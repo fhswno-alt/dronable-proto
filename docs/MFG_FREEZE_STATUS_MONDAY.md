@@ -1,8 +1,9 @@
 # Manufacturing freeze status — Monday morning
 
-**When:** Tue 29 Sep 2026 ~21:58 Europe/London (BST)  
+**When:** Tue 29 Sep 2026 ~22:08 Europe/London (BST)  
 **Audience:** Dave · Founding Manufacturing Lead · room  
 **Scope:** SIM-ONLY status sheet. **No Path A / thaw / greenlight / PO.**
+**Door v1 install note:** push/pull companion **INSTALLED (sim-only)**; no STEP/fab change, no PO, no spend.
 
 ---
 
@@ -23,9 +24,9 @@
 | **N** | **LOCKED TRUE** | Leave+disturb compose 2/2 same bout (L+M; soft-pass not used; stills DISTURBANCE ON + leave both bouts). Lock: `previews/ainex_walk/iterate/GATE_N_AI_LOCK.md`. Criteria: `docs/GATE_N_AI_CRITERIA.md`. Companion md5 `59cc408eda07037a58f92ad27da045d6`. **Not** latch / 90° / walk-through / full open / range bump / walk→door. **No plant/STEP/fab change.** |
 | **O** | **LOCKED TRUE** | Approach→N-compose 2/2 same run (soft-pass not used; stills APPROACH START + DISTURBANCE ON + LEAVE WINDOW both cycles). Lock: `previews/ainex_walk/iterate/GATE_O_AI_LOCK.md`. Criteria: `docs/GATE_O_AI_CRITERIA.md`. Companion md5 `59cc408eda07037a58f92ad27da045d6`. **Not** latch / 90° / walk-through / full open / range bump / room-walk / investor walk. **No plant/STEP/fab change.** |
 | **P** | **LOCKED TRUE** | Stepped approach then N compose 2/2 (Controls iterate2; soft-pass not used; earlier Root B flush-soles / sticky-HUD FAIL resolved). Lock: `previews/ainex_walk/iterate/GATE_P_AI_LOCK.md` · `docs/GATE_Q_AI_CRITERIA.md`. Criteria: `docs/GATE_P_AI_CRITERIA.md`. Companion md5 `59cc408eda07037a58f92ad27da045d6`. **Not** latch / 90° / walk-through / room-walk / range bump. **No plant/STEP/fab change.** |
-| **Q** | **PREFER FAIL (Hold + waiting picks)** | T5-E Prefer FAIL SCORED. Push/pull v1 AI no-veto; Dave **Hold** on plant swap — live freeze KEPT. Gate Q next lever still Dave (H2 / DCM-VRP-DS / park). Soft-pass off; E7lock. Live companion md5 `59cc408eda07037a58f92ad27da045d6`. **No plant invent / no STEP/fab / no PO**. |
+| **Q** | **OPEN (Door v1 live; Gate Q pick orthogonal)** | T5-E Prefer FAIL SCORED. Dave ACK: live plant = push/pull `gate_f_push` md5 `adb24309…`. Prefer FAIL Door SCORE next (multi-try; no one-shot FAIL ping). Gate Q next lever still Dave (H2 / DCM-VRP-DS / park) — separate. Soft-pass off; E7lock for walk. **No plant invent / no STEP/fab / no PO**. |
 
-Vision **off** walk loop. Still **not** Pi / Orin. CoP HX marginal — not SS prove. **Dave Hold** on Door v1 plant swap; GitHub remote pending (Hardware). MFG idle / no spend.
+Vision **off** walk loop. Still **not** Pi / Orin. CoP HX marginal — not SS prove. **Door v1 push/pull **INSTALLED (sim-only)** (Dave ACK). Lever-era F–P = history. MFG: foot freeze; lever fab parked; no spend.
 
 ---
 
@@ -35,10 +36,10 @@ Vision **off** walk loop. Still **not** Pi / Orin. CoP HX marginal — not SS pr
 |------|-------|-------|
 | **STEP foot pack** | **FROZEN** | Planform **145 × 86**; CAD stack **~4.5 mm** (3 + 1.5 plate+tread). XML **16 mm** = sim contact proxy only — **do not fab to 16 mm**. QC: `docs/M2_FAB_QC_FROZEN_145.md`. Sleeve dry-fit QC **PASS**: `docs/M2_ANK_ROLL_SLEEVE_FIT_QC.md` (~1 mm/side vs 137×78). Parts: `cad/m2_outsole/M2_outsole_145x86_*`, `M2_tread_145x86_*` (mesh-derived / not OEM). |
 | **Lever demo prop** | **PARKED for v1** (Dave voice ~21:52 BST) | Was PRE-POSITIONED fixed-bar STEP QC **PASS**; hinged/panel STEP **DEFERRED**. **v1 door task = hospital push/pull only — no knob/lever torque.** Lever fab / UK £ research **not** March 2027 critical path. Paths kept on disk for later: `cad/gate_f_lever/…`, `docs/GATE_F_LEVER_FAB_QC.md`. **NOT TO ORDER / no PO.** |
-| Score plant / companion | Locked (Controls) | Walk: `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml`. Gate F add-on: `…_m2_145_gate_f.xml` md5 `59cc408eda07037a58f92ad27da045d6`. |
+| Score plant / companion | **INSTALLED (sim-only)** (Controls) | Walk M145 `fc94709c…`. Live companion: `…_m2_145_gate_f_push.xml` md5 `adb24309…` (was gate_f `59cc408e…` lever-era). |
 | **H0 instrument fork** | **OPT-IN only** (not live train) | `…_m2_145_gate_f_h0.xml` md5 `ad9a1817f015e68e68f14535311369f0` — sites only, contype 0, contact physics identical. Doc: `docs/GATE_Q_HARDWARE_H0_INSTRUMENT.md`. **No STEP/fab.** |
 | **H2 honesty draft** | **READY-NOT-INSTALLED** | `…_gate_f_h2.xml` md5 `b6e574d60ddb1c06cdbd7e8cd256cacc` (16→4.5 mm vertical); optional `…_h0_h2.xml` md5 `90d8929006ad25c4772a75aa7825a0a4`. Live freeze untouched. Doc: `docs/GATE_Q_HARDWARE_H2_DRAFT_PACK.md`. **Dave unlock required** before any score swap / MFG quote. **No STEP/fab / no PO.** |
-| **Push/pull door v1 fork** | **READY-NOT-INSTALLED (Dave Hold)** | `…_gate_f_push.xml` md5 `adb24309b489d56615c194e92676d040`. AI no-veto landed; Dave **Hold** — no plant swap. Doc: `docs/GATE_Q_HARDWARE_PUSH_PULL_V1_DIRECTIVE.md`. **No STEP/fab / no PO**. |
+| **Push/pull door v1 fork** | **INSTALLED (Dave ACK ~22:08 BST; sim-only)** | Live companion now `…_gate_f_push.xml` md5 `adb24309b489d56615c194e92676d040` — hospital push/pull; lever visual; no latch. Doc: `docs/GATE_Q_HARDWARE_PUSH_PULL_V1_DIRECTIVE.md` · receipt `docs/GATE_DOOR_V1_HARDWARE_INSTALL.md`. Prefer FAIL Door SCORE = Controls multi-try (no one-shot FAIL report). **INSTALLED sim-only** — still no STEP/fab for swap. **No PO** (panel prop quote only after multi-try Door land + geometry freeze). |
 
 ---
 
@@ -53,9 +54,9 @@ Vision **off** walk loop. Still **not** Pi / Orin. CoP HX marginal — not SS pr
 
 ## 4. Explicit for Monday
 
-- **Waiting on Dave:** (1) name Door v1 plant-swap ACK when ready (currently **Hold**); (2) Gate Q next lever (H2 / DCM-VRP-DS / park); (3) empty GitHub repo `fhswno-alt/dronable-proto` for Hardware push.
+- **Waiting on Dave:** Gate Q next lever (H2 / DCM-VRP-DS / park) when he wants it — orthogonal to Door Prefer FAIL multi-try. Be present for Door Prefer FAIL / success ping (Dave preference).
 - **No spend.** No cart, no sole fab, no lever order, no Path A / thaw / greenlight ask from this sheet.
-- Manufacturing: foot **FROZEN**; lever **PARKED for v1**; push fork Hold. **No plant/STEP/fab**; **no PO / no spend**. Synced ~21:58 BST Tue 29 Sep.
+- Manufacturing: foot 145×86 **FROZEN**; lever **PARKED for v1**; Door push plant **LIVE**. **No STEP/fab**; **no PO / no spend**. Synced ~22:08 BST Tue 29 Sep.
 
 
 ---

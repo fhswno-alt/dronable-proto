@@ -1,8 +1,8 @@
 # Gate Q Hardware — PUSH/PULL v1 directive (hospital-door)
 
-**When:** Tue 29 Sep 2026 ~21:52 Europe/London (BST) — Dave voice  
+**When:** Tue 29 Sep 2026 ~22:08 Europe/London (BST) — Dave ACK install  
 **Audience:** Dave · Founding Hardware · Controls · AI  
-**Scope:** SIM-ONLY companion honesty proposal. **READY-NOT-INSTALLED.** Soft-pass **off**. **No spend / no PO.** Live freeze md5s **KEPT**.
+**Scope:** SIM-ONLY companion plant. **INSTALLED** (Dave ACK ~22:08 BST 29 Sep 2026). Soft-pass **off**. **No spend / no PO.** Walk M145 **KEPT**. Install receipt: `docs/GATE_DOOR_V1_HARDWARE_INSTALL.md`.
 
 ---
 
@@ -18,20 +18,21 @@
 | Open measure | Panel hinge open-angle (keep ±30°) | Full 90° / walk-through / UK handle height |
 | Soft-pass | **OFF** | — |
 | Spend | **None** | — |
-| Live freeze | **KEPT** until cospec + Dave ACK of plant swap | — |
+| Live freeze | **INSTALLED** — companion live = `gate_f_push` (Dave ACK ~22:08 BST) | Walk M145 KEPT |
 
 **One-liner:** Walk + open door by panel push/pull. No knob torque. No latch modeling.
 
 ---
 
-## 1. Live freeze (MUST stay untouched)
+## 1. Live freeze (post Dave ACK install)
 
-| Plant | Path | md5 (verified this turn) |
-|-------|------|--------------------------|
-| Walk / M145 | `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml` | `fc94709c84f5598d4474ecfc4bb41fdc` |
-| Companion F–Q | `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f.xml` | `59cc408eda07037a58f92ad27da045d6` |
+| Plant | Path | md5 (verified this turn) | State |
+|-------|------|--------------------------|-------|
+| Walk / M145 | `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml` | `fc94709c84f5598d4474ecfc4bb41fdc` | **KEPT** — do not edit |
+| **Live companion (Door v1)** | `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f_push.xml` | `adb24309b489d56615c194e92676d040` | **INSTALLED** plant-of-record |
+| Lever-era archive (F–P history) | `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f.xml` | `59cc408eda07037a58f92ad27da045d6` | **ARCHIVE** — left on disk; **not** overwritten with push content |
 
-Do **not** edit either file until AI/Controls cospec + Dave ACK of a named plant swap.
+Install = **point live companion at `…_gate_f_push.xml`**. Do **not** overwrite lever-era `…_gate_f.xml`. Walk bytes untouched.
 
 ---
 
@@ -39,12 +40,12 @@ Do **not** edit either file until AI/Controls cospec + Dave ACK of a named plant
 
 Assumptions that encode **hand→lever / knob / latch** interaction or treat lever contact as the door-open force path. Historical Gate F–J docs remain on disk as history; this table flags what **push/pull v1 supersedes for the door task**.
 
-### 2a. Companion plant (live `…_gate_f.xml`)
+### 2a. Companion plant (lever-era archive `…_gate_f.xml` — historical assumptions)
 
 | File / element | What it assumed | Push/pull v1 disposition |
 |----------------|-----------------|--------------------------|
 | Header comment Gate G03 | `door_lever` contactable bit 2 for **hand–lever only**; `door_panel` visual-only | Supersede: panel push contact; lever demoted |
-| `door_lever` geom | `contype=2 conaffinity=2` — hand–lever collide | **Demote** to contype 0 (visual) in draft fork |
+| `door_lever` geom | `contype=2 conaffinity=2` — hand–lever collide | **Demote** to contype 0 (visual) in installed companion |
 | `door_lever_hinge` | Hinge DOF for lever rotate ≥15° (H02/I00) | **Keep** for visual/reference (or weld later if Controls asks); **not** a v1 score DOF |
 | `door_lever_site` @ rest world ≈ `(0.40, 0, 0.275)` | Distance / arc / cam FOV target at **275 mm AFF** | Keep site for cam/FOV; **not** contact target |
 | `door_lever_link` child of `door_panel_link` | Hand→lever force couples into panel swing (I01/J01) | Coupling path **changes** to hand→**push face**→panel |
@@ -83,10 +84,10 @@ Assumptions that encode **hand→lever / knob / latch** interaction or treat lev
 
 ---
 
-## 3. Proposed companion delta (READY-NOT-INSTALLED)
+## 3. Companion delta (**INSTALLED** as live Door v1)
 
-**Draft fork:** `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f_push.xml`  
-**md5:** `adb24309b489d56615c194e92676d040` · **MuJoCo load:** OK  
+**Live plant-of-record:** `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f_push.xml`  
+**md5:** `adb24309b489d56615c194e92676d040` · **MuJoCo load:** OK · **Dave ACK:** ~22:08 BST Tue 29 Sep 2026  
 
 ### What stays
 
@@ -104,7 +105,7 @@ Assumptions that encode **hand→lever / knob / latch** interaction or treat lev
 
 | Element | Change |
 |---------|--------|
-| `door_lever` | `contype=2` → **`contype=0 conaffinity=0 group=1`** — no hand–lever contact |
+| `door_lever` | `contype=2` → **`contype=0 conaffinity=0 group=1`** in the installed push companion — no hand–lever contact |
 
 ### What is new (push contact)
 
@@ -117,11 +118,11 @@ Assumptions that encode **hand→lever / knob / latch** interaction or treat lev
 
 | Option | Scheme | Status |
 |--------|--------|--------|
-| **A (shipped conservative draft)** | Reuse **bit 2**: push face + hands; lever demoted | **In draft fork** |
+| **A (shipped / INSTALLED)** | Reuse **bit 2**: push face + hands; lever demoted | **Live companion** |
 | **B** | New **bit 4** for push face; leave bit 2 free for future knob A/B; hands would need dual affinity or retarget | Documented; not in draft |
 | **C** | Make whole `door_panel` `contype=2` (no dedicated face) | Documented; simpler geom, less selective |
 
-**Hardware default for draft:** Option A — minimal hand XML change; matches current hand affinity.
+**Hardware default INSTALLED:** Option A — minimal hand XML change; matches current hand affinity; present in the installed live companion.
 
 ---
 
@@ -141,7 +142,7 @@ Assumptions that encode **hand→lever / knob / latch** interaction or treat lev
 
 ## 5. Prefer FAIL / curriculum confirm asks (Controls + AI)
 
-Please confirm or Prefer FAIL before any plant swap:
+The plant is installed; these are scoring/cospec confirmations, not install gates. Door scoring remains multi-try Prefer FAIL: no FAIL report on the first miss; report FAIL only after repeated setbacks, with Dave/boss present for FAIL or success.
 
 1. **Door-task v1 = panel push/pull only** — drop G03 hand–lever / H02 lever-rotate / I01–J01 lever-coupled panel as **required** door proves. Panel open-angle via `door_panel_hinge` remains the open measure.  
 2. **Closed detect** — acceptable signal? (panel hinge ≈0 + optional push-site distance / contact pair `hand × door_panel_push_face`.)  
@@ -151,7 +152,7 @@ Please confirm or Prefer FAIL before any plant swap:
 6. **Curriculum rows F–P** — which stay LOCKED TRUE on live gate_f (historical), vs which need a new push/pull companion row after swap?  
 7. **March 2027 bar** — walk + open door (panel ±30° class) sufficient; knob/latch deferred. Soft-pass off.  
 
-**No install** until: AI/Controls cospec written + Dave ACK of plant swap. Live md5s stay.
+**INSTALLED** (Dave ACK ~22:08 BST): AI/Controls cospec were ready; live companion pointed at `gate_f_push`. Lever-era `gate_f` archived. Walk KEPT. No Prefer FAIL Door SCORE claim from Hardware.
 
 ---
 
@@ -161,18 +162,21 @@ Please confirm or Prefer FAIL before any plant swap:
 |------|-------|
 | Soft-pass | **OFF** |
 | Spend / PO / Path A | **None** |
-| Live M145 md5 | **KEPT** `fc94709c84f5598d4474ecfc4bb41fdc` |
-| Live companion md5 | **KEPT** `59cc408eda07037a58f92ad27da045d6` |
-| Draft fork | READY-NOT-INSTALLED · md5 `adb24309b489d56615c194e92676d040` · load OK |
+| Walk M145 md5 | **KEPT** `fc94709c84f5598d4474ecfc4bb41fdc` |
+| Live companion (Door v1) | **INSTALLED** `…_gate_f_push.xml` md5 `adb24309b489d56615c194e92676d040` |
+| Lever-era archive | `…_gate_f.xml` md5 `59cc408eda07037a58f92ad27da045d6` (F–P history only) |
+| H2 | Still **READY-NOT-INSTALLED** (separate Dave pick) |
+| Dave ACK | ~22:08 BST Tue 29 Sep 2026 |
 
 ---
 
 ## 7. Refs
 
-- Live companion header / plant: `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f.xml`  
-- Draft fork: `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f_push.xml`  
+- **Live companion (Door v1):** `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f_push.xml`  
+- Lever-era archive: `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f.xml`  
+- Install receipt: `docs/GATE_DOOR_V1_HARDWARE_INSTALL.md`  
 - Freeze sheet: `docs/HARDWARE_FREEZE_STATUS_MONDAY.md`  
 - Historical lever path: `docs/GATE_G_HARDWARE_LEVER_CONTACT.md` · `docs/GATE_H_HARDWARE_LEVER_HINGE.md` · `docs/GATE_I_HARDWARE_PANEL_HINGE.md` · `docs/GATE_J_HARDWARE_PANEL_SPRING.md`  
 - Design brief (lever language — superseded for door task by this directive): `docs/HARDWARE_SYSTEM_DESIGN_BRIEF.md`  
 
-**One-liner for room:** Dave dropped knob ops; Hardware inventoried lever assumptions, drafted push/pull companion fork READY-NOT-INSTALLED (Option A bit-2 push face; lever visual); live freeze md5s KEPT; waiting Controls/AI cospec + Dave ACK.
+**One-liner for room:** Dave ACK ~22:08 BST — Door v1 push/pull **INSTALLED**; live companion = `gate_f_push` md5 `adb24309…` (Option A); lever-era `gate_f` archived; walk KEPT; soft-pass off; no spend; H2 still READY-NOT-INSTALLED.
