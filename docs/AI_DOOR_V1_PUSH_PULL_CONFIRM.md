@@ -62,3 +62,9 @@ Formal no-veto: `docs/GATE_DOOR_V1_AI_COSPEC.md`
 Criteria: `docs/GATE_DOOR_V1_AI_CRITERIA.md`  
 Controls §5: Option A · closed ε=2° · F–P historical · open=`door_panel_hinge` · soft-pass off.  
 **NO INSTALL** until Dave ACK of named swap to `…_gate_f_push.xml` md5 `adb24309b489d56615c194e92676d040`.
+
+---
+
+## Update (~22:13 BST) — INSTALLED
+
+Dave ACK’d plant swap. Live companion = `…_gate_f_push.xml` md5 `adb24309b489d56615c194e92676d040` (Hardware receipt `docs/GATE_DOOR_V1_HARDWARE_INSTALL.md`). Soft-pass off. Multi-try Prefer FAIL Door scoring (no one-shot FAIL ping). AI idle for Controls SCORE → same-turn disposition.

@@ -4,7 +4,7 @@
 **Audience:** Dave · Founding AI · room  
 **Scope:** SIM-ONLY status sheet. **No Path A / thaw / greenlight / spend / PO.** Soft-pass **forbidden**.
 
-**Door v1 (Dave ~21:52 BST):** hospital **push/pull only** — lever/knob torque OUT. See `docs/AI_DOOR_V1_PUSH_PULL_CONFIRM.md`. F–P locks = lever-era history. Gate Q loco Prefer FAIL orthogonal; compose re-scope awaits Hardware pack.
+**Door v1:** hospital **push/pull only**. Live companion **INSTALLED** `…_gate_f_push.xml` md5 `adb24309…` (Dave ACK ~22:08 BST). Criteria `GATE_DOOR_V1_AI_CRITERIA.md`. Multi-try Prefer FAIL Door (no one-shot FAIL). F–P locks = lever-era history. Gate Q loco Prefer FAIL orthogonal / next lever still Dave.
 
 Verified live:
 - Companion `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f.xml` → md5 `59cc408eda07037a58f92ad27da045d6`
