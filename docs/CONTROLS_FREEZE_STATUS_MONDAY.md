@@ -1,6 +1,6 @@
 # Controls freeze status — Monday morning
 
-**When:** Mon 28 Sep 2026 ~14:23 Europe/London (BST)
+**When:** Mon 28 Sep 2026 ~14:23 Europe/London (BST) · Hardware note Tue 29 Sep ~22:08 BST: Door v1 live companion = `gate_f_push` md5 `adb24309…` (INSTALLED); lever-era `gate_f` archived
 **Audience:** Dave · Founding Controls · room  
 **Scope:** SIM-ONLY status sheet. **No Path A / thaw / greenlight / spend.**
 
@@ -34,12 +34,15 @@ Vision **off** walk / PPO obs. Still **not** Pi / Orin. Assist / freeze **OFF**.
 | Item | State | Path / value |
 |------|-------|----------------|
 | **Walk / Gate E plant** | **FROZEN** | `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml` |
-| **Gate F–Q companion** | **FROZEN** (F–P locks + Q Prefer FAIL park; **Gate K lock plant**) | `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f.xml` — cam + lever + panel hinge + **Gate J spring** damp 0.05 / stiff 0.015 + Gate K visual `door_panel_free_edge_stripe` (stripe v1); **lock md5 `59cc408eda07037a58f92ad27da045d6`**; foot/HX untouched vs M145 |
+| **Door v1 live companion** | **INSTALLED** (Hardware; Dave ACK ~22:08 BST 29 Sep) | `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f_push.xml` · md5 `adb24309b489d56615c194e92676d040` — Option A push face; soft-pass off; **no Controls score claim here** · receipt `docs/GATE_DOOR_V1_HARDWARE_INSTALL.md` |
+| **Lever-era F–P archive** | **ARCHIVE** (F–P locks + Q Prefer FAIL park history; **Gate K lock plant**) | `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f.xml` — cam + lever + panel hinge + **Gate J spring** damp 0.05 / stiff 0.015 + Gate K visual `door_panel_free_edge_stripe` (stripe v1); **lock md5 `59cc408eda07037a58f92ad27da045d6`**; foot/HX untouched vs M145 — **not** overwritten by push install |
 | **Gate E ckpt** | **FROZEN** | `previews/ainex_walk/iterate/learned_gate_e/ppo_gate_e_best.zip` · sha16 **`9ffaa1a21b607bf6`** |
 | **Head command** | **LOCKED** | Joint **`head_tilt`** (not `neck_pitch`) |
 | **Authority / cheats** | **OFF** | `k_auth=1.0`; assist OFF; freeze OFF; `vision_in_walk_obs=false` |
 
 Do **not** rescore Gate E on the companion plant. Companion is for F–Q rows only — **not** a full door-open claim.
+
+**Door v1 live pointer:** `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f_push.xml` · md5 `adb24309b489d56615c194e92676d040` · **INSTALLED (sim-only)**. The lever-era `gate_f.xml` remains archive/history for F–P lock references.
 
 ---
 

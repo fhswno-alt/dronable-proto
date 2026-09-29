@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Gate F prove: F00 stand look-down, F01 approach w/ Gate E residual, F02 grasp look-down.
 
-Plant: ainex_controls_m2_145_gate_f.xml ONLY (companion — do not score Gate E here).
+Plant: ainex_controls_m2_145_gate_f.xml ONLY for Gate F–P lever-era rows (do not score Gate E here).
+Door v1 live companion plant-of-record (Dave ACK ~22:08 BST 29 Sep 2026):
+  ainex_controls_m2_145_gate_f_push.xml md5 adb24309… — see PLANT_DOOR_V1 / scripts/score_door_v1.py.
+  Do NOT retarget PLANT_F to push (breaks F–P lock md5 59cc408e…).
 Assist/freeze OFF. Vision NOT in PPO obs. MUJOCO_GL=glfw.
 """
 from __future__ import annotations
@@ -26,7 +29,8 @@ import mujoco as mj  # noqa: E402
 import walk_gait_ainex as wg  # noqa: E402
 from score_auth_envelope import GRO01, CSF50, shape_to_params, gate_e, t88_ok  # noqa: E402
 
-PLANT_F = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145_gate_f.xml"
+PLANT_F = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145_gate_f.xml"  # lever-era F–P archive
+PLANT_DOOR_V1 = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145_gate_f_push.xml"  # Door v1 live
 PLANT_E = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145.xml"  # never load for F rows
 CKPT = ROOT / "previews" / "ainex_walk" / "iterate" / "learned_gate_e" / "ppo_gate_e_best.zip"
 ITER = ROOT / "previews" / "ainex_walk" / "iterate"
