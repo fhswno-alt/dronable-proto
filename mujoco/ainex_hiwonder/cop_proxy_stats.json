@@ -1,0 +1,223 @@
+{
+  "verdict": "MARGINAL",
+  "notes": [
+    "stand disturb share_sup vs truth: corr=0.829 RMSE=0.161",
+    "stand disturb share_sup EMA(\u03b1=0.2): corr=0.832 RMSE=0.186",
+    "stand disturb CoP-y (ankle-\u03c4 proxy) vs truth: corr=0.980 RMSE=0.0095 m",
+    "stand majority-load agreement=1.000",
+    "walk share_sup vs truth: corr=0.386 RMSE=0.400 (t_final=3.799999999999803, tip_t=None)",
+    "walk share_sup EMA(\u03b1=0.2): corr=0.706 RMSE=0.368",
+    "walk CoP-y ankle-\u03c4: corr=0.653 RMSE=0.0419 m"
+  ],
+  "quiet": {
+    "mode": "stand",
+    "hz": 50.0,
+    "mass_kg": 2.3474983899999997,
+    "t_final": 1.400000000000001,
+    "tip_t": null,
+    "n_samples": 70,
+    "disturb_applied": false,
+    "disturb_fy": 0.0,
+    "disturb_fx": 0.0,
+    "disturb_t": 99.0,
+    "disturb_hold": 0.0,
+    "com_z_cmd": 0.228,
+    "window": "0.40-1.30s",
+    "metrics": {
+      "share_sup_vs_T": {
+        "corr": 0.9959466258839755,
+        "rmse": 0.0036563516208144454,
+        "n": 45
+      },
+      "share_sup_ema_vs_T": {
+        "corr": 0.9971329172904392,
+        "rmse": 0.004518784073530005,
+        "n": 45
+      },
+      "share_bus_vs_T": {
+        "corr": 0.9971836050822388,
+        "rmse": 0.0018369865255228458,
+        "n": 45
+      },
+      "cop_y_ankle_vs_T": {
+        "corr": 0.9975797315440219,
+        "rmse": 0.00028039619822579757,
+        "n": 45
+      },
+      "cop_y_ankle_ema_vs_T": {
+        "corr": 0.9932697371247802,
+        "rmse": 0.0003427176343768121,
+        "n": 45
+      },
+      "cop_y_share_vs_T": {
+        "corr": 0.9914014203398863,
+        "rmse": 0.0001301574362553151,
+        "n": 45
+      },
+      "cop_x_ankle_vs_T": {
+        "corr": 0.999493394073267,
+        "rmse": 0.017795719941311416,
+        "n": 45
+      },
+      "fz_L_vs_p": {
+        "corr": 0.9957103361648657,
+        "rmse": 0.08426366229236068,
+        "n": 45
+      },
+      "fz_R_vs_p": {
+        "corr": 0.9961628306875026,
+        "rmse": 0.08414094361997289,
+        "n": 45
+      }
+    },
+    "majority_load_agree": 1.0,
+    "share_T_mean": 0.48820773907590276,
+    "share_sup_mean": 0.49099983450809115,
+    "cop_y_T_ptp": 0.0012913384207910595,
+    "cop_y_p_ptp": 0.0008278966394978692
+  },
+  "stand_disturb": {
+    "mode": "stand",
+    "hz": 50.0,
+    "mass_kg": 2.3474983899999997,
+    "t_final": 3.499999999999836,
+    "tip_t": 1.6800000000000013,
+    "n_samples": 175,
+    "disturb_applied": true,
+    "disturb_fy": 3.8,
+    "disturb_fx": 0.0,
+    "disturb_t": 1.0,
+    "disturb_hold": 0.6,
+    "com_z_cmd": 0.228,
+    "window": "1.00-1.68s",
+    "metrics": {
+      "share_sup_vs_T": {
+        "corr": 0.8292074542290895,
+        "rmse": 0.16112042816593605,
+        "n": 35
+      },
+      "share_sup_ema_vs_T": {
+        "corr": 0.8322648368376788,
+        "rmse": 0.1862219669782299,
+        "n": 35
+      },
+      "share_bus_vs_T": {
+        "corr": 0.8587473806128725,
+        "rmse": 0.17643887643160622,
+        "n": 35
+      },
+      "cop_y_ankle_vs_T": {
+        "corr": 0.9796259308197871,
+        "rmse": 0.009457047570028892,
+        "n": 35
+      },
+      "cop_y_ankle_ema_vs_T": {
+        "corr": 0.8739647482182643,
+        "rmse": 0.018957882631628037,
+        "n": 35
+      },
+      "cop_y_share_vs_T": {
+        "corr": 0.8626520206915387,
+        "rmse": 0.024480716782034204,
+        "n": 35
+      },
+      "cop_x_ankle_vs_T": {
+        "corr": 0.48695412600026666,
+        "rmse": 0.020834730876375593,
+        "n": 35
+      },
+      "fz_L_vs_p": {
+        "corr": 0.7285665915130904,
+        "rmse": 3.8849881849739663,
+        "n": 35
+      },
+      "fz_R_vs_p": {
+        "corr": 0.8300311153736679,
+        "rmse": 3.7009333036136605,
+        "n": 35
+      }
+    },
+    "majority_load_agree": 1.0,
+    "share_T_mean": 0.9400734491253409,
+    "share_sup_mean": 0.8014414443352232,
+    "cop_y_T_ptp": 0.06885325029275803,
+    "cop_y_p_ptp": 0.06407505819233189
+  },
+  "walk": {
+    "mode": "walk",
+    "hz": 50.0,
+    "mass_kg": 2.3474983899999997,
+    "t_final": 3.799999999999803,
+    "tip_t": null,
+    "n_samples": 190,
+    "disturb_applied": false,
+    "disturb_fy": null,
+    "disturb_fx": null,
+    "disturb_t": null,
+    "disturb_hold": null,
+    "com_z_cmd": 0.228,
+    "window": "0.80-3.10s",
+    "metrics": {
+      "share_sup_vs_T": {
+        "corr": 0.3864702231188242,
+        "rmse": 0.39958178673672207,
+        "n": 116
+      },
+      "share_sup_ema_vs_T": {
+        "corr": 0.7056463432405061,
+        "rmse": 0.3677371524749102,
+        "n": 116
+      },
+      "share_bus_vs_T": {
+        "corr": 0.2545788250572462,
+        "rmse": 0.4189732381678365,
+        "n": 116
+      },
+      "cop_y_ankle_vs_T": {
+        "corr": 0.6531408898218853,
+        "rmse": 0.041932059761636754,
+        "n": 116
+      },
+      "cop_y_ankle_ema_vs_T": {
+        "corr": 0.6034400932779455,
+        "rmse": 0.04485330492851475,
+        "n": 116
+      },
+      "cop_y_share_vs_T": {
+        "corr": 0.61469311653477,
+        "rmse": 0.04472568596934173,
+        "n": 116
+      },
+      "cop_x_ankle_vs_T": {
+        "corr": 0.8190431734837399,
+        "rmse": 0.04847560083453333,
+        "n": 116
+      },
+      "fz_L_vs_p": {
+        "corr": 0.317906891922041,
+        "rmse": 9.668508993208695,
+        "n": 116
+      },
+      "fz_R_vs_p": {
+        "corr": 0.3919779866127082,
+        "rmse": 9.104073998602038,
+        "n": 116
+      }
+    },
+    "majority_load_agree": 0.6206896551724138,
+    "share_T_mean": 0.5422035835880178,
+    "share_sup_mean": 0.49545465592702814,
+    "cop_y_T_ptp": 0.15166692451050476,
+    "cop_y_p_ptp": 0.09219765533152854
+  },
+  "gates": {
+    "CORR_USEABLE": 0.7,
+    "CORR_MARGINAL": 0.4,
+    "RMSE_SHARE_USEABLE": 0.12,
+    "RMSE_SHARE_MARGINAL": 0.22,
+    "RMSE_COPY_USEABLE": 0.025,
+    "RMSE_COPY_MARGINAL": 0.05
+  },
+  "hz": 50.0,
+  "model": "/workspace/dronable-proto/mujoco/ainex_hiwonder/ainex_controls.xml"
+}

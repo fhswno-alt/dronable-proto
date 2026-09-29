@@ -1,0 +1,62 @@
+AiNex ankle-CoP / walk_gait progress note (WORLD_FIXED acceptance)
+date: 2026-09-27 ~20:15+ BST
+model: /workspace/dronable-proto/mujoco/ainex_hiwonder/ainex_controls_m2_145.xml
+geometry: Hiwonder URDF+25 STL (NOT OEM STEP); Path A buy FROZEN
+tag: RL00_OL_T75
+run_id: a38d984e117c
+mode: walk
+
+CONTROL LEVERS THIS RUN:
+  + Ankle CoP servo: ON lean=(0.45,0.55) cop=(0.8,1.0) clip=0.3
+  + Lateral COM shift: hip_roll amp=0.31133025663712655 rad, phase lead=0.21792882001887864
+  + Stance plant damper: ON kd=105.97541086071345 N/(m/s) clip=20.0 N
+  + Stance-foot world freeze ablation: OFF
+  + Balance assist (upright/height/speed): OFF
+  + HX torque clips unchanged (±2.1 leg / ±0.7 arm-head)
+  + Gait: T=0.75s hip_amp=0.145 knee_swing=0.7869671613937524 COM_Z=0.24144458843778405
+
+METRICS:
+  t_final=9.00s  gait_s=6.80s  dx=+0.053m  avg_speed=0.8 cm/s
+  upright_frac=1.000  contact_duty L/R=0.70/0.68
+  hip_ptp=0.224 knee_ptp=0.344 hip_corr=-0.625
+  foot_lead_cycles=8  shin_cycles=8
+  lift L/R=0.026/0.025 m
+  stance |vx| mean L/R=0.117/0.124  p95 L/R=0.602/0.674
+  skate=True  exploded=False  flipped=False
+  cop_err mean x/y=0.0010/0.0003
+
+WORLD_FIXED GATES:
+  min_gait_s: 4.0
+  upright_frac: 0.9
+  min_up_z: 0.85
+  min_body_z: 0.18
+  contact_duty_lo: 0.2
+  contact_duty_hi: 0.85
+  min_foot_lead_cycles: 3
+  min_hip_ptp: 0.18
+  min_knee_ptp: 0.18
+  min_dx_m: 0.05
+  max_avg_speed: 0.22
+  max_stance_vx_mean: 0.08
+  max_stance_vx_p95: 0.18
+  require_assist_off: True
+
+VERDICT: FAIL — articulation present but WORLD_FIXED gates failed: skate: stance L mean |vx|=0.117>0.08; stance L p95 |vx|=0.602>0.18; stance R mean |vx|=0.124>0.08; stance R p95 |vx|=0.674>0.18
+clean_walk_claim: False
+fails (1):
+  - skate: stance L mean |vx|=0.117>0.08; stance L p95 |vx|=0.602>0.18; stance R mean |vx|=0.124>0.08; stance R p95 |vx|=0.674>0.18
+
+WHAT STILL LACKS (if FAIL):
+  - Stronger capture-point / ZMP with swing placement under HX ±2.1 Nm
+  - True no-slip stance (plant/freeze are external; friction-limited contact preferred)
+  - Full mesh collision (boxes only); Path A OEM STEP still frozen
+
+NEXT CONTROL LEVER:
+  → If stand recovers but walk tips: raise CoP gains carefully / add hip strategy
+  → If skate: try --stance-freeze ablation, then raise foot friction/condim
+  → Do NOT claim walk while balance_assist supplies +X or quat lock
+
+PNGs: /workspace/dronable-proto/mujoco/ainex_hiwonder/ankle_cop_walk.png
+MP4:  /workspace/dronable-proto/previews/ainex_walk/iterate/RL00_OL_T75.mp4
+stats:/workspace/dronable-proto/previews/ainex_walk/iterate/ainex_walk_stats.json
+script: scripts/walk_gait_ainex.py

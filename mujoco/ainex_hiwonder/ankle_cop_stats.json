@@ -1,0 +1,80 @@
+{
+  "date": "2026-09-27 ~20:19 BST",
+  "model": "mujoco/ainex_hiwonder/ainex_controls.xml",
+  "path_a": "FROZEN",
+  "geometry": "Hiwonder URDF + 25 STL (NOT OEM STEP)",
+  "hx_clips_Nm": {
+    "leg": [
+      -2.1,
+      2.1
+    ],
+    "arm_head": [
+      -0.7,
+      0.7
+    ]
+  },
+  "balance_assist": false,
+  "ankle_cop": {
+    "lean_kp_xy": [
+      0.45,
+      0.55
+    ],
+    "cop_kp_xy": [
+      0.8,
+      1.0
+    ],
+    "clip_rad": 0.3,
+    "bias_settle_s": 0.5,
+    "ctrl_hz": 50,
+    "notes": "Lean-primary + relative COM-support after settle bias. Absolute COM-foot without bias destabilizes quiet stand."
+  },
+  "trials": {
+    "quiet_stand_cop": {
+      "result": "PASS",
+      "upright_frac": 1.0,
+      "body_z": 0.235,
+      "assist": false
+    },
+    "disturb_ankle_only": {
+      "result": "FAIL",
+      "disturb": "Fy=+3.8 N for 0.60 s at t=1.0 s (tip-threshold; OFF also tips)",
+      "t_final": 2.0599999999999947,
+      "disturb_pass": false,
+      "verdict": "FAIL \u2014 stand disturbance recovery (ankle CoP only): fell/exploded t=2.06; flipped; post-push upright_frac=0.750<0.85; final up_z=0.052<0.85",
+      "png": "ankle_cop_stand.png"
+    },
+    "disturb_stance_freeze": {
+      "result": "PASS",
+      "disturb": "same Fy=+3.8 N / 0.60 s",
+      "t_final": 4.499999999999726,
+      "disturb_pass": true,
+      "max_lean": 0.23224921469058693,
+      "recover_t_s": 0.400000000000001,
+      "verdict": "PASS \u2014 stand disturbance recovery via stance-freeze ablation (recover_t=0.40s, post_uf=1.000, max_lean=0.232, assist OFF, HX clips on)",
+      "png": "ankle_cop_freeze.png",
+      "disclosed": "external xfrc sticky plant on foot bodies (not friction-limited contact)"
+    },
+    "walk_plant_cop_noassist": {
+      "result": "FAIL",
+      "clean_walk_claim": false,
+      "t_final": 2.2979999999999685,
+      "dx_m": -0.17497372235648945,
+      "upright_frac": 0.8859649122807017,
+      "stance_vx_mean_LR": [
+        0.2396315668288771,
+        0.3466031770231052
+      ],
+      "foot_lead_cycles": 2,
+      "hip_corr": -0.9750964089992986,
+      "skate": true,
+      "verdict": "FAIL \u2014 explode/fall before 6s (t=2.30); flipped (body up_z < 0.3); gait window 0.10s < 4.0; upright_frac=0.886 < 0.9; foot lead cycles=2<3; dx=-0.175m < 0.05 (no forward progress); avg speed -178.5 cm/s > 22; skate: stance L mean |vx|=0.240>0.08; stance L p95 |vx|=0.596>0.18; stance R mean |vx|=0.347>0.08; stance R p95 |vx|=0.464>0.18",
+      "png": "ankle_cop_walk.png"
+    }
+  },
+  "clean_walk_claim": false,
+  "next": [
+    "Capture-point / ZMP with swing footstep placement under HX \u00b12.1 Nm",
+    "Raise foot friction/condim or true no-slip contact (freeze is ablation only)",
+    "Do NOT claim walk while assist ON or freeze supplies plant"
+  ]
+}

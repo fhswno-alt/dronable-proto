@@ -1,0 +1,1106 @@
+#!/usr/bin/env python3
+"""Dronable Controls — open-loop 50 Hz PD walk on kit-matched AiNex mesh.
+
+Model: mujoco/ainex_hiwonder/ainex_controls.xml
+  = Hardware ainex.xml (Hiwonder URDF + 25 STL, NOT OEM STEP)
+  + Controls overlay: HX torque clips (±2.1 leg / ±0.7 arm-head),
+    mesh collision off + foot contact boxes, L=orange / R=green.
+
+Hardening (2026-09-27 evening BST):
+  - Lateral COM shift via hip_roll *before* swing (phase lead)
+  - Stance foot plant damper (tangential slip oppose while in contact)
+  - WORLD_FIXED acceptance: upright time, contacts, dx, skate gates
+  - Default: plant ON, balance assist OFF (no soft-pass)
+
+Axis note (differs from dronable_v0):
+  Forward = +X (URDF). Hip pitch axes mirrored L(+Y) / R(-Y).
+  L foot at +Y, R foot at -Y. Map: joint_hip_L = -fwd, joint_hip_R = +fwd;
+  joint_knee_L = +flex, joint_knee_R = -flex; ank = hip_j + knee_j (flat foot).
+
+Does NOT break scripts/walk_gait.py (still wired to dronable_v0.xml).
+
+Usage:
+  MUJOCO_GL=egl python scripts/walk_gait_ainex.py
+  MUJOCO_GL=egl python scripts/walk_gait_ainex.py --assist   # upright+speed (NOT clean walk)
+  MUJOCO_GL=egl python scripts/walk_gait_ainex.py --no-plant
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import hashlib
+import io
+import json
+import math
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import mujoco as mj
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+XML_DEFAULT = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls.xml"
+OUT_DIR = ROOT / "previews" / "ainex_walk"
+HIWONDER_DIR = ROOT / "mujoco" / "ainex_hiwonder"
+
+# --- Controls params (kit-plausible, not cartoon) ---
+CTRL_HZ = 50.0
+GAIT_T = 0.70          # slightly slower → more time for weight transfer
+STEP_LEN = 0.045       # m, modest
+HIP_PITCH_AMP = 0.20   # rad cmd (reduced vs skate-prone 0.42)
+HIP_BIAS_FWD = 0.10
+KNEE_STANCE = 0.32
+KNEE_SWING = 0.75
+ANK_BIAS = 0.0
+COM_Z = 0.238          # match stand_then_step plant height
+V_DES_X = 0.12         # only used when --assist
+FOOT_CLEAR = 0.030
+COM_SHIFT_AMP = 0.20   # rad hip-roll lateral weight shift
+COM_SHIFT_LEAD = 0.18  # phase lead so COM arrives before swing
+PLANT_KD = 45.0        # N/(m/s) tangential plant damper on stance foot
+PLANT_MAX_F = 18.0     # N clip
+CONTACT_Z_THR = 0.025  # foot body z below this ≈ planted (box half-h≈8mm + margin)
+
+# WORLD_FIXED side cam: walk +X through frame; camera on +Y looking -Y
+CAM_FIXED_LOOKAT = np.array([0.30, 0.0, 0.12], dtype=np.float64)
+CAM_FIXED_DISTANCE = 1.05
+CAM_FIXED_AZIMUTH = 90.0
+CAM_FIXED_ELEVATION = -12.0
+
+# --- WORLD_FIXED acceptance gates (measurable; all required for clean PASS) ---
+ACC = {
+    "min_gait_s": 4.0,
+    "upright_frac": 0.90,       # fraction up_z>0.85 and z>0.18
+    "min_up_z": 0.85,
+    "min_body_z": 0.18,
+    "contact_duty_lo": 0.20,    # each foot contact fraction
+    "contact_duty_hi": 0.85,
+    "min_foot_lead_cycles": 3,
+    "min_hip_ptp": 0.18,
+    "min_knee_ptp": 0.18,
+    "min_dx_m": 0.05,           # forward progress
+    "max_avg_speed": 0.22,      # m/s kit-class
+    "max_stance_vx_mean": 0.08, # m/s — above this = skate
+    "max_stance_vx_p95": 0.18,
+    "require_assist_off": True, # clean walk claim needs balance assist OFF
+}
+
+
+def act_name(jname: str) -> str:
+    return f"{jname}_pos"
+
+
+def clamp(x, lo, hi):
+    return max(lo, min(hi, x))
+
+
+def phase_leg(phi: float, side: str) -> float:
+    if side == "R":
+        phi = (phi + 0.5) % 1.0
+    return phi
+
+
+def swing_blend(s: float) -> float:
+    s = clamp(s, 0.0, 1.0)
+    return math.sin(math.pi * (s ** 0.55))
+
+
+def to_joint(side: str, fwd: float, flex: float) -> tuple[float, float, float]:
+    """Map signed kinematic (fwd thigh, knee flex) → (hip_j, knee_j, ank_j)."""
+    if side == "L":
+        hip = -fwd
+        knee = +flex
+    else:
+        hip = +fwd
+        knee = -flex
+    ank = hip + knee
+    return hip, knee, ank
+
+
+def lateral_com_target(phi: float) -> float:
+    """Signed lateral weight target: +1 = COM toward L (+Y), -1 toward R (-Y).
+
+    Lead the gait phase so weight sits on the upcoming stance foot *before*
+    the opposite swing lifts.
+    """
+    return math.cos(2.0 * math.pi * (phi + COM_SHIFT_LEAD))
+
+
+def gait_targets(t: float, gait_on: bool, amp: float = 1.0) -> dict[str, float]:
+    """Open-loop CPG → AiNex joint targets (rad), with pre-swing COM shift."""
+    q = {
+        "head_pan": 0.0,
+        "head_tilt": 0.0,
+        "l_sho_pitch": 0.0,
+        "l_sho_roll": -1.40,
+        "l_el_pitch": 0.38,
+        "l_el_yaw": 0.0,
+        "l_gripper": 0.0,
+        "r_sho_pitch": 0.0,
+        "r_sho_roll": 1.40,
+        "r_el_pitch": 0.38,
+        "r_el_yaw": 0.0,
+        "r_gripper": 0.0,
+        "l_hip_yaw": 0.0,
+        "l_hip_roll": -0.05,
+        "r_hip_yaw": 0.0,
+        "r_hip_roll": 0.05,
+        "l_ank_roll": 0.0,
+        "r_ank_roll": 0.0,
+    }
+    for side in ("L", "R"):
+        hip, knee, ank = to_joint(side, HIP_BIAS_FWD, KNEE_STANCE)
+        p = "l_" if side == "L" else "r_"
+        q[f"{p}hip_pitch"] = hip
+        q[f"{p}knee"] = knee
+        q[f"{p}ank_pitch"] = ank
+
+    if not gait_on or amp <= 0.0:
+        return q
+
+    a = clamp(amp, 0.0, 1.0)
+    phi = (t / GAIT_T) % 1.0
+    # +shift_cmd → both hip rolls more negative → empirically moves COM (see plant trial)
+    # We map: want COM toward L (+Y) when lat>0.
+    lat = lateral_com_target(phi)  # +1 → want COM toward L (+Y), -1 → R
+    # Empirically on this URDF: common-mode (both rolls -= s) with s<0
+    # brings body closer to L foot. So s = -amp*lat.
+    shift = -COM_SHIFT_AMP * a * lat
+
+    # Base abduct + common lateral shift
+    q["l_hip_roll"] = -0.05 - shift
+    q["r_hip_roll"] = 0.05 - shift
+    # Ankle rolls co-lean to push COM (same sign as hip common-mode intent)
+    q["l_ank_roll"] = -0.70 * shift
+    q["r_ank_roll"] = -0.70 * shift
+
+    for side in ("L", "R"):
+        p = phase_leg(phi, side)
+        pref = "l_" if side == "L" else "r_"
+        if p < 0.45:
+            # stance (slightly longer than half → more plant time)
+            s = p / 0.45
+            s = s * s * (3.0 - 2.0 * s)
+            fwd = HIP_BIAS_FWD + HIP_PITCH_AMP * a * (1.0 - 2.0 * s)
+            flex = KNEE_STANCE
+            sw = 0.0
+            ank_extra = 0.0
+        elif p < 0.52:
+            # short double-support / pre-swing hold (no lift yet)
+            s = (p - 0.45) / 0.07
+            fwd = HIP_BIAS_FWD + HIP_PITCH_AMP * a * (-1.0)
+            flex = KNEE_STANCE + 0.08 * s
+            sw = 0.0
+            ank_extra = 0.0
+        else:
+            # swing
+            s = (p - 0.52) / 0.48
+            sw = swing_blend(s)
+            s_sm = s * s * (3.0 - 2.0 * s)
+            fwd = HIP_BIAS_FWD + HIP_PITCH_AMP * a * (-1.0 + 2.0 * s_sm)
+            flex = KNEE_STANCE + (KNEE_SWING - KNEE_STANCE) * sw
+            ank_extra = 0.18 * sw  # dorsiflex clearance
+
+        hip, knee, ank = to_joint(side, fwd, flex)
+        if side == "L":
+            ank = ank + ank_extra
+        else:
+            ank = ank - ank_extra
+
+        q[f"{pref}hip_pitch"] = clamp(hip, -1.5, 1.5)
+        q[f"{pref}knee"] = clamp(knee, -2.0, 2.0)
+        q[f"{pref}ank_pitch"] = clamp(ank, -1.2, 1.2)
+
+        # slight extra abduct on swing leg for clearance
+        if side == "L":
+            q[f"{pref}hip_roll"] = q["l_hip_roll"] - 0.04 * sw
+        else:
+            q[f"{pref}hip_roll"] = q["r_hip_roll"] + 0.04 * sw
+
+        arm = -0.22 * (fwd - HIP_BIAS_FWD)
+        q[f"{pref}sho_pitch"] = arm
+        q[f"{pref}el_pitch"] = 0.32 + 0.08 * abs(arm)
+
+    return q
+
+
+def _lock_upright_yaw0(qpos: np.ndarray, qvel: np.ndarray, blend: float = 1.0) -> None:
+    tgt = np.array([1.0, 0.0, 0.0, 0.0])
+    cur = np.array([float(v) for v in qpos[3:7]])
+    if np.dot(cur, tgt) < 0:
+        tgt = -tgt
+    out = cur + blend * (tgt - cur)
+    out = out / (np.linalg.norm(out) + 1e-12)
+    qpos[3:7] = out
+    qvel[3:6] *= (1.0 - 0.85 * blend)
+
+
+def balance_assist(
+    model: mj.MjModel,
+    data: mj.MjData,
+    z_des: float = COM_Z,
+    fx_bias: float = 0.0,
+    v_des_x: float = 0.0,
+    speed_gate: float = 1.0,
+):
+    """Temporary upright/height/speed assist — NOT production; marks clean_walk_claim False."""
+    bid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "body_link")
+    R = data.xmat[bid].reshape(3, 3)
+    up = R[:, 2]
+    axis = np.cross(up, np.array([0.0, 0.0, 1.0]))
+    lean = float(np.linalg.norm(axis))
+    if lean > 0.25:
+        axis = axis * (0.25 / lean)
+
+    omega = data.qvel[3:6]
+    kp_ori, kd_ori = 55.0, 7.0
+    torque = np.clip(kp_ori * axis - kd_ori * omega, -10.0, 10.0)
+
+    mass = mj.mj_getTotalmass(model)
+    z = data.qpos[2]
+    fz = 0.90 * mass * 9.81 + 180.0 * (z_des - z) - 30.0 * data.qvel[2]
+    fz = float(np.clip(fz, -40.0, 55.0))
+    fy = float(np.clip(-14.0 * data.qpos[1] - 5.0 * data.qvel[1], -10.0, 10.0))
+    vx = float(data.qvel[0])
+    v_tgt = float(v_des_x) * float(speed_gate)
+    fx = float(np.clip(fx_bias + 18.0 * (v_tgt - vx), -8.0, 8.0))
+    data.qfrc_applied[0:6] = [fx, fy, fz, torque[0], torque[1], torque[2]]
+
+    blend = 0.50 if up[2] > 0.85 else 0.85
+    _lock_upright_yaw0(data.qpos, data.qvel, blend=blend)
+
+
+def stance_plant(
+    model: mj.MjModel,
+    data: mj.MjData,
+    phi: float,
+    amp: float,
+    bid_lf: int,
+    bid_rf: int,
+    gid_lfoot: int,
+    gid_rfoot: int,
+    gid_floor: int,
+):
+    """Oppose horizontal slip of the stance foot while it is in contact.
+
+    This is a *plant* aid (no upright quat lock, no speed governor). Still
+    external wrench — must be disclosed; does NOT alone make a clean walk PASS
+    if stance vx remains high.
+    """
+    if amp <= 0.01:
+        return
+    # Which foot is stance (with lead matching lateral_com_target)
+    lat = lateral_com_target(phi)
+    # lat>0 → weight on L; lat<0 → weight on R
+    # During transition |lat|<0.25 allow both light plant
+    plants = []
+    if lat > -0.25:
+        plants.append(("L", bid_lf, gid_lfoot))
+    if lat < 0.25:
+        plants.append(("R", bid_rf, gid_rfoot))
+
+    # Contact flags from MuJoCo contact list
+    in_contact = {"L": False, "R": False}
+    for i in range(data.ncon):
+        c = data.contact[i]
+        g1, g2 = int(c.geom1), int(c.geom2)
+        for side, _bid, gid in (("L", bid_lf, gid_lfoot), ("R", bid_rf, gid_rfoot)):
+            if (g1 == gid and g2 == gid_floor) or (g2 == gid and g1 == gid_floor):
+                in_contact[side] = True
+            # also toe spheres share floor contact — check by body
+        # toe geoms: detect via body of either geom
+        for side, bid, _gid in plants:
+            b1 = int(model.geom_bodyid[g1])
+            b2 = int(model.geom_bodyid[g2])
+            if (b1 == bid or b2 == bid) and (g1 == gid_floor or g2 == gid_floor):
+                in_contact[side] = True
+
+    # Fallback height heuristic if contact buffer empty early
+    for side, bid, _gid in (("L", bid_lf, gid_lfoot), ("R", bid_rf, gid_rfoot)):
+        if data.xpos[bid, 2] < CONTACT_Z_THR:
+            in_contact[side] = True
+
+    fx_sum = fy_sum = 0.0
+    for side, bid, _gid in plants:
+        if not in_contact[side]:
+            continue
+        # foot world velocity ≈ body cvel / finite diff via qvel mapping — use cvel
+        # cvel is [rot; lin] in world about com of body; lin part indices 3:6
+        v = data.cvel[bid][3:6].copy()
+        # weight by |lat| so primary stance gets more plant
+        w = clamp(abs(lat), 0.35, 1.0) if ((side == "L" and lat > 0) or (side == "R" and lat < 0)) else 0.35
+        fx = float(np.clip(-PLANT_KD * w * amp * v[0], -PLANT_MAX_F, PLANT_MAX_F))
+        fy = float(np.clip(-PLANT_KD * w * amp * v[1], -PLANT_MAX_F, PLANT_MAX_F))
+        fx_sum += fx
+        fy_sum += fy
+
+    # Apply at free-joint (root) — approximate plant reaction
+    data.qfrc_applied[0] += fx_sum
+    data.qfrc_applied[1] += fy_sum
+
+
+
+
+def roll_servo(model: mj.MjModel, data: mj.MjData, act_idx: dict[str, int], amp: float):
+    """Joint-space ankle/hip roll from body roll — recovery without free-joint quat lock.
+
+    body roll ≈ atan2(R[2,1], R[2,2]) small-angle: R[1,2] of up vector y-component.
+    Positive body roll (top toward +Y/L) → push ankles to recover toward center.
+    """
+    if amp <= 0.01:
+        return
+    bid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "body_link")
+    R = data.xmat[bid].reshape(3, 3)
+    # up vector world y component: lean toward +Y if up_y > 0
+    up_y = float(R[1, 2])
+    up_z = float(R[2, 2])
+    if up_z < 0.5:
+        return
+    # recover: if leaning +Y, command hip/ank rolls that shift COM toward -Y
+    # Using same common-mode convention as gait (s = -amp*lat with lat toward L=+Y)
+    # leaning +Y → want lat negative → shift = -amp*(-1) = +amp in old? 
+    # With corrected: shift = -COM * lat; lat_des = -k*up_y (lean +Y → lat toward R)
+    k = 0.85
+    lat_des = float(np.clip(-k * up_y / 0.10, -1.0, 1.0))
+    s = -0.16 * amp * lat_des  # additive recovery on top of CPG
+    for jn, delta in (
+        ("l_hip_roll", -s),
+        ("r_hip_roll", -s),
+        ("l_ank_roll", -0.8 * s),
+        ("r_ank_roll", -0.8 * s),
+    ):
+        an = act_name(jn)
+        if an in act_idx:
+            data.ctrl[act_idx[an]] = float(np.clip(data.ctrl[act_idx[an]] + delta, -1.5, 1.5))
+
+
+def pitch_servo(model: mj.MjModel, data: mj.MjData, act_idx: dict[str, int], amp: float):
+    """Joint-space ankle/hip pitch from body sagittal lean (no free-joint wrench)."""
+    if amp <= 0.01:
+        return
+    bid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "body_link")
+    R = data.xmat[bid].reshape(3, 3)
+    up_x = float(R[0, 2])  # lean toward +X if >0
+    up_z = float(R[2, 2])
+    if up_z < 0.5:
+        return
+    # lean +X (forward) → plantarflex ankles / extend hips slightly (signed fwd space)
+    k = 0.45
+    corr = float(np.clip(-k * up_x / 0.12, -0.20, 0.20)) * amp  # signed "fwd" correction
+    # L: hip = -fwd, R: hip = +fwd; ankles follow flat-ish
+    for side, sign in (("l", -1.0), ("r", +1.0)):
+        for jn, scale in ((f"{side}_hip_pitch", 1.0), (f"{side}_ank_pitch", 0.7)):
+            an = act_name(jn)
+            if an in act_idx:
+                data.ctrl[act_idx[an]] = float(np.clip(
+                    data.ctrl[act_idx[an]] + sign * scale * corr, -1.5, 1.5))
+
+def set_ctrl(model: mj.MjModel, data: mj.MjData, qdes: dict[str, float], act_idx: dict[str, int]):
+    for jname, val in qdes.items():
+        an = act_name(jname)
+        if an in act_idx:
+            data.ctrl[act_idx[an]] = val
+
+
+def body_sagittal_pitch_x(data: mj.MjData, bid: int) -> float:
+    R = data.xmat[bid].reshape(3, 3)
+    down = -R[:, 2]
+    return math.atan2(float(down[0]), float(-down[2]))
+
+
+def _burn_overlay(img: np.ndarray, lines: list[str]) -> np.ndarray:
+    from PIL import Image, ImageDraw, ImageFont
+
+    out = Image.fromarray(img)
+    draw = ImageDraw.Draw(out)
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", 13)
+        font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", 11)
+    except Exception:
+        font = ImageFont.load_default()
+        font_sm = font
+    y = 6
+    for i, line in enumerate(lines):
+        f = font if i == 0 else font_sm
+        draw.text((7, y + 1), line, fill=(0, 0, 0), font=f)
+        draw.text((6, y), line, fill=(255, 230, 80), font=f)
+        y += 15 if i == 0 else 13
+    return np.asarray(out, dtype=np.uint8)
+
+
+def _encode_mp4_ffmpeg(frame_dir: Path, out_mp4: Path, fps: int = 25) -> None:
+    out_mp4.parent.mkdir(parents=True, exist_ok=True)
+    pattern = str(frame_dir / "frame_%05d.png")
+    cmd = [
+        "ffmpeg", "-y",
+        "-framerate", str(fps),
+        "-i", pattern,
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-g", "1",
+        "-keyint_min", "1",
+        "-bf", "0",
+        "-preset", "veryfast",
+        "-crf", "18",
+        str(out_mp4),
+    ]
+    print(f"[ainex] ffmpeg: {' '.join(cmd)}")
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(r.stderr[-2000:], file=sys.stderr)
+        raise RuntimeError(f"ffmpeg failed rc={r.returncode}")
+
+
+def _sha256_first_1kb(data: bytes) -> str:
+    return hashlib.sha256(data[:1024]).hexdigest()
+
+
+def _zero_cross_cycles(sig: np.ndarray, level: float = 0.0) -> int:
+    if len(sig) < 3:
+        return 0
+    d = sig - level
+    zc = int(np.sum((d[1:] * d[:-1]) < 0))
+    return zc // 2
+
+
+def _count_lift_peaks(z: np.ndarray, thr: float = 0.012) -> tuple[int, float]:
+    if len(z) < 5:
+        return 0, 0.0
+    z0 = float(np.percentile(z, 8))
+    lift = z - z0
+    n = 0
+    for i in range(2, len(lift) - 2):
+        if lift[i] > thr and lift[i] >= max(lift[i - 1], lift[i + 1], lift[i - 2], lift[i + 2]):
+            n += 1
+    return n, float(np.max(lift))
+
+
+def foot_floor_contact(model, data, bid_foot, gid_floor) -> bool:
+    for i in range(data.ncon):
+        c = data.contact[i]
+        g1, g2 = int(c.geom1), int(c.geom2)
+        b1 = int(model.geom_bodyid[g1])
+        b2 = int(model.geom_bodyid[g2])
+        if (b1 == bid_foot or b2 == bid_foot) and (g1 == gid_floor or g2 == gid_floor):
+            return True
+    return float(data.xpos[bid_foot, 2]) < CONTACT_Z_THR
+
+
+def main():
+    ap = argparse.ArgumentParser(description="AiNex kit-matched open-loop walk @ 50 Hz (plant+COM shift)")
+    ap.add_argument("--model", type=str, default=str(XML_DEFAULT))
+    ap.add_argument("--duration", type=float, default=7.0)
+    ap.add_argument("--out", type=str, default=str(OUT_DIR / "ainex_walk.mp4"))
+    ap.add_argument("--gait-off", action="store_true")
+    ap.add_argument("--no-video", action="store_true")
+    ap.add_argument("--assist", action="store_true",
+                    help="Enable upright+height+speed balance assist (NOT clean walk)")
+    ap.add_argument("--no-plant", action="store_true", help="Disable stance plant damper")
+    ap.add_argument("--fx-bias", type=float, default=0.0)
+    ap.add_argument("--v-des", type=float, default=V_DES_X, help="forward speed target m/s (assist only)")
+    ap.add_argument("--tag", type=str, default="plant", help="label for note/stats")
+    args = ap.parse_args()
+
+    xml = Path(args.model)
+    if not xml.exists():
+        print(f"ERROR: missing {xml}", file=sys.stderr)
+        sys.exit(1)
+
+    out_dir = Path(args.out).parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    HIWONDER_DIR.mkdir(parents=True, exist_ok=True)
+    frame_seq = out_dir / "frame_seq"
+    if frame_seq.exists():
+        shutil.rmtree(frame_seq)
+    frame_seq.mkdir(parents=True, exist_ok=True)
+
+    model = mj.MjModel.from_xml_path(str(xml))
+    data = mj.MjData(model)
+    act_idx = {mj.mj_id2name(model, mj.mjtObj.mjOBJ_ACTUATOR, i): i for i in range(model.nu)}
+
+    needed = [
+        "l_hip_yaw", "l_hip_roll", "l_hip_pitch", "l_knee", "l_ank_pitch", "l_ank_roll",
+        "r_hip_yaw", "r_hip_roll", "r_hip_pitch", "r_knee", "r_ank_pitch", "r_ank_roll",
+        "l_sho_pitch", "l_sho_roll", "l_el_pitch", "r_sho_pitch", "r_sho_roll", "r_el_pitch",
+        "head_pan", "head_tilt",
+    ]
+    missing = [act_name(n) for n in needed if act_name(n) not in act_idx]
+    if missing:
+        print(f"ERROR: missing actuators {missing}", file=sys.stderr)
+        sys.exit(1)
+
+    mass = float(mj.mj_getTotalmass(model))
+    data.qpos[:] = 0
+    data.qpos[2] = COM_Z
+    data.qpos[3:7] = [1, 0, 0, 0]
+    data.qpos[0] = -0.12
+    q0 = gait_targets(0.0, False, 0.0)
+    for jn, val in q0.items():
+        jid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, jn)
+        if jid >= 0:
+            data.qpos[model.jnt_qposadr[jid]] = val
+    set_ctrl(model, data, q0, act_idx)
+    mj.mj_forward(model, data)
+
+    ctrl_dt = 1.0 / CTRL_HZ
+    sim_dt = model.opt.timestep
+    steps_per_ctrl = max(1, int(round(ctrl_dt / sim_dt)))
+    gait_on = not args.gait_off
+    stand_hold = 0.80
+    ramp_t = 1.40
+    use_assist = bool(args.assist)
+    use_plant = not args.no_plant
+    fx_bias = float(args.fx_bias)
+    v_des_x = float(args.v_des)
+
+    def gait_amp(t: float) -> float:
+        if not gait_on:
+            return 0.0
+        if t < stand_hold:
+            return 0.0
+        u = t - stand_hold
+        if u >= ramp_t:
+            return 1.0
+        s = u / ramp_t
+        return s * s * (3.0 - 2.0 * s)
+
+    def _qadr(name: str) -> int:
+        return int(model.jnt_qposadr[mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, name)])
+
+    hip_l = _qadr("l_hip_pitch")
+    hip_r = _qadr("r_hip_pitch")
+    knee_l = _qadr("l_knee")
+    knee_r = _qadr("r_knee")
+    ank_l = _qadr("l_ank_pitch")
+    ank_r = _qadr("r_ank_pitch")
+    bid_body = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "body_link")
+    bid_lf = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "l_ank_roll_link")
+    bid_rf = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "r_ank_roll_link")
+    bid_l_thigh = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "l_hip_pitch_link")
+    bid_r_thigh = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "r_hip_pitch_link")
+    bid_l_shin = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "l_knee_link")
+    bid_r_shin = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "r_knee_link")
+    aid_l_hip = act_idx["l_hip_pitch_pos"]
+    aid_r_hip = act_idx["r_hip_pitch_pos"]
+    gid_lfoot = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "l_foot_contact")
+    gid_rfoot = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "r_foot_contact")
+    gid_floor = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "floor")
+
+    print(f"[ainex] model={xml} nq={model.nq} nu={model.nu} nmesh={model.nmesh} dt={sim_dt}")
+    print(f"[ainex] mass={mass:.4f} kg  (kit class ~2.45; URDF sum ~2.35)")
+    print(f"[ainex] Controls: {CTRL_HZ} Hz T={GAIT_T}s hip_amp={HIP_PITCH_AMP} COM_shift={COM_SHIFT_AMP}")
+    print(f"[ainex] COM_Z={COM_Z} assist={use_assist} plant={use_plant} v_des={v_des_x} tag={args.tag}")
+    print(f"[ainex] legs L=ORANGE R=GREEN | mesh=Hiwonder STL (NOT OEM STEP) | Path A FROZEN")
+    print(f"[ainex] cam WORLD_FIXED lookat={CAM_FIXED_LOOKAT.tolist()} d={CAM_FIXED_DISTANCE}")
+
+    renderer = None
+    cam = mj.MjvCamera()
+    mj.mjv_defaultCamera(cam)
+    cam.azimuth = CAM_FIXED_AZIMUTH
+    cam.elevation = CAM_FIXED_ELEVATION
+    cam.distance = CAM_FIXED_DISTANCE
+    cam.lookat[:] = CAM_FIXED_LOOKAT
+
+    if not args.no_video:
+        renderer = mj.Renderer(model, height=480, width=640)
+
+    n_ctrl = int(args.duration * CTRL_HZ)
+    exploded = False
+    flipped = False
+    x0 = float(data.qpos[0])
+    csv_rows: list[list[float]] = []
+    raw_frames: list[np.ndarray] = []
+    frame_meta: list[dict] = []
+    foot_lead_L: list[bool] = []
+    upright_flags: list[bool] = []
+    contact_L: list[bool] = []
+    contact_R: list[bool] = []
+    stance_vx_L: list[float] = []
+    stance_vx_R: list[float] = []
+    best_frame_idx = 0
+    best_frame_score = -1e9
+
+    def _yaw_deg() -> float:
+        w, x, y, z = [float(v) for v in data.qpos[3:7]]
+        return math.degrees(math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z)))
+
+    def _render_raw() -> np.ndarray:
+        cam.lookat[:] = CAM_FIXED_LOOKAT
+        cam.azimuth = CAM_FIXED_AZIMUTH
+        cam.elevation = CAM_FIXED_ELEVATION
+        cam.distance = CAM_FIXED_DISTANCE
+        mj.mj_forward(model, data)
+        renderer.update_scene(data, cam)
+        return np.ascontiguousarray(renderer.render().copy(), dtype=np.uint8)
+
+    for k in range(n_ctrl):
+        t = data.time
+        a = gait_amp(t)
+        qdes = gait_targets(t, gait_on, a)
+        set_ctrl(model, data, qdes, act_idx)
+        if a > 0:
+            roll_servo(model, data, act_idx, a)
+            pitch_servo(model, data, act_idx, a)
+        phi_now = (max(0.0, t - stand_hold) / GAIT_T) % 1.0 if a > 0 else 0.0
+        for _ in range(steps_per_ctrl):
+            data.qfrc_applied[:] = 0
+            if use_assist:
+                balance_assist(model, data, COM_Z, fx_bias=fx_bias * a, v_des_x=v_des_x, speed_gate=a)
+            if use_plant and a > 0:
+                stance_plant(
+                    model, data, phi_now, a,
+                    bid_lf, bid_rf, gid_lfoot, gid_rfoot, gid_floor,
+                )
+            mj.mj_step(model, data)
+            data.qfrc_applied[:] = 0
+            if (not np.isfinite(data.qpos).all()) or data.qpos[2] < 0.08 or data.qpos[2] > 0.55:
+                exploded = True
+                break
+        if exploded:
+            print(f"[ainex] STOP early t={data.time:.3f}s z={data.qpos[2]}")
+            break
+
+        up_z = float(data.xmat[bid_body].reshape(3, 3)[2, 2])
+        if up_z < 0.3:
+            flipped = True
+
+        ctrl_l = float(data.ctrl[aid_l_hip])
+        ctrl_r = float(data.ctrl[aid_r_hip])
+        q_l = float(data.qpos[hip_l])
+        q_r = float(data.qpos[hip_r])
+        q_kl = float(data.qpos[knee_l])
+        q_kr = float(data.qpos[knee_r])
+        q_al = float(data.qpos[ank_l])
+        q_ar = float(data.qpos[ank_r])
+        z_l = float(data.xpos[bid_lf, 2])
+        z_r = float(data.xpos[bid_rf, 2])
+        x_l = float(data.xpos[bid_lf, 0])
+        x_r = float(data.xpos[bid_rf, 0])
+        pz = float(data.qpos[2])
+        px = float(data.qpos[0])
+        py = float(data.qpos[1])
+        p_th_l = body_sagittal_pitch_x(data, bid_l_thigh)
+        p_th_r = body_sagittal_pitch_x(data, bid_r_thigh)
+        p_sh_l = body_sagittal_pitch_x(data, bid_l_shin)
+        p_sh_r = body_sagittal_pitch_x(data, bid_r_shin)
+        foot_lead_L.append(x_l > x_r)
+
+        cL = foot_floor_contact(model, data, bid_lf, gid_floor)
+        cR = foot_floor_contact(model, data, bid_rf, gid_floor)
+        contact_L.append(cL)
+        contact_R.append(cR)
+        upright_flags.append(up_z >= ACC["min_up_z"] and pz >= ACC["min_body_z"])
+
+        # stance foot horizontal speed (use body cvel)
+        vx_l = float(data.cvel[bid_lf][3])
+        vx_r = float(data.cvel[bid_rf][3])
+        lat = lateral_com_target(phi_now) if a > 0 else 0.0
+        # record stance vx only when that side is weight-bearing + in contact
+        if a > 0.2 and lat > 0.0 and cL:
+            stance_vx_L.append(abs(vx_l))
+        if a > 0.2 and lat < 0.0 and cR:
+            stance_vx_R.append(abs(vx_r))
+
+        csv_rows.append([
+            float(data.time), ctrl_l, ctrl_r, q_l, q_r, z_l, z_r, pz, x_l, x_r, px,
+            q_kl, q_kr, q_al, q_ar, p_th_l, p_th_r, p_sh_l, p_sh_r, py, up_z,
+            float(cL), float(cR), vx_l, vx_r, lat, a,
+        ])
+
+        if renderer is not None and (k % 2 == 0):
+            raw = _render_raw()
+            raw_frames.append(raw)
+            meta = {
+                "t": float(data.time), "k": k, "z": pz, "x": px, "y": py,
+                "yaw": _yaw_deg(), "q_l": q_l, "q_r": q_r,
+                "z_l": z_l, "z_r": z_r, "shin_l": p_sh_l, "shin_r": p_sh_r,
+                "up_z": up_z, "cL": cL, "cR": cR,
+            }
+            frame_meta.append(meta)
+            # score for best still: upright + mid-corridor + both feet near ground or alt
+            score = (
+                10.0 * up_z
+                + 5.0 * (1.0 if 0.05 < px < 0.55 else 0.0)
+                + 2.0 * (1.0 if abs(py) < 0.08 else 0.0)
+                + 1.0 * (1.0 if a > 0.5 else 0.0)
+                - 3.0 * abs(pz - COM_Z)
+            )
+            if score > best_frame_score and a > 0.3:
+                best_frame_score = score
+                best_frame_idx = len(raw_frames) - 1
+
+    x_final = float(data.qpos[0])
+    dx = x_final - x0
+    t_final = float(data.time)
+    walk_t = max(1e-6, t_final - stand_hold - ramp_t)
+    avg_speed = dx / walk_t if gait_on else 0.0
+
+    arr = np.asarray(csv_rows, dtype=np.float64) if csv_rows else np.zeros((0, 27))
+    i0 = int((stand_hold + ramp_t + 0.2) * CTRL_HZ)
+    ss = arr[i0:] if len(arr) > i0 else arr
+
+    hip_q_ptp = knee_q_ptp = ank_q_ptp = 0.0
+    hip_q_corr = knee_q_corr = shin_corr = 0.0
+    shin_ptp_l = shin_ptp_r = 0.0
+    shin_cycles = foot_lead_cycles = 0
+    if len(ss):
+        hip_q_ptp = float(max(np.ptp(ss[:, 3]), np.ptp(ss[:, 4])))
+        knee_q_ptp = float(max(np.ptp(ss[:, 11]), np.ptp(ss[:, 12])))
+        ank_q_ptp = float(max(np.ptp(ss[:, 13]), np.ptp(ss[:, 14])))
+        if len(ss) > 5:
+            fwd_l = -ss[:, 3]
+            fwd_r = +ss[:, 4]
+            flex_l = +ss[:, 11]
+            flex_r = -ss[:, 12]
+            hip_q_corr = float(np.corrcoef(fwd_l, fwd_r)[0, 1])
+            knee_q_corr = float(np.corrcoef(flex_l, flex_r)[0, 1])
+            shin_corr = float(np.corrcoef(ss[:, 17], ss[:, 18])[0, 1])
+        shin_ptp_l = float(np.ptp(ss[:, 17]))
+        shin_ptp_r = float(np.ptp(ss[:, 18]))
+        shin_cycles = _zero_cross_cycles(ss[:, 17] - ss[:, 18], 0.0)
+        lead = np.asarray(foot_lead_L[i0:] if len(foot_lead_L) > i0 else foot_lead_L, dtype=bool)
+        if len(lead) > 2:
+            foot_lead_cycles = int(np.sum(lead[1:] != lead[:-1])) // 2
+
+    n_l, lift_l = _count_lift_peaks(ss[:, 5]) if len(ss) else (0, 0.0)
+    n_r, lift_r = _count_lift_peaks(ss[:, 6]) if len(ss) else (0, 0.0)
+
+    # upright + contact duty over steady-state window
+    uf = upright_flags[i0:] if len(upright_flags) > i0 else upright_flags
+    cLf = contact_L[i0:] if len(contact_L) > i0 else contact_L
+    cRf = contact_R[i0:] if len(contact_R) > i0 else contact_R
+    upright_frac = float(np.mean(uf)) if uf else 0.0
+    contact_duty_L = float(np.mean(cLf)) if cLf else 0.0
+    contact_duty_R = float(np.mean(cRf)) if cRf else 0.0
+    gait_s = max(0.0, t_final - stand_hold - ramp_t)
+
+    def _vx_stats(xs: list[float]) -> tuple[float, float]:
+        if not xs:
+            return float("nan"), float("nan")
+        a_ = np.asarray(xs, dtype=np.float64)
+        return float(np.mean(a_)), float(np.percentile(a_, 95))
+
+    stx_L_mean, stx_L_p95 = _vx_stats(stance_vx_L)
+    stx_R_mean, stx_R_p95 = _vx_stats(stance_vx_R)
+
+    skate = False
+    skate_reasons: list[str] = []
+    if foot_lead_cycles < 2 and abs(dx) > 0.05:
+        skate = True
+        skate_reasons.append("body translates without foot-lead alternation")
+    for label, mean_v, p95 in (
+        ("L", stx_L_mean, stx_L_p95),
+        ("R", stx_R_mean, stx_R_p95),
+    ):
+        if mean_v == mean_v and mean_v > ACC["max_stance_vx_mean"]:
+            skate = True
+            skate_reasons.append(f"stance {label} mean |vx|={mean_v:.3f}>{ACC['max_stance_vx_mean']}")
+        if p95 == p95 and p95 > ACC["max_stance_vx_p95"]:
+            skate = True
+            skate_reasons.append(f"stance {label} p95 |vx|={p95:.3f}>{ACC['max_stance_vx_p95']}")
+
+    rel_l_amp = rel_r_amp = 0.0
+    if len(ss):
+        rel_l_amp = float(np.ptp(ss[:, 8] - ss[:, 10]))
+        rel_r_amp = float(np.ptp(ss[:, 9] - ss[:, 10]))
+
+    pz_ss = ss[:, 7] if len(ss) else np.array([])
+    pz_min = float(pz_ss.min()) if len(pz_ss) else float("nan")
+    pz_max = float(pz_ss.max()) if len(pz_ss) else float("nan")
+    pz_mean = float(pz_ss.mean()) if len(pz_ss) else float("nan")
+
+    leg_clip = (-2.1, 2.1)
+    arm_clip = (-0.7, 0.7)
+
+    print(
+        f"[ainex] done t={t_final:.3f}s dx={dx:+.4f}m avg_speed={avg_speed*100:.1f} cm/s "
+        f"exploded={exploded} flipped={flipped}"
+    )
+    print(
+        f"[ainex] body_z ss: min={pz_min:.4f} max={pz_max:.4f} mean={pz_mean:.4f} "
+        f"upright_frac={upright_frac:.3f}"
+    )
+    print(
+        f"[ainex] joints: hip_ptp={hip_q_ptp:.3f} knee_ptp={knee_q_ptp:.3f} ank_ptp={ank_q_ptp:.3f} "
+        f"hip_corr={hip_q_corr:.3f} knee_corr={knee_q_corr:.3f}"
+    )
+    print(
+        f"[ainex] mesh: shin_ptp L/R={shin_ptp_l:.3f}/{shin_ptp_r:.3f} shin_corr={shin_corr:.3f} "
+        f"shin_cycles={shin_cycles} foot_lead_cycles={foot_lead_cycles}"
+    )
+    print(
+        f"[ainex] feet: lift L={lift_l:.4f}m({n_l}pk) R={lift_r:.4f}m({n_r}pk) "
+        f"contact_duty L/R={contact_duty_L:.2f}/{contact_duty_R:.2f} "
+        f"stance_vx_mean L/R={stx_L_mean:.3f}/{stx_R_mean:.3f} skate={skate}"
+    )
+
+    csv_path = out_dir / "ainex_walk_timeseries.csv"
+    buf = io.StringIO()
+    buf.write(
+        "# ainex_walk mesh=Hiwonder_STL NOT_OEM_STEP "
+        f"T={GAIT_T} hip_amp={HIP_PITCH_AMP} COM_shift={COM_SHIFT_AMP} "
+        f"assist={int(use_assist)} plant={int(use_plant)} cam=WORLD_FIXED_d{CAM_FIXED_DISTANCE}\n"
+    )
+    w = csv.writer(buf)
+    w.writerow([
+        "t", "ctrl_l_hip", "ctrl_r_hip", "q_l_hip", "q_r_hip",
+        "z_l_foot", "z_r_foot", "body_z", "x_l_foot", "x_r_foot", "body_x",
+        "q_l_knee", "q_r_knee", "q_l_ank", "q_r_ank",
+        "thigh_pitch_l", "thigh_pitch_r", "shin_pitch_l", "shin_pitch_r",
+        "body_y", "up_z", "contact_L", "contact_R", "vx_L", "vx_R", "lat", "amp",
+    ])
+    for row in csv_rows:
+        w.writerow([f"{v:.6f}" for v in row])
+    csv_bytes = buf.getvalue().encode("utf-8")
+    csv_path.write_bytes(csv_bytes)
+    run_id = _sha256_first_1kb(csv_bytes)
+    run_id_short = run_id[:12]
+    print(f"[ainex] wrote {csv_path} run_id={run_id_short}")
+
+    frame_paths: list[Path] = []
+    best_png_bytes = None
+    if renderer is not None and raw_frames:
+        import imageio.v2 as imageio
+
+        for fi, (raw, meta) in enumerate(zip(raw_frames, frame_meta)):
+            lines = [
+                f"run_id={run_id_short}  AiNex plant+COM ({args.tag})",
+                f"t={meta['t']:.2f}s  z={meta['z']:.3f}  x={meta['x']:.3f}  y={meta['y']:.3f}  up={meta['up_z']:.2f}",
+                f"hipL={meta['q_l']:+.3f} hipR={meta['q_r']:+.3f}  cL={int(meta['cL'])} cR={int(meta['cR'])}",
+                f"assist={int(use_assist)} plant={int(use_plant)}  WORLD_FIXED d={CAM_FIXED_DISTANCE:.2f}",
+            ]
+            img = _burn_overlay(raw, lines)
+            path = frame_seq / f"frame_{fi:05d}.png"
+            imageio.imwrite(path, img)
+            frame_paths.append(path)
+            if fi == best_frame_idx:
+                best_png_bytes = img
+        print(f"[ainex] wrote {len(frame_paths)} PNGs → {frame_seq}")
+        out = Path(args.out)
+        _encode_mp4_ffmpeg(frame_seq, out, fps=25)
+        print(f"[ainex] wrote {out} all-intra ({len(frame_paths)} frames @25fps)")
+        strip = out_dir / "debug_frames"
+        strip.mkdir(exist_ok=True)
+        for old in strip.glob("*.png"):
+            old.unlink()
+        idxs = np.linspace(0, len(frame_paths) - 1, min(12, len(frame_paths)), dtype=int)
+        for si, fi in enumerate(idxs):
+            shutil.copy2(frame_paths[fi], strip / f"strip_{si:02d}_t{frame_meta[fi]['t']:05.2f}.png")
+
+        # Save best still to kit folder
+        if best_png_bytes is not None:
+            import imageio.v2 as imageio
+            attempt_path = HIWONDER_DIR / "walk_attempt.png"
+            imageio.imwrite(attempt_path, best_png_bytes)
+            print(f"[ainex] best still → {attempt_path} (t={frame_meta[best_frame_idx]['t']:.2f}s)")
+
+    if renderer is not None:
+        renderer.close()
+
+    # --- WORLD_FIXED acceptance ---
+    fails: list[str] = []
+    if exploded and t_final < 6.0:
+        fails.append(f"explode/fall before 6s (t={t_final:.2f})")
+    if flipped:
+        fails.append("flipped (body up_z < 0.3)")
+    if gait_s < ACC["min_gait_s"]:
+        fails.append(f"gait window {gait_s:.2f}s < {ACC['min_gait_s']}")
+    if upright_frac < ACC["upright_frac"]:
+        fails.append(f"upright_frac={upright_frac:.3f} < {ACC['upright_frac']}")
+    if not (ACC["contact_duty_lo"] <= contact_duty_L <= ACC["contact_duty_hi"]):
+        fails.append(f"contact_duty_L={contact_duty_L:.2f} outside [{ACC['contact_duty_lo']},{ACC['contact_duty_hi']}]")
+    if not (ACC["contact_duty_lo"] <= contact_duty_R <= ACC["contact_duty_hi"]):
+        fails.append(f"contact_duty_R={contact_duty_R:.2f} outside [{ACC['contact_duty_lo']},{ACC['contact_duty_hi']}]")
+    if hip_q_ptp < ACC["min_hip_ptp"] and gait_on:
+        fails.append(f"hip q ptp {hip_q_ptp:.3f}<{ACC['min_hip_ptp']}")
+    if knee_q_ptp < ACC["min_knee_ptp"] and gait_on:
+        fails.append(f"knee q ptp {knee_q_ptp:.3f}<{ACC['min_knee_ptp']}")
+    if hip_q_corr > -0.45 and gait_on:
+        fails.append(f"hips not opposite-phase corr={hip_q_corr:.3f}")
+    if foot_lead_cycles < ACC["min_foot_lead_cycles"] and gait_on:
+        fails.append(f"foot lead cycles={foot_lead_cycles}<{ACC['min_foot_lead_cycles']}")
+    if dx < ACC["min_dx_m"] and gait_on:
+        fails.append(f"dx={dx:.3f}m < {ACC['min_dx_m']} (no forward progress)")
+    if abs(avg_speed) > ACC["max_avg_speed"] and gait_on:
+        fails.append(f"avg speed {avg_speed*100:.1f} cm/s > {ACC['max_avg_speed']*100:.0f}")
+    if skate:
+        fails.append("skate: " + "; ".join(skate_reasons))
+    if use_assist and ACC["require_assist_off"]:
+        fails.append("balance_assist ON (upright lock + height + speed governor) — not clean walk")
+    if lift_l < 0.006 and lift_r < 0.006 and gait_on:
+        fails.append("no measurable foot lift — statue-slide risk")
+
+    mesh_ok = (
+        gait_on
+        and not exploded
+        and not flipped
+        and hip_q_ptp >= ACC["min_hip_ptp"]
+        and knee_q_ptp >= ACC["min_knee_ptp"]
+        and hip_q_corr <= -0.45
+        and foot_lead_cycles >= ACC["min_foot_lead_cycles"]
+        and t_final >= 5.0
+    )
+    clean_walk = mesh_ok and not fails and not use_assist and not skate and dx >= ACC["min_dx_m"]
+
+    if clean_walk:
+        verdict = (
+            "PASS — WORLD_FIXED gates met (upright/contact/dx/no-skate) with balance assist OFF. "
+            "Still open-loop CPG + optional plant damper; not ZMP/capture-point/RL."
+        )
+    elif mesh_ok and use_assist and not flipped and not exploded:
+        verdict = (
+            "FAIL clean walk (assist ON) — mesh articulates but balance assist supplies upright/speed. "
+            + ("Fails: " + "; ".join(fails) if fails else "")
+        )
+    elif mesh_ok and fails:
+        verdict = "FAIL — articulation present but WORLD_FIXED gates failed: " + "; ".join(fails)
+    else:
+        verdict = "FAIL — " + ("; ".join(fails) if fails else "no credible walk")
+
+    stats = {
+        "run_id": run_id,
+        "run_id_short": run_id_short,
+        "tag": args.tag,
+        "model": str(xml),
+        "source_geometry": "Hiwonder URDF + 25 STL (NOT OEM STEP)",
+        "mass_kg": mass,
+        "nu": int(model.nu),
+        "nmesh": int(model.nmesh),
+        "ctrl_hz": CTRL_HZ,
+        "gait_T": GAIT_T,
+        "step_len_cmd": STEP_LEN,
+        "hip_pitch_amp": HIP_PITCH_AMP,
+        "knee_stance": KNEE_STANCE,
+        "knee_swing": KNEE_SWING,
+        "com_z": COM_Z,
+        "com_shift_amp": COM_SHIFT_AMP,
+        "com_shift_lead": COM_SHIFT_LEAD,
+        "balance_assist": use_assist,
+        "stance_plant": use_plant,
+        "plant_kd": PLANT_KD,
+        "fx_bias": fx_bias,
+        "v_des_x": v_des_x,
+        "t_final": t_final,
+        "gait_s": gait_s,
+        "dx_m": dx,
+        "avg_speed_m_s": avg_speed,
+        "avg_speed_cm_s": avg_speed * 100,
+        "exploded": exploded,
+        "flipped": flipped,
+        "upright_frac": upright_frac,
+        "contact_duty_L": contact_duty_L,
+        "contact_duty_R": contact_duty_R,
+        "hip_q_ptp": hip_q_ptp,
+        "knee_q_ptp": knee_q_ptp,
+        "ank_q_ptp": ank_q_ptp,
+        "hip_q_corr_LR": hip_q_corr,
+        "knee_q_corr_LR": knee_q_corr,
+        "shin_ptp_L": shin_ptp_l,
+        "shin_ptp_R": shin_ptp_r,
+        "shin_corr_LR": shin_corr,
+        "shin_cycles": shin_cycles,
+        "foot_lead_cycles": foot_lead_cycles,
+        "lift_L_m": lift_l,
+        "lift_R_m": lift_r,
+        "lift_peaks_L": n_l,
+        "lift_peaks_R": n_r,
+        "rel_x_amp_L": rel_l_amp,
+        "rel_x_amp_R": rel_r_amp,
+        "stance_foot_vx_mean_L": stx_L_mean,
+        "stance_foot_vx_mean_R": stx_R_mean,
+        "stance_foot_vx_p95_L": stx_L_p95,
+        "stance_foot_vx_p95_R": stx_R_p95,
+        "skate": skate,
+        "skate_reasons": skate_reasons,
+        "body_z_min": pz_min,
+        "body_z_max": pz_max,
+        "body_z_mean": pz_mean,
+        "torque_clip_leg_Nm": list(leg_clip),
+        "torque_clip_arm_Nm": list(arm_clip),
+        "acceptance": ACC,
+        "n_frames": len(frame_paths),
+        "mp4": str(args.out),
+        "csv": str(csv_path),
+        "walk_attempt_png": str(HIWONDER_DIR / "walk_attempt.png"),
+        "verdict": verdict,
+        "fails": fails,
+        "mesh_articulates": bool(mesh_ok),
+        "clean_walk_claim": bool(clean_walk),
+    }
+    stats_path = out_dir / "ainex_walk_stats.json"
+    stats_path.write_text(json.dumps(stats, indent=2))
+    # also copy stats next to kit assets
+    (HIWONDER_DIR / "walk_gait_stats.json").write_text(json.dumps(stats, indent=2))
+    print(f"[ainex] stats → {stats_path}")
+    print(f"[ainex] VERDICT: {verdict}")
+
+    # Honest note
+    note_path = HIWONDER_DIR / "walk_gait_note.txt"
+    note_lines = [
+        "AiNex walk_gait progress note (WORLD_FIXED acceptance)",
+        f"date: 2026-09-27 evening BST",
+        f"model: {xml}",
+        "geometry: Hiwonder URDF+25 STL (NOT OEM STEP); Path A buy FROZEN",
+        f"tag: {args.tag}",
+        f"run_id: {run_id_short}",
+        "",
+        "CONTROL LEVERS THIS RUN:",
+        f"  + Lateral COM shift: hip_roll amp={COM_SHIFT_AMP} rad, phase lead={COM_SHIFT_LEAD}",
+        f"  + Stance plant damper: {'ON' if use_plant else 'OFF'} kd={PLANT_KD} N/(m/s) clip={PLANT_MAX_F} N",
+        f"  + Balance assist (upright/height/speed): {'ON' if use_assist else 'OFF'}",
+        f"  + HX torque clips unchanged (±2.1 leg / ±0.7 arm-head)",
+        f"  + Gait: T={GAIT_T}s hip_amp={HIP_PITCH_AMP} knee_swing={KNEE_SWING} COM_Z={COM_Z}",
+        "",
+        "METRICS (steady-state after stand+ramp):",
+        f"  t_final={t_final:.2f}s  gait_s={gait_s:.2f}s  dx={dx:+.3f}m  avg_speed={avg_speed*100:.1f} cm/s",
+        f"  upright_frac={upright_frac:.3f}  contact_duty L/R={contact_duty_L:.2f}/{contact_duty_R:.2f}",
+        f"  hip_ptp={hip_q_ptp:.3f} knee_ptp={knee_q_ptp:.3f} hip_corr={hip_q_corr:.3f}",
+        f"  foot_lead_cycles={foot_lead_cycles}  shin_cycles={shin_cycles}",
+        f"  lift L/R={lift_l:.3f}/{lift_r:.3f} m",
+        f"  stance |vx| mean L/R={stx_L_mean:.3f}/{stx_R_mean:.3f}  p95 L/R={stx_L_p95:.3f}/{stx_R_p95:.3f}",
+        f"  skate={skate}  exploded={exploded}  flipped={flipped}",
+        "",
+        "WORLD_FIXED GATES:",
+    ]
+    for k_, v_ in ACC.items():
+        note_lines.append(f"  {k_}: {v_}")
+    note_lines += [
+        "",
+        f"VERDICT: {verdict}",
+        f"clean_walk_claim: {clean_walk}",
+        f"fails ({len(fails)}):",
+    ]
+    if fails:
+        for f_ in fails:
+            note_lines.append(f"  - {f_}")
+    else:
+        note_lines.append("  (none)")
+    note_lines += [
+        "",
+        "WHAT STILL LACKS (if FAIL):",
+        "  - Closed-loop balance (capture point / ZMP / ankle-hip strategy) under HX ±2.1 Nm",
+        "  - True no-slip stance (plant damper is external wrench, not friction-limited contact)",
+        "  - Swing footstep placement from measured COM; open-loop phase only",
+        "  - Full mesh collision (boxes only); Path A OEM STEP still frozen",
+        "",
+        "NEXT CONTROL LEVER:",
+        "  → If tip without assist: increase COM_SHIFT_AMP / lead, or add ankle-roll COM servo from body roll",
+        "  → If skate with plant: raise foot friction / condim, or freeze stance ankle in world during single support",
+        "  → If upright but no dx: add small push-off (ankle plantarflexion impulse) at toe-off — still open-loop",
+        "  → Do NOT claim walk while balance_assist supplies +X or quat lock",
+        "",
+        f"PNGs: {HIWONDER_DIR / 'walk_attempt.png'}",
+        f"MP4:  {args.out}",
+        f"stats:{stats_path}",
+        "script: scripts/walk_gait_ainex.py",
+    ]
+    note_path.write_text("\n".join(note_lines) + "\n")
+    print(f"[ainex] note → {note_path}")
+
+    sys.exit(0 if (not exploded or t_final >= 6.0) and not flipped else 1)
+
+
+if __name__ == "__main__":
+    main()

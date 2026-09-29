@@ -1,0 +1,1109 @@
+#!/usr/bin/env python3
+"""Dronable v0 — open-loop walking gait @ 50 Hz (Controls team params).
+
+Gait: T=0.5 s, DS≈0.1 s, step 0.06 m, clearance 0.025 m,
+hip pitch ±0.30 rad, knee stance 0.35 / swing peak ~0.9 rad (cmd overdrive
+for PD lag), COM height ~0.22 m.
+
+PD: kp 40/25/20, kd 1.0/0.6/0.4 (hips-knees / ankles / arms) via MuJoCo
+position actuators + joint damping; torque clip stall×0.6.
+
+v7 root cause (Controls RETRACTED v6 soft-pass): CSV/HUD showed hip cmds
+flipping and foot-z lifts, but lookat-tracked side cam + tiny same-blue
+legs + fy_bias freejoint slide made continuous playback a frozen split
+stance translating ~1.2 m. Soft PNG bbox-gap and full-frame MAD~1 lied;
+orange pixel count stayed dominant; robot-ROI MAD~1–3 (statue).
+Fix: color whole L/R legs orange/green + larger feet; hip amp 0.35; fy_bias
+0; closer leg-focused cam; assert robot-ROI MAD (HUD masked) and orange vs
+green dominance flips on PNG seq; ffmpeg all-intra from PNGs only.
+
+Foot/leg colors: L=ORANGE, R=GREEN (thigh+shin+foot).
+
+Usage:
+  python scripts/walk_gait.py                  # headless record 8 s MP4
+  python scripts/walk_gait.py --view           # interactive viewer
+  python scripts/walk_gait.py --duration 10 --out previews/walk.mp4
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import hashlib
+import io
+import math
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import mujoco as mj
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+XML = ROOT / "mujoco" / "dronable_v0.xml"
+PREVIEWS = ROOT / "previews"
+FRAME_SEQ = PREVIEWS / "frame_seq"
+
+# --- Controls team params (do not invent conflicting numbers) ---
+CTRL_HZ = 50.0
+GAIT_T = 0.5
+DS_FRAC = 0.1 / GAIT_T  # double support ~0.1 s → fraction of cycle
+STEP_LEN = 0.06
+FOOT_CLEAR = 0.025
+HIP_PITCH_AMP = 0.35  # v7: max allowed — must read on mesh, not only CSV
+HIP_BIAS = -0.08
+KNEE_STANCE = 0.32
+# Command overdrive: PD force-limits lag ~0.3 rad, so cmd high → tracked ~0.9–1.1
+KNEE_SWING = 1.05
+KNEE_SWING_CMD = 1.55  # v7: deeper swing knee for obvious clearance
+COM_Z = 0.215
+
+# Body-forward assist bias (N). v7: 0.0 — any residual +Y must come from
+# stance push / real step kinematics (statue-slide root cause).
+ASSIST_FY_BIAS = 0.0
+
+# Teleop envelope (stub — wired for future Xbox)
+TELEOP_RATE_LIMIT = 1.5  # rad/s
+TELEOP_DEADBAND = 0.08
+LEVER_Z = 0.275  # mid of 0.25–0.30 m
+
+# Actuator name order must match MJCF
+ACT_NAMES = [
+    "m_waist_yaw", "m_head_yaw",
+    "m_l_shoulder_pitch", "m_l_shoulder_roll", "m_l_elbow",
+    "m_r_shoulder_pitch", "m_r_shoulder_roll", "m_r_elbow",
+    "m_l_hip_yaw", "m_l_hip_roll", "m_l_hip_pitch", "m_l_knee",
+    "m_l_ankle_pitch", "m_l_ankle_roll",
+    "m_r_hip_yaw", "m_r_hip_roll", "m_r_hip_pitch", "m_r_knee",
+    "m_r_ankle_pitch", "m_r_ankle_roll",
+]
+
+
+def clamp(x, lo, hi):
+    return max(lo, min(hi, x))
+
+
+def phase_leg(phi: float, side: str) -> float:
+    """Return leg phase in [0,1); right lag by half cycle."""
+    if side == "R":
+        phi = (phi + 0.5) % 1.0
+    return phi
+
+
+def swing_blend(s: float) -> float:
+    """Front-loaded 0→1→0 over swing fraction s in [0,1]."""
+    s = clamp(s, 0.0, 1.0)
+    return math.sin(math.pi * (s ** 0.55))
+
+
+def gait_targets(t: float, gait_on: bool, amp: float = 1.0) -> dict[str, float]:
+    """Open-loop CPG gait → desired joint positions (rad).
+
+    amp in [0,1] ramps the walk so startup does not tip the floating base.
+
+    Stance/swing (p=0 heel-strike, p=0.5 toe-off), +Y forward, pitch about +X:
+      Stance: hip +A → -A (kinematic +Y on this MJCF)
+      Swing:  hip -A → +A with front-loaded knee clearance
+    """
+    q = {
+        "waist_yaw": 0.0,
+        "head_yaw": 0.0,
+        "l_shoulder_pitch": 0.12,
+        "l_shoulder_roll": 0.28,
+        "l_elbow": 0.45,
+        "r_shoulder_pitch": 0.12,
+        "r_shoulder_roll": -0.28,
+        "r_elbow": 0.45,
+        "l_hip_yaw": 0.0,
+        "l_hip_roll": 0.05,
+        "l_hip_pitch": HIP_BIAS,
+        "l_knee": KNEE_STANCE,
+        "l_ankle_pitch": -0.18,
+        "l_ankle_roll": -0.03,
+        "r_hip_yaw": 0.0,
+        "r_hip_roll": -0.05,
+        "r_hip_pitch": HIP_BIAS,
+        "r_knee": KNEE_STANCE,
+        "r_ankle_pitch": -0.18,
+        "r_ankle_roll": 0.03,
+    }
+    if not gait_on or amp <= 0.0:
+        return q
+
+    a = clamp(amp, 0.0, 1.0)
+    phi = (t / GAIT_T) % 1.0
+    for side, prefix in (("L", "l_"), ("R", "r_")):
+        p = phase_leg(phi, side)
+        if p < 0.5:
+            # STANCE — v7: hip -A→+A (was +A→-A which walked -Y when fy_bias=0).
+            # Positive hip about +X swings foot toward +Y; stance -A→+A rolls
+            # pelvis over planted foot in +Y (right-hand, leg along -Z).
+            s = p / 0.5
+            s = s * s * (3.0 - 2.0 * s)
+            hip = HIP_BIAS + HIP_PITCH_AMP * a * (-1.0 + 2.0 * s)
+            knee = KNEE_STANCE
+            ankle = -0.18 - 0.35 * (hip - HIP_BIAS)
+            sw = 0.0
+        else:
+            # SWING — front-loaded knee; hip +A→-A returns foot forward (+Y)
+            s = (p - 0.5) / 0.5
+            sw = swing_blend(s)
+            s_sm = s * s * (3.0 - 2.0 * s)
+            hip = HIP_BIAS + HIP_PITCH_AMP * a * (1.0 - 2.0 * s_sm)
+            knee = KNEE_STANCE + (KNEE_SWING_CMD - KNEE_STANCE) * sw
+            # v7: visible toe-up on swing foot (screen cue)
+            ankle = -0.10 + 0.35 * sw
+
+        q[f"{prefix}hip_pitch"] = clamp(hip, -1.35, 1.15)
+        q[f"{prefix}knee"] = clamp(knee, -0.05, 2.1)
+        q[f"{prefix}ankle_pitch"] = clamp(ankle, -0.85, 0.85)
+
+        roll_sign = 1.0 if side == "L" else -1.0
+        q[f"{prefix}hip_roll"] = roll_sign * (0.06 + 0.08 * sw)
+
+        arm = -0.22 * (hip - HIP_BIAS)
+        q[f"{prefix}shoulder_pitch"] = 0.12 + arm
+        q[f"{prefix}elbow"] = 0.40 + 0.10 * abs(arm)
+
+    q["waist_yaw"] = 0.03 * a * math.sin(2 * math.pi * phi)
+    return q
+
+
+def apply_teleop_delta(
+    q: dict[str, float],
+    deltas: dict[str, float],
+    dt: float,
+    last_hold: dict[str, float] | None,
+    soft_stop: bool,
+) -> dict[str, float]:
+    """Xbox → joint Δq with rate limit 1.5 rad/s, deadband 0.08; soft stop holds last q."""
+    if soft_stop and last_hold is not None:
+        return dict(last_hold)
+    out = dict(q)
+    max_step = TELEOP_RATE_LIMIT * dt
+    for k, dq in deltas.items():
+        if abs(dq) < TELEOP_DEADBAND:
+            continue
+        if k in out:
+            out[k] = out[k] + clamp(dq, -max_step, max_step)
+    return out
+
+
+def _lock_upright_yaw0(qpos: np.ndarray, qvel: np.ndarray, blend: float = 1.0) -> None:
+    """Force freejoint to upright with yaw=0 (identity). Kills yaw spin that
+    made a fixed side camera look like wobble/collapse (v4 root cause)."""
+    tgt = np.array([1.0, 0.0, 0.0, 0.0])
+    cur = np.array([float(v) for v in qpos[3:7]])
+    if np.dot(cur, tgt) < 0:
+        tgt = -tgt
+    out = cur + blend * (tgt - cur)
+    out = out / (np.linalg.norm(out) + 1e-12)
+    qpos[3:7] = out
+    # damp angular vel (pitch/roll/yaw) so assist does not fight residual spin
+    qvel[3:6] *= (1.0 - 0.85 * blend)
+
+
+def v0_balance_assist(
+    model: mj.MjModel,
+    data: mj.MjData,
+    z_des: float = COM_Z,
+    fy_bias: float = 0.0,
+):
+    """Temporary upright/height assist for v0 visual gait (NOT production balance).
+
+    Height hold + upright only. Soft forces. Locks yaw=0 so world +Y assist
+    and side-view camera stay meaningful. Does NOT overwrite data.ctrl.
+    """
+    bid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "pelvis")
+    R = data.xmat[bid].reshape(3, 3)
+    up = R[:, 2]
+    axis = np.cross(up, np.array([0.0, 0.0, 1.0]))
+    lean = float(np.linalg.norm(axis))
+    if lean > 0.25:
+        axis = axis * (0.25 / lean)
+
+    omega = data.qvel[3:6]
+    kp_ori, kd_ori = 60.0, 8.0
+    torque = np.clip(kp_ori * axis - kd_ori * omega, -12.0, 12.0)
+
+    mass = mj.mj_getTotalmass(model)
+    z = data.qpos[2]
+    # ~gravity FF + mild height PD (soft — no squat slam)
+    fz = 0.85 * mass * 9.81 + 160.0 * (z_des - z) - 28.0 * data.qvel[2]
+    fz = float(np.clip(fz, -50.0, 60.0))
+    fx = float(np.clip(-12.0 * data.qpos[0] - 4.0 * data.qvel[0], -10.0, 10.0))
+    fy = float(np.clip(fy_bias - 2.8 * data.qvel[1], -6.0, 6.0))
+    data.qfrc_applied[0:6] = [fx, fy, fz, torque[0], torque[1], torque[2]]
+
+    # Always lock yaw hard enough that side view stays side view
+    blend = 0.55 if up[2] > 0.85 else 0.85
+    _lock_upright_yaw0(data.qpos, data.qvel, blend=blend)
+
+
+def set_ctrl(model: mj.MjModel, data: mj.MjData, qdes: dict[str, float], act_idx: dict[str, int]):
+    for jname, val in qdes.items():
+        aname = "m_" + jname
+        if aname in act_idx:
+            data.ctrl[act_idx[aname]] = val
+
+
+def _count_lift_peaks(z: np.ndarray, thr: float = 0.015) -> tuple[int, float, float]:
+    """Return (n_peaks, max_lift, z0) using low-percentile planted baseline."""
+    if len(z) < 5:
+        return 0, 0.0, float(z[0]) if len(z) else 0.0
+    z0 = float(np.percentile(z, 8))
+    lift = z - z0
+    n = 0
+    for i in range(2, len(lift) - 2):
+        if lift[i] > thr and lift[i] >= max(lift[i - 1], lift[i + 1], lift[i - 2], lift[i + 2]):
+            n += 1
+    return n, float(np.max(lift)), z0
+
+
+def _burn_overlay(img: np.ndarray, lines: list[str]) -> np.ndarray:
+    """Burn run_id / telemetry text into a frame (PIL)."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    out = Image.fromarray(img)
+    draw = ImageDraw.Draw(out)
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", 14)
+        font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", 11)
+    except Exception:
+        font = ImageFont.load_default()
+        font_sm = font
+    y = 6
+    for i, line in enumerate(lines):
+        f = font if i == 0 else font_sm
+        # shadow for readability
+        draw.text((7, y + 1), line, fill=(0, 0, 0), font=f)
+        draw.text((6, y), line, fill=(255, 230, 80), font=f)
+        y += 16 if i == 0 else 14
+    return np.asarray(out, dtype=np.uint8)
+
+
+def _sha256_first_1kb(path: Path) -> str:
+    data = path.read_bytes()[:1024]
+    return hashlib.sha256(data).hexdigest()
+
+
+def _sha256_first_1kb_bytes(data: bytes) -> str:
+    return hashlib.sha256(data[:1024]).hexdigest()
+
+
+def _leg_color_masks(img: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Boolean masks for L=orange / R=green leg+foot pixels (exclude HUD yellow).
+
+    Tuned for v7 MJCF: whole L thigh/shin/foot orange, R green. Lower 70% only.
+    """
+    h = img.shape[0]
+    y0 = int(h * 0.28)
+    roi = img[y0:, :, :]
+    r = roi[:, :, 0].astype(np.int16)
+    g = roi[:, :, 1].astype(np.int16)
+    b = roi[:, :, 2].astype(np.int16)
+    # orange / amber legs (not HUD yellow which sits in top band and is g≈230)
+    orange = (r > 150) & (g > 40) & (g < 160) & (b < 100) & (r > g + 35) & (r > b + 70)
+    green = (g > 120) & (b > 40) & (b < 200) & (r < 130) & (g > r + 30) & (g > b)
+    bright = (r.astype(np.int32) + g.astype(np.int32) + b.astype(np.int32)) > 140
+    orange = orange & bright
+    green = green & bright
+    full_o = np.zeros(img.shape[:2], dtype=bool)
+    full_g = np.zeros(img.shape[:2], dtype=bool)
+    full_o[y0:] = orange
+    full_g[y0:] = green
+    return full_o, full_g
+
+
+def _foot_bbox_tops(img: np.ndarray) -> tuple[int | None, int | None, int, int]:
+    """Return (orange_top_row, green_top_row, n_orange, n_green)."""
+    orange, green = _leg_color_masks(img)
+
+    def _top(mask: np.ndarray) -> tuple[int | None, int]:
+        ys, xs = np.where(mask)
+        n = int(ys.size)
+        if n < 20:
+            return None, n
+        return int(ys.min()), n
+
+    o_top, o_n = _top(orange)
+    g_top, g_n = _top(green)
+    return o_top, g_top, o_n, g_n
+
+
+def _robot_roi_mask(img: np.ndarray) -> np.ndarray:
+    """Robot-ROI for stepping proof = L/R colored legs (dilated), HUD excluded.
+
+    Lookat tracks pelvis so the blue torso is nearly static by design; including
+    it dilutes MAD back to the v6 statue floor (~3). The mesh that must prove
+    stepping is the orange/green legs.
+    """
+    h, w = img.shape[:2]
+    topband = np.zeros((h, w), dtype=bool)
+    topband[:72, :] = True
+    orange, green = _leg_color_masks(img)
+    seed = (orange | green) & (~topband)
+    if int(seed.sum()) < 40:
+        return seed
+    dil = seed.copy()
+    for _ in range(2):
+        nxt = dil.copy()
+        nxt[1:, :] |= dil[:-1, :]
+        nxt[:-1, :] |= dil[1:, :]
+        nxt[:, 1:] |= dil[:, :-1]
+        nxt[:, :-1] |= dil[:, 1:]
+        dil = nxt
+    return dil
+
+
+def _leg_roi_mask(img: np.ndarray) -> np.ndarray:
+    """Orange|green leg pixels only (dilated 3px) — highest-signal swing metric."""
+    orange, green = _leg_color_masks(img)
+    seed = orange | green
+    if int(seed.sum()) < 40:
+        return seed
+    # box dilate
+    h, w = img.shape[:2]
+    ys, xs = np.where(seed)
+    y0, y1 = max(0, int(ys.min()) - 4), min(h, int(ys.max()) + 4)
+    x0, x1 = max(0, int(xs.min()) - 6), min(w, int(xs.max()) + 6)
+    box = np.zeros((h, w), dtype=bool)
+    box[y0:y1, x0:x1] = True
+    return box & (seed | _robot_roi_mask(img))
+
+
+def _assert_png_swings(frame_paths: list[Path], min_each: int = 4) -> dict:
+    """Swing + dominance from IMAGE: forward-foot (centroid x) and lift gap.
+
+    Robot faces screen-left (smaller x = more forward). Orange-forward ⇒ L swing
+    epoch; green-forward ⇒ R. Pixel-count dominance alone lied in v6 (orange
+    always won); forward-foot must flip.
+    """
+    l_swing = 0
+    r_swing = 0
+    clear_gap = 8
+    details: list[str] = []
+    from PIL import Image
+
+    orange_n: list[int] = []
+    green_n: list[int] = []
+    orange_forward: list[bool] = []  # True ⇒ orange more forward (L lead)
+
+    for p in frame_paths:
+        img = np.asarray(Image.open(p).convert("RGB"), dtype=np.uint8)
+        orange, green = _leg_color_masks(img)
+        o_n = int(orange.sum()); g_n = int(green.sum())
+        orange_n.append(o_n); green_n.append(g_n)
+        o_top, g_top, _, _ = _foot_bbox_tops(img)
+
+        def _cen_x(mask: np.ndarray) -> float | None:
+            ys, xs = np.where(mask)
+            if len(xs) < 30:
+                return None
+            # weight lower half of mask more (feet) for "forward foot"
+            y_med = float(np.median(ys))
+            foot = ys >= y_med
+            if foot.sum() < 15:
+                return float(xs.mean())
+            return float(xs[foot].mean())
+
+        ox, gx = _cen_x(orange), _cen_x(green)
+        if ox is not None and gx is not None:
+            o_fwd = ox < gx - 4  # orange clearly more forward (left on screen)
+            g_fwd = gx < ox - 4
+            if o_fwd:
+                orange_forward.append(True)
+            elif g_fwd:
+                orange_forward.append(False)
+            else:
+                # tie — fall back to pixel count
+                orange_forward.append(o_n > g_n)
+
+            if o_top is not None and g_top is not None:
+                gap = g_top - o_top
+                if o_fwd and gap >= clear_gap and o_n >= 40 and g_n >= 40:
+                    l_swing += 1
+                    details.append(f"{p.name}:L fwd gap={gap} dx={gx-ox:.0f}")
+                elif g_fwd and (-gap) >= clear_gap and o_n >= 40 and g_n >= 40:
+                    r_swing += 1
+                    details.append(f"{p.name}:R fwd gap={-gap} dx={ox-gx:.0f}")
+                elif o_fwd and o_n >= 40 and g_n >= 40:
+                    l_swing += 1
+                    details.append(f"{p.name}:L fwd-only dx={gx-ox:.0f}")
+                elif g_fwd and o_n >= 40 and g_n >= 40:
+                    r_swing += 1
+                    details.append(f"{p.name}:R fwd-only dx={ox-gx:.0f}")
+        else:
+            orange_forward.append(o_n > g_n)
+
+    fwd = np.asarray(orange_forward, dtype=bool)
+    flips = int(np.sum(fwd[1:] != fwd[:-1])) if len(fwd) > 1 else 0
+
+    def _epochs(mask: np.ndarray, min_len: int = 2) -> int:
+        n = 0
+        i = 0
+        while i < len(mask):
+            if not mask[i]:
+                i += 1
+                continue
+            j = i
+            while j < len(mask) and mask[j]:
+                j += 1
+            if (j - i) >= min_len:
+                n += 1
+            i = j
+        return n
+
+    o_epochs = _epochs(fwd, 2)
+    g_epochs = _epochs(~fwd, 2)
+
+    return {
+        "l_swing_pngs": l_swing,
+        "r_swing_pngs": r_swing,
+        "pass": l_swing >= min_each and r_swing >= min_each,
+        "n_scored": len(details),
+        "sample": details[:8],
+        "orange_px_mean": float(np.mean(orange_n)) if orange_n else 0.0,
+        "green_px_mean": float(np.mean(green_n)) if green_n else 0.0,
+        "orange_dom_frames": int(fwd.sum()),
+        "green_dom_frames": int((~fwd).sum()),
+        "dominance_flips": flips,
+        "orange_dom_epochs": o_epochs,
+        "green_dom_epochs": g_epochs,
+        "dominance_series": ["O" if d else "G" for d in fwd],
+    }
+
+
+def _robot_roi_mad_stats(frame_paths: list[Path], max_pairs: int = 120) -> dict:
+    """Consecutive-frame MAD on tight robot ROI and leg-color ROI."""
+    from PIL import Image
+
+    empty = {"mean": 0.0, "p50": 0.0, "p95": 0.0, "swing_mean": 0.0, "n": 0,
+             "leg_mean": 0.0, "leg_p95": 0.0, "leg_swing_mean": 0.0}
+    if len(frame_paths) < 2:
+        return empty
+    idxs = np.linspace(0, len(frame_paths) - 2, min(max_pairs, len(frame_paths) - 1), dtype=int)
+    mads: list[float] = []
+    leg_mads: list[float] = []
+    for i in idxs:
+        a = np.asarray(Image.open(frame_paths[i]).convert("RGB"), dtype=np.float32)
+        b = np.asarray(Image.open(frame_paths[i + 1]).convert("RGB"), dtype=np.float32)
+        au, bu = a.astype(np.uint8), b.astype(np.uint8)
+        m = _robot_roi_mask(au) | _robot_roi_mask(bu)
+        if int(m.sum()) >= 80:
+            mads.append(float(np.mean(np.abs(a[m] - b[m]))))
+        lm = _leg_roi_mask(au) | _leg_roi_mask(bu)
+        if int(lm.sum()) >= 60:
+            leg_mads.append(float(np.mean(np.abs(a[lm] - b[lm]))))
+    arr = np.asarray(mads, dtype=np.float64) if mads else np.zeros(1)
+    larr = np.asarray(leg_mads, dtype=np.float64) if leg_mads else np.zeros(1)
+    swing = float(np.mean(arr[arr >= np.percentile(arr, 70)])) if len(arr) > 4 else float(arr.mean())
+    lswing = float(np.mean(larr[larr >= np.percentile(larr, 70)])) if len(larr) > 4 else float(larr.mean())
+    return {
+        "mean": float(arr.mean()),
+        "p50": float(np.median(arr)),
+        "p95": float(np.percentile(arr, 95)),
+        "swing_mean": swing,
+        "n": int(len(mads)),
+        "leg_mean": float(larr.mean()),
+        "leg_p95": float(np.percentile(larr, 95)),
+        "leg_swing_mean": lswing,
+    }
+
+
+def _mean_pixel_mad(frame_paths: list[Path], max_pairs: int = 80) -> float:
+    """Mean absolute pixel difference between consecutive PNGs (full frame)."""
+    from PIL import Image
+
+    if len(frame_paths) < 2:
+        return 0.0
+    idxs = np.linspace(0, len(frame_paths) - 2, min(max_pairs, len(frame_paths) - 1), dtype=int)
+    mads = []
+    for i in idxs:
+        a = np.asarray(Image.open(frame_paths[i]).convert("RGB"), dtype=np.float32)
+        b = np.asarray(Image.open(frame_paths[i + 1]).convert("RGB"), dtype=np.float32)
+        mads.append(float(np.mean(np.abs(a - b))))
+    return float(np.mean(mads)) if mads else 0.0
+
+
+def _encode_mp4_ffmpeg(frame_dir: Path, out_mp4: Path, fps: int = 25) -> None:
+    """All-intra H.264 from PNG sequence — every frame a keyframe, no B-frames."""
+    out_mp4.parent.mkdir(parents=True, exist_ok=True)
+    pattern = str(frame_dir / "frame_%05d.png")
+    cmd = [
+        "ffmpeg", "-y",
+        "-framerate", str(fps),
+        "-i", pattern,
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-g", "1",
+        "-keyint_min", "1",
+        "-bf", "0",
+        "-preset", "veryfast",
+        "-crf", "18",
+        str(out_mp4),
+    ]
+    print(f"[dronable] ffmpeg: {' '.join(cmd)}")
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(r.stderr[-2000:], file=sys.stderr)
+        raise RuntimeError(f"ffmpeg failed rc={r.returncode}")
+
+
+def _encode_gif(frame_paths: list[Path], out_gif: Path, every: int = 2, fps: float = 12.5) -> None:
+    import imageio.v2 as imageio
+
+    sel = frame_paths[::every]
+    imgs = [imageio.imread(p) for p in sel]
+    imageio.mimsave(out_gif, imgs, fps=fps)
+    print(f"[dronable] wrote {out_gif} ({len(imgs)} frames @{fps}fps from every {every} PNG)")
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Dronable v0 walking gait (Controls 50 Hz PD)")
+    ap.add_argument("--view", action="store_true", help="Interactive MuJoCo viewer")
+    ap.add_argument("--duration", type=float, default=8.0, help="Sim duration seconds")
+    ap.add_argument("--out", type=str, default=str(PREVIEWS / "walk_gait.mp4"))
+    ap.add_argument("--gait-off", action="store_true", help="Hold stand pose (gait off)")
+    ap.add_argument("--no-video", action="store_true")
+    args = ap.parse_args()
+
+    if not XML.exists():
+        print(f"ERROR: missing {XML}", file=sys.stderr)
+        sys.exit(1)
+
+    model = mj.MjModel.from_xml_path(str(XML))
+    data = mj.MjData(model)
+    act_idx = {mj.mj_id2name(model, mj.mjtObj.mjOBJ_ACTUATOR, i): i for i in range(model.nu)}
+
+    missing = [n for n in ACT_NAMES if n not in act_idx]
+    if missing:
+        print(f"ERROR: missing actuators {missing}", file=sys.stderr)
+        sys.exit(1)
+
+    if model.nkey > 0:
+        mj.mj_resetDataKeyframe(model, data, 0)
+    else:
+        data.qpos[2] = COM_Z
+        data.qpos[3:7] = [1, 0, 0, 0]
+    data.qpos[2] = COM_Z
+    data.qpos[3:7] = [1, 0, 0, 0]  # yaw=0 lock from t0
+    mj.mj_forward(model, data)
+
+    ctrl_dt = 1.0 / CTRL_HZ
+    sim_dt = model.opt.timestep
+    steps_per_ctrl = max(1, int(round(ctrl_dt / sim_dt)))
+
+    gait_on = not args.gait_off
+    soft_stop = False
+    last_hold: dict[str, float] | None = None
+    teleop_deltas: dict[str, float] = {}
+    stand_hold = 0.40
+    ramp_t = 1.0
+
+    def gait_amp(t: float) -> float:
+        if not gait_on:
+            return 0.0
+        if t < stand_hold:
+            return 0.0
+        u = t - stand_hold
+        if u >= ramp_t:
+            return 1.0
+        s = u / ramp_t
+        return s * s * (3.0 - 2.0 * s)
+
+    def _qadr(name: str) -> int:
+        return int(model.jnt_qposadr[mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, name)])
+
+    hip_l_adr = _qadr("l_hip_pitch")
+    hip_r_adr = _qadr("r_hip_pitch")
+    aid_l_hip = act_idx["m_l_hip_pitch"]
+    aid_r_hip = act_idx["m_r_hip_pitch"]
+    bid_l_ankle = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "l_ankle")
+    bid_r_ankle = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "r_ankle")
+    bid_pelvis = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "pelvis")
+
+    csv_rows: list[list[float]] = []
+
+    print(f"[dronable] model={XML.name} nq={model.nq} nu={model.nu} dt={sim_dt}")
+    print(f"[dronable] Controls: {CTRL_HZ} Hz PD gait T={GAIT_T}s step={STEP_LEN}m clear={FOOT_CLEAR}m")
+    print(f"[dronable] COM target z≈{COM_Z}m lever≈{LEVER_Z}m gait_on={gait_on}")
+    print(f"[dronable] mass≈{mj.mj_getTotalmass(model):.3f} kg")
+    print(f"[dronable] stand_hold={stand_hold}s ramp={ramp_t}s fy_bias={ASSIST_FY_BIAS}N hip_amp={HIP_PITCH_AMP}")
+    print(f"[dronable] legs: L=ORANGE R=GREEN (thigh+shin+foot)")
+    print(f"[dronable] v7: colored legs, fy_bias=0, hip_amp=0.35, robot-ROI MAD + dominance flips")
+
+    if args.view:
+        import time
+        try:
+            from mujoco import viewer
+        except ImportError:
+            print("viewer unavailable", file=sys.stderr)
+            sys.exit(1)
+        with viewer.launch_passive(model, data) as v:
+            wall0 = time.time()
+            while v.is_running() and (time.time() - wall0) < args.duration:
+                t = data.time
+                a = gait_amp(t)
+                qdes = gait_targets(t, gait_on, a)
+                qdes = apply_teleop_delta(qdes, teleop_deltas, ctrl_dt, last_hold, soft_stop)
+                last_hold = dict(qdes)
+                set_ctrl(model, data, qdes, act_idx)
+                for _ in range(steps_per_ctrl):
+                    v0_balance_assist(model, data, COM_Z, fy_bias=ASSIST_FY_BIAS * a)
+                    mj.mj_step(model, data)
+                    data.qfrc_applied[:] = 0
+                v.sync()
+                target = wall0 + data.time
+                sleep = target - time.time()
+                if sleep > 0:
+                    time.sleep(sleep)
+            print(f"[dronable] viewer done t={data.time:.2f}s pelvis_z={data.qpos[2]:.3f}")
+            return
+
+    # Headless + video — FIXED pure side camera; collect raw RGB then burn run_id
+    raw_frames: list[np.ndarray] = []
+    frame_meta: list[dict] = []  # telemetry burned after run_id known
+    renderer = None
+    cam = mj.MjvCamera()
+    mj.mjv_defaultCamera(cam)
+    # v7: closer, slight elevation so foot lift + leg color swap dominate the frame
+    cam.azimuth = 0.0
+    cam.elevation = -12.0
+    cam.distance = 0.85
+    cam.lookat[:] = [0.0, float(data.qpos[1]), 0.08]
+
+    debug_dir = PREVIEWS / "debug_frames"
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    for old in debug_dir.glob("*.png"):
+        old.unlink()
+
+    if FRAME_SEQ.exists():
+        shutil.rmtree(FRAME_SEQ)
+    FRAME_SEQ.mkdir(parents=True, exist_ok=True)
+
+    if not args.no_video:
+        renderer = mj.Renderer(model, height=480, width=640)
+
+    n_ctrl = int(args.duration * CTRL_HZ)
+    exploded = False
+    flipped = False
+
+    y0 = float(data.qpos[1])
+    pelvis_z_log: list[float] = []
+    yaw_log: list[float] = []
+    # contact / slide diagnostics
+    contact_ok_frames = 0
+    contact_bad_frames = 0
+    foot_rel_y_l: list[float] = []
+    foot_rel_y_r: list[float] = []
+    swing_z_ok_l = 0
+    swing_z_ok_r = 0
+
+    def _yaw_deg() -> float:
+        w, x, y, z = [float(v) for v in data.qpos[3:7]]
+        return math.degrees(math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z)))
+
+    def _render_raw() -> np.ndarray:
+        # Track pelvis Y but keep lookat low so feet fill the frame; joints must
+        # move on screen (do not cancel step kinematics with pure freejoint slide).
+        cam.lookat[:] = [0.0, float(data.qpos[1]), 0.08]
+        cam.azimuth = 0.0
+        cam.elevation = -12.0
+        cam.distance = 0.85
+        mj.mj_forward(model, data)
+        renderer.update_scene(data, cam)
+        return np.ascontiguousarray(renderer.render().copy(), dtype=np.uint8)
+
+    for k in range(n_ctrl):
+        t = data.time
+        a = gait_amp(t)
+        qdes = gait_targets(t, gait_on, a)
+        qdes = apply_teleop_delta(qdes, teleop_deltas, ctrl_dt, last_hold, soft_stop)
+        last_hold = dict(qdes)
+        set_ctrl(model, data, qdes, act_idx)
+        for _ in range(steps_per_ctrl):
+            v0_balance_assist(model, data, COM_Z, fy_bias=ASSIST_FY_BIAS * a)
+            mj.mj_step(model, data)
+            data.qfrc_applied[:] = 0
+            if not np.isfinite(data.qpos).all() or data.qpos[2] < 0.05 or data.qpos[2] > 1.0:
+                exploded = True
+                break
+        if exploded:
+            print(f"[dronable] STOP early at t={data.time:.3f}s (fall/nan) z={data.qpos[2]}")
+            break
+
+        up_z = float(data.xmat[bid_pelvis].reshape(3, 3)[2, 2])
+        if up_z < 0.3:
+            flipped = True
+
+        ctrl_l = float(data.ctrl[aid_l_hip])
+        ctrl_r = float(data.ctrl[aid_r_hip])
+        q_l = float(data.qpos[hip_l_adr])
+        q_r = float(data.qpos[hip_r_adr])
+        z_l = float(data.xpos[bid_l_ankle, 2])
+        z_r = float(data.xpos[bid_r_ankle, 2])
+        y_l = float(data.xpos[bid_l_ankle, 1])
+        y_r = float(data.xpos[bid_r_ankle, 1])
+        pz = float(data.qpos[2])
+        py = float(data.qpos[1])
+        pelvis_z_log.append(pz)
+        yaw_log.append(_yaw_deg())
+        foot_rel_y_l.append(y_l - py)
+        foot_rel_y_r.append(y_r - py)
+        # CSV: same loop as video — includes foot y for slide diagnostics
+        csv_rows.append([float(data.time), ctrl_l, ctrl_r, q_l, q_r, z_l, z_r, pz, y_l, y_r, py])
+
+        # Contact-check once gait is fully on
+        if a >= 0.95:
+            phi = (float(data.time) / GAIT_T) % 1.0
+            p_l = phase_leg(phi, "L")
+            p_r = phase_leg(phi, "R")
+            # mid-swing window
+            if 0.55 < p_l < 0.95:
+                if (z_l - z_r) > 0.012 and z_r < 0.035:
+                    swing_z_ok_l += 1
+                    contact_ok_frames += 1
+                else:
+                    contact_bad_frames += 1
+            if 0.55 < p_r < 0.95:
+                if (z_r - z_l) > 0.012 and z_l < 0.035:
+                    swing_z_ok_r += 1
+                    contact_ok_frames += 1
+                else:
+                    contact_bad_frames += 1
+
+        # Render every ctrl step at 25 fps (drop every other); FIXED side cam
+        if renderer is not None and (k % 2 == 0):
+            raw = _render_raw()
+            raw_frames.append(raw)
+            frame_meta.append({
+                "t": float(data.time),
+                "k": k,
+                "pelvis_z": pz,
+                "y": py,
+                "yaw": _yaw_deg(),
+                "ctrl_l": ctrl_l,
+                "ctrl_r": ctrl_r,
+                "z_l": z_l,
+                "z_r": z_r,
+            })
+
+    z_final = float(data.qpos[2])
+    y_final = float(data.qpos[1])
+    dy = y_final - y0
+
+    arr = np.asarray(csv_rows, dtype=np.float64) if csv_rows else np.zeros((0, 11))
+    i0 = int((stand_hold + ramp_t + 0.3) * CTRL_HZ)
+    ss = arr[i0:] if len(arr) > i0 else arr
+
+    hip_cmd_dev = 0.0
+    hip_q_dev = 0.0
+    if len(ss):
+        hip_cmd_dev = float(
+            max(np.max(np.abs(ss[:, 1] - HIP_BIAS)), np.max(np.abs(ss[:, 2] - HIP_BIAS)))
+        )
+        hip_q_dev = float(
+            max(np.max(np.abs(ss[:, 3] - HIP_BIAS)), np.max(np.abs(ss[:, 4] - HIP_BIAS)))
+        )
+    n_l, lift_l, z0_l = _count_lift_peaks(ss[:, 5], thr=0.015) if len(ss) else (0, 0.0, 0.0)
+    n_r, lift_r, z0_r = _count_lift_peaks(ss[:, 6], thr=0.015) if len(ss) else (0, 0.0, 0.0)
+
+    pz_arr = np.asarray(pelvis_z_log, dtype=np.float64)
+    t_arr = arr[:, 0] if len(arr) else np.array([])
+    pz_mask = t_arr > 1.5 if len(t_arr) else np.array([], dtype=bool)
+    pz_ss = pz_arr[pz_mask] if pz_mask.size else pz_arr
+    pz_min = float(pz_ss.min()) if len(pz_ss) else float("nan")
+    pz_max = float(pz_ss.max()) if len(pz_ss) else float("nan")
+    pz_mean = float(pz_ss.mean()) if len(pz_ss) else float("nan")
+    yaw_arr = np.asarray(yaw_log, dtype=np.float64)
+    yaw_max_abs = float(np.max(np.abs(yaw_arr))) if len(yaw_arr) else 0.0
+
+    # Slide detector: foot Y relative to pelvis must oscillate (real stepping).
+    rel_l = np.asarray(foot_rel_y_l[i0:] if len(foot_rel_y_l) > i0 else foot_rel_y_l, dtype=np.float64)
+    rel_r = np.asarray(foot_rel_y_r[i0:] if len(foot_rel_y_r) > i0 else foot_rel_y_r, dtype=np.float64)
+    rel_l_std = float(np.std(rel_l)) if len(rel_l) else 0.0
+    rel_r_std = float(np.std(rel_r)) if len(rel_r) else 0.0
+    rel_l_amp = float(np.ptp(rel_l)) if len(rel_l) else 0.0
+    rel_r_amp = float(np.ptp(rel_r)) if len(rel_r) else 0.0
+    pure_slide = (rel_l_amp < 0.015 and rel_r_amp < 0.015) and gait_on
+
+    # Assertions (Controls acceptance) — sites/CSV first; PNG asserts after write
+    assert_ok = True
+    failures: list[str] = []
+    if lift_l <= 0.015 or n_l < 4:
+        assert_ok = False
+        failures.append(f"L foot lift fail: max_lift={lift_l:.4f} peaks={n_l}")
+    if lift_r <= 0.015 or n_r < 4:
+        assert_ok = False
+        failures.append(f"R foot lift fail: max_lift={lift_r:.4f} peaks={n_r}")
+    if hip_cmd_dev > 0.35:
+        assert_ok = False
+        failures.append(f"hip cmd amp from baseline {hip_cmd_dev:.3f} > 0.35")
+    if hip_q_dev > 0.40:
+        assert_ok = False
+        failures.append(f"hip q mushy overshoot {hip_q_dev:.3f} > 0.40")
+    if len(pz_ss) and (pz_min < 0.18 or pz_max > 0.28):
+        assert_ok = False
+        failures.append(f"pelvis_z out of [0.18,0.28] for t>1.5: [{pz_min:.3f},{pz_max:.3f}]")
+    if yaw_max_abs > 15.0:
+        assert_ok = False
+        failures.append(f"yaw not locked: max|yaw|={yaw_max_abs:.1f} deg")
+    if pure_slide:
+        assert_ok = False
+        failures.append(
+            f"PURE SLIDE: foot-rel-Y amp L={rel_l_amp:.4f} R={rel_r_amp:.4f} "
+            f"(joints not stepping; reduce fy_bias / increase step)"
+        )
+    if swing_z_ok_l < 4 or swing_z_ok_r < 4:
+        assert_ok = False
+        failures.append(
+            f"contact-check fail: swing_z_ok L={swing_z_ok_l} R={swing_z_ok_r} "
+            f"(need ≥4 mid-swing lifts with stance planted)"
+        )
+    if dy < 0.02 and gait_on:
+        print(f"[dronable] WARN: net +Y only {dy:.4f} m (want ≥0.02)")
+
+    print(
+        f"[dronable] done t={data.time:.3f}s steps={n_ctrl} pelvis_z={z_final:.3f} "
+        f"dy={dy:+.4f}m exploded={exploded} flipped={flipped}"
+    )
+    print(
+        f"[dronable] pelvis_z t>1.5: min={pz_min:.4f} max={pz_max:.4f} mean={pz_mean:.4f}"
+    )
+    print(f"[dronable] yaw max|deg|={yaw_max_abs:.2f}")
+    print(
+        f"[dronable] metrics: hip_cmd_dev={hip_cmd_dev:.4f} hip_q_dev={hip_q_dev:.4f}  "
+        f"L_lift={lift_l:.4f}m ({n_l} peaks)  R_lift={lift_r:.4f}m ({n_r} peaks)"
+    )
+    print(
+        f"[dronable] foot_rel_Y amp L={rel_l_amp:.4f} (std={rel_l_std:.4f}) "
+        f"R={rel_r_amp:.4f} (std={rel_r_std:.4f}) pure_slide={pure_slide}"
+    )
+    print(
+        f"[dronable] contact: swing_z_ok L={swing_z_ok_l} R={swing_z_ok_r} "
+        f"ok_frames={contact_ok_frames} bad={contact_bad_frames}"
+    )
+    print(f"[dronable] assert_ok={assert_ok} failures={failures}")
+
+    # CSV proof — written BEFORE hashing so run_id = sha256(first 1KB of CSV)
+    csv_path = PREVIEWS / "walk_gait_timeseries.csv"
+    buf = io.StringIO()
+    # v7 banner so run_id (sha256 first 1KB) differs from retracted v6 soft-pass
+    buf.write("# dronable_walk_gait version=v7 fy_bias=0 hip_amp=0.35 legs=Lorange_Rgreen\n")
+    w = csv.writer(buf)
+    w.writerow(
+        [
+            "t", "ctrl_l_hip", "ctrl_r_hip", "q_l_hip", "q_r_hip",
+            "z_l_foot", "z_r_foot", "pelvis_z", "y_l_foot", "y_r_foot", "pelvis_y",
+        ]
+    )
+    for row in csv_rows:
+        w.writerow([f"{v:.6f}" for v in row])
+    csv_bytes = buf.getvalue().encode("utf-8")
+    csv_path.write_bytes(csv_bytes)
+    run_id = _sha256_first_1kb_bytes(csv_bytes)
+    run_id_short = run_id[:12]
+    print(f"[dronable] wrote {csv_path} ({len(csv_rows)} rows) run_id={run_id_short}")
+
+    # Burn run_id + telemetry onto EVERY frame, save numbered PNGs, THEN ffmpeg
+    frame_paths: list[Path] = []
+    mean_mad = 0.0
+    roi_mad: dict = {"mean": 0.0, "p50": 0.0, "p95": 0.0, "swing_mean": 0.0, "n": 0,
+                   "leg_mean": 0.0, "leg_p95": 0.0, "leg_swing_mean": 0.0}
+    png_swing: dict = {"l_swing_pngs": 0, "r_swing_pngs": 0, "pass": False,
+                       "dominance_flips": 0, "orange_dom_epochs": 0, "green_dom_epochs": 0,
+                       "orange_dom_frames": 0, "green_dom_frames": 0,
+                       "orange_px_mean": 0.0, "green_px_mean": 0.0}
+    ffmpeg_used = False
+
+    if renderer is not None and raw_frames:
+        import imageio.v2 as imageio
+
+        for fi, (raw, meta) in enumerate(zip(raw_frames, frame_meta)):
+            lines = [
+                f"run_id={run_id_short}",
+                (
+                    f"t={meta['t']:.2f}s  pelvis_z={meta['pelvis_z']:.3f}  "
+                    f"y={meta['y']:.3f}  yaw={meta['yaw']:.1f}"
+                ),
+                (
+                    f"hipL_cmd={meta['ctrl_l']:+.3f}  hipR_cmd={meta['ctrl_r']:+.3f}  "
+                    f"zL={meta['z_l']:.3f} zR={meta['z_r']:.3f}"
+                ),
+                f"k={meta['k']}  cam=side az0 el-12 d0.85  v7-ffmpeg-intra",
+            ]
+            img = _burn_overlay(raw, lines)
+            path = FRAME_SEQ / f"frame_{fi:05d}.png"
+            imageio.imwrite(path, img)
+            frame_paths.append(path)
+        print(f"[dronable] wrote {len(frame_paths)} PNGs → {FRAME_SEQ}")
+
+        # Assert on the PNG sequence itself (image metrics, not only CSV/HUD)
+        png_swing = _assert_png_swings(frame_paths, min_each=4)
+        print(
+            f"[dronable] PNG swing assert: L={png_swing['l_swing_pngs']} "
+            f"R={png_swing['r_swing_pngs']} pass={png_swing['pass']} "
+            f"scored={png_swing['n_scored']} sample={png_swing['sample']}"
+        )
+        print(
+            f"[dronable] color dominance: orange_frames={png_swing['orange_dom_frames']} "
+            f"green_frames={png_swing['green_dom_frames']} flips={png_swing['dominance_flips']} "
+            f"O_epochs={png_swing['orange_dom_epochs']} G_epochs={png_swing['green_dom_epochs']} "
+            f"px_mean O={png_swing['orange_px_mean']:.0f} G={png_swing['green_px_mean']:.0f}"
+        )
+        if not png_swing["pass"]:
+            assert_ok = False
+            failures.append(
+                f"PNG swing fail: L={png_swing['l_swing_pngs']} R={png_swing['r_swing_pngs']} (need ≥4 each)"
+            )
+        # Foot/leg color dominance must flip (≥4 epochs each) — statue keeps one color dominant
+        if png_swing["orange_dom_epochs"] < 4 or png_swing["green_dom_epochs"] < 4:
+            assert_ok = False
+            failures.append(
+                f"dominance epoch fail: O={png_swing['orange_dom_epochs']} "
+                f"G={png_swing['green_dom_epochs']} (need ≥4 each); "
+                f"flips={png_swing['dominance_flips']}"
+            )
+
+        mean_mad = _mean_pixel_mad(frame_paths)
+        roi_mad = _robot_roi_mad_stats(frame_paths)
+        print(f"[dronable] mean consecutive-PNG full MAD={mean_mad:.4f}")
+        print(
+            f"[dronable] robot-ROI MAD: mean={roi_mad['mean']:.3f} p50={roi_mad['p50']:.3f} "
+            f"p95={roi_mad['p95']:.3f} swing_mean={roi_mad['swing_mean']:.3f} n={roi_mad['n']}"
+        )
+        print(
+            f"[dronable] leg-ROI MAD: mean={roi_mad['leg_mean']:.3f} "
+            f"p95={roi_mad['leg_p95']:.3f} swing_mean={roi_mad['leg_swing_mean']:.3f}"
+        )
+        # v6 failure: full/loose MAD ~1–3. Mesh ROI (legs+torso, no floor) and
+        # leg-color ROI must be clearly above that statue floor.
+        LEG_MAD_MIN = 12.0
+        LEG_SWING_MIN = 18.0
+        ROI_MAD_MIN = 12.0   # robot-ROI == leg mesh; statue floor was ~1–3
+        ROI_SWING_MIN = 18.0
+        if roi_mad["leg_mean"] < LEG_MAD_MIN and gait_on:
+            assert_ok = False
+            failures.append(
+                f"leg-ROI MAD mean={roi_mad['leg_mean']:.3f}<{LEG_MAD_MIN} "
+                f"(statue-level full MAD was ~1–3; mesh legs must move)"
+            )
+        if roi_mad["leg_swing_mean"] < LEG_SWING_MIN and gait_on:
+            assert_ok = False
+            failures.append(
+                f"leg-ROI swing MAD={roi_mad['leg_swing_mean']:.3f}<{LEG_SWING_MIN}"
+            )
+        if roi_mad["mean"] < ROI_MAD_MIN and gait_on:
+            assert_ok = False
+            failures.append(
+                f"robot-ROI MAD mean={roi_mad['mean']:.3f}<{ROI_MAD_MIN}"
+            )
+        if roi_mad["swing_mean"] < ROI_SWING_MIN and gait_on:
+            assert_ok = False
+            failures.append(
+                f"robot-ROI swing MAD={roi_mad['swing_mean']:.3f}<{ROI_SWING_MIN}"
+            )
+        if mean_mad < 0.5 and gait_on:
+            assert_ok = False
+            failures.append(
+                f"consecutive PNGs nearly identical (full MAD={mean_mad:.4f}<0.5)"
+            )
+
+        out = Path(args.out)
+        _encode_mp4_ffmpeg(FRAME_SEQ, out, fps=25)
+        ffmpeg_used = True
+        print(f"[dronable] wrote {out} via ffmpeg all-intra ({len(frame_paths)} frames @25fps)")
+
+        gif = out.with_suffix(".gif")
+        _encode_gif(frame_paths, gif, every=2, fps=12.5)
+
+        # PNG strip for quick visual QA (evenly spaced from same sequence)
+        n_strip = 16
+        idxs = np.linspace(0, len(frame_paths) - 1, n_strip, dtype=int)
+        for si, fi in enumerate(idxs):
+            t_approx = frame_meta[fi]["t"]
+            p = debug_dir / f"strip_{si:02d}_f{fi:04d}_t{t_approx:05.2f}.png"
+            shutil.copy2(frame_paths[fi], p)
+        print(f"[dronable] wrote {n_strip} PNG strip frames → {debug_dir}")
+
+        # Keep all frame_seq PNGs (space OK at ~200×640×480); also copy ≥50 samples note
+        print(f"[dronable] frame_seq kept: {len(frame_paths)} PNGs")
+
+    if renderer is not None:
+        renderer.close()
+
+    print(f"[dronable] FINAL assert_ok={assert_ok} failures={failures}")
+
+    log = PREVIEWS / "sim_run_log.txt"
+    log.write_text(
+        f"run_id={run_id}\n"
+        f"run_id_short={run_id_short}\n"
+        f"t_final={data.time:.4f}\n"
+        f"pelvis_z={z_final:.4f}\n"
+        f"pelvis_z_min_tgt1.5={pz_min:.4f}\n"
+        f"pelvis_z_max_tgt1.5={pz_max:.4f}\n"
+        f"pelvis_z_mean_tgt1.5={pz_mean:.4f}\n"
+        f"pelvis_dy={dy:.6f}\n"
+        f"yaw_max_abs_deg={yaw_max_abs:.4f}\n"
+        f"exploded={exploded}\n"
+        f"flipped={flipped}\n"
+        f"mass_kg={mj.mj_getTotalmass(model):.4f}\n"
+        f"nu={model.nu}\n"
+        f"ctrl_hz={CTRL_HZ}\n"
+        f"gait_T={GAIT_T}\n"
+        f"hip_bias={HIP_BIAS}\n"
+        f"hip_pitch_amp={HIP_PITCH_AMP}\n"
+        f"assist_fy_bias={ASSIST_FY_BIAS}\n"
+        f"hip_cmd_dev_from_bias={hip_cmd_dev:.6f}\n"
+        f"hip_q_dev_from_bias={hip_q_dev:.6f}\n"
+        f"l_foot_max_lift_m={lift_l:.6f}\n"
+        f"r_foot_max_lift_m={lift_r:.6f}\n"
+        f"l_foot_lift_peaks={n_l}\n"
+        f"r_foot_lift_peaks={n_r}\n"
+        f"foot_rel_y_amp_L={rel_l_amp:.6f}\n"
+        f"foot_rel_y_amp_R={rel_r_amp:.6f}\n"
+        f"pure_slide={pure_slide}\n"
+        f"swing_z_ok_L={swing_z_ok_l}\n"
+        f"swing_z_ok_R={swing_z_ok_r}\n"
+        f"png_L_swing_frames={png_swing.get('l_swing_pngs', 0)}\n"
+        f"png_R_swing_frames={png_swing.get('r_swing_pngs', 0)}\n"
+        f"png_swing_pass={png_swing.get('pass', False)}\n"
+        f"orange_dom_frames={png_swing.get('orange_dom_frames', 0)}\n"
+        f"green_dom_frames={png_swing.get('green_dom_frames', 0)}\n"
+        f"dominance_flips={png_swing.get('dominance_flips', 0)}\n"
+        f"orange_dom_epochs={png_swing.get('orange_dom_epochs', 0)}\n"
+        f"green_dom_epochs={png_swing.get('green_dom_epochs', 0)}\n"
+        f"orange_px_mean={png_swing.get('orange_px_mean', 0):.2f}\n"
+        f"green_px_mean={png_swing.get('green_px_mean', 0):.2f}\n"
+        f"mean_pixel_mad_consecutive_png={mean_mad:.6f}\n"
+        f"robot_roi_mad_mean={roi_mad.get('mean', 0):.6f}\n"
+        f"robot_roi_mad_p50={roi_mad.get('p50', 0):.6f}\n"
+        f"robot_roi_mad_p95={roi_mad.get('p95', 0):.6f}\n"
+        f"robot_roi_mad_swing_mean={roi_mad.get('swing_mean', 0):.6f}\n"
+        f"leg_roi_mad_mean={roi_mad.get('leg_mean', 0):.6f}\n"
+        f"leg_roi_mad_p95={roi_mad.get('leg_p95', 0):.6f}\n"
+        f"leg_roi_mad_swing_mean={roi_mad.get('leg_swing_mean', 0):.6f}\n"
+        f"ffmpeg_all_intra={ffmpeg_used}\n"
+        f"n_frame_seq_pngs={len(frame_paths)}\n"
+        f"assert_ok={assert_ok}\n"
+        f"failures={';'.join(failures)}\n"
+        f"n_video_frames={len(frame_paths)}\n"
+        f"csv={csv_path}\n"
+        f"mp4={args.out}\n"
+        f"frame_seq={FRAME_SEQ}\n"
+        f"version=v7\n"
+        f"root_cause=v6_soft_pass_retracted_CSV_HUD_stepped_but_lookat_tracked_side_cam_"
+        f"plus_same_blue_legs_plus_fy_bias_freejoint_slide_made_continuous_playback_a_"
+        f"frozen_split_stance_statue_robot_ROI_MAD~1-3_orange_always_dominant;"
+        f"v7_fix=color_whole_L_R_legs+larger_feet+hip_amp_0.35+fy_bias_0+"
+        f"closer_cam_el-12_d0.85+assert_robot_ROI_MAD_and_dominance_epochs+"
+        f"ffmpeg_all_intra_from_PNG_seq\n"
+    )
+    print(f"[dronable] log {log}")
+
+    sys.exit(1 if (not assert_ok) or flipped or (exploded and data.time < 2.0) else 0)
+
+
+if __name__ == "__main__":
+    main()

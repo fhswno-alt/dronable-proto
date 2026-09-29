@@ -1,0 +1,1 @@
+Source: Hiwonder/ainex @ e8fe2a8. Label document and parts as mesh-derived / not OEM STEP. 25 binary STL link meshes.

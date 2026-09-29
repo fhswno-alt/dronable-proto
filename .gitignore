@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.DS_Store
+*.mp4
+*.webm
+previews/frame_seq/
+previews/ainex_walk/

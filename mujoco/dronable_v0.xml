@@ -1,0 +1,210 @@
+<!-- Dronable v0 biped — AiNex-class ~0.41 m, walking core DOF + neck_pitch (pan-tilt)
+     Units: meters, kilograms, radians. Z-up. -->
+<mujoco model="dronable_v0">
+  <compiler angle="radian" meshdir="." autolimits="true"/>
+  <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast"/>
+
+  <visual>
+    <global offwidth="960" offheight="720"/>
+    <quality shadowsize="2048"/>
+  </visual>
+
+  <default>
+    <joint damping="0.6" armature="0.01" frictionloss="0.02"/>
+    <geom friction="1.2 0.1 0.01" solref="0.004 1" solimp="0.9 0.95 0.001" rgba="0.35 0.55 0.85 1"/>
+    <motor ctrllimited="true" ctrlrange="-1 1"/>
+    <default class="servo">
+      <!-- Hiwonder-class bus servo envelope -->
+      <joint damping="0.8" armature="0.015" frictionloss="0.03"/>
+    </default>
+    <default class="leg_geom">
+      <geom type="capsule" density="800" rgba="0.30 0.50 0.80 1"/>
+    </default>
+    <default class="foot_geom">
+      <geom type="box" density="600" rgba="0.25 0.25 0.30 1" friction="1.5 0.15 0.02"/>
+    </default>
+  </default>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.4 0.55 0.7" rgb2="0.05 0.08 0.12" width="512" height="512"/>
+    <texture name="grid" type="2d" builtin="checker" rgb1="0.25 0.25 0.28" rgb2="0.35 0.35 0.38" width="512" height="512"/>
+    <material name="grid" texture="grid" texrepeat="8 8" reflectance="0.02"/>
+    <material name="body" rgba="0.32 0.55 0.88 1"/>
+    <material name="accent" rgba="0.90 0.55 0.15 1"/>
+    <material name="door" rgba="0.55 0.40 0.25 1"/>
+  </asset>
+
+  <worldbody>
+    <light pos="1 1 2.5" dir="-0.3 -0.3 -1" diffuse="0.9 0.9 0.85" specular="0.3 0.3 0.3"/>
+    <light pos="-1 0.5 2" dir="0.4 -0.2 -1" diffuse="0.4 0.45 0.5"/>
+    <geom name="floor" type="plane" size="3 3 0.05" material="grid" friction="1.4 0.1 0.01"/>
+
+    <!-- Prop door + lever ~275 mm (optional reach target) -->
+    <body name="door_prop" pos="0.45 1.40 0">
+      <geom name="door_panel" type="box" size="0.01 0.05 0.17" pos="0 0 0.17" material="door" contype="0" conaffinity="0"/>
+      <geom name="door_lever" type="box" size="0.06 0.01 0.008" pos="-0.05 0 0.275" material="accent" contype="0" conaffinity="0"/>
+    </body>
+
+    <!-- Floating base at pelvis COM height ~0.24 m when standing -->
+    <body name="pelvis" pos="0 0 0.230">
+      <freejoint name="root"/>
+      <inertial pos="0 0 0" mass="0.35" diaginertia="0.0012 0.0010 0.0010"/>
+      <geom name="pelvis_geom" type="box" size="0.040 0.021 0.019" material="body"/>
+      <site name="imu" pos="0 0 0.02" size="0.01"/>
+
+      <!-- TORSO -->
+      <body name="torso" pos="0 0 0.019">
+        <joint name="waist_yaw" class="servo" type="hinge" axis="0 0 1" range="-0.7 0.7"/>
+        <inertial pos="0 0 0.05" mass="0.55" diaginertia="0.0025 0.0020 0.0015"/>
+        <geom name="torso_geom" type="box" size="0.037 0.020 0.050" pos="0 0 0.050" material="body"/>
+
+        <!-- HEAD: yaw (pan) + neck_pitch (tilt). Kit cam HFOV=120° / VFOV≈104.82° (640×480).
+             Stand cam_z≈0.385 m. Default approach pitch −16° (no fab shim). -->
+        <body name="head" pos="0 0.005 0.100">
+          <joint name="head_yaw" class="servo" type="hinge" axis="0 0 1" range="-1.0 1.0"/>
+          <inertial pos="0 0 0.025" mass="0.04" diaginertia="0.00005 0.00005 0.00004"/>
+          <body name="head_face" pos="0 0 0">
+            <!-- neck_pitch about +X: negative = look down (toward lever). Range ~−50°..+30°. -->
+            <joint name="neck_pitch" class="servo" type="hinge" axis="1 0 0" range="-0.87 0.52"/>
+            <inertial pos="0 0 0.025" mass="0.08" diaginertia="0.00012 0.00012 0.00010"/>
+            <geom name="head_geom" type="box" size="0.025 0.022 0.025" pos="0 0 0.025" material="body"/>
+            <geom name="eye_L" type="cylinder" size="0.006 0.004" pos="-0.012 0.022 0.030" zaxis="0 1 0" material="accent" contype="0" conaffinity="0"/>
+            <geom name="eye_R" type="cylinder" size="0.006 0.004" pos="0.012 0.022 0.030" zaxis="0 1 0" material="accent" contype="0" conaffinity="0"/>
+            <!-- Kit cam site + camera: forward +Y, mount ≈385 mm stand -->
+            <site name="kit_cam_site" pos="0.0 0.024 0.036" size="0.004" rgba="0.95 0.2 0.15 1"/>
+            <!-- xyaxes: cam-X=+X, cam-Y=+Z ⇒ look +Y. fovy = VFOV for HFOV 120° @ 4:3 -->
+            <camera name="kit_cam" pos="0.0 0.024 0.036" xyaxes="1 0 0 0 0 1" fovy="104.82"/>
+            <!-- Visual FOV frustum (level optical axis in face frame), d=0.4 m, collision off -->
+            <geom name="fov_e_tl" type="capsule" fromto="0.0 0.024 0.036  -0.6928 0.4240 0.5556" size="0.002" rgba="0.2 0.95 0.85 0.35" contype="0" conaffinity="0" group="1"/>
+            <geom name="fov_e_tr" type="capsule" fromto="0.0 0.024 0.036  0.6928 0.4240 0.5556" size="0.002" rgba="0.2 0.95 0.85 0.35" contype="0" conaffinity="0" group="1"/>
+            <geom name="fov_e_bl" type="capsule" fromto="0.0 0.024 0.036  -0.6928 0.4240 -0.4836" size="0.002" rgba="0.2 0.95 0.85 0.35" contype="0" conaffinity="0" group="1"/>
+            <geom name="fov_e_br" type="capsule" fromto="0.0 0.024 0.036  0.6928 0.4240 -0.4836" size="0.002" rgba="0.2 0.95 0.85 0.35" contype="0" conaffinity="0" group="1"/>
+            <geom name="fov_far_t" type="capsule" fromto="-0.6928 0.4240 0.5556  0.6928 0.4240 0.5556" size="0.002" rgba="0.2 0.95 0.85 0.28" contype="0" conaffinity="0" group="1"/>
+            <geom name="fov_far_b" type="capsule" fromto="-0.6928 0.4240 -0.4836  0.6928 0.4240 -0.4836" size="0.002" rgba="0.2 0.95 0.85 0.28" contype="0" conaffinity="0" group="1"/>
+            <geom name="fov_far_l" type="capsule" fromto="-0.6928 0.4240 0.5556  -0.6928 0.4240 -0.4836" size="0.002" rgba="0.2 0.95 0.85 0.28" contype="0" conaffinity="0" group="1"/>
+            <geom name="fov_far_r" type="capsule" fromto="0.6928 0.4240 0.5556  0.6928 0.4240 -0.4836" size="0.002" rgba="0.2 0.95 0.85 0.28" contype="0" conaffinity="0" group="1"/>
+          </body>
+        </body>
+
+        <!-- LEFT ARM -->
+        <body name="l_shoulder" pos="-0.045 0 0.075">
+          <joint name="l_shoulder_pitch" class="servo" type="hinge" axis="1 0 0" range="-2.0 1.5"/>
+          <joint name="l_shoulder_roll" class="servo" type="hinge" axis="0 1 0" range="-0.3 1.8"/>
+          <inertial pos="0 0 -0.036" mass="0.08" diaginertia="0.00008 0.00008 0.00002"/>
+          <geom name="l_uarm" class="leg_geom" fromto="0 0 0 0 0 -0.072" size="0.014"/>
+          <body name="l_elbow" pos="0 0 -0.072">
+            <joint name="l_elbow" class="servo" type="hinge" axis="1 0 0" range="-0.1 2.2"/>
+            <inertial pos="0 0 -0.034" mass="0.06" diaginertia="0.00005 0.00005 0.00001"/>
+            <geom name="l_farm" class="leg_geom" fromto="0 0 0 0 0 -0.068" size="0.012"/>
+            <geom name="l_hand" type="box" size="0.009 0.015 0.005" pos="0 0.01 -0.075" density="500"/>
+          </body>
+        </body>
+
+        <!-- RIGHT ARM -->
+        <body name="r_shoulder" pos="0.045 0 0.075">
+          <joint name="r_shoulder_pitch" class="servo" type="hinge" axis="1 0 0" range="-2.0 1.5"/>
+          <joint name="r_shoulder_roll" class="servo" type="hinge" axis="0 1 0" range="-1.8 0.3"/>
+          <inertial pos="0 0 -0.036" mass="0.08" diaginertia="0.00008 0.00008 0.00002"/>
+          <geom name="r_uarm" class="leg_geom" fromto="0 0 0 0 0 -0.072" size="0.014"/>
+          <body name="r_elbow" pos="0 0 -0.072">
+            <joint name="r_elbow" class="servo" type="hinge" axis="1 0 0" range="-0.1 2.2"/>
+            <inertial pos="0 0 -0.034" mass="0.06" diaginertia="0.00005 0.00005 0.00001"/>
+            <geom name="r_farm" class="leg_geom" fromto="0 0 0 0 0 -0.068" size="0.012"/>
+            <geom name="r_hand" type="box" size="0.009 0.015 0.005" pos="0 0.01 -0.075" density="500"/>
+          </body>
+        </body>
+      </body>
+
+      <!-- LEFT LEG: hip yaw, roll, pitch → knee → ankle pitch, roll -->
+      <body name="l_hip" pos="-0.025 0 -0.019">
+        <joint name="l_hip_yaw" class="servo" type="hinge" axis="0 0 1" range="-0.6 0.6"/>
+        <joint name="l_hip_roll" class="servo" type="hinge" axis="0 1 0" range="-0.5 0.7"/>
+        <joint name="l_hip_pitch" class="servo" type="hinge" axis="1 0 0" range="-1.4 1.2"/>
+        <inertial pos="0 0 -0.050" mass="0.14" diaginertia="0.00020 0.00020 0.00005"/>
+        <geom name="l_thigh" class="leg_geom" fromto="0 0 0 0 0 -0.100" size="0.017" rgba="0.92 0.40 0.08 1"/>
+        <body name="l_knee" pos="0 0 -0.100">
+          <joint name="l_knee" class="servo" type="hinge" axis="1 0 0" range="-0.05 2.2"/>
+          <inertial pos="0 0 -0.052" mass="0.12" diaginertia="0.00018 0.00018 0.00004"/>
+          <geom name="l_shin" class="leg_geom" fromto="0 0 0 0 0 -0.105" size="0.015" rgba="0.95 0.48 0.12 1"/>
+          <body name="l_ankle" pos="0 0 -0.105">
+            <joint name="l_ankle_pitch" class="servo" type="hinge" axis="1 0 0" range="-0.9 0.9"/>
+            <joint name="l_ankle_roll" class="servo" type="hinge" axis="0 1 0" range="-0.5 0.5"/>
+            <inertial pos="0 0.012 -0.008" mass="0.06" diaginertia="0.00004 0.00008 0.00008"/>
+            <geom name="l_foot" class="foot_geom" size="0.028 0.045 0.009" pos="0 0.016 -0.009" rgba="0.98 0.42 0.05 1"/>
+          </body>
+        </body>
+      </body>
+
+      <!-- RIGHT LEG -->
+      <body name="r_hip" pos="0.025 0 -0.019">
+        <joint name="r_hip_yaw" class="servo" type="hinge" axis="0 0 1" range="-0.6 0.6"/>
+        <joint name="r_hip_roll" class="servo" type="hinge" axis="0 1 0" range="-0.7 0.5"/>
+        <joint name="r_hip_pitch" class="servo" type="hinge" axis="1 0 0" range="-1.4 1.2"/>
+        <inertial pos="0 0 -0.050" mass="0.14" diaginertia="0.00020 0.00020 0.00005"/>
+        <geom name="r_thigh" class="leg_geom" fromto="0 0 0 0 0 -0.100" size="0.017" rgba="0.10 0.78 0.48 1"/>
+        <body name="r_knee" pos="0 0 -0.100">
+          <joint name="r_knee" class="servo" type="hinge" axis="1 0 0" range="-0.05 2.2"/>
+          <inertial pos="0 0 -0.052" mass="0.12" diaginertia="0.00018 0.00018 0.00004"/>
+          <geom name="r_shin" class="leg_geom" fromto="0 0 0 0 0 -0.105" size="0.015" rgba="0.12 0.82 0.50 1"/>
+          <body name="r_ankle" pos="0 0 -0.105">
+            <joint name="r_ankle_pitch" class="servo" type="hinge" axis="1 0 0" range="-0.9 0.9"/>
+            <joint name="r_ankle_roll" class="servo" type="hinge" axis="0 1 0" range="-0.5 0.5"/>
+            <inertial pos="0 0.012 -0.008" mass="0.06" diaginertia="0.00004 0.00008 0.00008"/>
+            <geom name="r_foot" class="foot_geom" size="0.028 0.045 0.009" pos="0 0.016 -0.009" rgba="0.08 0.90 0.45 1"/>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <!-- CONTROLS team: position PD — kp 40 hips/knees, 25 ankles, 20 arms/hands;
+         kd applied as joint damping in gait (1.0 / 0.6 / 0.4).
+         Torque clip = stall×0.6: HX-35H→2.1 Nm, HX-12H→1.1 Nm. -->
+    <position name="m_waist_yaw" joint="waist_yaw" kp="20" dampratio="0.4" ctrlrange="-0.7 0.7" forcelimited="true" forcerange="-1.1 1.1"/>
+    <position name="m_head_yaw" joint="head_yaw" kp="20" dampratio="0.4" ctrlrange="-1 1" forcelimited="true" forcerange="-1.1 1.1"/>
+    <position name="m_neck_pitch" joint="neck_pitch" kp="20" dampratio="0.4" ctrlrange="-0.87 0.52" forcelimited="true" forcerange="-1.1 1.1"/>
+
+    <position name="m_l_shoulder_pitch" joint="l_shoulder_pitch" kp="20" dampratio="0.4" ctrlrange="-2 1.5" forcelimited="true" forcerange="-1.1 1.1"/>
+    <position name="m_l_shoulder_roll" joint="l_shoulder_roll" kp="20" dampratio="0.4" ctrlrange="-0.3 1.8" forcelimited="true" forcerange="-1.1 1.1"/>
+    <position name="m_l_elbow" joint="l_elbow" kp="20" dampratio="0.4" ctrlrange="-0.1 2.2" forcelimited="true" forcerange="-1.1 1.1"/>
+    <position name="m_r_shoulder_pitch" joint="r_shoulder_pitch" kp="20" dampratio="0.4" ctrlrange="-2 1.5" forcelimited="true" forcerange="-1.1 1.1"/>
+    <position name="m_r_shoulder_roll" joint="r_shoulder_roll" kp="20" dampratio="0.4" ctrlrange="-1.8 0.3" forcelimited="true" forcerange="-1.1 1.1"/>
+    <position name="m_r_elbow" joint="r_elbow" kp="20" dampratio="0.4" ctrlrange="-0.1 2.2" forcelimited="true" forcerange="-1.1 1.1"/>
+
+    <position name="m_l_hip_yaw" joint="l_hip_yaw" kp="40" dampratio="1.0" ctrlrange="-0.6 0.6" forcelimited="true" forcerange="-2.1 2.1"/>
+    <position name="m_l_hip_roll" joint="l_hip_roll" kp="40" dampratio="1.0" ctrlrange="-0.5 0.7" forcelimited="true" forcerange="-2.1 2.1"/>
+    <position name="m_l_hip_pitch" joint="l_hip_pitch" kp="40" dampratio="1.0" ctrlrange="-1.4 1.2" forcelimited="true" forcerange="-2.1 2.1"/>
+    <position name="m_l_knee" joint="l_knee" kp="40" dampratio="1.0" ctrlrange="-0.05 2.2" forcelimited="true" forcerange="-2.1 2.1"/>
+    <position name="m_l_ankle_pitch" joint="l_ankle_pitch" kp="25" dampratio="0.6" ctrlrange="-0.9 0.9" forcelimited="true" forcerange="-1.1 1.1"/>
+    <position name="m_l_ankle_roll" joint="l_ankle_roll" kp="25" dampratio="0.6" ctrlrange="-0.5 0.5" forcelimited="true" forcerange="-1.1 1.1"/>
+
+    <position name="m_r_hip_yaw" joint="r_hip_yaw" kp="40" dampratio="1.0" ctrlrange="-0.6 0.6" forcelimited="true" forcerange="-2.1 2.1"/>
+    <position name="m_r_hip_roll" joint="r_hip_roll" kp="40" dampratio="1.0" ctrlrange="-0.7 0.5" forcelimited="true" forcerange="-2.1 2.1"/>
+    <position name="m_r_hip_pitch" joint="r_hip_pitch" kp="40" dampratio="1.0" ctrlrange="-1.4 1.2" forcelimited="true" forcerange="-2.1 2.1"/>
+    <position name="m_r_knee" joint="r_knee" kp="40" dampratio="1.0" ctrlrange="-0.05 2.2" forcelimited="true" forcerange="-2.1 2.1"/>
+    <position name="m_r_ankle_pitch" joint="r_ankle_pitch" kp="25" dampratio="0.6" ctrlrange="-0.9 0.9" forcelimited="true" forcerange="-1.1 1.1"/>
+    <position name="m_r_ankle_roll" joint="r_ankle_roll" kp="25" dampratio="0.6" ctrlrange="-0.5 0.5" forcelimited="true" forcerange="-1.1 1.1"/>
+  </actuator>
+
+  <sensor>
+    <framequat name="pelvis_quat" objtype="site" objname="imu"/>
+    <gyro name="pelvis_gyro" site="imu"/>
+    <accelerometer name="pelvis_acc" site="imu"/>
+  </sensor>
+
+  <keyframe>
+    <!-- Standing pose: slight knee bend, arms down -->
+    <key name="stand" qpos="0 0 0.230 1 0 0 0
+      0 0 0
+      0.15 0.35 0.4
+      0.15 -0.35 0.4
+      0 0.08 -0.15 0.35 -0.20 0
+      0 -0.08 -0.15 0.35 -0.20 0"
+      ctrl="0 0 0
+      0.15 0.35 0.4
+      0.15 -0.35 0.4
+      0 0.08 -0.15 0.35 -0.20 0
+      0 -0.08 -0.15 0.35 -0.20 0"/>
+  </keyframe>
+</mujoco>

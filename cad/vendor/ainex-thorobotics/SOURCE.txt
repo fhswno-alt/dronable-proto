@@ -1,0 +1,13 @@
+Requested URL: https://github.com/thorobotics/AiNex
+Status: DOES NOT EXIST (HTTP 404 / scm_repo_not_accessible)
+Thorobotics GitHub user (https://github.com/Thorobotics) is FRC Team 6166 —
+public repos are Java competition code only; no AiNex repo.
+
+CAD content in this folder cloned from nearest public official source:
+  https://github.com/Hiwonder/ainex
+  Commit: e8fe2a816797cf83054135160df5a82ec3596a69 (main HEAD at clone)
+  Path: src/ainex_simulations/ainex_description/
+  Cloned: 2026-09-27 (Europe/London / BST)
+  Releases: none
+  Git LFS: not used
+  License: README claims educational/research open-source; no SPDX LICENSE file

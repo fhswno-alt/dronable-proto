@@ -1,0 +1,1261 @@
+#!/usr/bin/env python3
+"""Dronable v0 — open-loop walking gait @ 50 Hz (Controls team params).
+
+Gait: T=0.5 s, DS≈0.1 s, step 0.06 m, clearance ~0.04 m,
+hip pitch ±0.50 rad cmd (force-limited track ~±0.25 from bias),
+knee stance 0.28 / swing cmd 1.85, COM height ~0.22 m.
+
+PD: kp 40/25/20, kd 1.0/0.6/0.4 (hips-knees / ankles / arms) via MuJoCo
+position actuators + joint damping; torque clip stall×0.6.
+
+v9 (Controls FAILED v8): WORLD_FIXED cam at d=2.15 left robot too small —
+orange−green Δx only ±15–25 px (statue). Soft shin/CSV/silhouette gates lied.
+Fix: WORLD_FIXED still, lookat mid-corridor, distance≈1.1 so robot fills frame;
+exaggerate gait (hip amp≥0.45, large swing knee, obvious clearance); HARD image
+gates only — orange vs green centroid Δx ptp≥50 px with ≥4 cycles, and
+opposite-phase L/R accept pair robot-bbox MAD≥20 (HUD cropped). Do NOT pass on
+CSV/xmat alone. fy_bias=0; ffmpeg all-intra from PNGs.
+
+Foot/leg colors: L=ORANGE, R=GREEN (thigh+shin+foot).
+
+Usage:
+  python scripts/walk_gait.py                  # headless record 8 s MP4
+  python scripts/walk_gait.py --view           # interactive viewer
+  python scripts/walk_gait.py --duration 10 --out previews/walk.mp4
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import hashlib
+import io
+import math
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import mujoco as mj
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+XML = ROOT / "mujoco" / "dronable_v0.xml"
+PREVIEWS = ROOT / "previews"
+FRAME_SEQ = PREVIEWS / "frame_seq"
+
+# --- Controls team params (do not invent conflicting numbers) ---
+CTRL_HZ = 50.0
+GAIT_T = 0.5
+DS_FRAC = 0.1 / GAIT_T
+STEP_LEN = 0.06
+# v9: exaggerate visible gait under close WORLD_FIXED cam (d≈1.1).
+# Force limits (2.1 Nm) still mush hip cmd→q; knee swing overdriven for clear bend.
+HIP_PITCH_AMP = 0.50
+HIP_BIAS = -0.08
+KNEE_STANCE = 0.28
+KNEE_SWING = 1.25
+KNEE_SWING_CMD = 1.85
+COM_Z = 0.215
+FOOT_CLEAR = 0.040  # visual target; clearance via swing knee/ankle
+
+# Body-forward assist bias (N). Keep 0 — +Y from stance kinematics only.
+ASSIST_FY_BIAS = 0.0
+
+TELEOP_RATE_LIMIT = 1.5
+TELEOP_DEADBAND = 0.08
+LEVER_Z = 0.275
+
+# World-fixed side camera (acceptance). Robot walks +Y through frame.
+# azimuth=0 → camera on +X looking at -X (sagittal side view); +Y = screen-left.
+# v9: d≈1.1 so robot fills large fraction of frame (v8 d=2.15 was statue-scale).
+CAM_FIXED_LOOKAT = np.array([0.0, 0.45, 0.12], dtype=np.float64)
+CAM_FIXED_DISTANCE = 1.05
+CAM_FIXED_AZIMUTH = 0.0
+CAM_FIXED_ELEVATION = -10.0
+
+ACT_NAMES = [
+    "m_waist_yaw", "m_head_yaw", "m_neck_pitch",
+    "m_l_shoulder_pitch", "m_l_shoulder_roll", "m_l_elbow",
+    "m_r_shoulder_pitch", "m_r_shoulder_roll", "m_r_elbow",
+    "m_l_hip_yaw", "m_l_hip_roll", "m_l_hip_pitch", "m_l_knee",
+    "m_l_ankle_pitch", "m_l_ankle_roll",
+    "m_r_hip_yaw", "m_r_hip_roll", "m_r_hip_pitch", "m_r_knee",
+    "m_r_ankle_pitch", "m_r_ankle_roll",
+]
+
+
+def clamp(x, lo, hi):
+    return max(lo, min(hi, x))
+
+
+def phase_leg(phi: float, side: str) -> float:
+    if side == "R":
+        phi = (phi + 0.5) % 1.0
+    return phi
+
+
+def swing_blend(s: float) -> float:
+    s = clamp(s, 0.0, 1.0)
+    return math.sin(math.pi * (s ** 0.55))
+
+
+def gait_targets(t: float, gait_on: bool, amp: float = 1.0) -> dict[str, float]:
+    """Open-loop CPG gait → desired joint positions (rad).
+
+    Stance/swing (p=0 heel-strike, p=0.5 toe-off), +Y forward, pitch about +X:
+      Stance: hip -A → +A (rolls pelvis over planted foot in +Y)
+      Swing:  hip +A → -A with front-loaded knee clearance
+    """
+    q = {
+        "waist_yaw": 0.0,
+        "head_yaw": 0.0,
+        "neck_pitch": 0.0,  # level during walk; ego approach uses commanded look-down
+        "l_shoulder_pitch": 0.12,
+        "l_shoulder_roll": 0.28,
+        "l_elbow": 0.45,
+        "r_shoulder_pitch": 0.12,
+        "r_shoulder_roll": -0.28,
+        "r_elbow": 0.45,
+        "l_hip_yaw": 0.0,
+        "l_hip_roll": 0.05,
+        "l_hip_pitch": HIP_BIAS,
+        "l_knee": KNEE_STANCE,
+        "l_ankle_pitch": -0.18,
+        "l_ankle_roll": -0.03,
+        "r_hip_yaw": 0.0,
+        "r_hip_roll": -0.05,
+        "r_hip_pitch": HIP_BIAS,
+        "r_knee": KNEE_STANCE,
+        "r_ankle_pitch": -0.18,
+        "r_ankle_roll": 0.03,
+    }
+    if not gait_on or amp <= 0.0:
+        return q
+
+    a = clamp(amp, 0.0, 1.0)
+    phi = (t / GAIT_T) % 1.0
+    for side, prefix in (("L", "l_"), ("R", "r_")):
+        p = phase_leg(phi, side)
+        if p < 0.5:
+            s = p / 0.5
+            s = s * s * (3.0 - 2.0 * s)
+            hip = HIP_BIAS + HIP_PITCH_AMP * a * (-1.0 + 2.0 * s)
+            knee = KNEE_STANCE
+            ankle = -0.18 - 0.35 * (hip - HIP_BIAS)
+            sw = 0.0
+        else:
+            s = (p - 0.5) / 0.5
+            sw = swing_blend(s)
+            s_sm = s * s * (3.0 - 2.0 * s)
+            hip = HIP_BIAS + HIP_PITCH_AMP * a * (1.0 - 2.0 * s_sm)
+            knee = KNEE_STANCE + (KNEE_SWING_CMD - KNEE_STANCE) * sw
+            ankle = -0.05 + 0.55 * sw  # v9: more dorsiflex / clearance
+
+        q[f"{prefix}hip_pitch"] = clamp(hip, -1.35, 1.15)
+        q[f"{prefix}knee"] = clamp(knee, -0.05, 2.1)
+        q[f"{prefix}ankle_pitch"] = clamp(ankle, -0.85, 0.85)
+
+        roll_sign = 1.0 if side == "L" else -1.0
+        q[f"{prefix}hip_roll"] = roll_sign * (0.06 + 0.08 * sw)
+
+        arm = -0.22 * (hip - HIP_BIAS)
+        q[f"{prefix}shoulder_pitch"] = 0.12 + arm
+        q[f"{prefix}elbow"] = 0.40 + 0.10 * abs(arm)
+
+    q["waist_yaw"] = 0.03 * a * math.sin(2 * math.pi * phi)
+    return q
+
+
+def apply_teleop_delta(
+    q: dict[str, float],
+    deltas: dict[str, float],
+    dt: float,
+    last_hold: dict[str, float] | None,
+    soft_stop: bool,
+) -> dict[str, float]:
+    if soft_stop and last_hold is not None:
+        return dict(last_hold)
+    out = dict(q)
+    max_step = TELEOP_RATE_LIMIT * dt
+    for k, dq in deltas.items():
+        if abs(dq) < TELEOP_DEADBAND:
+            continue
+        if k in out:
+            out[k] = out[k] + clamp(dq, -max_step, max_step)
+    return out
+
+
+def _lock_upright_yaw0(qpos: np.ndarray, qvel: np.ndarray, blend: float = 1.0) -> None:
+    tgt = np.array([1.0, 0.0, 0.0, 0.0])
+    cur = np.array([float(v) for v in qpos[3:7]])
+    if np.dot(cur, tgt) < 0:
+        tgt = -tgt
+    out = cur + blend * (tgt - cur)
+    out = out / (np.linalg.norm(out) + 1e-12)
+    qpos[3:7] = out
+    qvel[3:6] *= (1.0 - 0.85 * blend)
+
+
+def v0_balance_assist(
+    model: mj.MjModel,
+    data: mj.MjData,
+    z_des: float = COM_Z,
+    fy_bias: float = 0.0,
+):
+    """Temporary upright/height assist for v0 visual gait (NOT production balance)."""
+    bid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "pelvis")
+    R = data.xmat[bid].reshape(3, 3)
+    up = R[:, 2]
+    axis = np.cross(up, np.array([0.0, 0.0, 1.0]))
+    lean = float(np.linalg.norm(axis))
+    if lean > 0.25:
+        axis = axis * (0.25 / lean)
+
+    omega = data.qvel[3:6]
+    kp_ori, kd_ori = 60.0, 8.0
+    torque = np.clip(kp_ori * axis - kd_ori * omega, -12.0, 12.0)
+
+    mass = mj.mj_getTotalmass(model)
+    z = data.qpos[2]
+    fz = 0.85 * mass * 9.81 + 160.0 * (z_des - z) - 28.0 * data.qvel[2]
+    fz = float(np.clip(fz, -50.0, 60.0))
+    fx = float(np.clip(-12.0 * data.qpos[0] - 4.0 * data.qvel[0], -10.0, 10.0))
+    fy = float(np.clip(fy_bias - 5.5 * data.qvel[1], -8.0, 8.0))  # v9: keep in close-cam frame longer
+    data.qfrc_applied[0:6] = [fx, fy, fz, torque[0], torque[1], torque[2]]
+
+    blend = 0.55 if up[2] > 0.85 else 0.85
+    _lock_upright_yaw0(data.qpos, data.qvel, blend=blend)
+
+
+def set_ctrl(model: mj.MjModel, data: mj.MjData, qdes: dict[str, float], act_idx: dict[str, int]):
+    for jname, val in qdes.items():
+        aname = "m_" + jname
+        if aname in act_idx:
+            data.ctrl[act_idx[aname]] = val
+
+
+def body_sagittal_pitch(data: mj.MjData, bid: int) -> float:
+    """Angle of body -Z (leg-down) from world -Z toward +Y (rad). 0=straight down."""
+    R = data.xmat[bid].reshape(3, 3)
+    down = -R[:, 2]
+    return math.atan2(float(down[1]), float(-down[2]))
+
+
+def _count_lift_peaks(z: np.ndarray, thr: float = 0.015) -> tuple[int, float, float]:
+    if len(z) < 5:
+        return 0, 0.0, float(z[0]) if len(z) else 0.0
+    z0 = float(np.percentile(z, 8))
+    lift = z - z0
+    n = 0
+    for i in range(2, len(lift) - 2):
+        if lift[i] > thr and lift[i] >= max(lift[i - 1], lift[i + 1], lift[i - 2], lift[i + 2]):
+            n += 1
+    return n, float(np.max(lift)), z0
+
+
+def _zero_cross_cycles(sig: np.ndarray, level: float = 0.0) -> int:
+    """Count full cycles = floor(n_zero_crossings / 2)."""
+    if len(sig) < 3:
+        return 0
+    d = sig - level
+    zc = int(np.sum((d[1:] * d[:-1]) < 0))
+    return zc // 2
+
+
+def _burn_overlay(img: np.ndarray, lines: list[str]) -> np.ndarray:
+    from PIL import Image, ImageDraw, ImageFont
+
+    out = Image.fromarray(img)
+    draw = ImageDraw.Draw(out)
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", 14)
+        font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", 11)
+    except Exception:
+        font = ImageFont.load_default()
+        font_sm = font
+    y = 6
+    for i, line in enumerate(lines):
+        f = font if i == 0 else font_sm
+        draw.text((7, y + 1), line, fill=(0, 0, 0), font=f)
+        draw.text((6, y), line, fill=(255, 230, 80), font=f)
+        y += 16 if i == 0 else 14
+    return np.asarray(out, dtype=np.uint8)
+
+
+def _sha256_first_1kb_bytes(data: bytes) -> str:
+    return hashlib.sha256(data[:1024]).hexdigest()
+
+
+def _leg_color_masks(img: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """L=orange / R=green masks (lower 72% — HUD excluded). For silhouette only."""
+    h = img.shape[0]
+    y0 = int(h * 0.28)
+    roi = img[y0:, :, :]
+    r = roi[:, :, 0].astype(np.int16)
+    g = roi[:, :, 1].astype(np.int16)
+    b = roi[:, :, 2].astype(np.int16)
+    orange = (r > 150) & (g > 40) & (g < 160) & (b < 100) & (r > g + 35) & (r > b + 70)
+    green = (g > 120) & (b > 40) & (b < 200) & (r < 130) & (g > r + 30) & (g > b)
+    bright = (r.astype(np.int32) + g.astype(np.int32) + b.astype(np.int32)) > 140
+    orange = orange & bright
+    green = green & bright
+    full_o = np.zeros(img.shape[:2], dtype=bool)
+    full_g = np.zeros(img.shape[:2], dtype=bool)
+    full_o[y0:] = orange
+    full_g[y0:] = green
+    return full_o, full_g
+
+
+def _foot_bbox_heights(img: np.ndarray) -> tuple[float | None, float | None, int, int]:
+    """Foot bbox top row (smaller = higher on screen = lifted). Returns (o_top, g_top, n_o, n_g)."""
+    orange, green = _leg_color_masks(img)
+
+    def _top(mask: np.ndarray) -> tuple[float | None, int]:
+        ys, xs = np.where(mask)
+        n = int(ys.size)
+        if n < 25:
+            return None, n
+        # use 15th percentile of lower half of mask as "foot top" proxy — more ankle-like
+        y_med = float(np.median(ys))
+        foot = ys >= y_med
+        if foot.sum() < 15:
+            return float(ys.min()), n
+        return float(np.percentile(ys[foot], 10)), n
+
+    o_top, o_n = _top(orange)
+    g_top, g_n = _top(green)
+    return o_top, g_top, o_n, g_n
+
+
+def _leg_centroid_x(mask: np.ndarray) -> float | None:
+    """Screen-x centroid of a leg mask; weight lower half (feet) more."""
+    ys, xs = np.where(mask)
+    if len(xs) < 30:
+        return None
+    y_med = float(np.median(ys))
+    foot = ys >= y_med
+    if int(foot.sum()) < 15:
+        return float(xs.mean())
+    return float(xs[foot].mean())
+
+
+def _assert_centroid_dx(frame_paths: list[Path], min_cycles: int = 4, min_ptp: float = 50.0) -> dict:
+    """HARD image gate: orange−green foot centroid Δx reverses with large ptp.
+
+    Δx = ox − gx. Robot faces screen-left (smaller x = more forward). Positive
+    Δx ⇒ orange (L) more rightward than green ⇒ green forward; negative ⇒ orange
+    forward. Must reverse ≥min_cycles times with peak-to-peak |Δx| ≥ min_ptp.
+    """
+    from PIL import Image
+
+    dxs: list[float] = []
+    for p in frame_paths:
+        img = np.asarray(Image.open(p).convert("RGB"), dtype=np.uint8)
+        orange, green = _leg_color_masks(img)
+        if int(orange.sum()) < 40 or int(green.sum()) < 40:
+            continue
+        ox = _leg_centroid_x(orange)
+        gx = _leg_centroid_x(green)
+        if ox is None or gx is None:
+            continue
+        dxs.append(ox - gx)
+
+    if len(dxs) < 10:
+        return {
+            "pass": False,
+            "cycles": 0,
+            "dx_ptp": 0.0,
+            "dx_min": 0.0,
+            "dx_max": 0.0,
+            "n": len(dxs),
+            "reason": "too few scored frames",
+        }
+    arr = np.asarray(dxs, dtype=np.float64)
+    cycles = _zero_cross_cycles(arr, 0.0)
+    ptp = float(arr.max() - arr.min())
+    ok = cycles >= min_cycles and ptp >= min_ptp
+    return {
+        "pass": bool(ok),
+        "cycles": int(cycles),
+        "dx_ptp": ptp,
+        "dx_min": float(arr.min()),
+        "dx_max": float(arr.max()),
+        "n": len(dxs),
+        "series": arr,
+        "reason": "" if ok else f"cycles={cycles}<{min_cycles} or dx_ptp={ptp:.1f}<{min_ptp}",
+    }
+
+
+def _robot_bbox_from_legs(img: np.ndarray, hud_frac: float = 0.28, pad: int = 4) -> tuple[int, int, int, int] | None:
+    """Axis-aligned bbox of orange∪green legs, HUD band excluded. (y0,y1,x0,x1)."""
+    h, w = img.shape[:2]
+    y_hud = int(h * hud_frac)
+    orange, green = _leg_color_masks(img)
+    m = (orange | green).copy()
+    m[:y_hud, :] = False
+    ys, xs = np.where(m)
+    if len(ys) < 40:
+        return None
+    y0 = max(y_hud, int(ys.min()) - pad)
+    y1 = min(h, int(ys.max()) + pad + 1)
+    x0 = max(0, int(xs.min()) - pad)
+    x1 = min(w, int(xs.max()) + pad + 1)
+    if (y1 - y0) < 20 or (x1 - x0) < 20:
+        return None
+    return y0, y1, x0, x1
+
+
+def _accept_pair_bbox_mad(img_a: np.ndarray, img_b: np.ndarray) -> float:
+    """MAD between two opposite-phase frames on union robot bbox (HUD cropped)."""
+    ba = _robot_bbox_from_legs(img_a)
+    bb = _robot_bbox_from_legs(img_b)
+    if ba is None or bb is None:
+        return 0.0
+    y0 = min(ba[0], bb[0])
+    y1 = max(ba[1], bb[1])
+    x0 = min(ba[2], bb[2])
+    x1 = max(ba[3], bb[3])
+    a = img_a[y0:y1, x0:x1].astype(np.float32)
+    b = img_b[y0:y1, x0:x1].astype(np.float32)
+    if a.size < 100:
+        return 0.0
+    return float(np.mean(np.abs(a - b)))
+
+
+def _assert_accept_pair_mad(
+    frame_paths: list[Path],
+    frame_meta: list[dict],
+    min_mad: float = 20.0,
+) -> dict:
+    """HARD gate: best opposite-phase L vs R accept pair robot-bbox MAD ≥ min_mad."""
+    from PIL import Image
+
+    # Candidate frames: clear shin L−R sign (opposite pose)
+    cands: list[tuple[int, str, float]] = []
+    for fi, meta in enumerate(frame_meta):
+        if meta["t"] < 1.5:
+            continue
+        dshin = float(meta["shin_l"] - meta["shin_r"])
+        if abs(dshin) < 0.20:
+            continue
+        label = "L" if dshin > 0 else "R"
+        cands.append((fi, label, abs(dshin)))
+
+    best = {"pass": False, "mad": 0.0, "fi_L": -1, "fi_R": -1, "n_L": 0, "n_R": 0, "reason": "no pairs"}
+    Ls = [c for c in cands if c[1] == "L"]
+    Rs = [c for c in cands if c[1] == "R"]
+    best["n_L"] = len(Ls)
+    best["n_R"] = len(Rs)
+    if not Ls or not Rs:
+        best["reason"] = f"missing L/R cands L={len(Ls)} R={len(Rs)}"
+        return best
+
+    # Prefer mid-corridor (robot large): |y - lookat_y| small
+    lookat_y = float(CAM_FIXED_LOOKAT[1])
+    scored: list[tuple[float, int, int]] = []
+    for fi_l, _, _ in Ls:
+        for fi_r, _, _ in Rs:
+            # prefer temporal neighbors in opposite phase (~0.25s = half gait)
+            dt = abs(frame_meta[fi_l]["t"] - frame_meta[fi_r]["t"])
+            if dt < 0.15 or dt > 0.60:
+                continue
+            y_mid = 0.5 * (frame_meta[fi_l]["y"] + frame_meta[fi_r]["y"])
+            prox = abs(y_mid - lookat_y)
+            scored.append((prox, fi_l, fi_r))
+    if not scored:
+        # fallback: any L/R pair mid-run
+        for fi_l, _, _ in Ls[:8]:
+            for fi_r, _, _ in Rs[:8]:
+                y_mid = 0.5 * (frame_meta[fi_l]["y"] + frame_meta[fi_r]["y"])
+                scored.append((abs(y_mid - lookat_y), fi_l, fi_r))
+    scored.sort(key=lambda t: t[0])
+
+    best_mad = 0.0
+    best_pair = (-1, -1)
+    for _, fi_l, fi_r in scored[:24]:
+        img_l = np.asarray(Image.open(frame_paths[fi_l]).convert("RGB"), dtype=np.uint8)
+        img_r = np.asarray(Image.open(frame_paths[fi_r]).convert("RGB"), dtype=np.uint8)
+        mad = _accept_pair_bbox_mad(img_l, img_r)
+        if mad > best_mad:
+            best_mad = mad
+            best_pair = (fi_l, fi_r)
+
+    ok = best_mad >= min_mad
+    return {
+        "pass": bool(ok),
+        "mad": float(best_mad),
+        "fi_L": int(best_pair[0]),
+        "fi_R": int(best_pair[1]),
+        "n_L": len(Ls),
+        "n_R": len(Rs),
+        "reason": "" if ok else f"accept_pair_MAD={best_mad:.1f}<{min_mad}",
+    }
+
+
+def _assert_silhouette_foot_alts(frame_paths: list[Path], min_cycles: int = 4) -> dict:
+    """Legacy soft silhouette metric (logged only; NOT a pass gate in v9)."""
+    from PIL import Image
+
+    gap: list[float] = []
+    for p in frame_paths:
+        img = np.asarray(Image.open(p).convert("RGB"), dtype=np.uint8)
+        ot, gt, on, gn = _foot_bbox_heights(img)
+        if ot is None or gt is None or on < 40 or gn < 40:
+            continue
+        gap.append(gt - ot)
+    if len(gap) < 10:
+        return {"pass": False, "cycles": 0, "gap_ptp": 0.0, "n": len(gap), "reason": "too few"}
+    garr = np.asarray(gap, dtype=np.float64)
+    cycles = _zero_cross_cycles(garr, 0.0)
+    ptp = float(garr.max() - garr.min())
+    return {"pass": cycles >= min_cycles and ptp >= 12.0, "cycles": cycles, "gap_ptp": ptp, "n": len(gap), "reason": ""}
+
+
+def _encode_mp4_ffmpeg(frame_dir: Path, out_mp4: Path, fps: int = 25) -> None:
+    out_mp4.parent.mkdir(parents=True, exist_ok=True)
+    pattern = str(frame_dir / "frame_%05d.png")
+    cmd = [
+        "ffmpeg", "-y",
+        "-framerate", str(fps),
+        "-i", pattern,
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-g", "1",
+        "-keyint_min", "1",
+        "-bf", "0",
+        "-preset", "veryfast",
+        "-crf", "18",
+        str(out_mp4),
+    ]
+    print(f"[dronable] ffmpeg: {' '.join(cmd)}")
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(r.stderr[-2000:], file=sys.stderr)
+        raise RuntimeError(f"ffmpeg failed rc={r.returncode}")
+
+
+def _encode_gif(frame_paths: list[Path], out_gif: Path, every: int = 2, fps: float = 12.5) -> None:
+    import imageio.v2 as imageio
+
+    sel = frame_paths[::every]
+    imgs = [imageio.imread(p) for p in sel]
+    imageio.mimsave(out_gif, imgs, fps=fps)
+    print(f"[dronable] wrote {out_gif} ({len(imgs)} frames @{fps}fps from every {every} PNG)")
+
+
+def _plot_joint_mesh_proof(ss: np.ndarray, out_path: Path) -> None:
+    """ss columns documented in CSV writer. Plot cmd/q + shin pitch."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    t = ss[:, 0]
+    fig, axes = plt.subplots(4, 1, figsize=(10, 10), sharex=True)
+    ax = axes[0]
+    ax.plot(t, ss[:, 1], "C1--", label="ctrl L hip", alpha=0.7)
+    ax.plot(t, ss[:, 2], "C2--", label="ctrl R hip", alpha=0.7)
+    ax.plot(t, ss[:, 3], "C1-", label="q L hip", lw=1.5)
+    ax.plot(t, ss[:, 4], "C2-", label="q R hip", lw=1.5)
+    ax.set_ylabel("hip pitch (rad)")
+    ax.legend(loc="upper right", fontsize=8)
+    ax.set_title("v9 joint + mesh proof (world-fixed d≈1.1) — NOT a Controls pass claim")
+    ax.grid(True, alpha=0.3)
+
+    ax = axes[1]
+    ax.plot(t, ss[:, 11], "C1-", label="q L knee")
+    ax.plot(t, ss[:, 12], "C2-", label="q R knee")
+    ax.plot(t, ss[:, 13], "C1--", label="q L ankle", alpha=0.7)
+    ax.plot(t, ss[:, 14], "C2--", label="q R ankle", alpha=0.7)
+    ax.set_ylabel("knee/ankle (rad)")
+    ax.legend(loc="upper right", fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+    ax = axes[2]
+    ax.plot(t, ss[:, 15], "C1-", label="thigh L pitch (xmat)")
+    ax.plot(t, ss[:, 16], "C2-", label="thigh R pitch (xmat)")
+    ax.plot(t, ss[:, 17], "C1--", label="shin L pitch (xmat)", alpha=0.8)
+    ax.plot(t, ss[:, 18], "C2--", label="shin R pitch (xmat)", alpha=0.8)
+    ax.set_ylabel("body pitch (rad)")
+    ax.legend(loc="upper right", fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+    ax = axes[3]
+    ax.plot(t, ss[:, 17] - ss[:, 18], "k-", label="shin L−R pitch")
+    ax.axhline(0, color="gray", lw=0.8)
+    ax.set_ylabel("shin L−R (rad)")
+    ax.set_xlabel("t (s)")
+    ax.legend(loc="upper right", fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=120)
+    plt.close(fig)
+    print(f"[dronable] wrote joint/mesh proof plot {out_path}")
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Dronable v0 walking gait (Controls 50 Hz PD)")
+    ap.add_argument("--view", action="store_true", help="Interactive MuJoCo viewer")
+    ap.add_argument("--duration", type=float, default=8.0, help="Sim duration seconds")
+    ap.add_argument("--out", type=str, default=str(PREVIEWS / "walk_gait.mp4"))
+    ap.add_argument("--gait-off", action="store_true", help="Hold stand pose (gait off)")
+    ap.add_argument("--no-video", action="store_true")
+    args = ap.parse_args()
+
+    if not XML.exists():
+        print(f"ERROR: missing {XML}", file=sys.stderr)
+        sys.exit(1)
+
+    model = mj.MjModel.from_xml_path(str(XML))
+    data = mj.MjData(model)
+    act_idx = {mj.mj_id2name(model, mj.mjtObj.mjOBJ_ACTUATOR, i): i for i in range(model.nu)}
+
+    missing = [n for n in ACT_NAMES if n not in act_idx]
+    if missing:
+        print(f"ERROR: missing actuators {missing}", file=sys.stderr)
+        sys.exit(1)
+
+    if model.nkey > 0:
+        mj.mj_resetDataKeyframe(model, data, 0)
+    else:
+        data.qpos[2] = COM_Z
+        data.qpos[3:7] = [1, 0, 0, 0]
+    data.qpos[2] = COM_Z
+    data.qpos[3:7] = [1, 0, 0, 0]
+    # Start behind mid-corridor lookat so robot ENTERS then EXITS at close cam
+    data.qpos[1] = -0.35
+    mj.mj_forward(model, data)
+
+    ctrl_dt = 1.0 / CTRL_HZ
+    sim_dt = model.opt.timestep
+    steps_per_ctrl = max(1, int(round(ctrl_dt / sim_dt)))
+
+    gait_on = not args.gait_off
+    soft_stop = False
+    last_hold: dict[str, float] | None = None
+    teleop_deltas: dict[str, float] = {}
+    stand_hold = 0.40
+    ramp_t = 1.0
+
+    def gait_amp(t: float) -> float:
+        if not gait_on:
+            return 0.0
+        if t < stand_hold:
+            return 0.0
+        u = t - stand_hold
+        if u >= ramp_t:
+            return 1.0
+        s = u / ramp_t
+        return s * s * (3.0 - 2.0 * s)
+
+    def _qadr(name: str) -> int:
+        return int(model.jnt_qposadr[mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, name)])
+
+    hip_l_adr = _qadr("l_hip_pitch")
+    hip_r_adr = _qadr("r_hip_pitch")
+    knee_l_adr = _qadr("l_knee")
+    knee_r_adr = _qadr("r_knee")
+    ank_l_adr = _qadr("l_ankle_pitch")
+    ank_r_adr = _qadr("r_ankle_pitch")
+    aid_l_hip = act_idx["m_l_hip_pitch"]
+    aid_r_hip = act_idx["m_r_hip_pitch"]
+    bid_l_ankle = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "l_ankle")
+    bid_r_ankle = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "r_ankle")
+    bid_pelvis = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "pelvis")
+    bid_l_thigh = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "l_hip")
+    bid_r_thigh = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "r_hip")
+    bid_l_shin = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "l_knee")
+    bid_r_shin = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "r_knee")
+
+    csv_rows: list[list[float]] = []
+
+    print(f"[dronable] model={XML.name} nq={model.nq} nu={model.nu} dt={sim_dt}")
+    print(f"[dronable] Controls: {CTRL_HZ} Hz PD gait T={GAIT_T}s step={STEP_LEN}m clear={FOOT_CLEAR}m")
+    print(f"[dronable] COM target z≈{COM_Z}m lever≈{LEVER_Z}m gait_on={gait_on}")
+    print(f"[dronable] mass≈{mj.mj_getTotalmass(model):.3f} kg")
+    print(f"[dronable] stand_hold={stand_hold}s ramp={ramp_t}s fy_bias={ASSIST_FY_BIAS}N hip_amp={HIP_PITCH_AMP}")
+    print(f"[dronable] legs: L=ORANGE R=GREEN (thigh+shin+foot)")
+    print(
+        f"[dronable] v9: WORLD-FIXED cam lookat={CAM_FIXED_LOOKAT.tolist()} "
+        f"d={CAM_FIXED_DISTANCE} az={CAM_FIXED_AZIMUTH} el={CAM_FIXED_ELEVATION}; "
+        f"HARD gates: centroid Δx ptp≥50 + ≥4 cycles; accept L/R bbox MAD≥20"
+    )
+
+    if args.view:
+        import time
+        try:
+            from mujoco import viewer
+        except ImportError:
+            print("viewer unavailable", file=sys.stderr)
+            sys.exit(1)
+        with viewer.launch_passive(model, data) as v:
+            wall0 = time.time()
+            while v.is_running() and (time.time() - wall0) < args.duration:
+                t = data.time
+                a = gait_amp(t)
+                qdes = gait_targets(t, gait_on, a)
+                qdes = apply_teleop_delta(qdes, teleop_deltas, ctrl_dt, last_hold, soft_stop)
+                last_hold = dict(qdes)
+                set_ctrl(model, data, qdes, act_idx)
+                for _ in range(steps_per_ctrl):
+                    v0_balance_assist(model, data, COM_Z, fy_bias=ASSIST_FY_BIAS * a)
+                    mj.mj_step(model, data)
+                    data.qfrc_applied[:] = 0
+                v.sync()
+                target = wall0 + data.time
+                sleep = target - time.time()
+                if sleep > 0:
+                    time.sleep(sleep)
+            print(f"[dronable] viewer done t={data.time:.2f}s pelvis_z={data.qpos[2]:.3f}")
+            return
+
+    raw_frames: list[np.ndarray] = []
+    frame_meta: list[dict] = []
+    renderer = None
+    cam = mj.MjvCamera()
+    mj.mjv_defaultCamera(cam)
+    cam.azimuth = CAM_FIXED_AZIMUTH
+    cam.elevation = CAM_FIXED_ELEVATION
+    cam.distance = CAM_FIXED_DISTANCE
+    cam.lookat[:] = CAM_FIXED_LOOKAT
+
+    debug_dir = PREVIEWS / "debug_frames"
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    for old in debug_dir.glob("*.png"):
+        old.unlink()
+    accept_dir = PREVIEWS / "accept_frames"
+    accept_dir.mkdir(parents=True, exist_ok=True)
+    for old in accept_dir.glob("*.png"):
+        old.unlink()
+
+    if FRAME_SEQ.exists():
+        shutil.rmtree(FRAME_SEQ)
+    FRAME_SEQ.mkdir(parents=True, exist_ok=True)
+
+    if not args.no_video:
+        renderer = mj.Renderer(model, height=480, width=640)
+
+    n_ctrl = int(args.duration * CTRL_HZ)
+    exploded = False
+    flipped = False
+
+    y0 = float(data.qpos[1])
+    pelvis_z_log: list[float] = []
+    yaw_log: list[float] = []
+    contact_ok_frames = 0
+    contact_bad_frames = 0
+    foot_rel_y_l: list[float] = []
+    foot_rel_y_r: list[float] = []
+    swing_z_ok_l = 0
+    swing_z_ok_r = 0
+    # mesh pitch logs (steady-state)
+    shin_pitch_l: list[float] = []
+    shin_pitch_r: list[float] = []
+    thigh_pitch_l: list[float] = []
+    thigh_pitch_r: list[float] = []
+    q_knee_l_log: list[float] = []
+    q_knee_r_log: list[float] = []
+    q_ank_l_log: list[float] = []
+    q_ank_r_log: list[float] = []
+    foot_lead_L: list[bool] = []
+
+    def _yaw_deg() -> float:
+        w, x, y, z = [float(v) for v in data.qpos[3:7]]
+        return math.degrees(math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z)))
+
+    def _render_raw() -> np.ndarray:
+        # WORLD-FIXED — do NOT track pelvis. Robot walks through the corridor.
+        cam.lookat[:] = CAM_FIXED_LOOKAT
+        cam.azimuth = CAM_FIXED_AZIMUTH
+        cam.elevation = CAM_FIXED_ELEVATION
+        cam.distance = CAM_FIXED_DISTANCE
+        mj.mj_forward(model, data)
+        renderer.update_scene(data, cam)
+        return np.ascontiguousarray(renderer.render().copy(), dtype=np.uint8)
+
+    for k in range(n_ctrl):
+        t = data.time
+        a = gait_amp(t)
+        qdes = gait_targets(t, gait_on, a)
+        qdes = apply_teleop_delta(qdes, teleop_deltas, ctrl_dt, last_hold, soft_stop)
+        last_hold = dict(qdes)
+        set_ctrl(model, data, qdes, act_idx)
+        for _ in range(steps_per_ctrl):
+            v0_balance_assist(model, data, COM_Z, fy_bias=ASSIST_FY_BIAS * a)
+            mj.mj_step(model, data)
+            data.qfrc_applied[:] = 0
+            if not np.isfinite(data.qpos).all() or data.qpos[2] < 0.05 or data.qpos[2] > 1.0:
+                exploded = True
+                break
+        if exploded:
+            print(f"[dronable] STOP early at t={data.time:.3f}s (fall/nan) z={data.qpos[2]}")
+            break
+
+        up_z = float(data.xmat[bid_pelvis].reshape(3, 3)[2, 2])
+        if up_z < 0.3:
+            flipped = True
+
+        ctrl_l = float(data.ctrl[aid_l_hip])
+        ctrl_r = float(data.ctrl[aid_r_hip])
+        q_l = float(data.qpos[hip_l_adr])
+        q_r = float(data.qpos[hip_r_adr])
+        q_kl = float(data.qpos[knee_l_adr])
+        q_kr = float(data.qpos[knee_r_adr])
+        q_al = float(data.qpos[ank_l_adr])
+        q_ar = float(data.qpos[ank_r_adr])
+        z_l = float(data.xpos[bid_l_ankle, 2])
+        z_r = float(data.xpos[bid_r_ankle, 2])
+        y_l = float(data.xpos[bid_l_ankle, 1])
+        y_r = float(data.xpos[bid_r_ankle, 1])
+        pz = float(data.qpos[2])
+        py = float(data.qpos[1])
+        p_th_l = body_sagittal_pitch(data, bid_l_thigh)
+        p_th_r = body_sagittal_pitch(data, bid_r_thigh)
+        p_sh_l = body_sagittal_pitch(data, bid_l_shin)
+        p_sh_r = body_sagittal_pitch(data, bid_r_shin)
+
+        pelvis_z_log.append(pz)
+        yaw_log.append(_yaw_deg())
+        foot_rel_y_l.append(y_l - py)
+        foot_rel_y_r.append(y_r - py)
+        shin_pitch_l.append(p_sh_l)
+        shin_pitch_r.append(p_sh_r)
+        thigh_pitch_l.append(p_th_l)
+        thigh_pitch_r.append(p_th_r)
+        q_knee_l_log.append(q_kl)
+        q_knee_r_log.append(q_kr)
+        q_ank_l_log.append(q_al)
+        q_ank_r_log.append(q_ar)
+        foot_lead_L.append(y_l > y_r)
+
+        # CSV: same loop as video
+        csv_rows.append([
+            float(data.time), ctrl_l, ctrl_r, q_l, q_r, z_l, z_r, pz, y_l, y_r, py,
+            q_kl, q_kr, q_al, q_ar, p_th_l, p_th_r, p_sh_l, p_sh_r,
+        ])
+
+        if a >= 0.95:
+            phi = (float(data.time) / GAIT_T) % 1.0
+            p_l = phase_leg(phi, "L")
+            p_r = phase_leg(phi, "R")
+            if 0.55 < p_l < 0.95:
+                if (z_l - z_r) > 0.012 and z_r < 0.035:
+                    swing_z_ok_l += 1
+                    contact_ok_frames += 1
+                else:
+                    contact_bad_frames += 1
+            if 0.55 < p_r < 0.95:
+                if (z_r - z_l) > 0.012 and z_l < 0.035:
+                    swing_z_ok_r += 1
+                    contact_ok_frames += 1
+                else:
+                    contact_bad_frames += 1
+
+        if renderer is not None and (k % 2 == 0):
+            raw = _render_raw()
+            raw_frames.append(raw)
+            frame_meta.append({
+                "t": float(data.time),
+                "k": k,
+                "pelvis_z": pz,
+                "y": py,
+                "yaw": _yaw_deg(),
+                "ctrl_l": ctrl_l,
+                "ctrl_r": ctrl_r,
+                "q_l": q_l,
+                "q_r": q_r,
+                "z_l": z_l,
+                "z_r": z_r,
+                "shin_l": p_sh_l,
+                "shin_r": p_sh_r,
+            })
+
+    z_final = float(data.qpos[2])
+    y_final = float(data.qpos[1])
+    dy = y_final - y0
+
+    # CSV array: 19 cols
+    arr = np.asarray(csv_rows, dtype=np.float64) if csv_rows else np.zeros((0, 19))
+    i0 = int((stand_hold + ramp_t + 0.3) * CTRL_HZ)
+    ss = arr[i0:] if len(arr) > i0 else arr
+
+    hip_cmd_dev = 0.0
+    hip_q_dev = 0.0
+    hip_q_ptp = 0.0
+    knee_q_ptp = 0.0
+    ank_q_ptp = 0.0
+    shin_ptp_l = 0.0
+    shin_ptp_r = 0.0
+    shin_diff_cycles = 0
+    shin_corr = 0.0
+    thigh_corr = 0.0
+    hip_q_corr = 0.0
+    knee_q_corr = 0.0
+    foot_lead_cycles = 0
+
+    if len(ss):
+        hip_cmd_dev = float(
+            max(np.max(np.abs(ss[:, 1] - HIP_BIAS)), np.max(np.abs(ss[:, 2] - HIP_BIAS)))
+        )
+        hip_q_dev = float(
+            max(np.max(np.abs(ss[:, 3] - HIP_BIAS)), np.max(np.abs(ss[:, 4] - HIP_BIAS)))
+        )
+        hip_q_ptp = float(max(ss[:, 3].max() - ss[:, 3].min(), ss[:, 4].max() - ss[:, 4].min()))
+        knee_q_ptp = float(max(ss[:, 11].max() - ss[:, 11].min(), ss[:, 12].max() - ss[:, 12].min()))
+        ank_q_ptp = float(max(ss[:, 13].max() - ss[:, 13].min(), ss[:, 14].max() - ss[:, 14].min()))
+        shin_ptp_l = float(ss[:, 17].max() - ss[:, 17].min())
+        shin_ptp_r = float(ss[:, 18].max() - ss[:, 18].min())
+        shin_diff = ss[:, 17] - ss[:, 18]
+        shin_diff_cycles = _zero_cross_cycles(shin_diff, 0.0)
+        shin_corr = float(np.corrcoef(ss[:, 17], ss[:, 18])[0, 1])
+        thigh_corr = float(np.corrcoef(ss[:, 15], ss[:, 16])[0, 1])
+        hip_q_corr = float(np.corrcoef(ss[:, 3], ss[:, 4])[0, 1])
+        knee_q_corr = float(np.corrcoef(ss[:, 11], ss[:, 12])[0, 1])
+        lead = np.asarray(foot_lead_L[i0:] if len(foot_lead_L) > i0 else foot_lead_L, dtype=bool)
+        if len(lead) > 2:
+            flips = int(np.sum(lead[1:] != lead[:-1]))
+            foot_lead_cycles = flips // 2
+
+    n_l, lift_l, z0_l = _count_lift_peaks(ss[:, 5], thr=0.015) if len(ss) else (0, 0.0, 0.0)
+    n_r, lift_r, z0_r = _count_lift_peaks(ss[:, 6], thr=0.015) if len(ss) else (0, 0.0, 0.0)
+
+    pz_arr = np.asarray(pelvis_z_log, dtype=np.float64)
+    t_arr = arr[:, 0] if len(arr) else np.array([])
+    pz_mask = t_arr > 1.5 if len(t_arr) else np.array([], dtype=bool)
+    pz_ss = pz_arr[pz_mask] if pz_mask.size else pz_arr
+    pz_min = float(pz_ss.min()) if len(pz_ss) else float("nan")
+    pz_max = float(pz_ss.max()) if len(pz_ss) else float("nan")
+    pz_mean = float(pz_ss.mean()) if len(pz_ss) else float("nan")
+    yaw_arr = np.asarray(yaw_log, dtype=np.float64)
+    yaw_max_abs = float(np.max(np.abs(yaw_arr))) if len(yaw_arr) else 0.0
+
+    rel_l = np.asarray(foot_rel_y_l[i0:] if len(foot_rel_y_l) > i0 else foot_rel_y_l, dtype=np.float64)
+    rel_r = np.asarray(foot_rel_y_r[i0:] if len(foot_rel_y_r) > i0 else foot_rel_y_r, dtype=np.float64)
+    rel_l_std = float(np.std(rel_l)) if len(rel_l) else 0.0
+    rel_r_std = float(np.std(rel_r)) if len(rel_r) else 0.0
+    rel_l_amp = float(rel_l.max() - rel_l.min()) if len(rel_l) else 0.0
+    rel_r_amp = float(rel_r.max() - rel_r.min()) if len(rel_r) else 0.0
+    pure_slide = (rel_l_amp < 0.015 and rel_r_amp < 0.015) and gait_on
+
+    # --- Assertions (v9: mesh/joint logged; HARD pass = image centroid Δx + accept MAD) ---
+    assert_ok = True
+    failures: list[str] = []
+    if lift_l <= 0.015 or n_l < 4:
+        assert_ok = False
+        failures.append(f"L foot lift fail: max_lift={lift_l:.4f} peaks={n_l}")
+    if lift_r <= 0.015 or n_r < 4:
+        assert_ok = False
+        failures.append(f"R foot lift fail: max_lift={lift_r:.4f} peaks={n_r}")
+    # cmd amp may exceed old 0.35 — v8 visual amp; still flag absurd overshoot
+    if hip_cmd_dev > 0.55:
+        assert_ok = False
+        failures.append(f"hip cmd amp from baseline {hip_cmd_dev:.3f} > 0.55")
+    if hip_q_ptp < 0.30 and gait_on:
+        assert_ok = False
+        failures.append(f"hip q ptp {hip_q_ptp:.3f}<0.30 (mesh not articulating)")
+    if knee_q_ptp < 0.25 and gait_on:
+        assert_ok = False
+        failures.append(f"knee q ptp {knee_q_ptp:.3f}<0.25")
+    if ank_q_ptp < 0.12 and gait_on:
+        assert_ok = False
+        failures.append(f"ankle q ptp {ank_q_ptp:.3f}<0.12")
+    if hip_q_corr > -0.7 and gait_on:
+        assert_ok = False
+        failures.append(f"hip q not opposite-phase: corr={hip_q_corr:.3f} (want ≤-0.7)")
+    if knee_q_corr > -0.5 and gait_on:
+        assert_ok = False
+        failures.append(f"knee q not opposite-phase: corr={knee_q_corr:.3f}")
+    if shin_ptp_l < 0.30 or shin_ptp_r < 0.30:
+        assert_ok = False
+        failures.append(f"shin body pitch ptp L={shin_ptp_l:.3f} R={shin_ptp_r:.3f} (need ≥0.30)")
+    if shin_corr > -0.7 and gait_on:
+        assert_ok = False
+        failures.append(f"shin pitch not opposite-phase: corr={shin_corr:.3f}")
+    if shin_diff_cycles < 4 and gait_on:
+        assert_ok = False
+        failures.append(f"shin L−R pitch cycles={shin_diff_cycles}<4")
+    if thigh_corr > -0.7 and gait_on:
+        assert_ok = False
+        failures.append(f"thigh pitch not opposite-phase: corr={thigh_corr:.3f}")
+    if foot_lead_cycles < 4 and gait_on:
+        assert_ok = False
+        failures.append(f"foot lead (world Y) cycles={foot_lead_cycles}<4")
+    if len(pz_ss) and (pz_min < 0.18 or pz_max > 0.28):
+        assert_ok = False
+        failures.append(f"pelvis_z out of [0.18,0.28] for t>1.5: [{pz_min:.3f},{pz_max:.3f}]")
+    if yaw_max_abs > 15.0:
+        assert_ok = False
+        failures.append(f"yaw not locked: max|yaw|={yaw_max_abs:.1f} deg")
+    if pure_slide:
+        assert_ok = False
+        failures.append(
+            f"PURE SLIDE: foot-rel-Y amp L={rel_l_amp:.4f} R={rel_r_amp:.4f}"
+        )
+    if swing_z_ok_l < 4 or swing_z_ok_r < 4:
+        assert_ok = False
+        failures.append(
+            f"contact-check fail: swing_z_ok L={swing_z_ok_l} R={swing_z_ok_r}"
+        )
+    if dy < 0.02 and gait_on:
+        print(f"[dronable] WARN: net +Y only {dy:.4f} m (want ≥0.02)")
+
+    print(
+        f"[dronable] done t={data.time:.3f}s steps={n_ctrl} pelvis_z={z_final:.3f} "
+        f"dy={dy:+.4f}m exploded={exploded} flipped={flipped}"
+    )
+    print(
+        f"[dronable] pelvis_z t>1.5: min={pz_min:.4f} max={pz_max:.4f} mean={pz_mean:.4f}"
+    )
+    print(f"[dronable] yaw max|deg|={yaw_max_abs:.2f}")
+    print(
+        f"[dronable] metrics: hip_cmd_dev={hip_cmd_dev:.4f} hip_q_ptp={hip_q_ptp:.4f} "
+        f"knee_q_ptp={knee_q_ptp:.4f} ank_q_ptp={ank_q_ptp:.4f}  "
+        f"L_lift={lift_l:.4f}m ({n_l} peaks)  R_lift={lift_r:.4f}m ({n_r} peaks)"
+    )
+    print(
+        f"[dronable] mesh: shin_ptp L={shin_ptp_l:.3f} R={shin_ptp_r:.3f} "
+        f"shin_corr={shin_corr:.3f} shin_cycles={shin_diff_cycles} "
+        f"thigh_corr={thigh_corr:.3f} hip_q_corr={hip_q_corr:.3f} "
+        f"foot_lead_cycles={foot_lead_cycles}"
+    )
+    print(
+        f"[dronable] foot_rel_Y amp L={rel_l_amp:.4f} (std={rel_l_std:.4f}) "
+        f"R={rel_r_amp:.4f} (std={rel_r_std:.4f}) pure_slide={pure_slide}"
+    )
+    print(
+        f"[dronable] contact: swing_z_ok L={swing_z_ok_l} R={swing_z_ok_r} "
+        f"ok_frames={contact_ok_frames} bad={contact_bad_frames}"
+    )
+    print(f"[dronable] assert_ok={assert_ok} failures={failures}")
+
+    # CSV proof — run_id = sha256(first 1KB)
+    csv_path = PREVIEWS / "walk_gait_timeseries.csv"
+    buf = io.StringIO()
+    buf.write(
+        "# dronable_walk_gait version=v9 fy_bias=0 hip_amp=0.50 "
+        "cam=WORLD_FIXED_d1.05 legs=Lorange_Rgreen hard_image_gate=1\n"
+    )
+    w = csv.writer(buf)
+    w.writerow([
+        "t", "ctrl_l_hip", "ctrl_r_hip", "q_l_hip", "q_r_hip",
+        "z_l_foot", "z_r_foot", "pelvis_z", "y_l_foot", "y_r_foot", "pelvis_y",
+        "q_l_knee", "q_r_knee", "q_l_ankle", "q_r_ankle",
+        "thigh_pitch_l", "thigh_pitch_r", "shin_pitch_l", "shin_pitch_r",
+    ])
+    for row in csv_rows:
+        w.writerow([f"{v:.6f}" for v in row])
+    csv_bytes = buf.getvalue().encode("utf-8")
+    csv_path.write_bytes(csv_bytes)
+    run_id = _sha256_first_1kb_bytes(csv_bytes)
+    run_id_short = run_id[:12]
+    print(f"[dronable] wrote {csv_path} ({len(csv_rows)} rows) run_id={run_id_short}")
+
+    if len(ss):
+        _plot_joint_mesh_proof(ss, PREVIEWS / "v9_joint_mesh_proof.png")
+
+    frame_paths: list[Path] = []
+    sil: dict = {"pass": False, "cycles": 0, "gap_ptp": 0.0, "n": 0, "reason": "no frames"}
+    cen: dict = {"pass": False, "cycles": 0, "dx_ptp": 0.0, "dx_min": 0.0, "dx_max": 0.0, "n": 0, "reason": "no frames"}
+    acc_mad: dict = {"pass": False, "mad": 0.0, "fi_L": -1, "fi_R": -1, "n_L": 0, "n_R": 0, "reason": "no frames"}
+    ffmpeg_used = False
+
+    if renderer is not None and raw_frames:
+        import imageio.v2 as imageio
+
+        for fi, (raw, meta) in enumerate(zip(raw_frames, frame_meta)):
+            lines = [
+                f"run_id={run_id_short}",
+                (
+                    f"t={meta['t']:.2f}s  pelvis_z={meta['pelvis_z']:.3f}  "
+                    f"y={meta['y']:.3f}  yaw={meta['yaw']:.1f}"
+                ),
+                (
+                    f"hipL_q={meta['q_l']:+.3f}  hipR_q={meta['q_r']:+.3f}  "
+                    f"zL={meta['z_l']:.3f} zR={meta['z_r']:.3f}"
+                ),
+                (
+                    f"shinL={meta['shin_l']:+.2f} shinR={meta['shin_r']:+.2f}  "
+                    f"cam=WORLD_FIXED d={CAM_FIXED_DISTANCE:.2f} v9"
+                ),
+            ]
+            img = _burn_overlay(raw, lines)
+            path = FRAME_SEQ / f"frame_{fi:05d}.png"
+            imageio.imwrite(path, img)
+            frame_paths.append(path)
+        print(f"[dronable] wrote {len(frame_paths)} PNGs → {FRAME_SEQ}")
+
+        sil = _assert_silhouette_foot_alts(frame_paths, min_cycles=4)  # logged only
+        print(
+            f"[dronable] silhouette (soft/log): cycles={sil['cycles']} "
+            f"gap_ptp={sil['gap_ptp']:.1f}px n={sil['n']} pass={sil['pass']}"
+        )
+
+        cen = _assert_centroid_dx(frame_paths, min_cycles=4, min_ptp=50.0)
+        print(
+            f"[dronable] HARD centroid Δx: cycles={cen['cycles']} "
+            f"dx_ptp={cen['dx_ptp']:.1f}px range=[{cen['dx_min']:.1f},{cen['dx_max']:.1f}] "
+            f"n={cen['n']} pass={cen['pass']} reason={cen.get('reason','')}"
+        )
+        if not cen["pass"] and gait_on:
+            assert_ok = False
+            failures.append(
+                f"HARD centroid Δx fail: cycles={cen['cycles']} "
+                f"dx_ptp={cen['dx_ptp']:.1f} ({cen.get('reason','')})"
+            )
+
+        acc_mad = _assert_accept_pair_mad(frame_paths, frame_meta, min_mad=20.0)
+        print(
+            f"[dronable] HARD accept L/R bbox MAD={acc_mad['mad']:.1f} "
+            f"fi_L={acc_mad['fi_L']} fi_R={acc_mad['fi_R']} "
+            f"nL={acc_mad['n_L']} nR={acc_mad['n_R']} pass={acc_mad['pass']} "
+            f"reason={acc_mad.get('reason','')}"
+        )
+        if not acc_mad["pass"] and gait_on:
+            assert_ok = False
+            failures.append(
+                f"HARD accept pair MAD fail: MAD={acc_mad['mad']:.1f} ({acc_mad.get('reason','')})"
+            )
+
+        out = Path(args.out)
+        _encode_mp4_ffmpeg(FRAME_SEQ, out, fps=25)
+        ffmpeg_used = True
+        print(f"[dronable] wrote {out} via ffmpeg all-intra ({len(frame_paths)} frames @25fps)")
+
+        gif = out.with_suffix(".gif")
+        _encode_gif(frame_paths, gif, every=2, fps=12.5)
+
+        # PNG strip
+        n_strip = 16
+        idxs = np.linspace(0, len(frame_paths) - 1, n_strip, dtype=int)
+        for si, fi in enumerate(idxs):
+            t_approx = frame_meta[fi]["t"]
+            p = debug_dir / f"strip_{si:02d}_f{fi:04d}_t{t_approx:05.2f}.png"
+            shutil.copy2(frame_paths[fi], p)
+        print(f"[dronable] wrote {n_strip} PNG strip frames → {debug_dir}")
+
+        # Accept stills: HARD image criterion — centroid Δx sign (orange−green).
+        # Δx<0 ⇒ orange more screen-left = L forward; Δx>0 ⇒ green forward = R.
+        from PIL import Image as _PILImage
+        accept_cands: list[tuple[int, str, float]] = []  # fi, label, |dx|
+        for fi, fpath in enumerate(frame_paths):
+            if frame_meta[fi]["t"] < 1.6:
+                continue
+            _img = np.asarray(_PILImage.open(fpath).convert("RGB"), dtype=np.uint8)
+            _o, _g = _leg_color_masks(_img)
+            if int(_o.sum()) < 50 or int(_g.sum()) < 50:
+                continue
+            _ox, _gx = _leg_centroid_x(_o), _leg_centroid_x(_g)
+            if _ox is None or _gx is None:
+                continue
+            _dx = float(_ox - _gx)
+            if abs(_dx) < 30.0:
+                continue
+            _lab = "L" if _dx < 0 else "R"
+            accept_cands.append((fi, _lab, abs(_dx)))
+        # greedily space high-|dx| samples, alternate preference via time sort
+        accept_cands.sort(key=lambda t: -t[2])
+        accept_pairs: list[tuple[int, str]] = []
+        for fi, lab, _ in accept_cands:
+            if not accept_pairs or (fi - accept_pairs[-1][0]) >= 8:
+                # also require min gap vs any kept
+                if all(abs(fi - a[0]) >= 8 for a in accept_pairs):
+                    accept_pairs.append((fi, lab))
+            if len(accept_pairs) >= 16:
+                break
+        accept_pairs.sort(key=lambda t: t[0])
+        for ai, (fi, label) in enumerate(accept_pairs):
+            t_approx = frame_meta[fi]["t"]
+            dest = accept_dir / f"accept_{ai:02d}_t{t_approx:05.2f}_{label}.png"
+            shutil.copy2(frame_paths[fi], dest)
+        print(f"[dronable] wrote {len(accept_pairs)} accept stills → {accept_dir}")
+
+    if renderer is not None:
+        renderer.close()
+
+    print(f"[dronable] FINAL assert_ok={assert_ok} failures={failures}")
+    print("[dronable] NOTE: assert_ok includes HARD image gates — do NOT claim Controls pass")
+
+    log = PREVIEWS / "sim_run_log.txt"
+    log.write_text(
+        f"run_id={run_id}\n"
+        f"run_id_short={run_id_short}\n"
+        f"t_final={data.time:.4f}\n"
+        f"pelvis_z={z_final:.4f}\n"
+        f"pelvis_z_min_tgt1.5={pz_min:.4f}\n"
+        f"pelvis_z_max_tgt1.5={pz_max:.4f}\n"
+        f"pelvis_z_mean_tgt1.5={pz_mean:.4f}\n"
+        f"pelvis_dy={dy:.6f}\n"
+        f"yaw_max_abs_deg={yaw_max_abs:.4f}\n"
+        f"exploded={exploded}\n"
+        f"flipped={flipped}\n"
+        f"mass_kg={mj.mj_getTotalmass(model):.4f}\n"
+        f"nu={model.nu}\n"
+        f"ctrl_hz={CTRL_HZ}\n"
+        f"gait_T={GAIT_T}\n"
+        f"hip_bias={HIP_BIAS}\n"
+        f"hip_pitch_amp={HIP_PITCH_AMP}\n"
+        f"assist_fy_bias={ASSIST_FY_BIAS}\n"
+        f"hip_cmd_dev_from_bias={hip_cmd_dev:.6f}\n"
+        f"hip_q_dev_from_bias={hip_q_dev:.6f}\n"
+        f"hip_q_ptp={hip_q_ptp:.6f}\n"
+        f"knee_q_ptp={knee_q_ptp:.6f}\n"
+        f"ankle_q_ptp={ank_q_ptp:.6f}\n"
+        f"hip_q_corr_LR={hip_q_corr:.6f}\n"
+        f"knee_q_corr_LR={knee_q_corr:.6f}\n"
+        f"shin_pitch_ptp_L={shin_ptp_l:.6f}\n"
+        f"shin_pitch_ptp_R={shin_ptp_r:.6f}\n"
+        f"shin_pitch_corr_LR={shin_corr:.6f}\n"
+        f"shin_pitch_diff_cycles={shin_diff_cycles}\n"
+        f"thigh_pitch_corr_LR={thigh_corr:.6f}\n"
+        f"foot_lead_cycles={foot_lead_cycles}\n"
+        f"l_foot_max_lift_m={lift_l:.6f}\n"
+        f"r_foot_max_lift_m={lift_r:.6f}\n"
+        f"l_foot_lift_peaks={n_l}\n"
+        f"r_foot_lift_peaks={n_r}\n"
+        f"foot_rel_y_amp_L={rel_l_amp:.6f}\n"
+        f"foot_rel_y_amp_R={rel_r_amp:.6f}\n"
+        f"pure_slide={pure_slide}\n"
+        f"swing_z_ok_L={swing_z_ok_l}\n"
+        f"swing_z_ok_R={swing_z_ok_r}\n"
+        f"silhouette_foot_cycles={sil.get('cycles', 0)}\n"
+        f"silhouette_foot_gap_ptp_px={sil.get('gap_ptp', 0):.2f}\n"
+        f"silhouette_pass_soft={sil.get('pass', False)}\n"
+        f"centroid_dx_cycles={cen.get('cycles', 0)}\n"
+        f"centroid_dx_ptp_px={cen.get('dx_ptp', 0):.2f}\n"
+        f"centroid_dx_min={cen.get('dx_min', 0):.2f}\n"
+        f"centroid_dx_max={cen.get('dx_max', 0):.2f}\n"
+        f"centroid_dx_pass={cen.get('pass', False)}\n"
+        f"accept_pair_bbox_mad={acc_mad.get('mad', 0):.2f}\n"
+        f"accept_pair_mad_pass={acc_mad.get('pass', False)}\n"
+        f"accept_fi_L={acc_mad.get('fi_L', -1)}\n"
+        f"accept_fi_R={acc_mad.get('fi_R', -1)}\n"
+        f"cam_mode=WORLD_FIXED\n"
+        f"cam_lookat={CAM_FIXED_LOOKAT.tolist()}\n"
+        f"cam_distance={CAM_FIXED_DISTANCE}\n"
+        f"cam_azimuth={CAM_FIXED_AZIMUTH}\n"
+        f"cam_elevation={CAM_FIXED_ELEVATION}\n"
+        f"ffmpeg_all_intra={ffmpeg_used}\n"
+        f"n_frame_seq_pngs={len(frame_paths)}\n"
+        f"assert_ok={assert_ok}\n"
+        f"failures={';'.join(failures)}\n"
+        f"n_video_frames={len(frame_paths)}\n"
+        f"csv={csv_path}\n"
+        f"mp4={args.out}\n"
+        f"frame_seq={FRAME_SEQ}\n"
+        f"version=v9\n"
+        f"root_cause=v8_FAILED_WORLD_FIXED_d2.15_too_far_orange-green_dx_"
+        f"only_pm15-25px_statue_soft_shin_CSV_silhouette_lied;"
+        f"v9_fix=WORLD_FIXED_lookat_mid_corridor_d1.05+hip_amp_0.50+"
+        f"large_swing_knee_1.85+fy_bias_0+HARD_centroid_dx_ptp_ge50_ge4_cycles+"
+        f"HARD_accept_LR_bbox_MAD_ge20_HUD_crop+ffmpeg_all_intra;"
+        f"DO_NOT_CLAIM_CONTROLS_PASS\n"
+    )
+    print(f"[dronable] log {log}")
+
+    sys.exit(1 if (not assert_ok) or flipped or (exploded and data.time < 2.0) else 0)
+
+
+if __name__ == "__main__":
+    main()

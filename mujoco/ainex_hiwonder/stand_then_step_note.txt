@@ -1,0 +1,24 @@
+AiNex stand → step progress note
+model: /workspace/dronable-proto/mujoco/ainex_hiwonder/ainex_controls.xml
+geometry: Hiwonder URDF+25 STL (NOT OEM STEP); Path A buy FROZEN
+
+WORKED:
+  + Load clean: 25/25 meshes, 24 hinges, 24 actuators, mass=2.347 kg
+  + Stand pose defined (knee=0.32, |sho_roll|=1.45, hip_fwd=0.1)
+  + First-frame + side renders saved
+  + PD stand hold ~2.5s under gravity (no assist): z=0.235 up_z=1.000
+  + Open-loop step cue ran 2.0s: hip_ptp=0.517 knee_ptp=0.511 dx=+0.254m lead_flips=7 assist=ON
+
+DID NOT / LIMITS:
+  - Translation under soft assist likely includes foot skate (dx=+0.254m in 2.0s) — NOT claimed as walking
+  - True walking not achieved — open-loop only; no capture-point / ZMP / RL; URDF effort ±6 vs HX clips ±2.1 Nm; mesh collision off (boxes only)
+
+NEXT:
+  → Tune stand COM_Z + foot box height so plant is flat without assist
+  → Port walk_gait_ainex.py CPG with WORLD_FIXED acceptance (already axis-mapped)
+  → Add soft lateral COM shift before swing; raise swing clearance if feet scuff
+  → Optional: expose IMU/camera sites from URDF fixed frames
+
+PNGs: stand_first_frame.png, stand_side.png, stand_held.png, stand_walk_progress.png
+script: scripts/ainex_stand_then_step.py
+related: scripts/walk_gait_ainex.py (full CPG attempt on same model)
