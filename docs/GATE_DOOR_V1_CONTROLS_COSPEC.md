@@ -1,6 +1,6 @@
 # Gate Door v1 — Controls cospec (§5 answers to Hardware push/pull pack)
 
-**Superseded live pointer (Wed 30 Sep 2026 ~01:13 BST):** live companion = Option B `…_gate_f_optb.xml` md5 `ddf084cdac71cb0998aa6a44a65594c0` (**INSTALLED**). This cospec ACK’d Option A; `…_gate_f_push.xml` md5 `adb24309…` is now **ARCHIVE** (bytes unchanged). Option C **HELD**. Prefer FAIL bars unchanged. Soft-pass **OFF**. No Door SCORE claim from the Option B install. Receipt: `docs/GATE_DOOR_V1_HARDWARE_INSTALL.md`.
+**Superseded live pointer (Wed 30 Sep 2026 ~11:15 BST):** live companion = Option C `…_gate_f_optc.xml` md5 `6a3d4a70d4797b806dcc2580f46468aa` (**INSTALLED**). This cospec ACK’d Option A; `…_gate_f_push.xml` md5 `adb24309…` is **ARCHIVE** (bytes unchanged). Option B `…_gate_f_optb.xml` md5 `ddf084cd…` is **ARCHIVE** (bytes unchanged). Prefer FAIL bars unchanged. Soft-pass **OFF**. Park **OFF**. No Door SCORE claim from the Option C install. Receipt: `docs/GATE_DOOR_V1_HARDWARE_INSTALL.md`.
 
 **When:** Tue 29 Sep 2026 ~21:55 Europe/London (BST)  
 **From:** Controls · **To:** Hardware · AI · Dave  

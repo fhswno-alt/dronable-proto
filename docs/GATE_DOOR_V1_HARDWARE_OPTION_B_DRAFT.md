@@ -1,6 +1,8 @@
-# Gate Door v1 — Hardware Option B (INSTALLED)
+# Gate Door v1 — Hardware Option B (ARCHIVE)
 
-**INSTALLED** Wed 30 Sep 2026 ~01:13 Europe/London (BST) — Dave voice ACK. Live companion = `…_gate_f_optb.xml` md5 `ddf084cdac71cb0998aa6a44a65594c0`. Soft-pass **OFF**. **No spend.** No Prefer FAIL Door SCORE claim. No Door LOCK. Receipt: `docs/GATE_DOOR_V1_HARDWARE_INSTALL.md`.
+**ARCHIVE** Wed 30 Sep 2026 ~11:15 Europe/London (BST) — Dave ACK installed Option C as the live companion. This pack’s file `…_gate_f_optb.xml` md5 `ddf084cdac71cb0998aa6a44a65594c0` is **KEPT**. Bytes were **not** overwritten. It is **not** live. Receipt: `docs/GATE_DOOR_V1_HARDWARE_INSTALL.md`.
+
+**Was INSTALLED** Wed 30 Sep 2026 ~01:13 Europe/London (BST) — Dave voice ACK. That live pointer is superseded. Soft-pass **OFF**. **No spend.** No Prefer FAIL Door SCORE claim. No Door LOCK.
 
 Draft history below is the ~00:20 BST feasibility pack. Install did **not** edit the XML (md5 unchanged).
 
@@ -11,13 +13,13 @@ Draft history below is the ~00:20 BST feasibility pack. Install did **not** edit
 
 ---
 
-## Live freeze (post Option B install)
+## Live freeze (Option B demoted)
 
 | Item | Path | md5 | State |
 |------|------|-----|-------|
-| **Live Door v1 (Option B)** | `…_gate_f_optb.xml` | `ddf084cdac71cb0998aa6a44a65594c0` | **INSTALLED** plant-of-record |
+| **Live Door v1 (Option C)** | `…_gate_f_optc.xml` | `6a3d4a70d4797b806dcc2580f46468aa` | **INSTALLED** plant-of-record |
+| Option B (this pack) | `…_gate_f_optb.xml` | `ddf084cdac71cb0998aa6a44a65594c0` | **ARCHIVE** — bytes unchanged; not live |
 | Option A archive | `…_gate_f_push.xml` | `adb24309b489d56615c194e92676d040` | **ARCHIVE** — bytes unchanged; not live |
-| Option C (held) | `…_gate_f_optc.xml` | `6a3d4a70d4797b806dcc2580f46468aa` | **READY-NOT-INSTALLED / HELD** — do not install |
 | Lever-era archive | `…_gate_f.xml` | `59cc408eda07037a58f92ad27da045d6` | **ARCHIVE** |
 | Walk M145 | `…_m2_145.xml` | `fc94709c84f5598d4474ecfc4bb41fdc` | **KEPT** |
 
@@ -29,7 +31,7 @@ Draft history below is the ~00:20 BST feasibility pack. Install did **not** edit
 |------|-------|
 | Path | `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f_optb.xml` |
 | md5 | `ddf084cdac71cb0998aa6a44a65594c0` |
-| State | **INSTALLED** (Dave ACK ~01:13 BST 30 Sep 2026) — was READY-NOT-INSTALLED at draft |
+| State | **ARCHIVE** (demoted ~11:15 BST 30 Sep 2026) — was INSTALLED ~01:13 BST; bytes unchanged |
 | Push face | Same thin −X geom as Option A; **`contype=4 / conaffinity=4` (bit 4)** |
 | Hands | `l/r_hand_contact` retargeted to **bit 4** (exclusive push-face pairing) |
 | Bit 2 | **Free** for future knob/lever A/B |
@@ -69,11 +71,11 @@ Option B **does not by itself** stop phantom panel rise. It isolates push-face c
 
 ---
 
-## Install semantics (executed ~01:13 BST 30 Sep 2026)
+## Install semantics (executed ~01:13 BST 30 Sep 2026; demoted ~11:15 BST)
 
-1. Point live companion at `…_gate_f_optb.xml` (Option A file bytes **not** overwritten; `gate_f_push` is **ARCHIVE**). **Done.**  
-2. Update freeze sheets + receipt. **Done.**  
+1. Point live companion at `…_gate_f_optb.xml` (Option A file bytes **not** overwritten; `gate_f_push` is **ARCHIVE**). **Done, then demoted.**  
+2. Update freeze sheets + receipt. **Done** at 01:13; live pointer moved to Option C at 11:15.  
 3. Controls Prefer FAIL family stays on existing bars (closed ≤2° · contact ≥0.3 s · open ≥25° · hold ≥1 s @ ≥20° · 2/2). Soft-pass **OFF**. No Door SCORE claim from this install.  
-4. Option C remains **HELD** unless separately ACK’d.
+4. Option C was later **INSTALLED** (Dave ACK ~11:15 BST). This Option B file is **ARCHIVE**.
 
-**One-liner:** Option B bit-4 fork **INSTALLED** md5 `ddf084cd…`; Option A `adb24309…` **ARCHIVE**; Option C **HELD**; walk KEPT; soft-pass off; no spend; no Door SCORE claim.
+**One-liner:** Option B bit-4 fork **ARCHIVE** md5 `ddf084cd…` (bytes unchanged); live is Option C `gate_f_optc` `6a3d4a70…`; Option A `adb24309…` **ARCHIVE**; walk KEPT; soft-pass off; park off; no spend; no Door SCORE claim.

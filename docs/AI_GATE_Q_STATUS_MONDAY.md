@@ -4,7 +4,7 @@
 **Audience:** Dave · Founding AI · room  
 **Scope:** SIM-ONLY status sheet. **No Path A / thaw / greenlight / spend / PO.** Soft-pass **forbidden**.
 
-**Door v1:** hospital **push/pull only**. Live companion **INSTALLED** Option B `…_gate_f_optb.xml` md5 `ddf084cd…` (Dave ACK ~01:13 BST 30 Sep). Option A `…_gate_f_push.xml` md5 `adb24309…` **ARCHIVE** (bytes unchanged). Option C **HELD**. Criteria `GATE_DOOR_V1_AI_CRITERIA.md` (bars unchanged). Multi-try Prefer FAIL Door (no one-shot FAIL). No Door SCORE claim from the Option B install. F–P locks = lever-era history. Gate Q loco Prefer FAIL orthogonal / next lever still Dave. Soft-pass off.
+**Door v1:** hospital **push/pull only**. Live companion **INSTALLED** Option C `…_gate_f_optc.xml` md5 `6a3d4a70…` (Dave ACK ~11:15 BST 30 Sep). Option B `…_gate_f_optb.xml` md5 `ddf084cd…` **ARCHIVE** (bytes unchanged). Option A `…_gate_f_push.xml` md5 `adb24309…` **ARCHIVE** (bytes unchanged). Criteria `GATE_DOOR_V1_AI_CRITERIA.md` (numeric bars unchanged). Multi-try Prefer FAIL Door (no one-shot FAIL). No Door SCORE claim from the Option C install. Park off. F–P locks = lever-era history. Gate Q loco Prefer FAIL orthogonal / next lever still Dave. Soft-pass off.
 
 Verified live:
 - Companion `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f.xml` → md5 `59cc408eda07037a58f92ad27da045d6`

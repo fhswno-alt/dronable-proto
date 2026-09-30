@@ -1,6 +1,6 @@
 # Gate Door v1 — AI cospec (NO-VETO)
 
-**Superseded live pointer (Wed 30 Sep 2026 ~01:13 BST):** live companion = Option B `…_gate_f_optb.xml` md5 `ddf084cdac71cb0998aa6a44a65594c0` (**INSTALLED**). This no-veto ACK’d Option A; `…_gate_f_push.xml` md5 `adb24309…` is now **ARCHIVE** (bytes unchanged). Option C **HELD**. Bars in `docs/GATE_DOOR_V1_AI_CRITERIA.md` unchanged. Soft-pass **OFF**. No Door SCORE claim from the Option B install.
+**Superseded live pointer (Wed 30 Sep 2026 ~11:15 BST):** live companion = Option C `…_gate_f_optc.xml` md5 `6a3d4a70d4797b806dcc2580f46468aa` (**INSTALLED**). This no-veto ACK’d Option A; `…_gate_f_push.xml` md5 `adb24309…` is **ARCHIVE** (bytes unchanged). Option B `…_gate_f_optb.xml` md5 `ddf084cd…` is **ARCHIVE** (bytes unchanged). Numeric bars in `docs/GATE_DOOR_V1_AI_CRITERIA.md` unchanged. Soft-pass **OFF**. Park **OFF**. No Door SCORE claim from the Option C install.
 
 **When:** Tue 29 Sep 2026 ~21:56 Europe/London (BST)  
 **From:** Founding AI Scientist · **To:** Controls · Hardware · Dave  

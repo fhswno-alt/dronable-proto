@@ -2,7 +2,7 @@
 
 **When:** Wed 30 Sep 2026 ~02:11 Europe/London (BST)  
 **Who:** Founding Hardware Engineer  
-**Scope:** DOCS-ONLY dig. Soft-pass **OFF**. **No spend.** No plant XML edit. Live pointer stays Option B. Option C stays **READY-NOT-INSTALLED / HELD**. No Door LOCK. No Prefer FAIL Door SCORE claim.
+**Scope:** DOCS-ONLY dig of the thin push face (measured while Option B was live). Soft-pass **OFF**. **No spend.** No plant XML edit. **Live pointer since ~11:15 BST 30 Sep is Option C** `…_gate_f_optc.xml` md5 `6a3d4a70…`. Option B is **ARCHIVE**. This file does not install anything and does not claim a Door SCORE.
 
 Overnight context (not a Hardware SCORE): D-series Prefer FAIL **STUCK** (phantom PARTIAL). D-twin Prefer FAIL is spinning **control-only**. AI/Controls report intermittent contact, and contact-drop after peak, on D01/D02 against the thin −X push face. Option B bit-4 alone did not clear phantoms.
 

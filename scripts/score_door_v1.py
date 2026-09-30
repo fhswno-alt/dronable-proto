@@ -2,18 +2,18 @@
 """Gate Door v1: Prefer FAIL panel push/pull prove (hospital-style).
 
 Criteria: docs/GATE_DOOR_V1_AI_CRITERIA.md
-Plant: installed live gate_f_optb md5 ddf084cd… (Option B); gate_f_push.md5 adb24309… is Option A ARCHIVE; gate_f.xml is lever-era archive only.
-Soft-pass: OFF forever. No lever contact scored. No panel actuator / scripted
+Plant: installed live gate_f_optc md5 6a3d4a70… (Option C); gate_f_optb md5 ddf084cd… is Option B ARCHIVE; gate_f_push md5 adb24309… is Option A ARCHIVE; gate_f.xml is lever-era archive only.
+Soft-pass: OFF forever. Park OFF. No lever contact scored. No panel actuator / scripted
 panel qpos during bout (inter-bout rest reset OK). No latch / 90° / walk-through.
 
 Bars:
   1 closed start |door_panel_hinge| ≤ 2°
   2 approach/reach to door_panel_push_site (document Δ); tip≥8 if stepping
-  3 hand × door_panel_push_face contact ≥ 0.3 s during open
+  3 hand × door_panel contact ≥ 0.3 s during open (bit 2; push_face is visual 0)
   4 open |hinge| ≥ 25° within ±30°; tip≥8
   5 hold ≥ 1.0 s @ panel ≥ 20°; tip≥8
   6 multi-bout 2/2 consecutive
-  7 plant honesty (md5 lock; lever contype 0; push_face contype 4 Option B bit 4; no panel act)
+  7 plant honesty (md5 lock 6a3d4a70…; lever contype 0; door_panel contype 2; push_face visual 0; hand×panel bit 2; no panel act)
   8 continuous MP4 both bouts; HUD hinge + closed/contact/open marks
 """
 from __future__ import annotations
@@ -47,9 +47,12 @@ from score_gate_h import OPEN_CMD, CLOSE_CMD, _pin_arms_head, _substep  # noqa: 
 from score_gate_i import _panel_hinge_id, _angle_deg  # noqa: E402
 from score_gate_k import _hud, _panel_cam  # noqa: E402
 
-# Live plant-of-record md5 = Option B gate_f_optb (Dave ACK ~01:13 BST 30 Sep 2026).
+# Live plant-of-record md5 = Option C gate_f_optc (Dave ACK ~11:15 BST 30 Sep 2026).
+# Option B archive gate_f_optb remains ddf084cd… and is not this lock.
 # Option A archive gate_f_push remains adb24309… and is not this lock.
-PUSH_MD5 = "ddf084cdac71cb0998aa6a44a65594c0"
+LIVE_MD5 = "6a3d4a70d4797b806dcc2580f46468aa"
+OPTB_ARCHIVE_MD5 = "ddf084cdac71cb0998aa6a44a65594c0"
+OPTA_ARCHIVE_MD5 = "adb24309b489d56615c194e92676d040"
 ARCHIVE_LEVER_MD5 = "59cc408eda07037a58f92ad27da045d6"
 WALK_MD5 = "fc94709c84f5598d4474ecfc4bb41fdc"
 CKPT_SHA16 = "9ffaa1a21b607bf6"
@@ -62,7 +65,9 @@ TZ = ZoneInfo("Europe/London")
 
 PLANT_ARCHIVE = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145_gate_f.xml"  # lever-era ARCHIVE
 PLANT_LIVE = PLANT_ARCHIVE  # alias: never score Door v1 against archive
-PLANT_PUSH = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145_gate_f_optb.xml"  # Door v1 live (Option B)
+PLANT_PUSH = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145_gate_f_optc.xml"  # Door v1 live (Option C)
+PLANT_OPTB = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145_gate_f_optb.xml"  # Option B ARCHIVE
+PLANT_OPTA = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145_gate_f_push.xml"  # Option A ARCHIVE
 PLANT_WALK = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145.xml"
 PROGRESS = ITER / "GATE_DOOR_V1_PROGRESS.md"
 SCORE_DOC = ROOT / "docs" / "GATE_DOOR_V1_AI_SCORE.md"
@@ -83,13 +88,18 @@ def _now() -> str:
 
 
 def resolve_plant() -> tuple[Path, str, str]:
-    """Door v1 plant-of-record = gate_f_optb (Hardware install receipt).
+    """Door v1 plant-of-record = gate_f_optc (Hardware install receipt).
 
-    Score ONLY against gate_f_optb.xml. Option A gate_f_push.xml and lever-era
-    gate_f.xml are ARCHIVE — never load them for Door v1. Walk M145 untouched.
+    Score ONLY against gate_f_optc.xml. Option B gate_f_optb.xml, Option A
+    gate_f_push.xml, and lever-era gate_f.xml are ARCHIVE — never load them
+    for Door v1. Walk M145 untouched. No plant bytes are written here.
     """
     push = _md5(PLANT_PUSH)
-    assert push == PUSH_MD5, f"push plant md5 drift: {push}"
+    assert push == LIVE_MD5, f"live optc plant md5 drift: {push}"
+    optb = _md5(PLANT_OPTB)
+    assert optb == OPTB_ARCHIVE_MD5, f"Option B archive md5 drift: {optb}"
+    opta = _md5(PLANT_OPTA)
+    assert opta == OPTA_ARCHIVE_MD5, f"Option A archive md5 drift: {opta}"
     walk = _md5(PLANT_WALK)
     assert walk == WALK_MD5, f"walk plant touched: {walk}"
     archive = _md5(PLANT_LIVE)  # gate_f.xml = lever-era ARCHIVE (not Door live)
@@ -99,33 +109,64 @@ def resolve_plant() -> tuple[Path, str, str]:
     return (
         PLANT_PUSH,
         push,
-        "INSTALLED live=gate_f_optb md5 ddf084cd…; Option A gate_f_push adb24309… ARCHIVE; "
-        "archive gate_f 59cc… KEPT; walk fc94709c… KEPT "
+        "INSTALLED live=gate_f_optc md5 6a3d4a70…; Option B gate_f_optb ddf084cd… ARCHIVE; "
+        "Option A gate_f_push adb24309… ARCHIVE; archive gate_f 59cc… KEPT; "
+        "walk fc94709c… KEPT; soft-pass OFF; park OFF "
         "(docs/GATE_DOOR_V1_HARDWARE_INSTALL.md)",
     )
 
 
-def _assert_plant_honesty(model: mj.MjModel) -> dict:
-    gid_lev = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "door_lever")
-    gid_pf = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "door_panel_push_face")
-    assert gid_lev >= 0 and gid_pf >= 0
-    lev_ct = int(model.geom_contype[gid_lev])
-    pf_ct = int(model.geom_contype[gid_pf])
+def _geom_bits(model: mj.MjModel, name: str) -> tuple[int, int, int]:
+    gid = int(mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, name))
+    assert gid >= 0, name
+    return gid, int(model.geom_contype[gid]), int(model.geom_conaffinity[gid])
+
+
+def _bit_pair(ct1: int, ca1: int, ct2: int, ca2: int) -> bool:
+    return (ct1 & ca2) != 0 and (ct2 & ca1) != 0
+
+
+def _assert_plant_honesty(model: mj.MjModel) -> dict[str, int | bool]:
+    """Option C fingerprint: hand × door_panel bit 2; push_face visual 0."""
+    _, lev_ct, lev_ca = _geom_bits(model, "door_lever")
+    _, pf_ct, pf_ca = _geom_bits(model, "door_panel_push_face")
+    _, panel_ct, panel_ca = _geom_bits(model, "door_panel")
+    _, lh_ct, lh_ca = _geom_bits(model, "l_hand_contact")
+    _, rh_ct, rh_ca = _geom_bits(model, "r_hand_contact")
     assert lev_ct == 0, f"door_lever contype must be 0, got {lev_ct}"
-    assert pf_ct == 4, f"door_panel_push_face contype must be 4 (Option B bit 4), got {pf_ct}"
+    assert pf_ct == 0 and pf_ca == 0, (
+        f"door_panel_push_face must be visual 0, got contype {pf_ct} conaffinity {pf_ca}"
+    )
+    assert panel_ct == 2 and panel_ca == 2, (
+        f"door_panel must be bit 2 (contype/conaffinity 2), got {panel_ct}/{panel_ca}"
+    )
+    assert lh_ct == 2 and lh_ca == 2, f"l_hand_contact must be bit 2, got {lh_ct}/{lh_ca}"
+    assert rh_ct == 2 and rh_ca == 2, f"r_hand_contact must be bit 2, got {rh_ct}/{rh_ca}"
+    hand_panel = _bit_pair(lh_ct, lh_ca, panel_ct, panel_ca) and _bit_pair(
+        rh_ct, rh_ca, panel_ct, panel_ca
+    )
+    assert hand_panel, "l/r_hand_contact must pair with door_panel on bit 2"
+    assert not _bit_pair(lh_ct, lh_ca, pf_ct, pf_ca)
+    assert not _bit_pair(rh_ct, rh_ca, pf_ct, pf_ca)
+    assert not _bit_pair(lh_ct, lh_ca, lev_ct, lev_ca)
     for i in range(model.nu):
         n = mj.mj_id2name(model, mj.mjtObj.mjOBJ_ACTUATOR, i) or ""
         if "panel" in n.lower():
             raise RuntimeError(f"panel actuator present (cheat): {n}")
     return {
         "door_lever_contype": lev_ct,
+        "door_panel_contype": panel_ct,
+        "door_panel_conaffinity": panel_ca,
         "door_panel_push_face_contype": pf_ct,
+        "l_hand_contact_contype": lh_ct,
+        "r_hand_contact_contype": rh_ct,
+        "hand_x_door_panel_bit2": True,
         "panel_actuator": False,
     }
 
 
-def _hand_push_face_contact(model: mj.MjModel, data: mj.MjData) -> bool:
-    gid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "door_panel_push_face")
+def _hand_panel_contact(model: mj.MjModel, data: mj.MjData) -> bool:
+    gid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "door_panel")
     hands = {
         mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "l_hand_contact"),
         mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "r_hand_contact"),
@@ -193,7 +234,7 @@ def _door_hud(
     if mark == "CLOSED":
         out = _banner(out, 130, (0, 90, 40), "CLOSED |hinge|≤2°")
     elif mark == "CONTACT":
-        out = _banner(out, 130, (140, 80, 0), "CONTACT hand×push_face")
+        out = _banner(out, 130, (140, 80, 0), "CONTACT hand×door_panel")
     elif mark == "OPEN":
         out = _banner(out, 130, (0, 110, 180), "OPEN |hinge|≥25°")
     elif mark == "HOLD":
@@ -477,7 +518,7 @@ def score_episode(
         ang = _angle_deg(m, d, jid_p)
         global_max = max(global_max, abs(ang))
         reach = float(np.linalg.norm(d.site_xpos[sid_hand] - d.site_xpos[sid_push]))
-        contact_on = _hand_push_face_contact(m, d)
+        contact_on = _hand_panel_contact(m, d)
         lever_on = _hand_lever_contact(m, d)
 
         Rmat = d.xmat[env.bid_body].reshape(3, 3)
@@ -644,12 +685,14 @@ def write_score(ep: dict, install_status: str, attempts: list[dict], disposition
 | Item | Value |
 |------|-------|
 | Score plant | `{ep['plant']}` |
-| Score plant md5 | `{ep['plant_md5']}` (lock **ddf084cd…**) |
+| Score plant md5 | `{ep['plant_md5']}` (lock **6a3d4a70…**) |
 | Archive gate_f.md5 (lever-era) | `{live_md5}` |
 | Install status | {install_status} |
 | Walk M145 md5 | `{_md5(PLANT_WALK)}` (untouched) |
 | door_lever contype | **{ep['honesty']['door_lever_contype']}** |
-| door_panel_push_face contype | **{ep['honesty']['door_panel_push_face_contype']}** |
+| door_panel contype | **{ep['honesty']['door_panel_contype']}** (bit 2) |
+| door_panel_push_face contype | **{ep['honesty']['door_panel_push_face_contype']}** (visual 0) |
+| hand × door_panel bit 2 | **{ep['honesty']['hand_x_door_panel_bit2']}** |
 | panel actuator | **{ep['honesty']['panel_actuator']}** |
 
 ## Verdict: **{verdict}**
@@ -670,7 +713,7 @@ def write_score(ep: dict, install_status: str, attempts: list[dict], disposition
 - Panel qpos scripted during bout: **NO** (inter-bout rest reset only)
 - No latch / 90° / walk-through / UK height claim
 - Push site Z ≈ {ep['knobs']['push_z']} (panel center, not lever 0.275)
-- Contact pair: `l/r_hand_contact` × `door_panel_push_face`
+- Contact pair: `l/r_hand_contact` × `door_panel` (bit 2). `door_panel_push_face` is visual 0 and is not the pair.
 
 ## Artifacts
 
@@ -774,13 +817,14 @@ def main() -> int:
     sgf.PLANT_F = plant
     sha = _sha16(CKPT)
     assert sha == CKPT_SHA16, sha
-    assert plant_md5 == PUSH_MD5, plant_md5
+    assert plant_md5 == LIVE_MD5, plant_md5
 
     append_progress(
         f"\n## Run start — {_now()}\n\n"
         f"- install_status: **{install_status}**\n"
         f"- score plant: `{plant.relative_to(ROOT)}` md5 `{plant_md5}`\n"
-        f"- archive gate_f.md5 (lever-era): `{_md5(PLANT_ARCHIVE)}`\n"f"- Door v1 live: gate_f_optb `{plant_md5}`\n"
+        f"- archive gate_f.md5 (lever-era): `{_md5(PLANT_ARCHIVE)}`\n"
+        f"- Door v1 live: gate_f_optc `{plant_md5}`\n"
         f"- walk M145 md5: `{_md5(PLANT_WALK)}` (untouched)\n"
         f"- soft-pass: OFF\n"
     )
@@ -793,7 +837,7 @@ def main() -> int:
     for i, knobs in enumerate(ATTEMPT_KNOBS, start=1):
         # re-resolve plant mid-run in case Hardware swaps
         plant2, md5_2, inst2 = resolve_plant()
-        if md5_2 == PUSH_MD5:
+        if md5_2 == LIVE_MD5:
             plant, plant_md5, install_status = plant2, md5_2, inst2
             sgf.PLANT_F = plant
         tag = f"DOOR_V1_A{i:02d}"
@@ -835,7 +879,7 @@ def main() -> int:
         if ep["pass"]:
             # final plant check before SCORE write
             plant_f, md5_f, inst_f = resolve_plant()
-            if md5_f == PUSH_MD5:
+            if md5_f == LIVE_MD5:
                 plant, plant_md5, install_status = plant_f, md5_f, inst_f
                 ep["plant"] = str(plant.relative_to(ROOT))
                 ep["plant_md5"] = plant_md5
@@ -858,7 +902,7 @@ def main() -> int:
     # Prefer FAIL after ≥3
     assert best is not None
     plant_f, md5_f, inst_f = resolve_plant()
-    if md5_f == PUSH_MD5:
+    if md5_f == LIVE_MD5:
         install_status = inst_f
         best["plant"] = str(plant_f.relative_to(ROOT))
         best["plant_md5"] = md5_f
@@ -868,7 +912,7 @@ def main() -> int:
         f"- best n_pass={best['n_pass']}/2 max={best['global_max_abs_panel_deg']:.2f}° "
         f"tip={best['tip']:.2f}\n"
         f"- Prefer FAIL SCORE draft written; ping Dave (wants to be present)\n"
-        f"- Option C NOT invented mid-score\n"
+        f"- Soft-pass OFF. Park OFF. No bar soften.\n"
     )
     print("=== DOOR_V1_STUCK_REPEATED ===", flush=True)
     return 2

@@ -1,6 +1,6 @@
 # Gate Q Hardware — PUSH/PULL v1 directive (hospital-door)
 
-**Superseded live pointer (Wed 30 Sep 2026 ~01:13 BST):** Door v1 live companion is **Option B** `…_gate_f_optb.xml` md5 `ddf084cdac71cb0998aa6a44a65594c0` (**INSTALLED**). This file’s Option A `…_gate_f_push.xml` md5 `adb24309…` is **ARCHIVE** (bytes unchanged; not reinstalled as live). Option C remains **HELD**. Receipt: `docs/GATE_DOOR_V1_HARDWARE_INSTALL.md`. Soft-pass **OFF**. No spend. No Door SCORE claim.
+**Superseded live pointer (Wed 30 Sep 2026 ~11:15 BST):** Door v1 live companion is **Option C** `…_gate_f_optc.xml` md5 `6a3d4a70d4797b806dcc2580f46468aa` (**INSTALLED**). This file’s Option A `…_gate_f_push.xml` md5 `adb24309…` is **ARCHIVE** (bytes unchanged). Option B `…_gate_f_optb.xml` md5 `ddf084cd…` is **ARCHIVE** (bytes unchanged). Receipt: `docs/GATE_DOOR_V1_HARDWARE_INSTALL.md`. Soft-pass **OFF**. Park **OFF**. No spend. No Door SCORE claim. The tables below record the Option A directive and the later Option B pointer; they are not the current live plant.
 
 **When:** Tue 29 Sep 2026 ~22:08 Europe/London (BST) — Dave ACK of the Option A install (now archive)  
 **Audience:** Dave · Founding Hardware · Controls · AI  
