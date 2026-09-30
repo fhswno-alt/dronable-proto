@@ -1,17 +1,22 @@
-# Gate Door v1 — Hardware Option B draft (READY-NOT-INSTALLED)
+# Gate Door v1 — Hardware Option B (INSTALLED)
 
-**When:** Wed 30 Sep 2026 ~00:20 Europe/London (BST)  
+**INSTALLED** Wed 30 Sep 2026 ~01:13 Europe/London (BST) — Dave voice ACK. Live companion = `…_gate_f_optb.xml` md5 `ddf084cdac71cb0998aa6a44a65594c0`. Soft-pass **OFF**. **No spend.** No Prefer FAIL Door SCORE claim. No Door LOCK. Receipt: `docs/GATE_DOOR_V1_HARDWARE_INSTALL.md`.
+
+Draft history below is the ~00:20 BST feasibility pack. Install did **not** edit the XML (md5 unchanged).
+
+**When (draft):** Wed 30 Sep 2026 ~00:20 Europe/London (BST)  
 **Who:** Founding Hardware Engineer  
 **Trigger:** Dave voice UPDATE — hold Option C; ask Option B / bit-4 feasibility  
-**Scope:** SIM-ONLY companion **fork**. Soft-pass **OFF**. **No spend.** **NOT installed.** Live Option A freeze **KEPT**.
+**Scope:** SIM-ONLY companion fork. Soft-pass **OFF**. **No spend.**
 
 ---
 
-## Live freeze (unchanged)
+## Live freeze (post Option B install)
 
 | Item | Path | md5 | State |
 |------|------|-----|-------|
-| Live Door v1 (Option A) | `…_gate_f_push.xml` | `adb24309b489d56615c194e92676d040` | **INSTALLED / KEPT** |
+| **Live Door v1 (Option B)** | `…_gate_f_optb.xml` | `ddf084cdac71cb0998aa6a44a65594c0` | **INSTALLED** plant-of-record |
+| Option A archive | `…_gate_f_push.xml` | `adb24309b489d56615c194e92676d040` | **ARCHIVE** — bytes unchanged; not live |
 | Option C (held) | `…_gate_f_optc.xml` | `6a3d4a70d4797b806dcc2580f46468aa` | **READY-NOT-INSTALLED / HELD** — do not install |
 | Lever-era archive | `…_gate_f.xml` | `59cc408eda07037a58f92ad27da045d6` | **ARCHIVE** |
 | Walk M145 | `…_m2_145.xml` | `fc94709c84f5598d4474ecfc4bb41fdc` | **KEPT** |
@@ -24,7 +29,7 @@
 |------|-------|
 | Path | `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f_optb.xml` |
 | md5 | `ddf084cdac71cb0998aa6a44a65594c0` |
-| State | **READY-NOT-INSTALLED** |
+| State | **INSTALLED** (Dave ACK ~01:13 BST 30 Sep 2026) — was READY-NOT-INSTALLED at draft |
 | Push face | Same thin −X geom as Option A; **`contype=4 / conaffinity=4` (bit 4)** |
 | Hands | `l/r_hand_contact` retargeted to **bit 4** (exclusive push-face pairing) |
 | Bit 2 | **Free** for future knob/lever A/B |
@@ -64,11 +69,11 @@ Option B **does not by itself** stop phantom panel rise. It isolates push-face c
 
 ---
 
-## Install semantics (only after Dave ACK)
+## Install semantics (executed ~01:13 BST 30 Sep 2026)
 
-1. Point live companion at `…_gate_f_optb.xml` (do **not** overwrite Option A file bytes; leave as archive of A if desired).  
-2. Update freeze sheets + receipt.  
-3. Controls Prefer FAIL family under bit-4 pair + sustained gate.  
-4. Option C remains HELD unless separately ACK’d.
+1. Point live companion at `…_gate_f_optb.xml` (Option A file bytes **not** overwritten; `gate_f_push` is **ARCHIVE**). **Done.**  
+2. Update freeze sheets + receipt. **Done.**  
+3. Controls Prefer FAIL family stays on existing bars (closed ≤2° · contact ≥0.3 s · open ≥25° · hold ≥1 s @ ≥20° · 2/2). Soft-pass **OFF**. No Door SCORE claim from this install.  
+4. Option C remains **HELD** unless separately ACK’d.
 
-**One-liner:** Option B bit-4 fork READY-NOT-INSTALLED md5 `ddf084cd…`; live Option A `adb24309…` KEPT; Option C HELD; soft-pass off; no spend.
+**One-liner:** Option B bit-4 fork **INSTALLED** md5 `ddf084cd…`; Option A `adb24309…` **ARCHIVE**; Option C **HELD**; walk KEPT; soft-pass off; no spend; no Door SCORE claim.

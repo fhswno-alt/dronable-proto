@@ -2,7 +2,7 @@
 """Gate Door v1: Prefer FAIL panel push/pull prove (hospital-style).
 
 Criteria: docs/GATE_DOOR_V1_AI_CRITERIA.md
-Plant: installed live gate_f_push.md5 adb24309…; gate_f.xml is lever-era archive only.
+Plant: installed live gate_f_optb md5 ddf084cd… (Option B); gate_f_push.md5 adb24309… is Option A ARCHIVE; gate_f.xml is lever-era archive only.
 Soft-pass: OFF forever. No lever contact scored. No panel actuator / scripted
 panel qpos during bout (inter-bout rest reset OK). No latch / 90° / walk-through.
 
@@ -13,7 +13,7 @@ Bars:
   4 open |hinge| ≥ 25° within ±30°; tip≥8
   5 hold ≥ 1.0 s @ panel ≥ 20°; tip≥8
   6 multi-bout 2/2 consecutive
-  7 plant honesty (md5 lock; lever contype 0; push_face contype 2; no panel act)
+  7 plant honesty (md5 lock; lever contype 0; push_face contype 4 Option B bit 4; no panel act)
   8 continuous MP4 both bouts; HUD hinge + closed/contact/open marks
 """
 from __future__ import annotations
@@ -47,7 +47,9 @@ from score_gate_h import OPEN_CMD, CLOSE_CMD, _pin_arms_head, _substep  # noqa: 
 from score_gate_i import _panel_hinge_id, _angle_deg  # noqa: E402
 from score_gate_k import _hud, _panel_cam  # noqa: E402
 
-PUSH_MD5 = "adb24309b489d56615c194e92676d040"
+# Live plant-of-record md5 = Option B gate_f_optb (Dave ACK ~01:13 BST 30 Sep 2026).
+# Option A archive gate_f_push remains adb24309… and is not this lock.
+PUSH_MD5 = "ddf084cdac71cb0998aa6a44a65594c0"
 ARCHIVE_LEVER_MD5 = "59cc408eda07037a58f92ad27da045d6"
 WALK_MD5 = "fc94709c84f5598d4474ecfc4bb41fdc"
 CKPT_SHA16 = "9ffaa1a21b607bf6"
@@ -60,7 +62,7 @@ TZ = ZoneInfo("Europe/London")
 
 PLANT_ARCHIVE = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145_gate_f.xml"  # lever-era ARCHIVE
 PLANT_LIVE = PLANT_ARCHIVE  # alias: never score Door v1 against archive
-PLANT_PUSH = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145_gate_f_push.xml"  # Door v1 live
+PLANT_PUSH = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145_gate_f_optb.xml"  # Door v1 live (Option B)
 PLANT_WALK = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145.xml"
 PROGRESS = ITER / "GATE_DOOR_V1_PROGRESS.md"
 SCORE_DOC = ROOT / "docs" / "GATE_DOOR_V1_AI_SCORE.md"
@@ -81,10 +83,10 @@ def _now() -> str:
 
 
 def resolve_plant() -> tuple[Path, str, str]:
-    """Door v1 plant-of-record = gate_f_push (Hardware install receipt).
+    """Door v1 plant-of-record = gate_f_optb (Hardware install receipt).
 
-    Score ONLY against gate_f_push.xml. Lever-era gate_f.xml is ARCHIVE — never
-    load it for Door v1. Walk M145 untouched.
+    Score ONLY against gate_f_optb.xml. Option A gate_f_push.xml and lever-era
+    gate_f.xml are ARCHIVE — never load them for Door v1. Walk M145 untouched.
     """
     push = _md5(PLANT_PUSH)
     assert push == PUSH_MD5, f"push plant md5 drift: {push}"
@@ -97,7 +99,8 @@ def resolve_plant() -> tuple[Path, str, str]:
     return (
         PLANT_PUSH,
         push,
-        "INSTALLED live=gate_f_push md5 adb24309…; archive gate_f 59cc… KEPT; walk fc94709c… KEPT "
+        "INSTALLED live=gate_f_optb md5 ddf084cd…; Option A gate_f_push adb24309… ARCHIVE; "
+        "archive gate_f 59cc… KEPT; walk fc94709c… KEPT "
         "(docs/GATE_DOOR_V1_HARDWARE_INSTALL.md)",
     )
 
@@ -109,7 +112,7 @@ def _assert_plant_honesty(model: mj.MjModel) -> dict:
     lev_ct = int(model.geom_contype[gid_lev])
     pf_ct = int(model.geom_contype[gid_pf])
     assert lev_ct == 0, f"door_lever contype must be 0, got {lev_ct}"
-    assert pf_ct == 2, f"door_panel_push_face contype must be 2, got {pf_ct}"
+    assert pf_ct == 4, f"door_panel_push_face contype must be 4 (Option B bit 4), got {pf_ct}"
     for i in range(model.nu):
         n = mj.mj_id2name(model, mj.mjtObj.mjOBJ_ACTUATOR, i) or ""
         if "panel" in n.lower():
@@ -641,7 +644,7 @@ def write_score(ep: dict, install_status: str, attempts: list[dict], disposition
 | Item | Value |
 |------|-------|
 | Score plant | `{ep['plant']}` |
-| Score plant md5 | `{ep['plant_md5']}` (lock **adb24309…**) |
+| Score plant md5 | `{ep['plant_md5']}` (lock **ddf084cd…**) |
 | Archive gate_f.md5 (lever-era) | `{live_md5}` |
 | Install status | {install_status} |
 | Walk M145 md5 | `{_md5(PLANT_WALK)}` (untouched) |
@@ -777,7 +780,7 @@ def main() -> int:
         f"\n## Run start — {_now()}\n\n"
         f"- install_status: **{install_status}**\n"
         f"- score plant: `{plant.relative_to(ROOT)}` md5 `{plant_md5}`\n"
-        f"- archive gate_f.md5 (lever-era): `{_md5(PLANT_ARCHIVE)}`\n"f"- Door v1 live: gate_f_push `{plant_md5}`\n"
+        f"- archive gate_f.md5 (lever-era): `{_md5(PLANT_ARCHIVE)}`\n"f"- Door v1 live: gate_f_optb `{plant_md5}`\n"
         f"- walk M145 md5: `{_md5(PLANT_WALK)}` (untouched)\n"
         f"- soft-pass: OFF\n"
     )

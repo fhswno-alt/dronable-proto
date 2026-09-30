@@ -67,4 +67,10 @@ Controls §5: Option A · closed ε=2° · F–P historical · open=`door_panel_
 
 ## Update (~22:13 BST) — INSTALLED
 
-Dave ACK’d plant swap. Live companion = `…_gate_f_push.xml` md5 `adb24309b489d56615c194e92676d040` (Hardware receipt `docs/GATE_DOOR_V1_HARDWARE_INSTALL.md`). Soft-pass off. Multi-try Prefer FAIL Door scoring (no one-shot FAIL ping). AI idle for Controls SCORE → same-turn disposition.
+Dave ACK’d plant swap. Live companion at that time = `…_gate_f_push.xml` md5 `adb24309b489d56615c194e92676d040`. Soft-pass off. Multi-try Prefer FAIL Door scoring (no one-shot FAIL ping).
+
+---
+
+## Update (~01:13 BST 30 Sep) — Option B INSTALLED; Option A ARCHIVE
+
+Dave ACK’d Option B as the live Door v1 companion. Live companion = `…_gate_f_optb.xml` md5 `ddf084cdac71cb0998aa6a44a65594c0` (Hardware receipt `docs/GATE_DOOR_V1_HARDWARE_INSTALL.md`). Option A `…_gate_f_push.xml` md5 `adb24309…` is **ARCHIVE** (bytes unchanged). Option C **HELD**. Soft-pass off. No Prefer FAIL Door SCORE claim from this install. Bars in `docs/GATE_DOOR_V1_AI_CRITERIA.md` unchanged.

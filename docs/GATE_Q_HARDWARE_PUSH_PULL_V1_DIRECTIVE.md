@@ -1,8 +1,10 @@
 # Gate Q Hardware — PUSH/PULL v1 directive (hospital-door)
 
-**When:** Tue 29 Sep 2026 ~22:08 Europe/London (BST) — Dave ACK install  
+**Superseded live pointer (Wed 30 Sep 2026 ~01:13 BST):** Door v1 live companion is **Option B** `…_gate_f_optb.xml` md5 `ddf084cdac71cb0998aa6a44a65594c0` (**INSTALLED**). This file’s Option A `…_gate_f_push.xml` md5 `adb24309…` is **ARCHIVE** (bytes unchanged; not reinstalled as live). Option C remains **HELD**. Receipt: `docs/GATE_DOOR_V1_HARDWARE_INSTALL.md`. Soft-pass **OFF**. No spend. No Door SCORE claim.
+
+**When:** Tue 29 Sep 2026 ~22:08 Europe/London (BST) — Dave ACK of the Option A install (now archive)  
 **Audience:** Dave · Founding Hardware · Controls · AI  
-**Scope:** SIM-ONLY companion plant. **INSTALLED** (Dave ACK ~22:08 BST 29 Sep 2026). Soft-pass **off**. **No spend / no PO.** Walk M145 **KEPT**. Install receipt: `docs/GATE_DOOR_V1_HARDWARE_INSTALL.md`.
+**Scope:** SIM-ONLY companion plant. Option A history below. Walk M145 **KEPT**.
 
 ---
 
@@ -18,21 +20,23 @@
 | Open measure | Panel hinge open-angle (keep ±30°) | Full 90° / walk-through / UK handle height |
 | Soft-pass | **OFF** | — |
 | Spend | **None** | — |
-| Live freeze | **INSTALLED** — companion live = `gate_f_push` (Dave ACK ~22:08 BST) | Walk M145 KEPT |
+| Live freeze | **Option B INSTALLED** ~01:13 BST 30 Sep — companion live = `gate_f_optb` md5 `ddf084cd…`. Option A `gate_f_push` **ARCHIVE** | Walk M145 KEPT |
 
 **One-liner:** Walk + open door by panel push/pull. No knob torque. No latch modeling.
 
 ---
 
-## 1. Live freeze (post Dave ACK install)
+## 1. Live freeze (current — Option B install ~01:13 BST 30 Sep 2026)
 
-| Plant | Path | md5 (verified this turn) | State |
-|-------|------|--------------------------|-------|
+| Plant | Path | md5 | State |
+|-------|------|-----|-------|
 | Walk / M145 | `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml` | `fc94709c84f5598d4474ecfc4bb41fdc` | **KEPT** — do not edit |
-| **Live companion (Door v1)** | `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f_push.xml` | `adb24309b489d56615c194e92676d040` | **INSTALLED** plant-of-record |
-| Lever-era archive (F–P history) | `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f.xml` | `59cc408eda07037a58f92ad27da045d6` | **ARCHIVE** — left on disk; **not** overwritten with push content |
+| **Live companion (Door v1)** | `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f_optb.xml` | `ddf084cdac71cb0998aa6a44a65594c0` | **INSTALLED** plant-of-record (Option B) |
+| Option A archive | `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f_push.xml` | `adb24309b489d56615c194e92676d040` | **ARCHIVE** — bytes unchanged; was live ~22:08 BST 29 Sep |
+| Option C | `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f_optc.xml` | `6a3d4a70d4797b806dcc2580f46468aa` | **READY-NOT-INSTALLED / HELD** |
+| Lever-era archive (F–P history) | `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f.xml` | `59cc408eda07037a58f92ad27da045d6` | **ARCHIVE** — left on disk; **not** overwritten |
 
-Install = **point live companion at `…_gate_f_push.xml`**. Do **not** overwrite lever-era `…_gate_f.xml`. Walk bytes untouched.
+Install = **point live companion at `…_gate_f_optb.xml`**. Do **not** overwrite Option A `…_gate_f_push.xml` or lever-era `…_gate_f.xml`. Walk bytes untouched. Do **not** install Option C.
 
 ---
 
@@ -84,10 +88,11 @@ Assumptions that encode **hand→lever / knob / latch** interaction or treat lev
 
 ---
 
-## 3. Companion delta (**INSTALLED** as live Door v1)
+## 3. Companion delta (Option A archive — was live ~22:08 BST 29 Sep; **not** live after ~01:13 BST 30 Sep)
 
-**Live plant-of-record:** `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f_push.xml`  
-**md5:** `adb24309b489d56615c194e92676d040` · **MuJoCo load:** OK · **Dave ACK:** ~22:08 BST Tue 29 Sep 2026  
+**Archive plant (Option A):** `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f_push.xml`  
+**md5:** `adb24309b489d56615c194e92676d040` · **MuJoCo load:** still OK · **Dave ACK (this file):** ~22:08 BST Tue 29 Sep 2026  
+**Live plant-of-record now:** `…_gate_f_optb.xml` md5 `ddf084cdac71cb0998aa6a44a65594c0`  
 
 ### What stays
 
@@ -118,11 +123,11 @@ Assumptions that encode **hand→lever / knob / latch** interaction or treat lev
 
 | Option | Scheme | Status |
 |--------|--------|--------|
-| **A (shipped / INSTALLED)** | Reuse **bit 2**: push face + hands; lever demoted | **Live companion** |
-| **B** | New **bit 4** for push face; leave bit 2 free for future knob A/B; hands would need dual affinity or retarget | Documented; not in draft |
-| **C** | Make whole `door_panel` `contype=2` (no dedicated face) | Documented; simpler geom, less selective |
+| **A (archive)** | Reuse **bit 2**: push face + hands; lever demoted | **ARCHIVE** `gate_f_push` — was live ~22:08 BST 29 Sep; bytes unchanged |
+| **B (INSTALLED)** | New **bit 4** for push face; hands retargeted to bit 4 | **Live companion** `gate_f_optb` md5 `ddf084cd…` (Dave ACK ~01:13 BST 30 Sep) |
+| **C** | Make whole `door_panel` contactable (no dedicated face) | **READY-NOT-INSTALLED / HELD** — not installed |
 
-**Hardware default INSTALLED:** Option A — minimal hand XML change; matches current hand affinity; present in the installed live companion.
+**Hardware live companion:** Option B. Option A remains on disk as archive. Option C stays held.
 
 ---
 
@@ -152,7 +157,7 @@ The plant is installed; these are scoring/cospec confirmations, not install gate
 6. **Curriculum rows F–P** — which stay LOCKED TRUE on live gate_f (historical), vs which need a new push/pull companion row after swap?  
 7. **March 2027 bar** — walk + open door (panel ±30° class) sufficient; knob/latch deferred. Soft-pass off.  
 
-**INSTALLED** (Dave ACK ~22:08 BST): AI/Controls cospec were ready; live companion pointed at `gate_f_push`. Lever-era `gate_f` archived. Walk KEPT. No Prefer FAIL Door SCORE claim from Hardware.
+**Then INSTALLED** (Dave ACK ~22:08 BST): AI/Controls cospec were ready; live companion pointed at `gate_f_push`. **Superseded ~01:13 BST 30 Sep:** live companion pointed at Option B `gate_f_optb`; `gate_f_push` demoted to **ARCHIVE** (bytes unchanged). Lever-era `gate_f` archived. Walk KEPT. Option C HELD. No Prefer FAIL Door SCORE claim from Hardware.
 
 ---
 
@@ -163,20 +168,23 @@ The plant is installed; these are scoring/cospec confirmations, not install gate
 | Soft-pass | **OFF** |
 | Spend / PO / Path A | **None** |
 | Walk M145 md5 | **KEPT** `fc94709c84f5598d4474ecfc4bb41fdc` |
-| Live companion (Door v1) | **INSTALLED** `…_gate_f_push.xml` md5 `adb24309b489d56615c194e92676d040` |
+| Live companion (Door v1) | **INSTALLED** `…_gate_f_optb.xml` md5 `ddf084cdac71cb0998aa6a44a65594c0` (Option B) |
+| Option A archive | `…_gate_f_push.xml` md5 `adb24309b489d56615c194e92676d040` (bytes unchanged) |
+| Option C | **HELD** `…_gate_f_optc.xml` md5 `6a3d4a70d4797b806dcc2580f46468aa` |
 | Lever-era archive | `…_gate_f.xml` md5 `59cc408eda07037a58f92ad27da045d6` (F–P history only) |
 | H2 | Still **READY-NOT-INSTALLED** (separate Dave pick) |
-| Dave ACK | ~22:08 BST Tue 29 Sep 2026 |
+| Dave ACK | Option B live ~01:13 BST Wed 30 Sep 2026 (Option A archive ACK was ~22:08 BST Tue 29 Sep) |
 
 ---
 
 ## 7. Refs
 
-- **Live companion (Door v1):** `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f_push.xml`  
+- **Live companion (Door v1):** `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f_optb.xml`  
+- Option A archive: `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f_push.xml`  
 - Lever-era archive: `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f.xml`  
 - Install receipt: `docs/GATE_DOOR_V1_HARDWARE_INSTALL.md`  
 - Freeze sheet: `docs/HARDWARE_FREEZE_STATUS_MONDAY.md`  
 - Historical lever path: `docs/GATE_G_HARDWARE_LEVER_CONTACT.md` · `docs/GATE_H_HARDWARE_LEVER_HINGE.md` · `docs/GATE_I_HARDWARE_PANEL_HINGE.md` · `docs/GATE_J_HARDWARE_PANEL_SPRING.md`  
 - Design brief (lever language — superseded for door task by this directive): `docs/HARDWARE_SYSTEM_DESIGN_BRIEF.md`  
 
-**One-liner for room:** Dave ACK ~22:08 BST — Door v1 push/pull **INSTALLED**; live companion = `gate_f_push` md5 `adb24309…` (Option A); lever-era `gate_f` archived; walk KEPT; soft-pass off; no spend; H2 still READY-NOT-INSTALLED.
+**One-liner for room:** Dave ACK ~01:13 BST 30 Sep — Door v1 live companion = `gate_f_optb` md5 `ddf084cd…` (Option B **INSTALLED**); Option A `gate_f_push` md5 `adb24309…` **ARCHIVE**; Option C **HELD**; lever-era `gate_f` archived; walk KEPT; soft-pass off; no spend; H2 still READY-NOT-INSTALLED; no Door SCORE claim.
