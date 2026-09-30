@@ -1,5 +1,7 @@
 # Door v1 push/pull — Controls timeline (short)
 
+**Superseded live pointer (Wed 30 Sep 2026 ~01:13 BST):** live companion = Option B `…_gate_f_optb.xml` md5 `ddf084cd…` (**INSTALLED**). Option A `…_gate_f_push.xml` md5 `adb24309…` = **ARCHIVE**. Option C **HELD**. The “Now (Hold)” section below is the pre-Option-A snapshot and is not current state. Soft-pass **OFF**. No Door SCORE claim.
+
 **When:** Tue 29 Sep 2026 ~22:07 BST  
 **For:** Dave · Hardware · AI · MFG  
 **Soft-pass:** OFF · **Spend:** none

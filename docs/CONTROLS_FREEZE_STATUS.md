@@ -8,7 +8,7 @@
 
 - Curriculum **D–P TRUE** (sim). Gate **P LOCKED TRUE** (sim; stepped approach→N-compose 2/2 same run; iterate2; stills FOOT-LIFT daylight both bouts; finalize KINEMATIC XY SHIM).
 - Gate **Q PARK Prefer FAIL** (structural; criteria KEPT; soft-pass off; **not** lock TRUE; **not** LOCKED FALSE). Best E7lock. AI note `docs/GATE_Q_AI_STRUCTURAL_PREFER_FAIL.md`. No Q03 lock ping.
-- Ckpt sha16 **`9ffaa1a21b607bf6`**. Lever-era companion archive md5 **`59cc408eda07037a58f92ad27da045d6`**. **Door v1 live companion** (Hardware INSTALLED Dave ACK ~22:08 BST): `…_gate_f_push.xml` md5 **`adb24309b489d56615c194e92676d040`**. Gate E M145 plant frozen untouched.
+- Ckpt sha16 **`9ffaa1a21b607bf6`**. Lever-era companion archive md5 **`59cc408eda07037a58f92ad27da045d6`**. **Door v1 live companion** (Hardware INSTALLED Dave ACK ~01:13 BST 30 Sep): Option B `…_gate_f_optb.xml` md5 **`ddf084cdac71cb0998aa6a44a65594c0`**. Option A `…_gate_f_push.xml` md5 **`adb24309b489d56615c194e92676d040`** = **ARCHIVE** (bytes unchanged). Option C **HELD**. Soft-pass off. No Door SCORE claim here. Gate E M145 plant frozen untouched.
 - Soft-pass **not** used. Non-claims: full open / latch / 90° / walk-through / UK / range bump / room-walk / investor walk.
 - Controls **idle on Q** unless a genuinely new retreat-native family. HW/MFG stay freeze. No plant invent. No spend.
 

@@ -2,8 +2,10 @@
 
 **Owner:** Founding AI Scientist (criteria) + Controls (prove) + Hardware (push-face honesty)  
 **When:** Tue 29 Sep 2026 ~21:56 BST  
-**Live plant (Dave ACK ~22:08 BST Tue 29 Sep — INSTALLED):** `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f_push.xml` md5 `adb24309b489d56615c194e92676d040`  
+**Live plant (Dave ACK ~01:13 BST Wed 30 Sep — INSTALLED, Option B):** `mujoco/ainex_hiwonder/ainex_controls_m2_145_gate_f_optb.xml` md5 `ddf084cdac71cb0998aa6a44a65594c0`  
+**Option A archive:** `…_gate_f_push.xml` md5 `adb24309b489d56615c194e92676d040` (bytes unchanged — do not score Door v1 against it; not live)  
 **Archived lever-era:** `…_gate_f.xml` md5 `59cc408eda07037a58f92ad27da045d6` (history only — do not score Door v1 against it)  
+**Option C:** `…_gate_f_optc.xml` **HELD** — not the live plant. Prefer FAIL bars below are **unchanged**. Soft-pass **OFF**.  
 **Scoring rule (Dave):** multi-try Prefer FAIL Door — do **not** ping FAIL on first miss; report FAIL only after repeated setbacks; on success report + reassess. Soft-pass **OFF**.  
 **Soft-pass:** **OFF** · **Spend:** none  
 **Cospec:** `docs/GATE_DOOR_V1_AI_COSPEC.md` (NO-VETO) · Controls `docs/GATE_DOOR_V1_CONTROLS_COSPEC.md`
@@ -62,6 +64,6 @@ FOV blindness → separate panel-center cam rebind honesty item post-SCORE — n
 |-------|------|
 | Dave | Present for Prefer FAIL Door outcome (multi-try) |
 | Controls | Multi-try Prefer FAIL Door SCORE vs this criteria |
-| Hardware | Live freeze on push fork; Option C only on Prefer FAIL demand |
+| Hardware | Live freeze on Option B `gate_f_optb`; Option A archive; Option C HELD |
 | AI | Same-turn stills/watch when Controls lands SCORE |
 | MFG | No PO |
