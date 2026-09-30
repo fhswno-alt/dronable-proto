@@ -71,6 +71,10 @@ Dave ACK’d plant swap. Live companion at that time = `…_gate_f_push.xml` md5
 
 ---
 
-## Update (~01:13 BST 30 Sep) — Option B INSTALLED; Option A ARCHIVE
+## Update (~11:15 BST 30 Sep) — Option C INSTALLED; Option B ARCHIVE
 
-Dave ACK’d Option B as the live Door v1 companion. Live companion = `…_gate_f_optb.xml` md5 `ddf084cdac71cb0998aa6a44a65594c0` (Hardware receipt `docs/GATE_DOOR_V1_HARDWARE_INSTALL.md`). Option A `…_gate_f_push.xml` md5 `adb24309…` is **ARCHIVE** (bytes unchanged). Option C **HELD**. Soft-pass off. No Prefer FAIL Door SCORE claim from this install. Bars in `docs/GATE_DOOR_V1_AI_CRITERIA.md` unchanged.
+Dave ACK’d Option C as the live Door v1 companion. Live companion = `…_gate_f_optc.xml` md5 `6a3d4a70d4797b806dcc2580f46468aa` (Hardware receipt `docs/GATE_DOOR_V1_HARDWARE_INSTALL.md`). Option B `…_gate_f_optb.xml` md5 `ddf084cd…` is **ARCHIVE** (bytes unchanged). Option A `…_gate_f_push.xml` md5 `adb24309…` is **ARCHIVE** (bytes unchanged). Soft-pass off. Park off. No Prefer FAIL Door SCORE claim from this install. Numeric bars in `docs/GATE_DOOR_V1_AI_CRITERIA.md` unchanged.
+
+## Update (~01:13 BST 30 Sep) — Option B INSTALLED; later demoted
+
+Dave ACK’d Option B as the live Door v1 companion. That pointer was demoted ~11:15 BST when Option C was installed. Option B bytes (`ddf084cd…`) were not overwritten.
