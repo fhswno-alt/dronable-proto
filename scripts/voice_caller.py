@@ -19,15 +19,20 @@ Controls' merged clip moved about -0.97 m, mean body speed about -0.053 m/s,
 upright, no tip. This caller does not send a more negative vx. This caller
 does not claim faster than that clip.
 
-Turn right while walking sends yaw_rate -0.25 rad/s together with forward
-vx +0.056 m/s. Turn left while walking sends yaw_rate +0.25 rad/s with the
-same forward vx. Neither sends 0.080, and neither sends a yaw past ±0.25.
-Yaw with zero forward is only a turn in place. That hold is a hip bias,
-not a spin. Left while walking on the same 11 s window is about +62 deg.
-Their right-turn ceiling on that window is about -83 deg, still moving
-forward about +0.46 m, end stand, margin about +0.063 m. A 4.5 s window
-used to stall near -17 deg. That short window is obsolete. This caller
-does not claim more than their 11 s clip.
+A turn while already walking is the nav window, not a cold start from the
+first step. Both arcs send forward vx +0.056 m/s together with yaw_rate
+±0.25 rad/s. Neither sends 0.080, and neither sends a yaw past ±0.25.
+The command is not the heading rate. Realized yaw rate stays below that
+cap. Yaw with zero forward is only a turn in place. Neither arc is a spin.
+Right nav: walk forward from t=1 to t=16 (approach about +0.60 m), hold
+vel(+0.056, -0.25) until t=27 (heading about -77 deg while still walking),
+forward only until t=33 (resume about +0.32 m), stop by t=35.5. End stand,
+margin about +0.063 m. Left uses the same approach to t=16, then
+vel(+0.056, +0.25) until t=28.5 (about +76 deg), forward until t=34.5,
+stop by t=37. Do not start that left yaw at 15 s and do not hold it for
+14 s. That window tips on the resume and is not claimed. Cold-start from
+stand stays about +62 deg left and about -83 deg right. Those are not
+this arc. This arc is not a spin.
 
 Go to the kitchen, the bathroom, or any other room is refused in one
 line: the camera can see, but there is no room and no map. No path is
@@ -36,7 +41,7 @@ invented. The floor in the clip is empty.
 kit_cam is the plant camera on head_tilt_link at pos 0.050 0.019 0.007,
 same aim and fovy. Plant md5 is 71b2c86d133ebc603f58b99c53e496f3. The
 clip renders that camera for back up, for walk forward then stop, and
-for turn right while walking for about 11 s then stop. This file does
+for the right nav window, then the stop. This file does
 not move the camera, and does not edit the plant, the gait, the tip
 check, or the CommandBus.
 
@@ -80,11 +85,24 @@ FWD_CLIP_VX_MPS = 0.039
 FWD_CLIP_MARGIN_M = 0.063
 REVERSE_VX_MPS = -0.053
 REVERSE_DX_M = -0.97
-WALK_LEFT_DEG = 62.0
-WALK_RIGHT_DEG = -83.0
-WALK_RIGHT_DX_M = 0.46
-WALK_RIGHT_MARGIN_M = 0.063
-RIGHT_TURN_S = 11.0
+# From-stand cold starts. Not the nav arc.
+COLD_LEFT_DEG = 62.0
+COLD_RIGHT_DEG = -83.0
+# Nav window. Approach, then yaw while still walking, then resume, then stop.
+NAV_APPROACH_DX_M = 0.60
+NAV_RESUME_DX_M = 0.32
+NAV_MARGIN_M = 0.063
+NAV_RIGHT_DEG = -77.0
+NAV_LEFT_DEG = 76.0
+NAV_RIGHT_YAW_RATE = -0.123
+NAV_LEFT_YAW_RATE = 0.106
+NAV_APPROACH_END = 16.0
+NAV_RIGHT_YAW_END = 27.0
+NAV_RIGHT_RESUME_END = 33.0
+NAV_RIGHT_STOP_END = 35.5
+NAV_LEFT_YAW_END = 28.5
+NAV_LEFT_RESUME_END = 34.5
+NAV_LEFT_STOP_END = 37.0
 
 ROOM_LINE = "the camera can see, but there is no room and no map"
 CLAMP_LINE = "refused: reverse is only the bus clamp"
@@ -228,6 +246,7 @@ class ClockedBus(CommandSink, Protocol):
 class SampleView(Protocol):
     t: float
     x: float
+    y: float
     body_vx: float
     applied_vx: float
     yaw: float
@@ -290,19 +309,31 @@ def _back() -> VoiceCommand:
 
 
 def _walk_turn(yaw_rate: float) -> VoiceCommand:
+    if yaw_rate < 0.0:
+        heading = NAV_RIGHT_DEG
+        rate = NAV_RIGHT_YAW_RATE
+        side = "right"
+    else:
+        heading = NAV_LEFT_DEG
+        rate = NAV_LEFT_YAW_RATE
+        side = "left"
     return VoiceCommand(
         "vel",
         FWD_MPS,
         yaw_rate,
         (
             f"vel vx={FWD_MPS:+.3f} yaw_rate={yaw_rate:+.3f} "
-            f"(walking turn inside ±{YAW_RAD_S:.2f} rad/s with forward "
-            f"vx {FWD_MPS:+.3f}; not a spin; left while walking about "
-            f"{WALK_LEFT_DEG:+.0f} deg; right {RIGHT_TURN_S:.0f} s window about "
-            f"{WALK_RIGHT_DEG:+.0f} deg, still moving forward about "
-            f"{WALK_RIGHT_DX_M:+.2f} m, end stand, margin about "
-            f"{WALK_RIGHT_MARGIN_M:+.3f} m; the 4.5 s window is obsolete; "
-            "this caller does not claim more than that clip; does not send 0.080)"
+            "(turn while already walking; nav window, not a cold start from "
+            f"the first step; not a spin; approach about {NAV_APPROACH_DX_M:+.2f} m, "
+            f"{side} heading about {heading:+.0f} deg while still walking, "
+            f"resume about {NAV_RESUME_DX_M:+.2f} m, end stand, "
+            f"margin about {NAV_MARGIN_M:+.3f} m; "
+            f"realized yaw rate about {rate:+.3f} rad/s, below ±{YAW_RAD_S:.2f}; "
+            "the command is not the heading rate; "
+            f"from stand, cold-start left is about {COLD_LEFT_DEG:+.0f} deg and "
+            f"cold-start right is about {COLD_RIGHT_DEG:+.0f} deg, not this arc; "
+            "a left yaw at 15 s held for 14 s tips on the resume and is not claimed; "
+            "does not send 0.080)"
         ),
     )
 
@@ -488,11 +519,21 @@ FORWARD_CUES: tuple[PhraseCue, ...] = (
     PhraseCue(36.0, "walk forward", "forward"),
     PhraseCue(38.5, "stop", "stop"),
 )
-# Same 11 s command window as Controls' right-turn clip, then the settle.
+# Nav window. Yaw starts after the approach, not on the first step.
+# Left is the contract only. A yaw from t=15 held for 14 s tips and is not played.
 RIGHT_CUES: tuple[PhraseCue, ...] = (
     PhraseCue(1.0, None, "quiet"),
-    PhraseCue(1.0 + RIGHT_TURN_S, "turn right", "turn-right"),
-    PhraseCue(1.0 + RIGHT_TURN_S + 2.5, "stop", "stop"),
+    PhraseCue(NAV_APPROACH_END, "walk forward", "approach"),
+    PhraseCue(NAV_RIGHT_YAW_END, "turn right", "turn-right"),
+    PhraseCue(NAV_RIGHT_RESUME_END, "walk forward", "resume"),
+    PhraseCue(NAV_RIGHT_STOP_END, "stop", "stop"),
+)
+LEFT_CUES: tuple[PhraseCue, ...] = (
+    PhraseCue(1.0, None, "quiet"),
+    PhraseCue(NAV_APPROACH_END, "walk forward", "approach"),
+    PhraseCue(NAV_LEFT_YAW_END, "turn left", "turn-left"),
+    PhraseCue(NAV_LEFT_RESUME_END, "walk forward", "resume"),
+    PhraseCue(NAV_LEFT_STOP_END, "stop", "stop"),
 )
 BACKUP_STILLS = ((3.0, "backup", "voice_caller_kit_cam_backup.png"),)
 FORWARD_STILLS = (
@@ -500,8 +541,8 @@ FORWARD_STILLS = (
     (38.2, "stop", "voice_caller_kit_cam_stop.png"),
 )
 RIGHT_STILLS = (
-    (11.0, "turn-right", "voice_caller_kit_cam_turn_right.png"),
-    (14.2, "stop", "voice_caller_kit_cam_turn_right_stop.png"),
+    (26.0, "turn-right", "voice_caller_kit_cam_nav_right.png"),
+    (35.2, "stop", "voice_caller_kit_cam_nav_right_stop.png"),
 )
 
 
@@ -586,9 +627,12 @@ def test_phrases() -> list[str]:
     _expect("-0.032" in doc, "module doc omits the reverse clamp", failures)
     _expect("does not claim faster" in doc, "module doc claims a faster reverse", failures)
     _expect("-0.053" in doc and "-0.97" in doc, "module doc omits the reverse clip", failures)
-    _expect("+62" in doc and "-83" in doc, "module doc omits the walking-turn holds", failures)
-    _expect("11 s" in doc and "4.5" in doc and "obsolete" in doc, "module doc keeps the short right window", failures)
-    _expect("+0.46" in doc and "end stand" in doc, "module doc omits the right-turn ceiling", failures)
+    _expect("+62" in doc and "-83" in doc, "module doc drops the from-stand numbers", failures)
+    _expect("-77" in doc and "+76" in doc, "module doc omits the nav headings", failures)
+    _expect("+0.60" in doc and "+0.32" in doc, "module doc omits the nav distances", failures)
+    _expect("not a cold start" in doc, "module doc treats the arc as a cold start", failures)
+    _expect("not the heading rate" in doc, "module doc claims the yaw command as heading rate", failures)
+    _expect("15 s" in doc and "14 s" in doc and "not claimed" in doc, "module doc claims the tipping left window", failures)
     _expect("not a spin" in doc and "spin in place" not in doc, "module doc calls the turn a spin", failures)
     _expect("turn in place" in doc, "module doc drops the in-place phrase", failures)
     _expect("no room and no map" in doc, "module doc invents a map", failures)
@@ -628,10 +672,13 @@ def test_phrases() -> list[str]:
     right = parse_phrase("turn right")
     _expect(left.vx == FWD_MPS and left.yaw_rate == YAW_RAD_S, "left is not a walking turn", failures)
     _expect("not a spin" in left.line and "spin in place" not in left.line, "left line claims a spin", failures)
-    _expect("+62" in left.line and "-83" in left.line and "+0.46" in left.line, "left line omits the walking holds", failures)
+    _expect("+76" in left.line and "not a cold start" in left.line, "left line omits the nav arc", failures)
+    _expect("+62" in left.line and "-83" in left.line and "not this arc" in left.line, "left line treats cold start as the arc", failures)
+    _expect("15 s" in left.line and "14 s" in left.line and "not claimed" in left.line, "left line claims the tipping window", failures)
     _expect(right.vx == FWD_MPS and right.yaw_rate == -YAW_RAD_S, "right is not a walking turn", failures)
     _expect("not a spin" in right.line and "does not send 0.080" in right.line, "right line claims a spin or sends 0.080", failures)
-    _expect("4.5 s window is obsolete" in right.line, "right line keeps the short window", failures)
+    _expect("-77" in right.line and "+0.60" in right.line and "+0.32" in right.line, "right line omits the nav window", failures)
+    _expect("not the heading rate" in right.line, "right line claims the yaw command as heading rate", failures)
     for phrase in ("turn right in place", "right in place", "yaw right in place"):
         command = parse_phrase(phrase)
         _expect(command.vx == 0.0 and command.yaw_rate == -YAW_RAD_S, f"{phrase!r} is not in place", failures)
@@ -658,12 +705,31 @@ def test_phrases() -> list[str]:
     _expect(backup_phrases == ["back up", "stop"], f"backup phrases {backup_phrases}", failures)
     _expect(forward_phrases == ["walk forward", "stop"], f"forward phrases {forward_phrases}", failures)
     right_phrases = [cue.phrase for cue in RIGHT_CUES if cue.phrase is not None]
-    _expect(right_phrases == ["turn right", "stop"], f"right phrases {right_phrases}", failures)
     _expect(
-        abs((RIGHT_CUES[1].t_end - RIGHT_CUES[0].t_end) - RIGHT_TURN_S) < 1e-9,
-        "right window is not 11 s",
+        right_phrases == ["walk forward", "turn right", "walk forward", "stop"],
+        f"right phrases {right_phrases}",
         failures,
     )
+    _expect(
+        [cue.t_end for cue in RIGHT_CUES] == [1.0, 16.0, 27.0, 33.0, 35.5],
+        f"right nav times {[cue.t_end for cue in RIGHT_CUES]}",
+        failures,
+    )
+    _expect(RIGHT_CUES[1].phrase == "walk forward", "right yaw starts on the first step", failures)
+    left_phrases = [cue.phrase for cue in LEFT_CUES if cue.phrase is not None]
+    _expect(
+        left_phrases == ["walk forward", "turn left", "walk forward", "stop"],
+        f"left phrases {left_phrases}",
+        failures,
+    )
+    _expect(
+        [cue.t_end for cue in LEFT_CUES] == [1.0, 16.0, 28.5, 34.5, 37.0],
+        f"left nav times {[cue.t_end for cue in LEFT_CUES]}",
+        failures,
+    )
+    left_yaw_s = LEFT_CUES[2].t_end - LEFT_CUES[1].t_end
+    _expect(LEFT_CUES[1].t_end != 15.0 and abs(left_yaw_s - 14.0) > 0.1, "left yaw is the tipping window", failures)
+    _expect(abs(left_yaw_s - 12.5) < 1e-9, "left yaw is not 12.5 s", failures)
     return failures
 
 
@@ -957,10 +1023,10 @@ class ClipResult:
     end_mode_backup: str
     end_mode_forward: str
     end_margin_forward: float | None
-    dyaw_right_deg: float | None
-    dx_right_m: float | None
-    mean_body_vx_right: float | None
-    mean_applied_vx_right: float | None
+    dx_approach_m: float | None
+    dyaw_arc_deg: float | None
+    mean_yaw_rate_arc: float | None
+    dx_resume_m: float | None
     min_up_z_right: float | None
     end_mode_right: str
     end_margin_right: float | None
@@ -988,7 +1054,7 @@ def _fmt(value: float | None, spec: str) -> str:
 def _honesty(result: ClipResult) -> str:
     stop_pose = "The forward stop frame is level. " if result.end_mode_forward == "stand" else ""
     text = (
-        "kit_cam for back up, for walk forward then stop, and for an 11 s right turn. "
+        "kit_cam for back up, for walk forward then stop, and for the right nav, then the stop. "
         "These are three separate steers. "
         f"Camera pos {result.kit_cam_pos[0]:.3f} {result.kit_cam_pos[1]:.3f} "
         f"{result.kit_cam_pos[2]:.3f}. The camera was not moved. "
@@ -1022,21 +1088,27 @@ def _honesty(result: ClipResult) -> str:
         f"end margin {FWD_CLIP_MARGIN_M:+.3f} m. "
         "This clip does not claim faster or farther than that. "
         "0.080 yaws and tips near 1.2 m. This caller does not send 0.080. "
-        f"Turn right while walking publishes vx {FWD_MPS:+.3f} m/s and "
-        f"yaw_rate {-YAW_RAD_S:+.2f} rad/s for {RIGHT_TURN_S:.0f} s, then stop. "
-        f"Heading in that window is {_fmt(result.dyaw_right_deg, '+.1f')} deg. "
-        f"Forward Δx in that window is {_fmt(result.dx_right_m, '+.3f')} m. "
-        f"Mean body vx in that window is {_fmt(result.mean_body_vx_right, '+.3f')} m/s. "
-        f"min up_z during the right turn is {_fmt(result.min_up_z_right, '.3f')}. "
-        f"{_end_mode_sentence(result.end_mode_right, 'Right-turn end mode')} "
-        f"Right-turn end support margin is {_fmt(result.end_margin_right, '+.3f')} m. "
-        f"Controls' {RIGHT_TURN_S:.0f} s window is the ceiling: right heading about "
-        f"{WALK_RIGHT_DEG:+.0f} deg, still moving forward about {WALK_RIGHT_DX_M:+.2f} m, "
-        f"end stand, margin about {WALK_RIGHT_MARGIN_M:+.3f} m. "
+        "Right nav walks forward from t=1 to t=16, then holds "
+        f"vel({FWD_MPS:+.3f}, {-YAW_RAD_S:+.2f}) until t=27, "
+        "then forward only until t=33, then stop by t=35.5. "
+        f"Approach Δx={_fmt(result.dx_approach_m, '+.3f')} m. "
+        f"Heading while still walking is {_fmt(result.dyaw_arc_deg, '+.1f')} deg. "
+        f"Realized yaw rate in that window is {_fmt(result.mean_yaw_rate_arc, '+.3f')} rad/s. "
+        f"The command ±{YAW_RAD_S:.2f} is not the heading rate. "
+        f"Resume along the new heading is {_fmt(result.dx_resume_m, '+.3f')} m. "
+        f"min up_z during the right nav is {_fmt(result.min_up_z_right, '.3f')}. "
+        f"{_end_mode_sentence(result.end_mode_right, 'Right-nav end mode')} "
+        f"Right-nav end support margin is {_fmt(result.end_margin_right, '+.3f')} m. "
+        f"Controls' ceiling is approach about {NAV_APPROACH_DX_M:+.2f} m, "
+        f"heading about {NAV_RIGHT_DEG:+.0f} deg, resume about {NAV_RESUME_DX_M:+.2f} m, "
+        f"end stand, margin about {NAV_MARGIN_M:+.3f} m. "
         "This clip does not claim more than that. "
-        "The 4.5 s window that stalled near -17 deg is obsolete. "
-        f"Left while walking on the same window is about {WALK_LEFT_DEG:+.0f} deg. "
-        f"Both stay inside ±{YAW_RAD_S:.2f} rad/s. That is a hip bias, not a spin. "
+        f"Cold-start from stand is about {COLD_LEFT_DEG:+.0f} deg left and "
+        f"{COLD_RIGHT_DEG:+.0f} deg right. Those are not this arc. "
+        f"Left on the same approach is about {NAV_LEFT_DEG:+.0f} deg, "
+        "yaw from t=16 to t=28.5, not from 15 s and not for 14 s. "
+        "That earlier window tips on the resume and is not claimed. "
+        "This clip does not render the left arc. Not a spin. "
         "Go to the kitchen or the bathroom stays refused: "
         "the camera can see, but there is no room and no map. "
         "The floor is empty. This gait is not a room crossing. "
@@ -1062,10 +1134,14 @@ def _overlay(phrase: str, label: str, report_line: str, now: float, x: float) ->
         note = "cmd -0.032  clip ~-0.053 m/s ~-0.97 m  do not claim faster"
     elif label == "forward":
         note = "cmd +0.056  clip ~+0.039 m/s ~+2.16 m  do not claim farther"
+    elif label == "approach":
+        note = "approach cmd +0.056  nav ~+0.60 m  not a cold start"
     elif label == "turn-right":
-        note = "cmd +0.056 yaw -0.25  11s ceiling ~-83 deg ~+0.46 m  do not claim more"
+        note = "cmd +0.056 yaw -0.25  nav ~-77 deg  rate is not 0.25"
+    elif label == "resume":
+        note = "resume cmd +0.056  along heading ~+0.32 m"
     else:
-        note = "stop  |  ceiling end stand margin +0.063  do not claim more"
+        note = "stop  |  end stand margin +0.063  do not claim more"
     return [
         f'kit_cam "{phrase}"  empty floor',
         report_line,
@@ -1117,7 +1193,7 @@ def run_clip(out_mp4: Path, summary_path: Path) -> int:
     frames: list[np.ndarray] = []
     stills: list[str] = []
     print(
-        f"[voice] kit_cam separate steers: back up | walk forward then stop | turn right 11s  "
+        f"[voice] kit_cam separate steers: back up | walk forward then stop | right nav  "
         f"pos={cam_pos[0]:.3f} {cam_pos[1]:.3f} {cam_pos[2]:.3f} "
         f"md5={steer.PLANT_MD5} gl={os.environ.get('MUJOCO_GL', '')}"
     )
@@ -1302,6 +1378,25 @@ def _dyaw_deg(samples: Sequence[SampleView]) -> float | None:
     return math.degrees(_wrap_rad(samples[-1].yaw - samples[0].yaw))
 
 
+def _mean_yaw_rate(samples: Sequence[SampleView]) -> float | None:
+    if len(samples) < 2:
+        return None
+    dt = samples[-1].t - samples[0].t
+    if dt <= 1e-9:
+        return None
+    return _wrap_rad(samples[-1].yaw - samples[0].yaw) / dt
+
+
+def _heading_travel(samples: Sequence[SampleView]) -> float | None:
+    """Displacement along the heading at the start of the window."""
+    if len(samples) < 2:
+        return None
+    yaw0 = samples[0].yaw
+    dx = samples[-1].x - samples[0].x
+    dy = samples[-1].y - samples[0].y
+    return dx * math.cos(yaw0) + dy * math.sin(yaw0)
+
+
 def _measure(
     backup_samples: Sequence[SampleView],
     backup_fault: bool,
@@ -1318,13 +1413,16 @@ def _measure(
 ) -> ClipResult:
     backup, backup_settled = _window(backup_samples, BACKUP_CUES, 0.5)
     forward, forward_settled = _window(forward_samples, FORWARD_CUES, 1.5)
-    right, right_settled = _window(right_samples, RIGHT_CUES, 1.5)
+    approach = _between(right_samples, RIGHT_CUES[0].t_end, RIGHT_CUES[1].t_end)
+    arc = _between(right_samples, RIGHT_CUES[1].t_end, RIGHT_CUES[2].t_end)
+    resume = _between(right_samples, RIGHT_CUES[2].t_end, RIGHT_CUES[3].t_end)
+    nav = _between(right_samples, RIGHT_CUES[0].t_end, RIGHT_CUES[-1].t_end)
     backup_end = backup_samples[-1] if backup_samples else None
     forward_end = forward_samples[-1] if forward_samples else None
     right_end = right_samples[-1] if right_samples else None
     backup_ups = [sample.up_z for sample in backup]
     forward_ups = [sample.up_z for sample in forward]
-    right_ups = [sample.up_z for sample in right]
+    right_ups = [sample.up_z for sample in nav]
     phrases = tuple(
         cue.phrase
         for cues in (BACKUP_CUES, FORWARD_CUES, RIGHT_CUES)
@@ -1352,10 +1450,10 @@ def _measure(
         end_mode_backup=backup_end.mode if backup_end is not None else "",
         end_mode_forward=forward_end.mode if forward_end is not None else "",
         end_margin_forward=float(forward_end.margin) if forward_end is not None else None,
-        dyaw_right_deg=_dyaw_deg(right),
-        dx_right_m=_dx(right),
-        mean_body_vx_right=_mean([sample.body_vx for sample in right_settled]),
-        mean_applied_vx_right=_mean([sample.applied_vx for sample in right_settled]),
+        dx_approach_m=_dx(approach),
+        dyaw_arc_deg=_dyaw_deg(arc),
+        mean_yaw_rate_arc=_mean_yaw_rate(arc),
+        dx_resume_m=_heading_travel(resume),
         min_up_z_right=min(right_ups) if right_ups else None,
         end_mode_right=right_end.mode if right_end is not None else "",
         end_margin_right=float(right_end.margin) if right_end is not None else None,
@@ -1395,7 +1493,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--clip",
         action="store_true",
-        help="Render kit_cam for back up, walk forward, and an 11 s right turn",
+        help="Render kit_cam for back up, walk forward, and the right nav window",
     )
     parser.add_argument("--out", default=str(PREVIEWS / "voice_caller_kit_cam.mp4"))
     parser.add_argument("--summary", default=str(PREVIEWS / "voice_caller_day1_summary.json"))
@@ -1408,7 +1506,7 @@ def main(argv: list[str] | None = None) -> int:
         return self_test()
     if args.clip:
         if args.phrases:
-            print("refused: --clip plays back up, walk forward, turn right, stop", file=sys.stderr)
+            print("refused: --clip plays back up, walk forward, and the right nav", file=sys.stderr)
             return 2
         return run_clip(Path(args.out), Path(args.summary))
     if args.phrases:
