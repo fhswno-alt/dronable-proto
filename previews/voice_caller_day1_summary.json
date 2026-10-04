@@ -12,8 +12,8 @@
     "walk forward",
     "stop"
   ],
-  "fault": true,
-  "fault_reason": "COM outside support and tipping margin=-0.083",
+  "fault": false,
+  "fault_reason": "",
   "command_vx_back": -0.032,
   "command_vx_fwd": 0.08,
   "mean_applied_vx_backup": -0.032,
@@ -25,12 +25,13 @@
   "min_up_z_backup": 0.9027298123429784,
   "min_up_z_forward": 0.9535730874620898,
   "end_mode_backup": "stand",
-  "end_mode_forward": "fault",
+  "end_mode_forward": "stand",
+  "end_margin_forward": 0.06363900117463278,
   "stills": [
     "previews/voice_caller_kit_cam_backup.png",
     "previews/voice_caller_kit_cam_forward.png",
     "previews/voice_caller_kit_cam_stop.png"
   ],
   "mp4": "previews/voice_caller_kit_cam.mp4",
-  "honesty": "kit_cam for back up, and for walk forward then stop. These are two separate steers. Camera pos 0.050 0.019 0.007. The camera was not moved. The frame is still largely the inside of the head. Empty floor shows through the opening. Back up command is -0.032 m/s. Mean applied_vx in the reverse window is -0.032 m/s. Mean body vx in that window is -0.048 m/s. Reverse \u0394x=-0.283 m. min up_z during back up is 0.903. End mode after back up is stand. Controls' merged reverse clip moved about -0.97 m, mean body speed about -0.053 m/s, upright, no tip. This clip does not claim faster than that clip. Forward command into the gait is +0.080 m/s. Mean applied_vx in the forward window is +0.080 m/s. Mean body vx in that window is +0.080 m/s. Forward \u0394x=+0.255 m. min up_z while the forward command was applied is 0.954. End mode after stop is fault. That after-stop latch is the existing tip check. Controls' sneak peek realized about +0.074 m/s and +0.64 m upright. This clip does not claim faster than that, and it is not a clean walk. One steer that sent walk forward immediately after back up latched the existing tip check (COM outside support, margin=-0.090). The gait was not changed. Turn left while walking held about +44 deg. Right was weaker, about -17 deg. Both stay inside \u00b10.25 rad/s. That is a hip bias, not a spin. This clip does not send a turn. Go to the kitchen or the bathroom stays refused: the camera can see, but there is no room and no map. The floor is empty. This gait is not a room crossing. Not autonomous navigation. FAULT: COM outside support and tipping margin=-0.083."
+  "honesty": "kit_cam for back up, and for walk forward then stop. These are two separate steers. Camera pos 0.050 0.019 0.007. The camera was not moved. The frame is still largely the inside of the head. Empty floor shows through the opening. Back up command is -0.032 m/s. Mean applied_vx in the reverse window is -0.032 m/s. Mean body vx in that window is -0.048 m/s. Reverse \u0394x=-0.283 m. min up_z during back up is 0.903. End mode after back up is stand. Controls' merged reverse clip moved about -0.97 m, mean body speed about -0.053 m/s, upright, no tip. This clip does not claim faster than that clip. Forward command into the gait is +0.080 m/s. Mean applied_vx in the forward window is +0.080 m/s. Mean body vx in that window is +0.080 m/s. Forward \u0394x=+0.255 m. min up_z while the forward command was applied is 0.954. End mode is stand. The stop frame is level. End support margin is +0.064 m. Controls' stop clip is the ceiling: about +0.417 m, mean body speed about +0.067 m/s, end margin +0.063 m, end stand. This clip does not claim faster or a longer upright walk than that, and does not claim past the older sneak peek of about +0.074 m/s and +0.64 m. It is not a clean walk. Turn left while walking held about +44 deg. Right was weaker, about -17 deg. Both stay inside \u00b10.25 rad/s. That is a hip bias, not a spin. This clip does not send a turn. Go to the kitchen or the bathroom stays refused: the camera can see, but there is no room and no map. The floor is empty. This gait is not a room crossing. Not autonomous navigation."
 }

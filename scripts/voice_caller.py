@@ -7,9 +7,12 @@ stands inside the bus. This file does not write that clock and does not
 change the clamps.
 
 Forward sends the bus forward cap, +0.08 m/s, into the gait. Controls'
-sneak peek on this plant realized about +0.074 m/s and moved +0.64 m
-upright. This caller does not claim faster than that. It is not a clean walk.
-The gait is not a room crossing.
+stop clip on this settle moved about +0.417 m, mean body speed about
++0.067 m/s, end margin +0.063 m, end stand. This caller does not claim
+faster or a longer upright walk than that clip. It does not claim past
+the older sneak peek of about +0.074 m/s and +0.64 m. It is not a clean walk.
+The gait is not a room crossing. The tip predicate is still COM outside
+support together with up_z < 0.85. It was not loosened.
 
 Back up sends the bus reverse clamp, -0.032 m/s, and resends it at 10 Hz.
 Controls' merged clip moved about -0.97 m, mean body speed about -0.053 m/s,
@@ -27,7 +30,8 @@ invented. The floor in the clip is empty.
 kit_cam is the plant camera on head_tilt_link at pos 0.050 0.019 0.007,
 same aim and fovy. Plant md5 is 71b2c86d133ebc603f58b99c53e496f3. The
 clip renders that camera for back up, and for walk forward then stop.
-This file does not move the camera, and does not edit the plant or the gait.
+This file does not move the camera, and does not edit the plant, the gait,
+or the tip check.
 
 Run:
   python scripts/voice_caller.py "walk forward"
@@ -66,6 +70,9 @@ KIT_CAM_POS = (0.050, 0.019, 0.007)
 PLANT_XML = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145.xml"
 SNEAK_VX_MPS = 0.074
 SNEAK_DX_M = 0.64
+STOP_DX_M = 0.417
+STOP_VX_MPS = 0.067
+STOP_END_MARGIN_M = 0.063
 REVERSE_VX_MPS = -0.053
 REVERSE_DX_M = -0.97
 WALK_LEFT_DEG = 44.0
@@ -212,6 +219,7 @@ class SampleView(Protocol):
     yaw: float
     mode: str
     up_z: float
+    margin: float
 
 
 def normalize_phrase(phrase: str) -> str:
@@ -243,8 +251,11 @@ def _forward() -> VoiceCommand:
         0.0,
         (
             f"vel vx={FWD_MPS:+.3f} yaw_rate={0.0:+.3f} "
-            "(command into the gait; sneak peek realized about "
-            f"{SNEAK_VX_MPS:+.3f} m/s and {SNEAK_DX_M:+.2f} m upright; "
+            "(command into the gait; Controls' stop clip moved about "
+            f"{STOP_DX_M:+.3f} m, mean body speed about {STOP_VX_MPS:+.3f} m/s, "
+            f"end margin {STOP_END_MARGIN_M:+.3f} m, end stand; "
+            f"older sneak peek about {SNEAK_VX_MPS:+.3f} m/s and {SNEAK_DX_M:+.2f} m; "
+            "this caller does not claim faster or a longer upright walk; "
             "not a clean walk)"
         ),
     )
@@ -427,8 +438,8 @@ class PhraseCue:
     label: str
 
 
-# Two separate steers. Chaining reverse straight into forward latches the
-# existing tip check. The gait is not edited to survive that chain.
+# Separate steers. The stop hold runs past the 1.20 s settle damper.
+# This file does not edit that damper or the tip check.
 BACKUP_CUES: tuple[PhraseCue, ...] = (
     PhraseCue(1.0, None, "quiet"),
     PhraseCue(5.0, "back up", "backup"),
@@ -437,12 +448,12 @@ BACKUP_CUES: tuple[PhraseCue, ...] = (
 FORWARD_CUES: tuple[PhraseCue, ...] = (
     PhraseCue(1.0, None, "quiet"),
     PhraseCue(5.0, "walk forward", "forward"),
-    PhraseCue(6.0, "stop", "stop"),
+    PhraseCue(7.2, "stop", "stop"),
 )
 STILL_TIMES = (
     (3.0, "backup", "voice_caller_kit_cam_backup.png"),
     (3.5, "forward", "voice_caller_kit_cam_forward.png"),
-    (5.5, "stop", "voice_caller_kit_cam_stop.png"),
+    (7.0, "stop", "voice_caller_kit_cam_stop.png"),
 )
 
 
@@ -471,13 +482,8 @@ def _plant_file_md5() -> str:
     return hashlib.md5(PLANT_XML.read_bytes()).hexdigest()
 
 
-def _bind_shipped_plant() -> list[str]:
-    """Point the existing freeze check at the shipped XML.
-
-    steer_walk.py still names the pre-move camera. This does not edit that
-    file, the gait, or the plant. It only lets SteerSession load the plant
-    whose md5 and kit_cam pose are already on main.
-    """
+def _shipped_plant_problems() -> list[str]:
+    """The freeze already names this plant. Do not rewrite it."""
     import steer_walk as steer
 
     problems: list[str] = []
@@ -487,16 +493,17 @@ def _bind_shipped_plant() -> list[str]:
     digest = _plant_file_md5()
     if digest != PLANT_MD5:
         problems.append(f"plant file md5 {digest} != {PLANT_MD5}")
-        return problems
-    steer.PLANT_MD5 = PLANT_MD5
-    steer.KIT_CAM_POS = KIT_CAM_POS
+    if steer.PLANT_MD5 != PLANT_MD5:
+        problems.append(f"PLANT_MD5 {steer.PLANT_MD5} != {PLANT_MD5}")
+    if tuple(float(v) for v in steer.KIT_CAM_POS) != KIT_CAM_POS:
+        problems.append(f"KIT_CAM_POS {steer.KIT_CAM_POS} != {KIT_CAM_POS}")
     return problems
 
 
 def _cap_problems() -> list[str]:
     import steer_walk as steer
 
-    problems = _bind_shipped_plant()
+    problems = _shipped_plant_problems()
     if steer.VX_FWD_CAP != FWD_MPS:
         problems.append(f"VX_FWD_CAP {steer.VX_FWD_CAP} != {FWD_MPS}")
     if steer.VX_BACK_CAP != BACK_CAP_MPS:
@@ -524,6 +531,9 @@ def _expect(cond: bool, msg: str, failures: list[str]) -> None:
 def test_phrases() -> list[str]:
     failures: list[str] = []
     doc = __doc__ or ""
+    _expect("+0.417" in doc and "+0.067" in doc and "+0.063" in doc, "module doc omits the stop clip", failures)
+    _expect("end stand" in doc, "module doc omits the stop-clip end mode", failures)
+    _expect("up_z < 0.85" in doc and "was not loosened" in doc, "module doc loosens the tip check", failures)
     _expect("-0.032" in doc, "module doc omits the reverse clamp", failures)
     _expect("does not claim faster" in doc, "module doc claims a faster reverse", failures)
     _expect("-0.053" in doc and "-0.97" in doc, "module doc omits the reverse clip", failures)
@@ -558,6 +568,7 @@ def test_phrases() -> list[str]:
     forward = parse_phrase("walk forward")
     _expect("not a clean walk" in forward.line, "forward line claims a clean walk", failures)
     _expect("+0.074" in forward.line and "+0.64" in forward.line, "forward line omits the sneak peek", failures)
+    _expect("+0.417" in forward.line and "+0.067" in forward.line and "+0.063" in forward.line, "forward line omits the stop clip", failures)
     _expect(forward.vx == FWD_MPS, "forward is not the bus cap", failures)
     left = parse_phrase("turn left")
     right = parse_phrase("turn right")
@@ -761,6 +772,24 @@ def test_bus() -> list[str]:
     return failures
 
 
+def test_tip_predicate() -> list[str]:
+    """The COM-outside-support check is the one already on main."""
+    import inspect
+
+    import steer_walk as steer
+
+    failures: list[str] = []
+    src = inspect.getsource(steer.SteerSession._fault_reason)
+    _expect(steer.TIP_UP_Z == 0.72, f"TIP_UP_Z {steer.TIP_UP_Z}", failures)
+    _expect(abs(steer.TIP_HOLD_S - 0.12) < 1e-12, f"TIP_HOLD_S {steer.TIP_HOLD_S}", failures)
+    _expect(steer.COP_FAULT_MARGIN == -0.04, f"COP_FAULT_MARGIN {steer.COP_FAULT_MARGIN}", failures)
+    _expect("COM outside support and tipping" in src, "COM-outside-support line missing", failures)
+    _expect("up_z < 0.85" in src, "torso bar in the tip predicate was loosened", failures)
+    _expect("margin < COP_FAULT_MARGIN" in src, "margin gate missing", failures)
+    _expect("self.cop_out_hold >= TIP_HOLD_S and up_z < 0.85" in src, "tip conjunction was rewritten", failures)
+    return failures
+
+
 def self_test() -> int:
     failures = test_phrases()
     if steer_load_error() is not None:
@@ -770,6 +799,7 @@ def self_test() -> int:
             return 1
         print("[voice] self-test PASS (mapping only; CommandBus not loaded; no walk claim)")
         return 0
+    failures.extend(test_tip_predicate())
     failures.extend(test_bus())
     if failures:
         for msg in failures:
@@ -799,6 +829,7 @@ class ClipResult:
     min_up_z_forward: float | None
     end_mode_backup: str
     end_mode_forward: str
+    end_margin_forward: float | None
     stills: tuple[str, ...]
     mp4: str | None
     honesty: str
@@ -821,6 +852,7 @@ def _fmt(value: float | None, spec: str) -> str:
 
 
 def _honesty(result: ClipResult) -> str:
+    stop_pose = "The stop frame is level. " if result.end_mode_forward == "stand" else ""
     text = (
         "kit_cam for back up, and for walk forward then stop. "
         "These are two separate steers. "
@@ -847,14 +879,15 @@ def _honesty(result: ClipResult) -> str:
         f"Forward Δx={_fmt(result.dx_forward_m, '+.3f')} m. "
         "min up_z while the forward command was applied is "
         f"{_fmt(result.min_up_z_forward, '.3f')}. "
-        f"End mode after stop is {result.end_mode_forward}. "
-        "That after-stop latch is the existing tip check. "
-        f"Controls' sneak peek realized about {SNEAK_VX_MPS:+.3f} m/s and "
-        f"{SNEAK_DX_M:+.2f} m upright. This clip does not claim faster than that, "
-        "and it is not a clean walk. "
-        "One steer that sent walk forward immediately after back up latched "
-        "the existing tip check (COM outside support, margin=-0.090). "
-        "The gait was not changed. "
+        f"{_end_mode_sentence(result.end_mode_forward)} "
+        f"{stop_pose}"
+        f"End support margin is {_fmt(result.end_margin_forward, '+.3f')} m. "
+        f"Controls' stop clip is the ceiling: about {STOP_DX_M:+.3f} m, "
+        f"mean body speed about {STOP_VX_MPS:+.3f} m/s, "
+        f"end margin {STOP_END_MARGIN_M:+.3f} m, end stand. "
+        "This clip does not claim faster or a longer upright walk than that, "
+        f"and does not claim past the older sneak peek of about {SNEAK_VX_MPS:+.3f} m/s "
+        f"and {SNEAK_DX_M:+.2f} m. It is not a clean walk. "
         f"Turn left while walking held about {WALK_LEFT_DEG:+.0f} deg. "
         f"Right was weaker, about {WALK_RIGHT_DEG:+.0f} deg. "
         f"Both stay inside ±{YAW_RAD_S:.2f} rad/s. That is a hip bias, not a spin. "
@@ -869,13 +902,23 @@ def _honesty(result: ClipResult) -> str:
     return text
 
 
+def _end_mode_sentence(mode: str) -> str:
+    if mode == "fault":
+        return "End mode is fault."
+    if mode == "stand":
+        return "End mode is stand."
+    if mode == "":
+        return "End mode is missing."
+    return f"End mode is {mode}."
+
+
 def _overlay(phrase: str, label: str, report_line: str, now: float, x: float) -> list[str]:
     if label == "backup":
         note = "cmd -0.032  clip ~-0.053 m/s ~-0.97 m  do not claim faster"
     elif label == "forward":
-        note = "cmd +0.080  sneak peek ~0.074  not a clean walk"
+        note = "cmd +0.080  stop clip ~+0.067 m/s ~+0.417 m  do not claim faster"
     else:
-        note = "stand/stop  |  camera sees, no room, no map"
+        note = "stop  |  ceiling end stand margin +0.063  do not claim longer"
     return [
         f'kit_cam "{phrase}"  empty floor',
         report_line,
@@ -1139,6 +1182,7 @@ def _measure(
         min_up_z_forward=min(forward_ups) if forward_ups else None,
         end_mode_backup=backup_end.mode if backup_end is not None else "",
         end_mode_forward=forward_end.mode if forward_end is not None else "",
+        end_margin_forward=float(forward_end.margin) if forward_end is not None else None,
         stills=tuple(stills),
         mp4=str(mp4.relative_to(ROOT)) if mp4 is not None else None,
         honesty="",
