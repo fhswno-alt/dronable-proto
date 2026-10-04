@@ -14,5 +14,7 @@ __pycache__/
 !previews/steer_walk_reverse.mp4
 !previews/steer_walk_turn.mp4
 !previews/steer_walk_turn_right.mp4
+!previews/steer_walk_nav_left.mp4
+!previews/steer_walk_nav_right.mp4
 previews/frame_seq/
 previews/ainex_walk/
