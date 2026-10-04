@@ -1,0 +1,1590 @@
+#usda 1.0
+(
+    defaultPrim = "ainex"
+    doc = "Ainex M2 145 frozen-kit asset authored from mujoco/ainex_hiwonder/ainex_controls_m2_145.xml. Not loaded in Isaac Sim. Walk not proven. Angular USD limits and drive targets are degrees; MuJoCo ranges and kp are stored on mujoco:* attributes."
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "ainex" (
+    prepend apiSchemas = ["PhysicsArticulationRootAPI"]
+    customData = {
+        dictionary mujoco = {
+            bool fixBase = 0
+            string freeJoint = "root"
+            string source = "mujoco/ainex_hiwonder/ainex_controls_m2_145.xml"
+        }
+    }
+)
+{
+    def "PhysicsMaterials"
+    {
+        def Material "foot_contact_material" (
+            prepend apiSchemas = ["PhysicsMaterialAPI"]
+        )
+        {
+            custom int mujoco:condim = 3
+            custom double mujoco:frictionRolling = 0.01
+            custom double mujoco:frictionSliding = 1.6
+            custom double mujoco:frictionTorsional = 0.1
+            custom string mujoco:note = "condim 3 uses only the sliding coefficient 1.6. Torsional 0.1 and rolling 0.01 are stored and not enabled."
+            float physics:dynamicFriction = 1.6
+            float physics:staticFriction = 1.6
+        }
+    }
+
+    def Xform "body_link" (
+        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+        customData = {
+            dictionary mujoco = {
+                string joint = "root"
+                string jointType = "free"
+            }
+        }
+    )
+    {
+        custom double[] mujoco:com = [0.00394314, -0.0000792911, 0.0504545]
+        custom double[] mujoco:diaginertia = [0.00123535, 0.00106658, 0.00104392]
+        custom double[] mujoco:inertialQuatWxyz = [0.679389, 0.713581, 0.123546, -0.118193]
+        custom string mujoco:note = "MuJoCo free joint 'root'. Not a revolute. Do not weld this base; fixBase must stay false."
+        point3f physics:centerOfMass = (0.00394314, -0.0000792911, 0.0504545)
+        float3 physics:diagonalInertia = (0.00123535, 0.00106658, 0.00104392)
+        float physics:mass = 0.743
+        quatf physics:principalAxes = (0.679389, 0.713581, 0.123546, -0.118193)
+        double3 xformOp:translate = (0, 0, 0.268)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+
+        def Mesh "body_link_mesh" (
+            prepend references = @../../mujoco/ainex_hiwonder/meshes/body_link.STL@
+        )
+        {
+            custom bool mujoco:collision = 0
+            custom int mujoco:contype = 0
+            custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/body_link.STL@
+            color3f[] primvars:displayColor = [(0.18, 0.18, 0.2)]
+        }
+
+        def Xform "r_hip_yaw_link" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+        )
+        {
+            custom double[] mujoco:com = [-0.0000308089, 0.00125727, -0.00137107]
+            custom double[] mujoco:diaginertia = [0.0000227792, 0.0000175538, 0.00000897703]
+            custom double[] mujoco:inertialQuatWxyz = [0.685451, 0.035864, -0.0116524, 0.727142]
+            point3f physics:centerOfMass = (-0.0000308089, 0.00125727, -0.00137107)
+            float3 physics:diagonalInertia = (0.0000227792, 0.0000175538, 0.00000897703)
+            float physics:mass = 0.032
+            quatf physics:principalAxes = (0.685451, 0.035864, -0.0116524, 0.727142)
+            double3 xformOp:translate = (0, -0.029, 0)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+
+            def PhysicsRevoluteJoint "r_hip_yaw" (
+                prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+            )
+            {
+                float drive:angular:physics:damping = 0.0013962634
+                float drive:angular:physics:maxForce = 2.1
+                float drive:angular:physics:stiffness = 0.6981317
+                float drive:angular:physics:targetPosition = 0
+                float drive:angular:physics:targetVelocity = 0
+                uniform token drive:angular:physics:type = "force"
+                custom string mujoco:actuator = "r_hip_yaw_pos"
+                custom double mujoco:armature = 0.01
+                custom double[] mujoco:axis = [0, 0, -1]
+                custom bool mujoco:axisDefaulted = 0
+                custom double mujoco:damping = 0.08
+                custom double mujoco:dampratio = 1
+                custom double[] mujoco:forcerange = [-2.1, 2.1]
+                custom double mujoco:frictionloss = 0
+                custom string mujoco:group = "leg"
+                custom double mujoco:kp = 40
+                custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                uniform token physics:axis = "Z"
+                rel physics:body0 = </ainex/body_link>
+                rel physics:body1 = </ainex/body_link/r_hip_yaw_link>
+                bool physics:collisionEnabled = 0
+                point3f physics:localPos0 = (0, -0.029, 0)
+                point3f physics:localPos1 = (0, 0, 0)
+                quatf physics:localRot0 = (0, 1, 0, 0)
+                quatf physics:localRot1 = (0, 1, 0, 0)
+                float physics:lowerLimit = -119.74818
+                float physics:upperLimit = 119.74818
+                float physxJoint:armature = 0.01
+                float physxJoint:jointFriction = 0
+            }
+
+            def Mesh "r_hip_yaw_link_mesh" (
+                prepend references = @../../mujoco/ainex_hiwonder/meshes/r_hip_yaw_link.STL@
+            )
+            {
+                custom bool mujoco:collision = 0
+                custom int mujoco:contype = 0
+                custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/r_hip_yaw_link.STL@
+                color3f[] primvars:displayColor = [(0.12, 0.12, 0.14)]
+            }
+
+            def Xform "r_hip_roll_link" (
+                prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+            )
+            {
+                custom double[] mujoco:com = [0.0013624, -0.000566876, -0.0134187]
+                custom double[] mujoco:diaginertia = [0.0000731184, 0.0000605065, 0.0000291551]
+                custom double[] mujoco:inertialQuatWxyz = [0.498207, 0.491474, 0.501276, 0.508887]
+                point3f physics:centerOfMass = (0.0013624, -0.000566876, -0.0134187)
+                float3 physics:diagonalInertia = (0.0000731184, 0.0000605065, 0.0000291551)
+                float physics:mass = 0.12
+                quatf physics:principalAxes = (0.498207, 0.491474, 0.501276, 0.508887)
+                double3 xformOp:translate = (-0.01955, 0, -0.0255)
+                uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                def PhysicsRevoluteJoint "r_hip_roll" (
+                    prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+                )
+                {
+                    float drive:angular:physics:damping = 0.0013962634
+                    float drive:angular:physics:maxForce = 2.1
+                    float drive:angular:physics:stiffness = 0.6981317
+                    float drive:angular:physics:targetPosition = 0
+                    float drive:angular:physics:targetVelocity = 0
+                    uniform token drive:angular:physics:type = "force"
+                    custom string mujoco:actuator = "r_hip_roll_pos"
+                    custom double mujoco:armature = 0.01
+                    custom double[] mujoco:axis = [-1, 0, 0]
+                    custom bool mujoco:axisDefaulted = 0
+                    custom double mujoco:damping = 0.08
+                    custom double mujoco:dampratio = 1
+                    custom double[] mujoco:forcerange = [-2.1, 2.1]
+                    custom double mujoco:frictionloss = 0
+                    custom string mujoco:group = "leg"
+                    custom double mujoco:kp = 40
+                    custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                    uniform token physics:axis = "X"
+                    rel physics:body0 = </ainex/body_link/r_hip_yaw_link>
+                    rel physics:body1 = </ainex/body_link/r_hip_yaw_link/r_hip_roll_link>
+                    bool physics:collisionEnabled = 0
+                    point3f physics:localPos0 = (-0.01955, 0, -0.0255)
+                    point3f physics:localPos1 = (0, 0, 0)
+                    quatf physics:localRot0 = (0, 0, 1, 0)
+                    quatf physics:localRot1 = (0, 0, 1, 0)
+                    float physics:lowerLimit = -119.74818
+                    float physics:upperLimit = 119.74818
+                    float physxJoint:armature = 0.01
+                    float physxJoint:jointFriction = 0
+                }
+
+                def Mesh "r_hip_roll_link_mesh" (
+                    prepend references = @../../mujoco/ainex_hiwonder/meshes/r_hip_roll_link.STL@
+                )
+                {
+                    custom bool mujoco:collision = 0
+                    custom int mujoco:contype = 0
+                    custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/r_hip_roll_link.STL@
+                    color3f[] primvars:displayColor = [(0.12, 0.12, 0.14)]
+                }
+
+                def Xform "r_hip_pitch_link" (
+                    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                )
+                {
+                    custom double[] mujoco:com = [0.0135944, 0.0193812, -0.0727054]
+                    custom double[] mujoco:diaginertia = [0.000112942, 0.000111046, 0.0000406518]
+                    custom double[] mujoco:inertialQuatWxyz = [0.738938, 0.0427036, 0.0407745, 0.671181]
+                    point3f physics:centerOfMass = (0.0135944, 0.0193812, -0.0727054)
+                    float3 physics:diagonalInertia = (0.000112942, 0.000111046, 0.0000406518)
+                    float physics:mass = 0.1065
+                    quatf physics:principalAxes = (0.738938, 0.0427036, 0.0407745, 0.671181)
+                    double3 xformOp:translate = (0.0190366, -0.02, 0)
+                    uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                    def PhysicsRevoluteJoint "r_hip_pitch" (
+                        prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+                    )
+                    {
+                        float drive:angular:physics:damping = 0.0013962634
+                        float drive:angular:physics:maxForce = 2.1
+                        float drive:angular:physics:stiffness = 0.7853982
+                        float drive:angular:physics:targetPosition = 0
+                        float drive:angular:physics:targetVelocity = 0
+                        uniform token drive:angular:physics:type = "force"
+                        custom string mujoco:actuator = "r_hip_pitch_pos"
+                        custom double mujoco:armature = 0.01
+                        custom double[] mujoco:axis = [0, -1, 0]
+                        custom bool mujoco:axisDefaulted = 0
+                        custom double mujoco:damping = 0.08
+                        custom double mujoco:dampratio = 1
+                        custom double[] mujoco:forcerange = [-2.1, 2.1]
+                        custom double mujoco:frictionloss = 0
+                        custom string mujoco:group = "leg"
+                        custom double mujoco:kp = 45
+                        custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                        uniform token physics:axis = "Y"
+                        rel physics:body0 = </ainex/body_link/r_hip_yaw_link/r_hip_roll_link>
+                        rel physics:body1 = </ainex/body_link/r_hip_yaw_link/r_hip_roll_link/r_hip_pitch_link>
+                        bool physics:collisionEnabled = 0
+                        point3f physics:localPos0 = (0.0190366, -0.02, 0)
+                        point3f physics:localPos1 = (0, 0, 0)
+                        quatf physics:localRot0 = (0, 1, 0, 0)
+                        quatf physics:localRot1 = (0, 1, 0, 0)
+                        float physics:lowerLimit = -119.74818
+                        float physics:upperLimit = 119.74818
+                        float physxJoint:armature = 0.01
+                        float physxJoint:jointFriction = 0
+                    }
+
+                    def Mesh "r_hip_pitch_link_mesh" (
+                        prepend references = @../../mujoco/ainex_hiwonder/meshes/r_hip_pitch_link.STL@
+                    )
+                    {
+                        custom bool mujoco:collision = 0
+                        custom int mujoco:contype = 0
+                        custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/r_hip_pitch_link.STL@
+                        color3f[] primvars:displayColor = [(0.15, 0.75, 0.35)]
+                    }
+
+                    def Xform "r_knee_link" (
+                        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                    )
+                    {
+                        custom double[] mujoco:com = [0.00334266, 0.0196474, -0.0425049]
+                        custom double[] mujoco:diaginertia = [0.0000675039, 0.0000549998, 0.0000205563]
+                        custom double[] mujoco:inertialQuatWxyz = [0.999535, -0.000104839, -0.0304235, 0.0019934]
+                        point3f physics:centerOfMass = (0.00334266, 0.0196474, -0.0425049)
+                        float3 physics:diagonalInertia = (0.0000675039, 0.0000549998, 0.0000205563)
+                        float physics:mass = 0.045
+                        quatf physics:principalAxes = (0.999535, -0.000104839, -0.0304235, 0.0019934)
+                        double3 xformOp:translate = (-0.000372039, 0.00005, -0.0968862)
+                        uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                        def PhysicsRevoluteJoint "r_knee" (
+                            prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+                        )
+                        {
+                            float drive:angular:physics:damping = 0.0013962634
+                            float drive:angular:physics:maxForce = 2.1
+                            float drive:angular:physics:stiffness = 0.7853982
+                            float drive:angular:physics:targetPosition = 0
+                            float drive:angular:physics:targetVelocity = 0
+                            uniform token drive:angular:physics:type = "force"
+                            custom string mujoco:actuator = "r_knee_pos"
+                            custom double mujoco:armature = 0.01
+                            custom double[] mujoco:axis = [0, -1, 0]
+                            custom bool mujoco:axisDefaulted = 0
+                            custom double mujoco:damping = 0.08
+                            custom double mujoco:dampratio = 1
+                            custom double[] mujoco:forcerange = [-2.1, 2.1]
+                            custom double mujoco:frictionloss = 0
+                            custom string mujoco:group = "leg"
+                            custom double mujoco:kp = 45
+                            custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                            uniform token physics:axis = "Y"
+                            rel physics:body0 = </ainex/body_link/r_hip_yaw_link/r_hip_roll_link/r_hip_pitch_link>
+                            rel physics:body1 = </ainex/body_link/r_hip_yaw_link/r_hip_roll_link/r_hip_pitch_link/r_knee_link>
+                            bool physics:collisionEnabled = 0
+                            point3f physics:localPos0 = (-0.000372039, 0.00005, -0.0968862)
+                            point3f physics:localPos1 = (0, 0, 0)
+                            quatf physics:localRot0 = (0, 1, 0, 0)
+                            quatf physics:localRot1 = (0, 1, 0, 0)
+                            float physics:lowerLimit = -119.74818
+                            float physics:upperLimit = 119.74818
+                            float physxJoint:armature = 0.01
+                            float physxJoint:jointFriction = 0
+                        }
+
+                        def Mesh "r_knee_link_mesh" (
+                            prepend references = @../../mujoco/ainex_hiwonder/meshes/r_knee_link.STL@
+                        )
+                        {
+                            custom bool mujoco:collision = 0
+                            custom int mujoco:contype = 0
+                            custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/r_knee_link.STL@
+                            color3f[] primvars:displayColor = [(0.15, 0.75, 0.35)]
+                        }
+
+                        def Xform "r_ank_pitch_link" (
+                            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                        )
+                        {
+                            custom double[] mujoco:com = [-0.017544, 0.0195632, 0.0134182]
+                            custom double[] mujoco:diaginertia = [0.0000736835, 0.0000610769, 0.0000291596]
+                            custom double[] mujoco:inertialQuatWxyz = [0.489309, 0.496862, 0.510389, 0.503197]
+                            point3f physics:centerOfMass = (-0.017544, 0.0195632, 0.0134182)
+                            float3 physics:diagonalInertia = (0.0000736835, 0.0000610769, 0.0000291596)
+                            float physics:mass = 0.12
+                            quatf physics:principalAxes = (0.489309, 0.496862, 0.510389, 0.503197)
+                            double3 xformOp:translate = (0.00103699, 0, -0.0890766)
+                            uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                            def PhysicsRevoluteJoint "r_ank_pitch" (
+                                prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+                            )
+                            {
+                                float drive:angular:physics:damping = 0.0013962634
+                                float drive:angular:physics:maxForce = 2.1
+                                float drive:angular:physics:stiffness = 0.61086524
+                                float drive:angular:physics:targetPosition = 0
+                                float drive:angular:physics:targetVelocity = 0
+                                uniform token drive:angular:physics:type = "force"
+                                custom string mujoco:actuator = "r_ank_pitch_pos"
+                                custom double mujoco:armature = 0.01
+                                custom double[] mujoco:axis = [0, 1, 0]
+                                custom bool mujoco:axisDefaulted = 0
+                                custom double mujoco:damping = 0.08
+                                custom double mujoco:dampratio = 1
+                                custom double[] mujoco:forcerange = [-2.1, 2.1]
+                                custom double mujoco:frictionloss = 0
+                                custom string mujoco:group = "leg"
+                                custom double mujoco:kp = 35
+                                custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                                uniform token physics:axis = "Y"
+                                rel physics:body0 = </ainex/body_link/r_hip_yaw_link/r_hip_roll_link/r_hip_pitch_link/r_knee_link>
+                                rel physics:body1 = </ainex/body_link/r_hip_yaw_link/r_hip_roll_link/r_hip_pitch_link/r_knee_link/r_ank_pitch_link>
+                                bool physics:collisionEnabled = 0
+                                point3f physics:localPos0 = (0.00103699, 0, -0.0890766)
+                                point3f physics:localPos1 = (0, 0, 0)
+                                quatf physics:localRot0 = (1, 0, 0, 0)
+                                quatf physics:localRot1 = (1, 0, 0, 0)
+                                float physics:lowerLimit = -119.74818
+                                float physics:upperLimit = 119.74818
+                                float physxJoint:armature = 0.01
+                                float physxJoint:jointFriction = 0
+                            }
+
+                            def Mesh "r_ank_pitch_link_mesh" (
+                                prepend references = @../../mujoco/ainex_hiwonder/meshes/r_ank_pitch_link.STL@
+                            )
+                            {
+                                custom bool mujoco:collision = 0
+                                custom int mujoco:contype = 0
+                                custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/r_ank_pitch_link.STL@
+                                color3f[] primvars:displayColor = [(0.15, 0.75, 0.35)]
+                            }
+
+                            def Xform "r_ank_roll_link" (
+                                prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                            )
+                            {
+                                custom double[] mujoco:com = [0.0285085, -0.0128729, -0.017671]
+                                custom double[] mujoco:diaginertia = [0.000126012, 0.0000921991, 0.0000420891]
+                                custom double[] mujoco:inertialQuatWxyz = [0.0257514, 0.696659, 0.0389182, 0.715883]
+                                point3f physics:centerOfMass = (0.0285085, -0.0128729, -0.017671)
+                                float3 physics:diagonalInertia = (0.000126012, 0.0000921991, 0.0000420891)
+                                float physics:mass = 0.0675
+                                quatf physics:principalAxes = (0.0257514, 0.696659, 0.0389182, 0.715883)
+                                double3 xformOp:translate = (-0.0190366, 0.02, 0)
+                                uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                                def PhysicsRevoluteJoint "r_ank_roll" (
+                                    prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+                                )
+                                {
+                                    float drive:angular:physics:damping = 0.0013962634
+                                    float drive:angular:physics:maxForce = 2.1
+                                    float drive:angular:physics:stiffness = 0.61086524
+                                    float drive:angular:physics:targetPosition = 0
+                                    float drive:angular:physics:targetVelocity = 0
+                                    uniform token drive:angular:physics:type = "force"
+                                    custom string mujoco:actuator = "r_ank_roll_pos"
+                                    custom double mujoco:armature = 0.01
+                                    custom double[] mujoco:axis = [1, 0, 0]
+                                    custom bool mujoco:axisDefaulted = 0
+                                    custom double mujoco:damping = 0.08
+                                    custom double mujoco:dampratio = 1
+                                    custom double[] mujoco:forcerange = [-2.1, 2.1]
+                                    custom double mujoco:frictionloss = 0
+                                    custom string mujoco:group = "leg"
+                                    custom double mujoco:kp = 35
+                                    custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                                    uniform token physics:axis = "X"
+                                    rel physics:body0 = </ainex/body_link/r_hip_yaw_link/r_hip_roll_link/r_hip_pitch_link/r_knee_link/r_ank_pitch_link>
+                                    rel physics:body1 = </ainex/body_link/r_hip_yaw_link/r_hip_roll_link/r_hip_pitch_link/r_knee_link/r_ank_pitch_link/r_ank_roll_link>
+                                    bool physics:collisionEnabled = 0
+                                    point3f physics:localPos0 = (-0.0190366, 0.02, 0)
+                                    point3f physics:localPos1 = (0, 0, 0)
+                                    quatf physics:localRot0 = (1, 0, 0, 0)
+                                    quatf physics:localRot1 = (1, 0, 0, 0)
+                                    float physics:lowerLimit = -119.74818
+                                    float physics:upperLimit = 119.74818
+                                    float physxJoint:armature = 0.01
+                                    float physxJoint:jointFriction = 0
+                                }
+
+                                def Mesh "r_ank_roll_link_mesh" (
+                                    prepend references = @../../mujoco/ainex_hiwonder/meshes/r_ank_roll_link.STL@
+                                )
+                                {
+                                    custom bool mujoco:collision = 0
+                                    custom int mujoco:contype = 0
+                                    custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/r_ank_roll_link.STL@
+                                    color3f[] primvars:displayColor = [(0.15, 0.75, 0.35)]
+                                }
+
+                                def Cube "r_foot_contact" (
+                                    prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"]
+                                )
+                                {
+                                    rel material:binding:physics = </ainex/PhysicsMaterials/foot_contact_material> (
+                                        bindMaterialAs = "weakerThanDescendants"
+                                    )
+                                    custom int mujoco:condim = 3
+                                    custom double[] mujoco:friction = [1.6, 0.1, 0.01]
+                                    custom double[] mujoco:halfSize = [0.0725, 0.043, 0.008]
+                                    bool physics:collisionEnabled = 1
+                                    color3f[] primvars:displayColor = [(0.15, 0.75, 0.35)]
+                                    double size = 1
+                                    float3 xformOp:scale = (0.145, 0.086, 0.016)
+                                    double3 xformOp:translate = (0.03, 0, -0.018)
+                                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+                                }
+
+                                def Sphere "r_toe_viz"
+                                {
+                                    custom bool mujoco:collision = 0
+                                    custom int mujoco:contype = 0
+                                    color3f[] primvars:displayColor = [(0.15, 0.75, 0.35)]
+                                    double radius = 0.012
+                                    double3 xformOp:translate = (0.075, 0, -0.012)
+                                    uniform token[] xformOpOrder = ["xformOp:translate"]
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        def Xform "l_hip_yaw_link" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+        )
+        {
+            custom double[] mujoco:com = [-0.0000311406, -0.00125722, -0.0013713]
+            custom double[] mujoco:diaginertia = [0.0000227801, 0.0000175528, 0.00000897707]
+            custom double[] mujoco:inertialQuatWxyz = [0.727661, -0.0116933, 0.0358264, 0.684901]
+            point3f physics:centerOfMass = (-0.0000311406, -0.00125722, -0.0013713)
+            float3 physics:diagonalInertia = (0.0000227801, 0.0000175528, 0.00000897707)
+            float physics:mass = 0.032
+            quatf physics:principalAxes = (0.727661, -0.0116933, 0.0358264, 0.684901)
+            double3 xformOp:translate = (0, 0.029, 0)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+
+            def PhysicsRevoluteJoint "l_hip_yaw" (
+                prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+            )
+            {
+                float drive:angular:physics:damping = 0.0013962634
+                float drive:angular:physics:maxForce = 2.1
+                float drive:angular:physics:stiffness = 0.6981317
+                float drive:angular:physics:targetPosition = 0
+                float drive:angular:physics:targetVelocity = 0
+                uniform token drive:angular:physics:type = "force"
+                custom string mujoco:actuator = "l_hip_yaw_pos"
+                custom double mujoco:armature = 0.01
+                custom double[] mujoco:axis = [0, 0, -1]
+                custom bool mujoco:axisDefaulted = 0
+                custom double mujoco:damping = 0.08
+                custom double mujoco:dampratio = 1
+                custom double[] mujoco:forcerange = [-2.1, 2.1]
+                custom double mujoco:frictionloss = 0
+                custom string mujoco:group = "leg"
+                custom double mujoco:kp = 40
+                custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                uniform token physics:axis = "Z"
+                rel physics:body0 = </ainex/body_link>
+                rel physics:body1 = </ainex/body_link/l_hip_yaw_link>
+                bool physics:collisionEnabled = 0
+                point3f physics:localPos0 = (0, 0.029, 0)
+                point3f physics:localPos1 = (0, 0, 0)
+                quatf physics:localRot0 = (0, 1, 0, 0)
+                quatf physics:localRot1 = (0, 1, 0, 0)
+                float physics:lowerLimit = -119.74818
+                float physics:upperLimit = 119.74818
+                float physxJoint:armature = 0.01
+                float physxJoint:jointFriction = 0
+            }
+
+            def Mesh "l_hip_yaw_link_mesh" (
+                prepend references = @../../mujoco/ainex_hiwonder/meshes/l_hip_yaw_link.STL@
+            )
+            {
+                custom bool mujoco:collision = 0
+                custom int mujoco:contype = 0
+                custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/l_hip_yaw_link.STL@
+                color3f[] primvars:displayColor = [(0.12, 0.12, 0.14)]
+            }
+
+            def Xform "l_hip_roll_link" (
+                prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+            )
+            {
+                custom double[] mujoco:com = [0.00136239, 0.000566861, -0.0134187]
+                custom double[] mujoco:diaginertia = [0.0000731184, 0.0000605065, 0.0000291551]
+                custom double[] mujoco:inertialQuatWxyz = [0.508887, 0.501276, 0.491474, 0.498207]
+                point3f physics:centerOfMass = (0.00136239, 0.000566861, -0.0134187)
+                float3 physics:diagonalInertia = (0.0000731184, 0.0000605065, 0.0000291551)
+                float physics:mass = 0.12
+                quatf physics:principalAxes = (0.508887, 0.501276, 0.491474, 0.498207)
+                double3 xformOp:translate = (-0.01955, 0, -0.0255)
+                uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                def PhysicsRevoluteJoint "l_hip_roll" (
+                    prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+                )
+                {
+                    float drive:angular:physics:damping = 0.0013962634
+                    float drive:angular:physics:maxForce = 2.1
+                    float drive:angular:physics:stiffness = 0.6981317
+                    float drive:angular:physics:targetPosition = 0
+                    float drive:angular:physics:targetVelocity = 0
+                    uniform token drive:angular:physics:type = "force"
+                    custom string mujoco:actuator = "l_hip_roll_pos"
+                    custom double mujoco:armature = 0.01
+                    custom double[] mujoco:axis = [-1, 0, 0]
+                    custom bool mujoco:axisDefaulted = 0
+                    custom double mujoco:damping = 0.08
+                    custom double mujoco:dampratio = 1
+                    custom double[] mujoco:forcerange = [-2.1, 2.1]
+                    custom double mujoco:frictionloss = 0
+                    custom string mujoco:group = "leg"
+                    custom double mujoco:kp = 40
+                    custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                    uniform token physics:axis = "X"
+                    rel physics:body0 = </ainex/body_link/l_hip_yaw_link>
+                    rel physics:body1 = </ainex/body_link/l_hip_yaw_link/l_hip_roll_link>
+                    bool physics:collisionEnabled = 0
+                    point3f physics:localPos0 = (-0.01955, 0, -0.0255)
+                    point3f physics:localPos1 = (0, 0, 0)
+                    quatf physics:localRot0 = (0, 0, 1, 0)
+                    quatf physics:localRot1 = (0, 0, 1, 0)
+                    float physics:lowerLimit = -119.74818
+                    float physics:upperLimit = 119.74818
+                    float physxJoint:armature = 0.01
+                    float physxJoint:jointFriction = 0
+                }
+
+                def Mesh "l_hip_roll_link_mesh" (
+                    prepend references = @../../mujoco/ainex_hiwonder/meshes/l_hip_roll_link.STL@
+                )
+                {
+                    custom bool mujoco:collision = 0
+                    custom int mujoco:contype = 0
+                    custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/l_hip_roll_link.STL@
+                    color3f[] primvars:displayColor = [(0.12, 0.12, 0.14)]
+                }
+
+                def Xform "l_hip_pitch_link" (
+                    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                )
+                {
+                    custom double[] mujoco:com = [0.0135944, -0.0193812, -0.0727051]
+                    custom double[] mujoco:diaginertia = [0.000112942, 0.000111046, 0.0000406518]
+                    custom double[] mujoco:inertialQuatWxyz = [0.671181, 0.0407745, 0.0427036, 0.738938]
+                    point3f physics:centerOfMass = (0.0135944, -0.0193812, -0.0727051)
+                    float3 physics:diagonalInertia = (0.000112942, 0.000111046, 0.0000406518)
+                    float physics:mass = 0.1065
+                    quatf physics:principalAxes = (0.671181, 0.0407745, 0.0427036, 0.738938)
+                    double3 xformOp:translate = (0.019037, 0.02, 0)
+                    uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                    def PhysicsRevoluteJoint "l_hip_pitch" (
+                        prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+                    )
+                    {
+                        float drive:angular:physics:damping = 0.0013962634
+                        float drive:angular:physics:maxForce = 2.1
+                        float drive:angular:physics:stiffness = 0.7853982
+                        float drive:angular:physics:targetPosition = 0
+                        float drive:angular:physics:targetVelocity = 0
+                        uniform token drive:angular:physics:type = "force"
+                        custom string mujoco:actuator = "l_hip_pitch_pos"
+                        custom double mujoco:armature = 0.01
+                        custom double[] mujoco:axis = [0, 1, 0]
+                        custom bool mujoco:axisDefaulted = 0
+                        custom double mujoco:damping = 0.08
+                        custom double mujoco:dampratio = 1
+                        custom double[] mujoco:forcerange = [-2.1, 2.1]
+                        custom double mujoco:frictionloss = 0
+                        custom string mujoco:group = "leg"
+                        custom double mujoco:kp = 45
+                        custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                        uniform token physics:axis = "Y"
+                        rel physics:body0 = </ainex/body_link/l_hip_yaw_link/l_hip_roll_link>
+                        rel physics:body1 = </ainex/body_link/l_hip_yaw_link/l_hip_roll_link/l_hip_pitch_link>
+                        bool physics:collisionEnabled = 0
+                        point3f physics:localPos0 = (0.019037, 0.02, 0)
+                        point3f physics:localPos1 = (0, 0, 0)
+                        quatf physics:localRot0 = (1, 0, 0, 0)
+                        quatf physics:localRot1 = (1, 0, 0, 0)
+                        float physics:lowerLimit = -119.74818
+                        float physics:upperLimit = 119.74818
+                        float physxJoint:armature = 0.01
+                        float physxJoint:jointFriction = 0
+                    }
+
+                    def Mesh "l_hip_pitch_link_mesh" (
+                        prepend references = @../../mujoco/ainex_hiwonder/meshes/l_hip_pitch_link.STL@
+                    )
+                    {
+                        custom bool mujoco:collision = 0
+                        custom int mujoco:contype = 0
+                        custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/l_hip_pitch_link.STL@
+                        color3f[] primvars:displayColor = [(0.95, 0.45, 0.08)]
+                    }
+
+                    def Xform "l_knee_link" (
+                        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                    )
+                    {
+                        custom double[] mujoco:com = [0.00334256, -0.0196465, -0.0425053]
+                        custom double[] mujoco:diaginertia = [0.0000675038, 0.0000549999, 0.0000205563]
+                        custom double[] mujoco:inertialQuatWxyz = [0.999536, 0.0000838714, -0.0304235, -0.00159474]
+                        point3f physics:centerOfMass = (0.00334256, -0.0196465, -0.0425053)
+                        float3 physics:diagonalInertia = (0.0000675038, 0.0000549999, 0.0000205563)
+                        float physics:mass = 0.045
+                        quatf physics:principalAxes = (0.999536, 0.0000838714, -0.0304235, -0.00159474)
+                        double3 xformOp:translate = (-0.00037204, -0.00005, -0.096886)
+                        uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                        def PhysicsRevoluteJoint "l_knee" (
+                            prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+                        )
+                        {
+                            float drive:angular:physics:damping = 0.0013962634
+                            float drive:angular:physics:maxForce = 2.1
+                            float drive:angular:physics:stiffness = 0.7853982
+                            float drive:angular:physics:targetPosition = 0
+                            float drive:angular:physics:targetVelocity = 0
+                            uniform token drive:angular:physics:type = "force"
+                            custom string mujoco:actuator = "l_knee_pos"
+                            custom double mujoco:armature = 0.01
+                            custom double[] mujoco:axis = [0, 1, 0]
+                            custom bool mujoco:axisDefaulted = 0
+                            custom double mujoco:damping = 0.08
+                            custom double mujoco:dampratio = 1
+                            custom double[] mujoco:forcerange = [-2.1, 2.1]
+                            custom double mujoco:frictionloss = 0
+                            custom string mujoco:group = "leg"
+                            custom double mujoco:kp = 45
+                            custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                            uniform token physics:axis = "Y"
+                            rel physics:body0 = </ainex/body_link/l_hip_yaw_link/l_hip_roll_link/l_hip_pitch_link>
+                            rel physics:body1 = </ainex/body_link/l_hip_yaw_link/l_hip_roll_link/l_hip_pitch_link/l_knee_link>
+                            bool physics:collisionEnabled = 0
+                            point3f physics:localPos0 = (-0.00037204, -0.00005, -0.096886)
+                            point3f physics:localPos1 = (0, 0, 0)
+                            quatf physics:localRot0 = (1, 0, 0, 0)
+                            quatf physics:localRot1 = (1, 0, 0, 0)
+                            float physics:lowerLimit = -119.74818
+                            float physics:upperLimit = 119.74818
+                            float physxJoint:armature = 0.01
+                            float physxJoint:jointFriction = 0
+                        }
+
+                        def Mesh "l_knee_link_mesh" (
+                            prepend references = @../../mujoco/ainex_hiwonder/meshes/l_knee_link.STL@
+                        )
+                        {
+                            custom bool mujoco:collision = 0
+                            custom int mujoco:contype = 0
+                            custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/l_knee_link.STL@
+                            color3f[] primvars:displayColor = [(0.95, 0.45, 0.08)]
+                        }
+
+                        def Xform "l_ank_pitch_link" (
+                            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                        )
+                        {
+                            custom double[] mujoco:com = [-0.017544, -0.0195632, 0.0134182]
+                            custom double[] mujoco:diaginertia = [0.0000736835, 0.0000610769, 0.0000291596]
+                            custom double[] mujoco:inertialQuatWxyz = [0.503197, 0.510389, 0.496862, 0.489309]
+                            point3f physics:centerOfMass = (-0.017544, -0.0195632, 0.0134182)
+                            float3 physics:diagonalInertia = (0.0000736835, 0.0000610769, 0.0000291596)
+                            float physics:mass = 0.12
+                            quatf physics:principalAxes = (0.503197, 0.510389, 0.496862, 0.489309)
+                            double3 xformOp:translate = (0.001037, 0, -0.089077)
+                            uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                            def PhysicsRevoluteJoint "l_ank_pitch" (
+                                prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+                            )
+                            {
+                                float drive:angular:physics:damping = 0.0013962634
+                                float drive:angular:physics:maxForce = 2.1
+                                float drive:angular:physics:stiffness = 0.61086524
+                                float drive:angular:physics:targetPosition = 0
+                                float drive:angular:physics:targetVelocity = 0
+                                uniform token drive:angular:physics:type = "force"
+                                custom string mujoco:actuator = "l_ank_pitch_pos"
+                                custom double mujoco:armature = 0.01
+                                custom double[] mujoco:axis = [0, -1, 0]
+                                custom bool mujoco:axisDefaulted = 0
+                                custom double mujoco:damping = 0.08
+                                custom double mujoco:dampratio = 1
+                                custom double[] mujoco:forcerange = [-2.1, 2.1]
+                                custom double mujoco:frictionloss = 0
+                                custom string mujoco:group = "leg"
+                                custom double mujoco:kp = 35
+                                custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                                uniform token physics:axis = "Y"
+                                rel physics:body0 = </ainex/body_link/l_hip_yaw_link/l_hip_roll_link/l_hip_pitch_link/l_knee_link>
+                                rel physics:body1 = </ainex/body_link/l_hip_yaw_link/l_hip_roll_link/l_hip_pitch_link/l_knee_link/l_ank_pitch_link>
+                                bool physics:collisionEnabled = 0
+                                point3f physics:localPos0 = (0.001037, 0, -0.089077)
+                                point3f physics:localPos1 = (0, 0, 0)
+                                quatf physics:localRot0 = (0, 1, 0, 0)
+                                quatf physics:localRot1 = (0, 1, 0, 0)
+                                float physics:lowerLimit = -119.74818
+                                float physics:upperLimit = 119.74818
+                                float physxJoint:armature = 0.01
+                                float physxJoint:jointFriction = 0
+                            }
+
+                            def Mesh "l_ank_pitch_link_mesh" (
+                                prepend references = @../../mujoco/ainex_hiwonder/meshes/l_ank_pitch_link.STL@
+                            )
+                            {
+                                custom bool mujoco:collision = 0
+                                custom int mujoco:contype = 0
+                                custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/l_ank_pitch_link.STL@
+                                color3f[] primvars:displayColor = [(0.95, 0.45, 0.08)]
+                            }
+
+                            def Xform "l_ank_roll_link" (
+                                prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                            )
+                            {
+                                custom double[] mujoco:com = [0.028508, 0.012873, -0.017671]
+                                custom double[] mujoco:diaginertia = [0.000126012, 0.0000921991, 0.0000420891]
+                                custom double[] mujoco:inertialQuatWxyz = [-0.0257514, 0.696659, -0.0389182, 0.715883]
+                                point3f physics:centerOfMass = (0.028508, 0.012873, -0.017671)
+                                float3 physics:diagonalInertia = (0.000126012, 0.0000921991, 0.0000420891)
+                                float physics:mass = 0.0675
+                                quatf physics:principalAxes = (-0.0257514, 0.696659, -0.0389182, 0.715883)
+                                double3 xformOp:translate = (-0.019037, -0.02, 0)
+                                uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                                def PhysicsRevoluteJoint "l_ank_roll" (
+                                    prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+                                )
+                                {
+                                    float drive:angular:physics:damping = 0.0013962634
+                                    float drive:angular:physics:maxForce = 2.1
+                                    float drive:angular:physics:stiffness = 0.61086524
+                                    float drive:angular:physics:targetPosition = 0
+                                    float drive:angular:physics:targetVelocity = 0
+                                    uniform token drive:angular:physics:type = "force"
+                                    custom string mujoco:actuator = "l_ank_roll_pos"
+                                    custom double mujoco:armature = 0.01
+                                    custom double[] mujoco:axis = [1, 0, 0]
+                                    custom bool mujoco:axisDefaulted = 0
+                                    custom double mujoco:damping = 0.08
+                                    custom double mujoco:dampratio = 1
+                                    custom double[] mujoco:forcerange = [-2.1, 2.1]
+                                    custom double mujoco:frictionloss = 0
+                                    custom string mujoco:group = "leg"
+                                    custom double mujoco:kp = 35
+                                    custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                                    uniform token physics:axis = "X"
+                                    rel physics:body0 = </ainex/body_link/l_hip_yaw_link/l_hip_roll_link/l_hip_pitch_link/l_knee_link/l_ank_pitch_link>
+                                    rel physics:body1 = </ainex/body_link/l_hip_yaw_link/l_hip_roll_link/l_hip_pitch_link/l_knee_link/l_ank_pitch_link/l_ank_roll_link>
+                                    bool physics:collisionEnabled = 0
+                                    point3f physics:localPos0 = (-0.019037, -0.02, 0)
+                                    point3f physics:localPos1 = (0, 0, 0)
+                                    quatf physics:localRot0 = (1, 0, 0, 0)
+                                    quatf physics:localRot1 = (1, 0, 0, 0)
+                                    float physics:lowerLimit = -119.74818
+                                    float physics:upperLimit = 119.74818
+                                    float physxJoint:armature = 0.01
+                                    float physxJoint:jointFriction = 0
+                                }
+
+                                def Mesh "l_ank_roll_link_mesh" (
+                                    prepend references = @../../mujoco/ainex_hiwonder/meshes/l_ank_roll_link.STL@
+                                )
+                                {
+                                    custom bool mujoco:collision = 0
+                                    custom int mujoco:contype = 0
+                                    custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/l_ank_roll_link.STL@
+                                    color3f[] primvars:displayColor = [(0.95, 0.45, 0.08)]
+                                }
+
+                                def Cube "l_foot_contact" (
+                                    prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"]
+                                )
+                                {
+                                    rel material:binding:physics = </ainex/PhysicsMaterials/foot_contact_material> (
+                                        bindMaterialAs = "weakerThanDescendants"
+                                    )
+                                    custom int mujoco:condim = 3
+                                    custom double[] mujoco:friction = [1.6, 0.1, 0.01]
+                                    custom double[] mujoco:halfSize = [0.0725, 0.043, 0.008]
+                                    bool physics:collisionEnabled = 1
+                                    color3f[] primvars:displayColor = [(0.95, 0.45, 0.08)]
+                                    double size = 1
+                                    float3 xformOp:scale = (0.145, 0.086, 0.016)
+                                    double3 xformOp:translate = (0.03, 0, -0.018)
+                                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+                                }
+
+                                def Sphere "l_toe_viz"
+                                {
+                                    custom bool mujoco:collision = 0
+                                    custom int mujoco:contype = 0
+                                    color3f[] primvars:displayColor = [(0.95, 0.45, 0.08)]
+                                    double radius = 0.012
+                                    double3 xformOp:translate = (0.075, 0, -0.012)
+                                    uniform token[] xformOpOrder = ["xformOp:translate"]
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        def Xform "head_pan_link" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+        )
+        {
+            custom double[] mujoco:com = [0.00549414, 0.000156599, 0.0141339]
+            custom double[] mujoco:diaginertia = [0.00000217841, 0.00000177447, 9.86663e-7]
+            custom double[] mujoco:inertialQuatWxyz = [0.693159, 0.693116, 0.139862, -0.139857]
+            point3f physics:centerOfMass = (0.00549414, 0.000156599, 0.0141339)
+            float3 physics:diagonalInertia = (0.00000217841, 0.00000177447, 9.86663e-7)
+            float physics:mass = 0.00767349
+            quatf physics:principalAxes = (0.693159, 0.693116, 0.139862, -0.139857)
+            double3 xformOp:translate = (-0.00410029, 0, 0.1078)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+
+            def PhysicsRevoluteJoint "head_pan" (
+                prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+            )
+            {
+                float drive:angular:physics:damping = 0.0008726646
+                float drive:angular:physics:maxForce = 0.7
+                float drive:angular:physics:stiffness = 0.2617994
+                float drive:angular:physics:targetPosition = 0
+                float drive:angular:physics:targetVelocity = 0
+                uniform token drive:angular:physics:type = "force"
+                custom string mujoco:actuator = "head_pan_pos"
+                custom double mujoco:armature = 0.01
+                custom double[] mujoco:axis = [0, 0, -1]
+                custom bool mujoco:axisDefaulted = 0
+                custom double mujoco:damping = 0.05
+                custom double mujoco:dampratio = 1
+                custom double[] mujoco:forcerange = [-0.7, 0.7]
+                custom double mujoco:frictionloss = 0
+                custom string mujoco:group = "head"
+                custom double mujoco:kp = 15
+                custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                uniform token physics:axis = "Z"
+                rel physics:body0 = </ainex/body_link>
+                rel physics:body1 = </ainex/body_link/head_pan_link>
+                bool physics:collisionEnabled = 0
+                point3f physics:localPos0 = (-0.00410029, 0, 0.1078)
+                point3f physics:localPos1 = (0, 0, 0)
+                quatf physics:localRot0 = (0, 1, 0, 0)
+                quatf physics:localRot1 = (0, 1, 0, 0)
+                float physics:lowerLimit = -119.74818
+                float physics:upperLimit = 119.74818
+                float physxJoint:armature = 0.01
+                float physxJoint:jointFriction = 0
+            }
+
+            def Mesh "head_pan_link_mesh" (
+                prepend references = @../../mujoco/ainex_hiwonder/meshes/head_pan_link.STL@
+            )
+            {
+                custom bool mujoco:collision = 0
+                custom int mujoco:contype = 0
+                custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/head_pan_link.STL@
+                color3f[] primvars:displayColor = [(0.12, 0.12, 0.14)]
+            }
+
+            def Xform "head_tilt_link" (
+                prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+            )
+            {
+                custom double[] mujoco:com = [0.0113381, 0.0189173, 0.0221227]
+                custom double[] mujoco:diaginertia = [0.00000742721, 0.00000632366, 0.0000056713]
+                custom double[] mujoco:inertialQuatWxyz = [0.00744474, 0.879474, -0.0114416, 0.475751]
+                point3f physics:centerOfMass = (0.0113381, 0.0189173, 0.0221227)
+                float3 physics:diagonalInertia = (0.00000742721, 0.00000632366, 0.0000056713)
+                float physics:mass = 0.0262249
+                quatf physics:principalAxes = (0.00744474, 0.879474, -0.0114416, 0.475751)
+                double3 xformOp:translate = (0.00904595, -0.0185734, 0.0281579)
+                uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                def PhysicsRevoluteJoint "head_tilt" (
+                    prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+                )
+                {
+                    float drive:angular:physics:damping = 0.0008726646
+                    float drive:angular:physics:maxForce = 0.7
+                    float drive:angular:physics:stiffness = 0.2617994
+                    float drive:angular:physics:targetPosition = 0
+                    float drive:angular:physics:targetVelocity = 0
+                    uniform token drive:angular:physics:type = "force"
+                    custom string mujoco:actuator = "head_tilt_pos"
+                    custom double mujoco:armature = 0.01
+                    custom double[] mujoco:axis = [0, -1, 0]
+                    custom bool mujoco:axisDefaulted = 0
+                    custom double mujoco:damping = 0.05
+                    custom double mujoco:dampratio = 1
+                    custom double[] mujoco:forcerange = [-0.7, 0.7]
+                    custom double mujoco:frictionloss = 0
+                    custom string mujoco:group = "head"
+                    custom double mujoco:kp = 15
+                    custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                    uniform token physics:axis = "Y"
+                    rel physics:body0 = </ainex/body_link/head_pan_link>
+                    rel physics:body1 = </ainex/body_link/head_pan_link/head_tilt_link>
+                    bool physics:collisionEnabled = 0
+                    point3f physics:localPos0 = (0.00904595, -0.0185734, 0.0281579)
+                    point3f physics:localPos1 = (0, 0, 0)
+                    quatf physics:localRot0 = (0, 1, 0, 0)
+                    quatf physics:localRot1 = (0, 1, 0, 0)
+                    float physics:lowerLimit = -119.74818
+                    float physics:upperLimit = 119.74818
+                    float physxJoint:armature = 0.01
+                    float physxJoint:jointFriction = 0
+                }
+
+                def Mesh "head_tilt_link_mesh" (
+                    prepend references = @../../mujoco/ainex_hiwonder/meshes/head_tilt_link.STL@
+                )
+                {
+                    custom bool mujoco:collision = 0
+                    custom int mujoco:contype = 0
+                    custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/head_tilt_link.STL@
+                    color3f[] primvars:displayColor = [(0.12, 0.12, 0.14)]
+                }
+
+                def Camera "kit_cam"
+                {
+                    float2 clippingRange = (0.01, 100)
+                    float focalLength = 10
+                    float horizontalAperture = 34.639877
+                    custom double mujoco:fovy = 104.82
+                    custom string mujoco:note = "No mass. clippingRange (0.01, 100) and focalLength 10 mm are USD carriers, not MuJoCo camera attributes. horizontalAperture uses visual global 960x720."
+                    custom double[] mujoco:pos = [0.02, 0.019, 0.007]
+                    custom double[] mujoco:xyaxes = [0, -1, 0, 0, 0, 1]
+                    token projection = "perspective"
+                    float verticalAperture = 25.979908
+                    quatf xformOp:orient = (0.5, 0.5, -0.5, -0.5)
+                    double3 xformOp:translate = (0.02, 0.019, 0.007)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+                }
+            }
+        }
+
+        def Xform "r_sho_pitch_link" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+        )
+        {
+            custom double[] mujoco:com = [0.000375793, -0.0113307, 0.00000209986]
+            custom double[] mujoco:diaginertia = [0.00000503, 0.00000390135, 0.00000204865]
+            custom double[] mujoco:inertialQuatWxyz = [-0.00954592, 0.707042, 0.00954592, 0.707042]
+            point3f physics:centerOfMass = (0.000375793, -0.0113307, 0.00000209986)
+            float3 physics:diagonalInertia = (0.00000503, 0.00000390135, 0.00000204865)
+            float physics:mass = 0.0128
+            quatf physics:principalAxes = (-0.00954592, 0.707042, 0.00954592, 0.707042)
+            double3 xformOp:translate = (-0.0000546274, -0.052491, 0.087448)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+
+            def PhysicsRevoluteJoint "r_sho_pitch" (
+                prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+            )
+            {
+                float drive:angular:physics:damping = 0.0008726646
+                float drive:angular:physics:maxForce = 0.7
+                float drive:angular:physics:stiffness = 0.34906584
+                float drive:angular:physics:targetPosition = 0
+                float drive:angular:physics:targetVelocity = 0
+                uniform token drive:angular:physics:type = "force"
+                custom string mujoco:actuator = "r_sho_pitch_pos"
+                custom double mujoco:armature = 0.01
+                custom double[] mujoco:axis = [0, -1, 0]
+                custom bool mujoco:axisDefaulted = 0
+                custom double mujoco:damping = 0.05
+                custom double mujoco:dampratio = 1
+                custom double[] mujoco:forcerange = [-0.7, 0.7]
+                custom double mujoco:frictionloss = 0.2
+                custom string mujoco:group = "arm"
+                custom double mujoco:kp = 20
+                custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                uniform token physics:axis = "Y"
+                rel physics:body0 = </ainex/body_link>
+                rel physics:body1 = </ainex/body_link/r_sho_pitch_link>
+                bool physics:collisionEnabled = 0
+                point3f physics:localPos0 = (-0.0000546274, -0.052491, 0.087448)
+                point3f physics:localPos1 = (0, 0, 0)
+                quatf physics:localRot0 = (0, 1, 0, 0)
+                quatf physics:localRot1 = (0, 1, 0, 0)
+                float physics:lowerLimit = -119.74818
+                float physics:upperLimit = 119.74818
+                float physxJoint:armature = 0.01
+                float physxJoint:jointFriction = 0.2
+            }
+
+            def Mesh "r_sho_pitch_link_mesh" (
+                prepend references = @../../mujoco/ainex_hiwonder/meshes/r_sho_pitch_link.STL@
+            )
+            {
+                custom bool mujoco:collision = 0
+                custom int mujoco:contype = 0
+                custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/r_sho_pitch_link.STL@
+                color3f[] primvars:displayColor = [(0.12, 0.12, 0.14)]
+            }
+
+            def Xform "r_sho_roll_link" (
+                prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+            )
+            {
+                custom double[] mujoco:com = [-0.0205038, -0.0278388, -0.0000610732]
+                custom double[] mujoco:diaginertia = [0.000075398, 0.000074522, 0.0000237399]
+                custom double[] mujoco:inertialQuatWxyz = [0.428351, 0.520926, -0.479863, 0.561145]
+                point3f physics:centerOfMass = (-0.0205038, -0.0278388, -0.0000610732)
+                float3 physics:diagonalInertia = (0.000075398, 0.000074522, 0.0000237399)
+                float physics:mass = 0.121
+                quatf physics:principalAxes = (0.428351, 0.520926, -0.479863, 0.561145)
+                double3 xformOp:translate = (0.0200035, -0.021506, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                def PhysicsRevoluteJoint "r_sho_roll" (
+                    prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+                )
+                {
+                    float drive:angular:physics:damping = 0.0008726646
+                    float drive:angular:physics:maxForce = 0.7
+                    float drive:angular:physics:stiffness = 0.34906584
+                    float drive:angular:physics:targetPosition = 0
+                    float drive:angular:physics:targetVelocity = 0
+                    uniform token drive:angular:physics:type = "force"
+                    custom string mujoco:actuator = "r_sho_roll_pos"
+                    custom double mujoco:armature = 0.01
+                    custom double[] mujoco:axis = [1, 0, 0]
+                    custom bool mujoco:axisDefaulted = 0
+                    custom double mujoco:damping = 0.05
+                    custom double mujoco:dampratio = 1
+                    custom double[] mujoco:forcerange = [-0.7, 0.7]
+                    custom double mujoco:frictionloss = 0.2
+                    custom string mujoco:group = "arm"
+                    custom double mujoco:kp = 20
+                    custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                    uniform token physics:axis = "X"
+                    rel physics:body0 = </ainex/body_link/r_sho_pitch_link>
+                    rel physics:body1 = </ainex/body_link/r_sho_pitch_link/r_sho_roll_link>
+                    bool physics:collisionEnabled = 0
+                    point3f physics:localPos0 = (0.0200035, -0.021506, 0)
+                    point3f physics:localPos1 = (0, 0, 0)
+                    quatf physics:localRot0 = (1, 0, 0, 0)
+                    quatf physics:localRot1 = (1, 0, 0, 0)
+                    float physics:lowerLimit = -119.74818
+                    float physics:upperLimit = 119.74818
+                    float physxJoint:armature = 0.01
+                    float physxJoint:jointFriction = 0.2
+                }
+
+                def Mesh "r_sho_roll_link_mesh" (
+                    prepend references = @../../mujoco/ainex_hiwonder/meshes/r_sho_roll_link.STL@
+                )
+                {
+                    custom bool mujoco:collision = 0
+                    custom int mujoco:contype = 0
+                    custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/r_sho_roll_link.STL@
+                    color3f[] primvars:displayColor = [(0.12, 0.12, 0.14)]
+                }
+
+                def Xform "r_el_pitch_link" (
+                    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                )
+                {
+                    custom double[] mujoco:com = [-0.00697553, -0.0128964, 0.000205171]
+                    custom double[] mujoco:diaginertia = [0.0000105425, 0.00000879567, 0.00000746187]
+                    custom double[] mujoco:inertialQuatWxyz = [0.20604, 0.650509, -0.249985, 0.686945]
+                    point3f physics:centerOfMass = (-0.00697553, -0.0128964, 0.000205171)
+                    float3 physics:diagonalInertia = (0.0000105425, 0.00000879567, 0.00000746187)
+                    float physics:mass = 0.045
+                    quatf physics:principalAxes = (0.20604, 0.650509, -0.249985, 0.686945)
+                    double3 xformOp:translate = (-0.0200035, -0.0741099, 0)
+                    uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                    def PhysicsRevoluteJoint "r_el_pitch" (
+                        prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+                    )
+                    {
+                        float drive:angular:physics:damping = 0.0008726646
+                        float drive:angular:physics:maxForce = 0.7
+                        float drive:angular:physics:stiffness = 0.34906584
+                        float drive:angular:physics:targetPosition = 0
+                        float drive:angular:physics:targetVelocity = 0
+                        uniform token drive:angular:physics:type = "force"
+                        custom string mujoco:actuator = "r_el_pitch_pos"
+                        custom double mujoco:armature = 0.01
+                        custom double[] mujoco:axis = [0, -1, 0]
+                        custom bool mujoco:axisDefaulted = 0
+                        custom double mujoco:damping = 0.05
+                        custom double mujoco:dampratio = 1
+                        custom double[] mujoco:forcerange = [-0.7, 0.7]
+                        custom double mujoco:frictionloss = 0.2
+                        custom string mujoco:group = "arm"
+                        custom double mujoco:kp = 20
+                        custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                        uniform token physics:axis = "Y"
+                        rel physics:body0 = </ainex/body_link/r_sho_pitch_link/r_sho_roll_link>
+                        rel physics:body1 = </ainex/body_link/r_sho_pitch_link/r_sho_roll_link/r_el_pitch_link>
+                        bool physics:collisionEnabled = 0
+                        point3f physics:localPos0 = (-0.0200035, -0.0741099, 0)
+                        point3f physics:localPos1 = (0, 0, 0)
+                        quatf physics:localRot0 = (0, 1, 0, 0)
+                        quatf physics:localRot1 = (0, 1, 0, 0)
+                        float physics:lowerLimit = -119.74818
+                        float physics:upperLimit = 119.74818
+                        float physxJoint:armature = 0.01
+                        float physxJoint:jointFriction = 0.2
+                    }
+
+                    def Mesh "r_el_pitch_link_mesh" (
+                        prepend references = @../../mujoco/ainex_hiwonder/meshes/r_el_pitch_link.STL@
+                    )
+                    {
+                        custom bool mujoco:collision = 0
+                        custom int mujoco:contype = 0
+                        custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/r_el_pitch_link.STL@
+                        color3f[] primvars:displayColor = [(0.12, 0.12, 0.14)]
+                    }
+
+                    def Xform "r_el_yaw_link" (
+                        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                    )
+                    {
+                        custom double[] mujoco:com = [-0.000228559, -0.0572724, -0.0138716]
+                        custom double[] mujoco:diaginertia = [0.000143205, 0.000142106, 0.0000294195]
+                        custom double[] mujoco:inertialQuatWxyz = [0.66352, 0.747563, 0.0231725, -0.0188373]
+                        point3f physics:centerOfMass = (-0.000228559, -0.0572724, -0.0138716)
+                        float3 physics:diagonalInertia = (0.000143205, 0.000142106, 0.0000294195)
+                        float physics:mass = 0.102
+                        quatf physics:principalAxes = (0.66352, 0.747563, 0.0231725, -0.0188373)
+                        double3 xformOp:translate = (0.000397813, -0.0170183, 0.0190702)
+                        uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                        def PhysicsRevoluteJoint "r_el_yaw" (
+                            prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+                        )
+                        {
+                            float drive:angular:physics:damping = 0.0008726646
+                            float drive:angular:physics:maxForce = 0.7
+                            float drive:angular:physics:stiffness = 0.34906584
+                            float drive:angular:physics:targetPosition = 0
+                            float drive:angular:physics:targetVelocity = 0
+                            uniform token drive:angular:physics:type = "force"
+                            custom string mujoco:actuator = "r_el_yaw_pos"
+                            custom double mujoco:armature = 0.01
+                            custom double[] mujoco:axis = [0, 0, 1]
+                            custom bool mujoco:axisDefaulted = 1
+                            custom double mujoco:damping = 0.05
+                            custom double mujoco:dampratio = 1
+                            custom double[] mujoco:forcerange = [-0.7, 0.7]
+                            custom double mujoco:frictionloss = 0.2
+                            custom string mujoco:group = "arm"
+                            custom double mujoco:kp = 20
+                            custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                            uniform token physics:axis = "Z"
+                            rel physics:body0 = </ainex/body_link/r_sho_pitch_link/r_sho_roll_link/r_el_pitch_link>
+                            rel physics:body1 = </ainex/body_link/r_sho_pitch_link/r_sho_roll_link/r_el_pitch_link/r_el_yaw_link>
+                            bool physics:collisionEnabled = 0
+                            point3f physics:localPos0 = (0.000397813, -0.0170183, 0.0190702)
+                            point3f physics:localPos1 = (0, 0, 0)
+                            quatf physics:localRot0 = (1, 0, 0, 0)
+                            quatf physics:localRot1 = (1, 0, 0, 0)
+                            float physics:lowerLimit = -119.74818
+                            float physics:upperLimit = 119.74818
+                            float physxJoint:armature = 0.01
+                            float physxJoint:jointFriction = 0.2
+                        }
+
+                        def Mesh "r_el_yaw_link_mesh" (
+                            prepend references = @../../mujoco/ainex_hiwonder/meshes/r_el_yaw_link.STL@
+                        )
+                        {
+                            custom bool mujoco:collision = 0
+                            custom int mujoco:contype = 0
+                            custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/r_el_yaw_link.STL@
+                            color3f[] primvars:displayColor = [(0.12, 0.12, 0.14)]
+                        }
+
+                        def Xform "r_gripper_link" (
+                            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                        )
+                        {
+                            custom double[] mujoco:com = [-0.0193851, -0.00931115, -0.00543048]
+                            custom double[] mujoco:diaginertia = [0.00000651914, 0.00000396161, 0.00000327925]
+                            custom double[] mujoco:inertialQuatWxyz = [0.159151, 0.685412, 0.178235, 0.687832]
+                            point3f physics:centerOfMass = (-0.0193851, -0.00931115, -0.00543048)
+                            float3 physics:diagonalInertia = (0.00000651914, 0.00000396161, 0.00000327925)
+                            float physics:mass = 0.0135
+                            quatf physics:principalAxes = (0.159151, 0.685412, 0.178235, 0.687832)
+                            double3 xformOp:translate = (0.0198902, -0.0892356, -0.0190702)
+                            uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                            def PhysicsRevoluteJoint "r_gripper" (
+                                prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+                            )
+                            {
+                                float drive:angular:physics:damping = 0.0008726646
+                                float drive:angular:physics:maxForce = 0.7
+                                float drive:angular:physics:stiffness = 0.34906584
+                                float drive:angular:physics:targetPosition = 0
+                                float drive:angular:physics:targetVelocity = 0
+                                uniform token drive:angular:physics:type = "force"
+                                custom string mujoco:actuator = "r_gripper_pos"
+                                custom double mujoco:armature = 0.01
+                                custom double[] mujoco:axis = [1, 0, 0]
+                                custom bool mujoco:axisDefaulted = 0
+                                custom double mujoco:damping = 0.05
+                                custom double mujoco:dampratio = 1
+                                custom double[] mujoco:forcerange = [-0.7, 0.7]
+                                custom double mujoco:frictionloss = 0.2
+                                custom string mujoco:group = "arm"
+                                custom double mujoco:kp = 20
+                                custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                                uniform token physics:axis = "X"
+                                rel physics:body0 = </ainex/body_link/r_sho_pitch_link/r_sho_roll_link/r_el_pitch_link/r_el_yaw_link>
+                                rel physics:body1 = </ainex/body_link/r_sho_pitch_link/r_sho_roll_link/r_el_pitch_link/r_el_yaw_link/r_gripper_link>
+                                bool physics:collisionEnabled = 0
+                                point3f physics:localPos0 = (0.0198902, -0.0892356, -0.0190702)
+                                point3f physics:localPos1 = (0, 0, 0)
+                                quatf physics:localRot0 = (1, 0, 0, 0)
+                                quatf physics:localRot1 = (1, 0, 0, 0)
+                                float physics:lowerLimit = -119.74818
+                                float physics:upperLimit = 119.74818
+                                float physxJoint:armature = 0.01
+                                float physxJoint:jointFriction = 0.2
+                            }
+
+                            def Mesh "r_gripper_link_mesh" (
+                                prepend references = @../../mujoco/ainex_hiwonder/meshes/r_gripper_link.STL@
+                            )
+                            {
+                                custom bool mujoco:collision = 0
+                                custom int mujoco:contype = 0
+                                custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/r_gripper_link.STL@
+                                color3f[] primvars:displayColor = [(0.12, 0.12, 0.14)]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        def Xform "l_sho_pitch_link" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+        )
+        {
+            custom double[] mujoco:com = [0.000375774, 0.0113303, 0.00000196337]
+            custom double[] mujoco:diaginertia = [0.00000503, 0.00000390135, 0.00000204865]
+            custom double[] mujoco:inertialQuatWxyz = [0.00954592, 0.707042, -0.00954592, 0.707042]
+            point3f physics:centerOfMass = (0.000375774, 0.0113303, 0.00000196337)
+            float3 physics:diagonalInertia = (0.00000503, 0.00000390135, 0.00000204865)
+            float physics:mass = 0.0128
+            quatf physics:principalAxes = (0.00954592, 0.707042, -0.00954592, 0.707042)
+            double3 xformOp:translate = (-0.000054627, 0.052491, 0.087448)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+
+            def PhysicsRevoluteJoint "l_sho_pitch" (
+                prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+            )
+            {
+                float drive:angular:physics:damping = 0.0008726646
+                float drive:angular:physics:maxForce = 0.7
+                float drive:angular:physics:stiffness = 0.34906584
+                float drive:angular:physics:targetPosition = 0
+                float drive:angular:physics:targetVelocity = 0
+                uniform token drive:angular:physics:type = "force"
+                custom string mujoco:actuator = "l_sho_pitch_pos"
+                custom double mujoco:armature = 0.01
+                custom double[] mujoco:axis = [0, -1, 0]
+                custom bool mujoco:axisDefaulted = 0
+                custom double mujoco:damping = 0.05
+                custom double mujoco:dampratio = 1
+                custom double[] mujoco:forcerange = [-0.7, 0.7]
+                custom double mujoco:frictionloss = 0.2
+                custom string mujoco:group = "arm"
+                custom double mujoco:kp = 20
+                custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                uniform token physics:axis = "Y"
+                rel physics:body0 = </ainex/body_link>
+                rel physics:body1 = </ainex/body_link/l_sho_pitch_link>
+                bool physics:collisionEnabled = 0
+                point3f physics:localPos0 = (-0.000054627, 0.052491, 0.087448)
+                point3f physics:localPos1 = (0, 0, 0)
+                quatf physics:localRot0 = (0, 1, 0, 0)
+                quatf physics:localRot1 = (0, 1, 0, 0)
+                float physics:lowerLimit = -119.74818
+                float physics:upperLimit = 119.74818
+                float physxJoint:armature = 0.01
+                float physxJoint:jointFriction = 0.2
+            }
+
+            def Mesh "l_sho_pitch_link_mesh" (
+                prepend references = @../../mujoco/ainex_hiwonder/meshes/l_sho_pitch_link.STL@
+            )
+            {
+                custom bool mujoco:collision = 0
+                custom int mujoco:contype = 0
+                custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/l_sho_pitch_link.STL@
+                color3f[] primvars:displayColor = [(0.12, 0.12, 0.14)]
+            }
+
+            def Xform "l_sho_roll_link" (
+                prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+            )
+            {
+                custom double[] mujoco:com = [-0.020504, 0.027838, -0.000060431]
+                custom double[] mujoco:diaginertia = [0.000075398, 0.000074522, 0.0000237399]
+                custom double[] mujoco:inertialQuatWxyz = [0.520926, 0.428351, -0.561145, 0.479863]
+                point3f physics:centerOfMass = (-0.020504, 0.027838, -0.000060431)
+                float3 physics:diagonalInertia = (0.000075398, 0.000074522, 0.0000237399)
+                float physics:mass = 0.121
+                quatf physics:principalAxes = (0.520926, 0.428351, -0.561145, 0.479863)
+                double3 xformOp:translate = (0.020003, 0.021507, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                def PhysicsRevoluteJoint "l_sho_roll" (
+                    prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+                )
+                {
+                    float drive:angular:physics:damping = 0.0008726646
+                    float drive:angular:physics:maxForce = 0.7
+                    float drive:angular:physics:stiffness = 0.34906584
+                    float drive:angular:physics:targetPosition = 0
+                    float drive:angular:physics:targetVelocity = 0
+                    uniform token drive:angular:physics:type = "force"
+                    custom string mujoco:actuator = "l_sho_roll_pos"
+                    custom double mujoco:armature = 0.01
+                    custom double[] mujoco:axis = [1, 0, 0]
+                    custom bool mujoco:axisDefaulted = 0
+                    custom double mujoco:damping = 0.05
+                    custom double mujoco:dampratio = 1
+                    custom double[] mujoco:forcerange = [-0.7, 0.7]
+                    custom double mujoco:frictionloss = 0.2
+                    custom string mujoco:group = "arm"
+                    custom double mujoco:kp = 20
+                    custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                    uniform token physics:axis = "X"
+                    rel physics:body0 = </ainex/body_link/l_sho_pitch_link>
+                    rel physics:body1 = </ainex/body_link/l_sho_pitch_link/l_sho_roll_link>
+                    bool physics:collisionEnabled = 0
+                    point3f physics:localPos0 = (0.020003, 0.021507, 0)
+                    point3f physics:localPos1 = (0, 0, 0)
+                    quatf physics:localRot0 = (1, 0, 0, 0)
+                    quatf physics:localRot1 = (1, 0, 0, 0)
+                    float physics:lowerLimit = -119.74818
+                    float physics:upperLimit = 119.74818
+                    float physxJoint:armature = 0.01
+                    float physxJoint:jointFriction = 0.2
+                }
+
+                def Mesh "l_sho_roll_link_mesh" (
+                    prepend references = @../../mujoco/ainex_hiwonder/meshes/l_sho_roll_link.STL@
+                )
+                {
+                    custom bool mujoco:collision = 0
+                    custom int mujoco:contype = 0
+                    custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/l_sho_roll_link.STL@
+                    color3f[] primvars:displayColor = [(0.12, 0.12, 0.14)]
+                }
+
+                def Xform "l_el_pitch_link" (
+                    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                )
+                {
+                    custom double[] mujoco:com = [-0.0069756, 0.012896, 0.0002073]
+                    custom double[] mujoco:diaginertia = [0.0000105425, 0.00000879567, 0.00000746187]
+                    custom double[] mujoco:inertialQuatWxyz = [-0.20604, 0.650509, 0.249985, 0.686945]
+                    point3f physics:centerOfMass = (-0.0069756, 0.012896, 0.0002073)
+                    float3 physics:diagonalInertia = (0.0000105425, 0.00000879567, 0.00000746187)
+                    float physics:mass = 0.045
+                    quatf physics:principalAxes = (-0.20604, 0.650509, 0.249985, 0.686945)
+                    double3 xformOp:translate = (-0.020003, 0.074109, 0)
+                    uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                    def PhysicsRevoluteJoint "l_el_pitch" (
+                        prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+                    )
+                    {
+                        float drive:angular:physics:damping = 0.0008726646
+                        float drive:angular:physics:maxForce = 0.7
+                        float drive:angular:physics:stiffness = 0.34906584
+                        float drive:angular:physics:targetPosition = 0
+                        float drive:angular:physics:targetVelocity = 0
+                        uniform token drive:angular:physics:type = "force"
+                        custom string mujoco:actuator = "l_el_pitch_pos"
+                        custom double mujoco:armature = 0.01
+                        custom double[] mujoco:axis = [0, -1, 0]
+                        custom bool mujoco:axisDefaulted = 0
+                        custom double mujoco:damping = 0.05
+                        custom double mujoco:dampratio = 1
+                        custom double[] mujoco:forcerange = [-0.7, 0.7]
+                        custom double mujoco:frictionloss = 0.2
+                        custom string mujoco:group = "arm"
+                        custom double mujoco:kp = 20
+                        custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                        uniform token physics:axis = "Y"
+                        rel physics:body0 = </ainex/body_link/l_sho_pitch_link/l_sho_roll_link>
+                        rel physics:body1 = </ainex/body_link/l_sho_pitch_link/l_sho_roll_link/l_el_pitch_link>
+                        bool physics:collisionEnabled = 0
+                        point3f physics:localPos0 = (-0.020003, 0.074109, 0)
+                        point3f physics:localPos1 = (0, 0, 0)
+                        quatf physics:localRot0 = (0, 1, 0, 0)
+                        quatf physics:localRot1 = (0, 1, 0, 0)
+                        float physics:lowerLimit = -119.74818
+                        float physics:upperLimit = 119.74818
+                        float physxJoint:armature = 0.01
+                        float physxJoint:jointFriction = 0.2
+                    }
+
+                    def Mesh "l_el_pitch_link_mesh" (
+                        prepend references = @../../mujoco/ainex_hiwonder/meshes/l_el_pitch_link.STL@
+                    )
+                    {
+                        custom bool mujoco:collision = 0
+                        custom int mujoco:contype = 0
+                        custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/l_el_pitch_link.STL@
+                        color3f[] primvars:displayColor = [(0.12, 0.12, 0.14)]
+                    }
+
+                    def Xform "l_el_yaw_link" (
+                        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                    )
+                    {
+                        custom double[] mujoco:com = [-0.00022583, 0.0572712, -0.0138703]
+                        custom double[] mujoco:diaginertia = [0.000143205, 0.000142106, 0.0000294195]
+                        custom double[] mujoco:inertialQuatWxyz = [0.747563, 0.66352, 0.0188373, -0.0231725]
+                        point3f physics:centerOfMass = (-0.00022583, 0.0572712, -0.0138703)
+                        float3 physics:diagonalInertia = (0.000143205, 0.000142106, 0.0000294195)
+                        float physics:mass = 0.102
+                        quatf physics:principalAxes = (0.747563, 0.66352, 0.0188373, -0.0231725)
+                        double3 xformOp:translate = (0.00039506, 0.017019, 0.019072)
+                        uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                        def PhysicsRevoluteJoint "l_el_yaw" (
+                            prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+                        )
+                        {
+                            float drive:angular:physics:damping = 0.0008726646
+                            float drive:angular:physics:maxForce = 0.7
+                            float drive:angular:physics:stiffness = 0.34906584
+                            float drive:angular:physics:targetPosition = 0
+                            float drive:angular:physics:targetVelocity = 0
+                            uniform token drive:angular:physics:type = "force"
+                            custom string mujoco:actuator = "l_el_yaw_pos"
+                            custom double mujoco:armature = 0.01
+                            custom double[] mujoco:axis = [0, 0, 1]
+                            custom bool mujoco:axisDefaulted = 1
+                            custom double mujoco:damping = 0.05
+                            custom double mujoco:dampratio = 1
+                            custom double[] mujoco:forcerange = [-0.7, 0.7]
+                            custom double mujoco:frictionloss = 0.2
+                            custom string mujoco:group = "arm"
+                            custom double mujoco:kp = 20
+                            custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                            uniform token physics:axis = "Z"
+                            rel physics:body0 = </ainex/body_link/l_sho_pitch_link/l_sho_roll_link/l_el_pitch_link>
+                            rel physics:body1 = </ainex/body_link/l_sho_pitch_link/l_sho_roll_link/l_el_pitch_link/l_el_yaw_link>
+                            bool physics:collisionEnabled = 0
+                            point3f physics:localPos0 = (0.00039506, 0.017019, 0.019072)
+                            point3f physics:localPos1 = (0, 0, 0)
+                            quatf physics:localRot0 = (1, 0, 0, 0)
+                            quatf physics:localRot1 = (1, 0, 0, 0)
+                            float physics:lowerLimit = -119.74818
+                            float physics:upperLimit = 119.74818
+                            float physxJoint:armature = 0.01
+                            float physxJoint:jointFriction = 0.2
+                        }
+
+                        def Mesh "l_el_yaw_link_mesh" (
+                            prepend references = @../../mujoco/ainex_hiwonder/meshes/l_el_yaw_link.STL@
+                        )
+                        {
+                            custom bool mujoco:collision = 0
+                            custom int mujoco:contype = 0
+                            custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/l_el_yaw_link.STL@
+                            color3f[] primvars:displayColor = [(0.12, 0.12, 0.14)]
+                        }
+
+                        def Xform "l_gripper_link" (
+                            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                        )
+                        {
+                            custom double[] mujoco:com = [-0.019384, 0.0093137, -0.005426]
+                            custom double[] mujoco:diaginertia = [0.00000651914, 0.00000396161, 0.00000327925]
+                            custom double[] mujoco:inertialQuatWxyz = [-0.159151, 0.685412, -0.178235, 0.687832]
+                            point3f physics:centerOfMass = (-0.019384, 0.0093137, -0.005426)
+                            float3 physics:diagonalInertia = (0.00000651914, 0.00000396161, 0.00000327925)
+                            float physics:mass = 0.0135
+                            quatf physics:principalAxes = (-0.159151, 0.685412, -0.178235, 0.687832)
+                            double3 xformOp:translate = (0.019893, 0.089232, -0.019072)
+                            uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                            def PhysicsRevoluteJoint "l_gripper" (
+                                prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysxJointAPI"]
+                            )
+                            {
+                                float drive:angular:physics:damping = 0.0008726646
+                                float drive:angular:physics:maxForce = 0.7
+                                float drive:angular:physics:stiffness = 0.34906584
+                                float drive:angular:physics:targetPosition = 0
+                                float drive:angular:physics:targetVelocity = 0
+                                uniform token drive:angular:physics:type = "force"
+                                custom string mujoco:actuator = "l_gripper_pos"
+                                custom double mujoco:armature = 0.01
+                                custom double[] mujoco:axis = [1, 0, 0]
+                                custom bool mujoco:axisDefaulted = 0
+                                custom double mujoco:damping = 0.05
+                                custom double mujoco:dampratio = 1
+                                custom double[] mujoco:forcerange = [-0.7, 0.7]
+                                custom double mujoco:frictionloss = 0.2
+                                custom string mujoco:group = "arm"
+                                custom double mujoco:kp = 20
+                                custom double[] mujoco:rangeRad = [-2.09, 2.09]
+                                uniform token physics:axis = "X"
+                                rel physics:body0 = </ainex/body_link/l_sho_pitch_link/l_sho_roll_link/l_el_pitch_link/l_el_yaw_link>
+                                rel physics:body1 = </ainex/body_link/l_sho_pitch_link/l_sho_roll_link/l_el_pitch_link/l_el_yaw_link/l_gripper_link>
+                                bool physics:collisionEnabled = 0
+                                point3f physics:localPos0 = (0.019893, 0.089232, -0.019072)
+                                point3f physics:localPos1 = (0, 0, 0)
+                                quatf physics:localRot0 = (1, 0, 0, 0)
+                                quatf physics:localRot1 = (1, 0, 0, 0)
+                                float physics:lowerLimit = -119.74818
+                                float physics:upperLimit = 119.74818
+                                float physxJoint:armature = 0.01
+                                float physxJoint:jointFriction = 0.2
+                            }
+
+                            def Mesh "l_gripper_link_mesh" (
+                                prepend references = @../../mujoco/ainex_hiwonder/meshes/l_gripper_link.STL@
+                            )
+                            {
+                                custom bool mujoco:collision = 0
+                                custom int mujoco:contype = 0
+                                custom asset mujoco:stl = @../../mujoco/ainex_hiwonder/meshes/l_gripper_link.STL@
+                                color3f[] primvars:displayColor = [(0.12, 0.12, 0.14)]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+def PhysicsScene "physicsScene"
+{
+    custom string mujoco:integrator = "implicitfast"
+    custom string mujoco:note = "World floor plane was not ported. Foot material friction is 1.6."
+    custom double mujoco:timestep = 0.002
+    vector3f physics:gravityDirection = (0, 0, -1)
+    float physics:gravityMagnitude = 9.81
+}
+
