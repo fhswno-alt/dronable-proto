@@ -966,12 +966,12 @@ def Xform "ainex" (
                     float horizontalAperture = 34.639877
                     custom double mujoco:fovy = 104.82
                     custom string mujoco:note = "No mass. clippingRange (0.01, 100) and focalLength 10 mm are USD carriers, not MuJoCo camera attributes. horizontalAperture uses visual global 960x720."
-                    custom double[] mujoco:pos = [0.02, 0.019, 0.007]
+                    custom double[] mujoco:pos = [0.05, 0.019, 0.007]
                     custom double[] mujoco:xyaxes = [0, -1, 0, 0, 0, 1]
                     token projection = "perspective"
                     float verticalAperture = 25.979908
                     quatf xformOp:orient = (0.5, 0.5, -0.5, -0.5)
-                    double3 xformOp:translate = (0.02, 0.019, 0.007)
+                    double3 xformOp:translate = (0.05, 0.019, 0.007)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
                 }
             }

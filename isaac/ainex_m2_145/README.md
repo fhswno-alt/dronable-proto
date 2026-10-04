@@ -6,7 +6,7 @@ This directory is a text USD stage for a later Isaac Sim import. It was **not** 
 
 - Body, inertials, joints, mesh files, foot boxes, toe visuals, and position actuators: `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml` (read-only).
 - Foot size, foot friction, and actuator kp / forcerange were cross-checked against `ainex_controls_m2_145_gate_f_optc.xml`. Shared links, inertials, joint attributes, foot geoms, and position actuators match. Optc-only pieces that were not ported: door bodies (`door_prop`, `door_panel_link`, `door_lever_link`) and gripper geoms `l_hand_contact` / `r_hand_contact`.
-- `kit_cam` is **not** in the walk file. Pose, `xyaxes`, and `fovy` were copied from the optc camera, which matches the frozen spec.
+- Head camera `kit_cam` pose, aim, and field of view match the walk plant on main (`mujoco/ainex_hiwonder/ainex_controls_m2_145.xml`): parent `head_tilt_link`, `pos="0.050 0.019 0.007"`, `xyaxes="0 -1 0 0 0 1"`, `fovy="104.82"`. `kit_cam_site` is at that same position. That XML file is not edited on this branch.
 - Mesh files are the MJCF paths under `mujoco/ainex_hiwonder/meshes/` (those `.STL` names are symlinks to the vendor meshes). Relative path from this USDA: `../../mujoco/ainex_hiwonder/meshes/<link>.STL`.
 - MuJoCo XML was not modified.
 
@@ -52,9 +52,9 @@ Drive `type` is `force`, so max force is a torque.
 ## Camera
 
 - Prim `/ainex/body_link/head_pan_link/head_tilt_link/kit_cam`.
-- Local translate `0.02 0.019 0.007` m on `head_tilt_link`.
-- Looks along +X (MuJoCo `xyaxes="0 -1 0 0 0 1"`, camera -Z). Up is +Z. No extra mass.
-- `mujoco:fovy` = 104.82 degrees. Encoded as focalLength 10 mm, verticalAperture 25.97990799 mm. Recomputed fovy 104.820000 degrees.
+- Local translate `0.050 0.019 0.007` m on `head_tilt_link`. `mujoco:pos` and `xformOp:translate` match walk-plant `kit_cam` and the colocated `kit_cam_site`.
+- Looks along +X (MuJoCo `xyaxes="0 -1 0 0 0 1"`, camera -Z). Up is +Z. Same aim as the walk plant. No extra mass.
+- `mujoco:fovy` = 104.82 degrees, same as the walk plant. Encoded as focalLength 10 mm, verticalAperture 25.97990799 mm. Recomputed fovy 104.820000 degrees.
 - horizontalAperture 34.63987732 mm uses the MJCF visual buffer 960×720. That aspect is not a camera attribute.
 - `clippingRange` (0.01, 100) is a USD stand-in. The MuJoCo camera does not set near/far.
 
