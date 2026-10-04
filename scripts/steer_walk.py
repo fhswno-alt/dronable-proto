@@ -1207,6 +1207,9 @@ class RunSummary:
     dx_forward_m: float
     mean_body_vx_forward: float
     dyaw_forward_rad: float
+    yaw_forward_min_rad: float
+    yaw_forward_max_rad: float
+    dyaw_end_rad: float
     dyaw_turn_rad: float
     gait_amp_vx: float
     dx_turn_m: float
@@ -1253,10 +1256,20 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
     straight_w = _segment_window(session.samples, straight[0], straight[1]) if straight is not None else []
     dyaw_fwd = (straight_w[-1].yaw - straight_w[0].yaw) if len(straight_w) >= 2 else 0.0
     dyaw_fwd = (dyaw_fwd + math.pi) % (2.0 * math.pi) - math.pi
+    if straight_w:
+        yaw_lo = min(s.yaw for s in straight_w)
+        yaw_hi = max(s.yaw for s in straight_w)
+    else:
+        yaw_lo = 0.0
+        yaw_hi = 0.0
     dyaw = (turn[-1].yaw - turn[0].yaw) if len(turn) >= 2 else 0.0
     dx_turn = (turn[-1].x - turn[0].x) if len(turn) >= 2 else 0.0
     # Wrap yaw delta to [-pi, pi]
     dyaw = (dyaw + math.pi) % (2.0 * math.pi) - math.pi
+    dyaw_end = 0.0
+    if session.samples:
+        dyaw_end = session.samples[-1].yaw - session.samples[0].yaw
+        dyaw_end = (dyaw_end + math.pi) % (2.0 * math.pi) - math.pi
     tip = bool(session.min_up_z < 0.85 or (session.bus.fault and "tip" in session.bus.fault_reason))
     cop_in_box = bool(session.max_cop_excursion <= 0.001)
     tail = session.samples[-1] if session.samples else None
@@ -1271,8 +1284,11 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
         f"Yaw cap is ±{YAW_RATE_CAP:.2f} rad/s; hip-yaw clip {YAW_HIP_CLIP:.2f} rad "
         f"plus outside-step scale {TURN_STEP_ASYM:.2f}. "
         f"Measured motion Δx={dx_fwd:+.3f} m, mean body vx={mean_vx:+.3f} m/s "
-        f"(not the command). Straight-forward yaw drift="
-        f"{math.degrees(dyaw_fwd):+.2f} deg (0 if this clip has no forward segment). "
+        f"(not the command). Straight-forward net yaw drift="
+        f"{math.degrees(dyaw_fwd):+.2f} deg; yaw during that window "
+        f"{math.degrees(yaw_lo):+.1f} to {math.degrees(yaw_hi):+.1f} deg. "
+        f"Heading at the end of the clip is {math.degrees(dyaw_end):+.2f} deg from the start. "
+        f"Turn-window Δyaw={math.degrees(dyaw):+.2f} deg. "
         f"tip={tip}; CoP in box={cop_in_box} "
         f"(outside {session.max_cop_excursion:.4f} m); "
         f"peak leg torque={session.max_leg_tau:.2f} Nm (limit {LEG_TAU}). "
@@ -1293,6 +1309,9 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
         dx_forward_m=float(dx_fwd),
         mean_body_vx_forward=float(mean_vx),
         dyaw_forward_rad=float(dyaw_fwd),
+        yaw_forward_min_rad=float(yaw_lo),
+        yaw_forward_max_rad=float(yaw_hi),
+        dyaw_end_rad=float(dyaw_end),
         dyaw_turn_rad=float(dyaw),
         gait_amp_vx=GAIT_AMP_VX,
         dx_turn_m=float(dx_turn),
@@ -1627,6 +1646,12 @@ def test_smoke_sim() -> list[str]:
         f"forward yaw drift={summary.dyaw_forward_rad:.3f} rad",
         failures,
     )
+    _expect(
+        abs(summary.yaw_forward_min_rad) < 0.45 and abs(summary.yaw_forward_max_rad) < 0.45,
+        f"forward yaw span {summary.yaw_forward_min_rad:.3f}..{summary.yaw_forward_max_rad:.3f}",
+        failures,
+    )
+    _expect(abs(summary.dyaw_end_rad) < 0.20, f"end heading {summary.dyaw_end_rad:.3f} rad", failures)
     _expect(summary.min_up_z >= 0.90, f"min up_z={summary.min_up_z:.3f}", failures)
     _expect(summary.cop_in_box, "CoP left the foot box", failures)
     _expect(summary.max_leg_tau_nm <= LEG_TAU + 1e-3, "leg torque above freeze", failures)
