@@ -77,7 +77,15 @@ MUJOCO_GL=glfw  python scripts/steer_walk.py --view
 python scripts/steer_walk.py --self-test
 ```
 
-Headless demo writes `previews/steer_walk_forward.mp4` (stand → forward → stop) and `previews/steer_walk_forward_summary.json`. Keys, when a display exists: **W/S** ±vx, **A/D** ±yaw (A = left), **Space** stop. Keys latch until Space. AI resends `vel` at 10 Hz; 200 ms of silence stands. Full-stick forward is a 0.08 m/s command; the summary records realized Δx and mean body vx. Reverse is a best-effort sagittal mirror and can tip. Yaw is still a hip-yaw bias, not a verified spin. Not a door or Gate Q claim.
+Headless clips:
+
+```bash
+MUJOCO_GL=osmesa python scripts/steer_walk.py --clip forward
+MUJOCO_GL=osmesa python scripts/steer_walk.py --clip reverse
+MUJOCO_GL=osmesa python scripts/steer_walk.py --clip turn
+```
+
+`forward` is stand → forward → stop. `reverse` is stand → retreat → stop. `turn` is stand → walk while yawing left → stop. Each writes `previews/steer_walk_<clip>.mp4` and a JSON summary (Δx, Δyaw, tip, CoP in box, peak torque). Keys, when a display exists: **W/S** ±vx, **A/D** ±yaw (A = left), **Space** stop. Keys latch until Space. AI resends `vel` at 10 Hz; 200 ms of silence stands. Clamps stay +0.08 / −0.032 m/s and ±0.25 rad/s. Reverse raises the stance-slip damper to 100 N/(m/s) only while backing up. Turning lengthens the outside step. Not a door or Gate Q claim.
 
 Model: `mujoco/dronable_v0.xml`  
 Gait params & teleop stubs: top of `scripts/walk_gait.py` (wired to Controls/AI brief).
