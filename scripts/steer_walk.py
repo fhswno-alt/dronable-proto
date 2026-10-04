@@ -25,14 +25,18 @@ mode in {stand, move, fault}. A refused command prints one line and is not
 applied.
 
 Clamps (what we actually apply — not the raw request):
-  Forward vx  ≤ VX_FWD_CAP (0.08 m/s). Full stick is full forward-gait
-                amplitude. On this plant that realizes about 0.08 m/s body
-                speed (see the headless summary). applied_vx is the clamped
-                command; the summary's mean body vx is the measurement.
-  Reverse vx  ≥ -VX_BACK_CAP (0.032 m/s) → 0.4× forward amplitude, sagittal
-                mirror of the forward CPG. The stance-slip damper is raised to
-                REVERSE_PLANT_KD only while reversing. Realized retreat is
-                about two to three body lengths, then stop. Not a Gate Q pass.
+  Forward vx  ≤ VX_FWD_CAP (0.056 m/s). Lowered from 0.080: that command
+                yaws off and tips near 1.2 m (support margin about −0.09 m).
+                CPG amplitude is |applied_vx| / GAIT_AMP_VX (0.080), so full
+                stick is amplitude 0.70 of the gait that used to be full stick
+                at 0.080. Realized body speed is about 0.04 m/s, not 0.056.
+                applied_vx is the clamped command; the summary's mean body vx
+                and forward Δyaw are the measurements.
+  Reverse vx  ≥ -VX_BACK_CAP (0.032 m/s) → amplitude 0.40 of the same CPG
+                (still |vx| / 0.080), sagittal mirror of the forward gait.
+                The stance-slip damper is raised to REVERSE_PLANT_KD only
+                while reversing. Realized retreat is about two to three body
+                lengths, then stop. Not a Gate Q pass.
   |yaw_rate|  ≤ YAW_RATE_CAP (0.25 rad/s). While walking forward this scales
                 the outside step longer than the inside step and adds a
                 hip-yaw bias clipped at YAW_HIP_CLIP. Heading that remains
@@ -137,11 +141,14 @@ LEG_TAU = 2.1
 ARM_TAU = 0.7
 SAT_FRAC = 0.98
 
-# Full-stick forward command. Amplitude is |applied_vx| / VX_FWD_CAP, so this
-# number is the command at gait amplitude 1. It is set to the upright realized
-# body speed of that gait (~0.08 m/s), not a torque-limit increase.
-VX_FWD_CAP = 0.08
-# 0.4× forward amplitude. This command, with REVERSE_PLANT_KD, is the
+# vx that maps to CPG amplitude 1. Full-stick forward is below this: 0.080
+# yaws off and tips near Δx 1.2 m. Do not divide amplitude by VX_FWD_CAP.
+GAIT_AMP_VX = 0.08
+# Full-stick forward command. |applied_vx| / GAIT_AMP_VX is the CPG amplitude,
+# so this cap is amplitude 0.70. Realized body speed is slower than the
+# command (~0.04 m/s). Not a torque-limit increase.
+VX_FWD_CAP = 0.056
+# |vx| / GAIT_AMP_VX = 0.40. This command, with REVERSE_PLANT_KD, is the
 # upright retreat. A larger reverse command shortens the distance before a tip.
 VX_BACK_CAP = 0.032
 # Stance-slip damper (N per m/s) used only while vx < 0. Forward stays at
@@ -165,7 +172,7 @@ INPLACE_YAW_AMP = 0.35
 DEADBAND_VX = TELEOP_DEADBAND * VX_FWD_CAP
 DEADBAND_YAW = TELEOP_DEADBAND * YAW_RATE_CAP
 # Plant slew is tighter than TELEOP_RATE_LIMIT so stand→full gait is not one frame.
-VX_SLEW = 0.08  # m/s^2  (0 → forward cap in 1.0 s)
+VX_SLEW = 0.08  # m/s^2  (0 → 0.056 cap in 0.70 s)
 YAW_SLEW = 0.40  # rad/s^2
 
 COMMAND_TIMEOUT_S = 0.200
@@ -424,11 +431,12 @@ class DemoSegment:
     label: str
 
 
-# Sneak peek: stand → forward → stop. Yaw stays on the API and the keyboard.
+# Sneak peek: stand → forward → stop. Several body lengths at the lowered
+# clamp (amplitude 0.70). 0.080 tips before 2 m. Yaw stays on the API.
 DEMO_SCRIPT: tuple[DemoSegment, ...] = (
     DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
-    DemoSegment(9.0, "vel", VX_FWD_CAP, 0.0, "forward"),
-    DemoSegment(10.5, "stop", 0.0, 0.0, "stop"),
+    DemoSegment(53.0, "vel", VX_FWD_CAP, 0.0, "forward"),
+    DemoSegment(56.0, "stop", 0.0, 0.0, "stop"),
 )
 # Stop on a gait phase that pitched (support margin about −0.08 m) before
 # the settle damper. Same phase as t=2.35, one visible walk later.
@@ -443,10 +451,12 @@ REVERSE_SCRIPT: tuple[DemoSegment, ...] = (
     DemoSegment(17.0, "vel", -VX_BACK_CAP, 0.0, "reverse"),
     DemoSegment(19.0, "stop", 0.0, 0.0, "stop"),
 )
+# Left turn at amplitude 0.70 needs a longer window to clear ~0.55 rad.
+# Raising TURN_STEP_ASYM at this speed yaws the wrong way.
 TURN_SCRIPT: tuple[DemoSegment, ...] = (
     DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
-    DemoSegment(6.0, "vel", VX_FWD_CAP, YAW_RATE_CAP, "turn"),
-    DemoSegment(8.0, "stop", 0.0, 0.0, "stop"),
+    DemoSegment(12.0, "vel", VX_FWD_CAP, YAW_RATE_CAP, "turn"),
+    DemoSegment(14.5, "stop", 0.0, 0.0, "stop"),
 )
 CLIP_SCRIPTS: dict[str, tuple[DemoSegment, ...]] = {
     "forward": DEMO_SCRIPT,
@@ -592,7 +602,7 @@ def gait_amp_and_dir(report: TickReport) -> tuple[float, int]:
         return 0.0, 0
     if abs(report.applied_vx) >= 1e-6:
         direction = 1 if report.applied_vx > 0.0 else -1
-        amp = min(1.0, abs(report.applied_vx) / VX_FWD_CAP)
+        amp = min(1.0, abs(report.applied_vx) / GAIT_AMP_VX)
         return amp, direction
     if abs(report.applied_yaw_rate) >= 1e-6:
         amp = INPLACE_YAW_AMP * min(1.0, abs(report.applied_yaw_rate) / YAW_RATE_CAP)
@@ -1196,7 +1206,12 @@ class RunSummary:
     fault_reason: str
     dx_forward_m: float
     mean_body_vx_forward: float
+    dyaw_forward_rad: float
+    yaw_forward_min_rad: float
+    yaw_forward_max_rad: float
+    dyaw_end_rad: float
     dyaw_turn_rad: float
+    gait_amp_vx: float
     dx_turn_m: float
     min_up_z: float
     min_support_margin_m: float
@@ -1237,22 +1252,43 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
     turn = _segment_window(session.samples, turn_bounds[0], turn_bounds[1]) if turn_bounds is not None else []
     dx_fwd = (fwd[-1].x - fwd[0].x) if len(fwd) >= 2 else 0.0
     mean_vx = float(np.mean([s.body_vx for s in fwd])) if fwd else 0.0
+    straight = bounds.get("forward")
+    straight_w = _segment_window(session.samples, straight[0], straight[1]) if straight is not None else []
+    dyaw_fwd = (straight_w[-1].yaw - straight_w[0].yaw) if len(straight_w) >= 2 else 0.0
+    dyaw_fwd = (dyaw_fwd + math.pi) % (2.0 * math.pi) - math.pi
+    if straight_w:
+        yaw_lo = min(s.yaw for s in straight_w)
+        yaw_hi = max(s.yaw for s in straight_w)
+    else:
+        yaw_lo = 0.0
+        yaw_hi = 0.0
     dyaw = (turn[-1].yaw - turn[0].yaw) if len(turn) >= 2 else 0.0
     dx_turn = (turn[-1].x - turn[0].x) if len(turn) >= 2 else 0.0
     # Wrap yaw delta to [-pi, pi]
     dyaw = (dyaw + math.pi) % (2.0 * math.pi) - math.pi
+    dyaw_end = 0.0
+    if session.samples:
+        dyaw_end = session.samples[-1].yaw - session.samples[0].yaw
+        dyaw_end = (dyaw_end + math.pi) % (2.0 * math.pi) - math.pi
     tip = bool(session.min_up_z < 0.85 or (session.bus.fault and "tip" in session.bus.fault_reason))
     cop_in_box = bool(session.max_cop_excursion <= 0.001)
     tail = session.samples[-1] if session.samples else None
     honesty = (
-        "applied_vx is the clamped forward-gait command (amplitude 1 at "
-        f"{VX_FWD_CAP:.3f} m/s), not a separate odometry claim. "
-        "Reverse command saturates at "
-        f"{-VX_BACK_CAP:.3f} m/s (0.4× amplitude) with stance damper "
-        f"{REVERSE_PLANT_KD:.0f} N/(m/s). "
+        "applied_vx is the clamped command, not odometry. "
+        f"Forward clamp is {VX_FWD_CAP:.3f} m/s, lowered from 0.080 because "
+        "0.080 yaws off and tips near 1.2 m (support margin about −0.09 m). "
+        f"CPG amplitude is |applied_vx| / {GAIT_AMP_VX:.3f}, so full forward "
+        f"stick is amplitude {VX_FWD_CAP / GAIT_AMP_VX:.2f} and reverse "
+        f"{-VX_BACK_CAP:.3f} m/s stays amplitude {VX_BACK_CAP / GAIT_AMP_VX:.2f} "
+        f"with stance damper {REVERSE_PLANT_KD:.0f} N/(m/s). "
         f"Yaw cap is ±{YAW_RATE_CAP:.2f} rad/s; hip-yaw clip {YAW_HIP_CLIP:.2f} rad "
         f"plus outside-step scale {TURN_STEP_ASYM:.2f}. "
-        f"Measured forward Δx={dx_fwd:+.3f} m, mean body vx={mean_vx:+.3f} m/s. "
+        f"Measured motion Δx={dx_fwd:+.3f} m, mean body vx={mean_vx:+.3f} m/s "
+        f"(not the command). Straight-forward net yaw drift="
+        f"{math.degrees(dyaw_fwd):+.2f} deg; yaw during that window "
+        f"{math.degrees(yaw_lo):+.1f} to {math.degrees(yaw_hi):+.1f} deg. "
+        f"Heading at the end of the clip is {math.degrees(dyaw_end):+.2f} deg from the start. "
+        f"Turn-window Δyaw={math.degrees(dyaw):+.2f} deg. "
         f"tip={tip}; CoP in box={cop_in_box} "
         f"(outside {session.max_cop_excursion:.4f} m); "
         f"peak leg torque={session.max_leg_tau:.2f} Nm (limit {LEG_TAU}). "
@@ -1272,7 +1308,12 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
         fault_reason=session.bus.fault_reason,
         dx_forward_m=float(dx_fwd),
         mean_body_vx_forward=float(mean_vx),
+        dyaw_forward_rad=float(dyaw_fwd),
+        yaw_forward_min_rad=float(yaw_lo),
+        yaw_forward_max_rad=float(yaw_hi),
+        dyaw_end_rad=float(dyaw_end),
         dyaw_turn_rad=float(dyaw),
+        gait_amp_vx=GAIT_AMP_VX,
         dx_turn_m=float(dx_turn),
         min_up_z=float(session.min_up_z),
         min_support_margin_m=float(session.min_margin) if math.isfinite(session.min_margin) else -1.0,
@@ -1319,6 +1360,7 @@ def run_demo(
     )
     print(
         "[steer] gait=forward T=0.55 hip=0.24 ds=0.1375 plant_kd=25 "
+        f"amp=|vx|/{GAIT_AMP_VX:.3f} "
         "assist=OFF ankle_cop=ON cp_swing=ON stance_vik=ON residual=OFF door=OFF"
     )
     n_ctrl = int(duration * wg.CTRL_HZ)
@@ -1493,6 +1535,21 @@ def test_bus() -> list[str]:
     bus2.vel(DEADBAND_VX * 0.5, 0.0, 0.0)
     report = bus2.tick(0.0, CTRL_DT)
     _expect(report.mode == "stand" and report.applied_vx == 0.0, "deadband did not zero vx", failures)
+    full = TickReport(VX_FWD_CAP, 0.0, "move")
+    amp, direction = gait_amp_and_dir(full)
+    _expect(
+        abs(amp - VX_FWD_CAP / GAIT_AMP_VX) < 1e-9 and direction == 1,
+        f"full-stick amp {amp} (divisor must stay {GAIT_AMP_VX})",
+        failures,
+    )
+    back = TickReport(-VX_BACK_CAP, 0.0, "move")
+    amp, direction = gait_amp_and_dir(back)
+    _expect(
+        abs(amp - VX_BACK_CAP / GAIT_AMP_VX) < 1e-9 and direction == -1,
+        f"reverse amp {amp}",
+        failures,
+    )
+    _expect(GAIT_AMP_VX + 1e-12 >= VX_FWD_CAP, "amplitude reference below the forward clamp", failures)
     bus2.declare_fault(0.1, "tip")
     refusal = bus2.vel(0.1, 0.0, 0.1)
     _expect(refusal is not None and refusal.startswith("refused: fault"), f"fault vel got {refusal}", failures)
@@ -1582,8 +1639,20 @@ def test_smoke_sim() -> list[str]:
     _expect(not summary.fault, f"smoke fault: {summary.fault_reason}", failures)
     _expect(not summary.tip, f"tipped up_z={summary.min_up_z:.3f}", failures)
     _expect(saw_forward, "forward command was not applied", failures)
-    _expect(summary.dx_forward_m > 0.40, f"forward Δx={summary.dx_forward_m:.3f} m", failures)
-    _expect(summary.mean_body_vx_forward > 0.05, f"mean vx={summary.mean_body_vx_forward:.3f}", failures)
+    _expect(summary.dx_forward_m > 2.0, f"forward Δx={summary.dx_forward_m:.3f} m", failures)
+    _expect(summary.mean_body_vx_forward > 0.03, f"mean vx={summary.mean_body_vx_forward:.3f}", failures)
+    _expect(
+        abs(summary.dyaw_forward_rad) < 0.20,
+        f"forward yaw drift={summary.dyaw_forward_rad:.3f} rad",
+        failures,
+    )
+    _expect(
+        abs(summary.yaw_forward_min_rad) < 0.45 and abs(summary.yaw_forward_max_rad) < 0.45,
+        f"forward yaw span {summary.yaw_forward_min_rad:.3f}..{summary.yaw_forward_max_rad:.3f}",
+        failures,
+    )
+    _expect(abs(summary.dyaw_end_rad) < 0.20, f"end heading {summary.dyaw_end_rad:.3f} rad", failures)
+    _expect(summary.min_up_z >= 0.90, f"min up_z={summary.min_up_z:.3f}", failures)
     _expect(summary.cop_in_box, "CoP left the foot box", failures)
     _expect(summary.max_leg_tau_nm <= LEG_TAU + 1e-3, "leg torque above freeze", failures)
     _expect(summary.max_contact_cop_outside_box_m <= 0.005, "CoP left the foot box", failures)
