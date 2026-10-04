@@ -29,11 +29,14 @@ Clamps (what we actually apply — not the raw request):
                 amplitude. On this plant that realizes about 0.08 m/s body
                 speed (see the headless summary). applied_vx is the clamped
                 command; the summary's mean body vx is the measurement.
-  Reverse vx  ≥ -VX_BACK_CAP (0.032 m/s) → 0.4× forward amplitude. Best-effort
-                sagittal mirror. It can move −X and then tip. Not a verified
-                walk-back. Gate Q retreat stays Prefer FAIL and is not touched.
-  |yaw_rate|  ≤ YAW_RATE_CAP (0.25 rad/s), turned into a common-mode hip-yaw
-                bias. Not a verified spin, and the sneak-peek does not use it.
+  Reverse vx  ≥ -VX_BACK_CAP (0.032 m/s) → 0.4× forward amplitude, sagittal
+                mirror of the forward CPG. The stance-slip damper is raised to
+                REVERSE_PLANT_KD only while reversing. Realized retreat is
+                about two to three body lengths, then stop. Not a Gate Q pass.
+  |yaw_rate|  ≤ YAW_RATE_CAP (0.25 rad/s). While walking forward this scales
+                the outside step longer than the inside step and adds a
+                hip-yaw bias clipped at YAW_HIP_CLIP. Heading that remains
+                after stop is the measured turn.
   Deadband and slew reuse TELEOP_DEADBAND (0.08) and TELEOP_RATE_LIMIT (1.5)
   from scripts/walk_gait.py. Those constants are joint-space (rad, rad/s).
   Velocity uses the same fraction of each cap:
@@ -131,14 +134,23 @@ SAT_FRAC = 0.98
 # number is the command at gait amplitude 1. It is set to the upright realized
 # body speed of that gait (~0.08 m/s), not a torque-limit increase.
 VX_FWD_CAP = 0.08
-# 0.4× forward amplitude. Higher reverse commands tip this plant.
+# 0.4× forward amplitude. This command, with REVERSE_PLANT_KD, is the
+# upright retreat. A larger reverse command shortens the distance before a tip.
 VX_BACK_CAP = 0.032
+# Stance-slip damper (N per m/s) used only while vx < 0. Forward stays at
+# the value in apply_frozen_forward_gait (25). Not a forcerange change.
+REVERSE_PLANT_KD = 100.0
 YAW_RATE_CAP = 0.25
-# Hip-yaw bias at full stick. Must clear TELEOP_DEADBAND (0.08 rad) or the
-# joint deadband swallows the turn. 0.35 rad is enough to show a heading
-# change on CSF50; it is not a verified spin and it is inside the ±2.09 joint range.
-YAW_HIP_CLIP = 0.35
+# Hip-yaw bias at full stick. Must clear TELEOP_DEADBAND (0.08 rad).
+# 0.35 rad tips this cadence. 0.12 rad clears TELEOP_DEADBAND and, with
+# TURN_STEP_ASYM, holds a walk-turn instead of a pure pelvis twist.
+YAW_HIP_CLIP = 0.12
 YAW_HIP_GAIN = YAW_HIP_CLIP / YAW_RATE_CAP
+# Full-stick outside/inside step scale. +yaw lengthens the right step.
+TURN_STEP_ASYM = 0.20
+# Subtracted from both hip yaws only while turning left. The open-loop gait
+# already drifts left; without this the left command stacks and tips.
+TURN_LEFT_BIAS = 0.06
 # vx=0 and yaw!=0: reduced forward CPG so a step exists to yaw on.
 INPLACE_YAW_AMP = 0.35
 
@@ -396,6 +408,21 @@ DEMO_SCRIPT: tuple[DemoSegment, ...] = (
     DemoSegment(9.0, "vel", VX_FWD_CAP, 0.0, "forward"),
     DemoSegment(10.5, "stop", 0.0, 0.0, "stop"),
 )
+REVERSE_SCRIPT: tuple[DemoSegment, ...] = (
+    DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+    DemoSegment(17.0, "vel", -VX_BACK_CAP, 0.0, "reverse"),
+    DemoSegment(19.0, "stop", 0.0, 0.0, "stop"),
+)
+TURN_SCRIPT: tuple[DemoSegment, ...] = (
+    DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+    DemoSegment(6.0, "vel", VX_FWD_CAP, YAW_RATE_CAP, "turn"),
+    DemoSegment(8.0, "stop", 0.0, 0.0, "stop"),
+)
+CLIP_SCRIPTS: dict[str, tuple[DemoSegment, ...]] = {
+    "forward": DEMO_SCRIPT,
+    "reverse": REVERSE_SCRIPT,
+    "turn": TURN_SCRIPT,
+}
 
 
 class ScriptedDriver:
@@ -695,6 +722,8 @@ class SteerSession:
         self.q_stand = wg.gait_targets(0.0, False, 0.0)
         self.gait_t = 0.0
         self._gait_live = False
+        self._blend = 0.0
+        self._q_live: dict[str, float] | None = None
         self.hip_yaw_cmd = 0.0
         self.cop_bias: np.ndarray | None = None
         self._cop_samples: list[np.ndarray] = []
@@ -748,7 +777,7 @@ class SteerSession:
         qdes = self._targets(amp, direction, report.applied_yaw_rate)
         wg.set_ctrl(self.model, self.data, qdes, self.act_idx)
         self._servos(amp, direction)
-        self._substep(amp)
+        self._substep(amp, direction)
         self._update_bias(now)
         margin = self._support_margin()
         up_z = self._up_z()
@@ -805,12 +834,41 @@ class SteerSession:
             qdes = wg.gait_targets(self.gait_t, True, amp)
             if direction < 0:
                 qdes = mirror_sagittal(qdes, self.q_stand)
+            else:
+                self._asymmetric_step(qdes, yaw_rate, amp)
+            self._q_live = dict(qdes)
+            self._blend = 1.0
         else:
             self._gait_live = False
-            qdes = dict(self.q_stand)
-        qdes["l_hip_yaw"] = qdes.get("l_hip_yaw", 0.0) + self._hip_yaw(yaw_rate)
-        qdes["r_hip_yaw"] = qdes.get("r_hip_yaw", 0.0) + self.hip_yaw_cmd
+            qdes = self._settle_targets()
+        yaw_cmd = self._hip_yaw(yaw_rate)
+        if yaw_rate > 1e-3 and direction >= 0:
+            yaw_cmd -= TURN_LEFT_BIAS
+        qdes["l_hip_yaw"] = qdes.get("l_hip_yaw", 0.0) + yaw_cmd
+        qdes["r_hip_yaw"] = qdes.get("r_hip_yaw", 0.0) + yaw_cmd
         return qdes
+
+    def _settle_targets(self) -> dict[str, float]:
+        """Ease the last step into the stand pose. applied_vx is already 0."""
+        self._blend = max(0.0, self._blend - CTRL_DT / 0.45)
+        if self._q_live is None or self._blend <= 0.0:
+            return dict(self.q_stand)
+        qdes: dict[str, float] = {}
+        for key, stand in self.q_stand.items():
+            qdes[key] = stand + self._blend * (self._q_live.get(key, stand) - stand)
+        return qdes
+
+    def _asymmetric_step(self, qdes: dict[str, float], yaw_rate: float, amp: float) -> None:
+        """Lengthen the outside step. +yaw (left) lengthens the right step."""
+        if amp <= 0.05 or abs(yaw_rate) < 1e-4 or TURN_STEP_ASYM <= 0.0:
+            return
+        frac = _clamp(yaw_rate / YAW_RATE_CAP, -1.0, 1.0)
+        for side, side_sign in (("l_", -1.0), ("r_", 1.0)):
+            scale = max(0.25, 1.0 + TURN_STEP_ASYM * frac * side_sign)
+            for joint in ("hip_pitch", "ank_pitch"):
+                key = f"{side}{joint}"
+                stand = self.q_stand[key]
+                qdes[key] = stand + scale * (qdes.get(key, stand) - stand)
 
     def _hip_yaw(self, yaw_rate: float) -> float:
         """Common-mode hip yaw. Both joints use axis -Z, so +cmd yaws the body left."""
@@ -846,8 +904,17 @@ class SteerSession:
                 self.bid_lf, self.bid_rf, self.gid_floor,
             )
 
-    def _substep(self, amp: float) -> None:
+    def _substep(self, amp: float, direction: int) -> None:
         phi = (self.gait_t / wg.GAIT_T) % 1.0 if amp > 0.02 else 0.0
+        saved_kd = float(wg.PLANT_KD)
+        if direction < 0:
+            wg.PLANT_KD = REVERSE_PLANT_KD
+        try:
+            self._substep_plant(amp, phi)
+        finally:
+            wg.PLANT_KD = saved_kd
+
+    def _substep_plant(self, amp: float, phi: float) -> None:
         for _ in range(self.steps_per_ctrl):
             self.data.qfrc_applied[:] = 0.0
             self.data.xfrc_applied[:] = 0.0
@@ -1058,9 +1125,16 @@ class RunSummary:
     honesty: str
 
 
-def summarize(session: SteerSession) -> RunSummary:
-    bounds = script_bounds()
-    fwd_t = bounds.get("forward", (1.2, 4.5))
+def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRIPT) -> RunSummary:
+    bounds = script_bounds(script)
+    if "reverse" in bounds:
+        fwd_t = bounds["reverse"]
+    elif "forward" in bounds:
+        fwd_t = bounds["forward"]
+    elif "turn" in bounds:
+        fwd_t = bounds["turn"]
+    else:
+        fwd_t = (1.2, 4.5)
     fwd = _segment_window(session.samples, fwd_t[0], fwd_t[1])
     turn_bounds = bounds.get("turn")
     turn = _segment_window(session.samples, turn_bounds[0], turn_bounds[1]) if turn_bounds is not None else []
@@ -1075,9 +1149,11 @@ def summarize(session: SteerSession) -> RunSummary:
     honesty = (
         "applied_vx is the clamped forward-gait command (amplitude 1 at "
         f"{VX_FWD_CAP:.3f} m/s), not a separate odometry claim. "
-        "Reverse is a sagittal mirror at "
-        f"{VX_BACK_CAP:.3f} m/s and is not a verified retreat; "
-        "yaw is a hip-yaw bias and is not in this clip. "
+        "Reverse command saturates at "
+        f"{-VX_BACK_CAP:.3f} m/s (0.4× amplitude) with stance damper "
+        f"{REVERSE_PLANT_KD:.0f} N/(m/s). "
+        f"Yaw cap is ±{YAW_RATE_CAP:.2f} rad/s; hip-yaw clip {YAW_HIP_CLIP:.2f} rad "
+        f"plus outside-step scale {TURN_STEP_ASYM:.2f}. "
         f"Measured forward Δx={dx_fwd:+.3f} m, mean body vx={mean_vx:+.3f} m/s. "
         f"tip={tip}; CoP in box={cop_in_box} "
         f"(outside {session.max_cop_excursion:.4f} m); "
@@ -1125,10 +1201,11 @@ def run_demo(
     out_mp4: Path | None,
     log_path: Path | None,
     summary_path: Path | None,
+    script: tuple[DemoSegment, ...] = DEMO_SCRIPT,
 ) -> RunSummary:
     video = out_mp4 is not None
     session = SteerSession(video=video)
-    segments = _clip_script(DEMO_SCRIPT, duration)
+    segments = _clip_script(script, duration)
     driver = ScriptedDriver(segments)
     print(
         f"[steer] plant={PLANT_XML.name} md5={PLANT_MD5} "
@@ -1172,7 +1249,7 @@ def run_demo(
             # Keep a short fault tail so the clip shows the stop, then end.
             pass
     session.assert_plant_unchanged()
-    summary = summarize(session)
+    summary = summarize(session, script)
     print("[steer] " + summary.honesty)
     if log_path is not None:
         _write_log(log_path, session, summary, refusals)
@@ -1408,26 +1485,65 @@ def test_smoke_sim() -> list[str]:
     _expect(summary.max_contact_cop_outside_box_m <= 0.005, "CoP left the foot box", failures)
     tail = session.samples[-1]
     _expect(tail.mode == "stand" and abs(tail.applied_vx) < 1e-6, "did not end in stand", failures)
-    # Best-effort reverse probe. A fault here is recorded, not hidden.
-    rev = SteerSession(video=False)
-    rev.bus.stand(0.0)
-    for _ in range(int(1.0 * wg.CTRL_HZ)):
-        rev.step()
-    t_rev0 = float(rev.data.time)
-    x0 = float(rev.data.qpos[0])
-    for _ in range(int(2.0 * wg.CTRL_HZ)):
-        now = float(rev.data.time)
-        # 10 Hz resend, same contract the voice layer will use.
-        if int(round((now - t_rev0) / CTRL_DT)) % 5 == 0:
-            rev.bus.vel(-VX_BACK_CAP, 0.0, now)
-        rev.step()
-    dx_rev = float(rev.data.qpos[0]) - x0
-    print(
-        f"[steer] reverse probe dx={dx_rev:+.3f} m fault={rev.bus.fault} "
-        f"reason={rev.bus.fault_reason or '-'} "
-        "(best-effort mirror, not a verified retreat)"
+    failures.extend(test_reverse_and_turn())
+    return failures
+
+
+def _run_script(script: tuple[DemoSegment, ...]) -> tuple[SteerSession, RunSummary]:
+    session = SteerSession(video=False)
+    driver = ScriptedDriver(script)
+    n_ctrl = int(script[-1].t_end * wg.CTRL_HZ)
+    for _ in range(n_ctrl):
+        now = float(session.data.time)
+        driver.publish(session.bus, now)
+        session.step()
+    session.assert_plant_unchanged()
+    return session, summarize(session, script)
+
+
+def test_reverse_and_turn() -> list[str]:
+    """Upright retreat and a walking left/right turn. No video."""
+    failures: list[str] = []
+    rev, rev_sum = _run_script(REVERSE_SCRIPT)
+    print("[steer] reverse " + rev_sum.honesty)
+    _expect(not rev_sum.fault, f"reverse fault: {rev_sum.fault_reason}", failures)
+    _expect(not rev_sum.tip, f"reverse tip up_z={rev_sum.min_up_z:.3f}", failures)
+    _expect(rev_sum.dx_forward_m < -0.70, f"reverse Δx={rev_sum.dx_forward_m:.3f} m", failures)
+    _expect(rev_sum.min_up_z >= 0.90, f"reverse min up_z={rev_sum.min_up_z:.3f}", failures)
+    _expect(rev_sum.cop_in_box, "reverse CoP left the foot box", failures)
+    _expect(rev.samples[-1].mode == "stand", "reverse did not end in stand", failures)
+
+    turn, turn_sum = _run_script(TURN_SCRIPT)
+    print("[steer] turn " + turn_sum.honesty)
+    _expect(not turn_sum.fault, f"turn fault: {turn_sum.fault_reason}", failures)
+    _expect(not turn_sum.tip, f"turn tip up_z={turn_sum.min_up_z:.3f}", failures)
+    _expect(turn_sum.dyaw_turn_rad > 0.55, f"turn Δyaw={turn_sum.dyaw_turn_rad:.3f} rad", failures)
+    _expect(turn_sum.dx_turn_m > 0.15, f"turn Δx={turn_sum.dx_turn_m:.3f} m", failures)
+    _expect(turn_sum.min_up_z >= 0.90, f"turn min up_z={turn_sum.min_up_z:.3f}", failures)
+    _expect(turn_sum.cop_in_box, "turn CoP left the foot box", failures)
+    _expect(turn.samples[-1].mode == "stand", "turn did not end in stand", failures)
+    turn_end = [s for s in turn.samples if s.t < TURN_SCRIPT[1].t_end][-1]
+    unwind = abs(turn.samples[-1].yaw - turn_end.yaw)
+    _expect(unwind < 0.20, f"heading unwound {unwind:.3f} rad after stop", failures)
+
+    # Right is the weaker direction: the open-loop gait drifts left, so the
+    # same stick does not mirror. This duration stays upright.
+    right_script = (
+        DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+        DemoSegment(5.5, "vel", VX_FWD_CAP, -YAW_RATE_CAP, "turn"),
+        DemoSegment(7.5, "stop", 0.0, 0.0, "stop"),
     )
-    rev.assert_plant_unchanged()
+    _right, right_sum = _run_script(right_script)
+    print(
+        f"[steer] right Δyaw={right_sum.dyaw_turn_rad:+.3f} rad "
+        f"Δx={right_sum.dx_turn_m:+.3f} m up={right_sum.min_up_z:.3f} "
+        f"fault={right_sum.fault_reason or '-'}"
+    )
+    _expect(not right_sum.fault, f"right fault: {right_sum.fault_reason}", failures)
+    _expect(not right_sum.tip, f"right tip up_z={right_sum.min_up_z:.3f}", failures)
+    _expect(right_sum.dyaw_turn_rad < -0.15, f"right Δyaw={right_sum.dyaw_turn_rad:.3f}", failures)
+    _expect(right_sum.min_up_z >= 0.90, f"right min up_z={right_sum.min_up_z:.3f}", failures)
+    _expect(right_sum.cop_in_box, "right CoP left the foot box", failures)
     return failures
 
 
@@ -1454,24 +1570,32 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Day-1 velocity steer on frozen M145 (no door)")
     ap.add_argument("--view", action="store_true", help="Interactive viewer + keyboard")
     ap.add_argument("--duration", type=float, default=None, help="Seconds (demo default is the scripted clip, view default 120)")
-    ap.add_argument("--out", type=str, default=str(PREVIEWS / "steer_walk_forward.mp4"))
+    ap.add_argument("--clip", choices=tuple(CLIP_SCRIPTS), default="forward")
+    ap.add_argument("--out", type=str, default=None)
     ap.add_argument("--no-video", action="store_true", help="Headless sim without mp4")
     ap.add_argument("--self-test", action="store_true", help="Command bus, freeze checks, short sim")
-    ap.add_argument("--log", type=str, default=str(PREVIEWS / "steer_walk_forward_log.txt"))
-    ap.add_argument("--summary", type=str, default=str(PREVIEWS / "steer_walk_forward_summary.json"))
+    ap.add_argument("--log", type=str, default=None)
+    ap.add_argument("--summary", type=str, default=None)
     args = ap.parse_args()
     if args.self_test:
         raise SystemExit(self_test())
     if args.view:
         run_view(120.0 if args.duration is None else float(args.duration))
         return
-    duration = DEMO_SCRIPT[-1].t_end if args.duration is None else float(args.duration)
-    out = None if args.no_video else Path(args.out)
+    script = CLIP_SCRIPTS[args.clip]
+    stem = {
+        "forward": "steer_walk_forward",
+        "reverse": "steer_walk_reverse",
+        "turn": "steer_walk_turn",
+    }[args.clip]
+    duration = script[-1].t_end if args.duration is None else float(args.duration)
+    out = None if args.no_video else Path(args.out or (PREVIEWS / f"{stem}.mp4"))
     run_demo(
         duration=duration,
         out_mp4=out,
-        log_path=Path(args.log),
-        summary_path=Path(args.summary),
+        log_path=Path(args.log or (PREVIEWS / f"{stem}_log.txt")),
+        summary_path=Path(args.summary or (PREVIEWS / f"{stem}_summary.json")),
+        script=script,
     )
 
 
