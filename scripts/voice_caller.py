@@ -4,13 +4,13 @@
 A short English phrase becomes stand, stop, or vel(vx, yaw_rate). Latest
 command wins. vel is resent at 10 Hz. Silence longer than 200 ms already
 stands inside the bus. This file does not write that clock and does not
-change the clamps.
+change the clamps or the CommandBus.
 
-Forward sends the bus forward cap, +0.08 m/s, into the gait. Controls'
-stop clip on this settle moved about +0.417 m, mean body speed about
-+0.067 m/s, end margin +0.063 m, end stand. This caller does not claim
-faster or a longer upright walk than that clip. It does not claim past
-the older sneak peek of about +0.074 m/s and +0.64 m. It is not a clean walk.
+Forward sends +0.056 m/s, the bus forward cap, and resends it at 10 Hz.
+This caller does not send 0.080. 0.080 yaws and tips near 1.2 m. Controls'
+clip at +0.056 moved about +2.16 m, mean body speed about +0.039 m/s,
+then stood, end margin +0.063 m. The command 0.056 is not the odometry.
+This caller does not claim faster or farther than that clip.
 The gait is not a room crossing. The tip predicate is still COM outside
 support together with up_z < 0.85. It was not loosened.
 
@@ -19,9 +19,10 @@ Controls' merged clip moved about -0.97 m, mean body speed about -0.053 m/s,
 upright, no tip. This caller does not send a more negative vx. This caller
 does not claim faster than that clip.
 
-Turn left and turn right send ±0.25 rad/s. Turn left while walking held
-about +44 deg. Right was weaker, about -17 deg. Both stay inside that
-yaw cap. That hold is a hip bias, not a spin.
+Turn left and turn right send ±0.25 rad/s. Left while walking on their
+longer clip held about +62 deg and still moved forward. Right on the
+short window was about -0.28 rad. Both stay inside that yaw cap. That
+hold is a hip bias, not a spin. This clip does not send a turn.
 
 Go to the kitchen, the bathroom, or any other room is refused in one
 line: the camera can see, but there is no room and no map. No path is
@@ -60,7 +61,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PREVIEWS = ROOT / "previews"
 
 # Controls' clamps on the merged bus. The self-test fails if steer_walk drifts.
-FWD_MPS = 0.08
+FWD_MPS = 0.056
 BACK_CAP_MPS = 0.032
 YAW_RAD_S = 0.25
 RESEND_S = 0.10
@@ -68,15 +69,13 @@ TIMEOUT_S = 0.200
 PLANT_MD5 = "71b2c86d133ebc603f58b99c53e496f3"
 KIT_CAM_POS = (0.050, 0.019, 0.007)
 PLANT_XML = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145.xml"
-SNEAK_VX_MPS = 0.074
-SNEAK_DX_M = 0.64
-STOP_DX_M = 0.417
-STOP_VX_MPS = 0.067
-STOP_END_MARGIN_M = 0.063
+FWD_CLIP_DX_M = 2.16
+FWD_CLIP_VX_MPS = 0.039
+FWD_CLIP_MARGIN_M = 0.063
 REVERSE_VX_MPS = -0.053
 REVERSE_DX_M = -0.97
-WALK_LEFT_DEG = 44.0
-WALK_RIGHT_DEG = -17.0
+WALK_LEFT_DEG = 62.0
+WALK_RIGHT_RAD = -0.28
 
 ROOM_LINE = "the camera can see, but there is no room and no map"
 CLAMP_LINE = "refused: reverse is only the bus clamp"
@@ -251,12 +250,12 @@ def _forward() -> VoiceCommand:
         0.0,
         (
             f"vel vx={FWD_MPS:+.3f} yaw_rate={0.0:+.3f} "
-            "(command into the gait; Controls' stop clip moved about "
-            f"{STOP_DX_M:+.3f} m, mean body speed about {STOP_VX_MPS:+.3f} m/s, "
-            f"end margin {STOP_END_MARGIN_M:+.3f} m, end stand; "
-            f"older sneak peek about {SNEAK_VX_MPS:+.3f} m/s and {SNEAK_DX_M:+.2f} m; "
-            "this caller does not claim faster or a longer upright walk; "
-            "not a clean walk)"
+            "(command into the gait; the command 0.056 is not the odometry; "
+            "Controls' clip moved about "
+            f"{FWD_CLIP_DX_M:+.2f} m, mean body speed about {FWD_CLIP_VX_MPS:+.3f} m/s, "
+            f"then stood, end margin {FWD_CLIP_MARGIN_M:+.3f} m; "
+            "0.080 yaws and tips near 1.2 m; "
+            "this caller does not claim faster or farther)"
         ),
     )
 
@@ -283,8 +282,8 @@ def _yaw(yaw_rate: float) -> VoiceCommand:
         (
             f"vel vx={0.0:+.3f} yaw_rate={yaw_rate:+.3f} "
             f"(hip bias inside ±{YAW_RAD_S:.2f} rad/s; walking left held about "
-            f"{WALK_LEFT_DEG:+.0f} deg, right about {WALK_RIGHT_DEG:+.0f} deg; "
-            "not a spin)"
+            f"{WALK_LEFT_DEG:+.0f} deg and still moved forward, "
+            f"right about {WALK_RIGHT_RAD:+.2f} rad; not a spin)"
         ),
     )
 
@@ -445,15 +444,17 @@ BACKUP_CUES: tuple[PhraseCue, ...] = (
     PhraseCue(5.0, "back up", "backup"),
     PhraseCue(6.0, "stop", "stop"),
 )
+# ~0.039 m/s body speed needs well past 26 s to clear 1 m. The stop hold
+# runs past the 1.20 s settle damper. Command is +0.056, not body speed.
 FORWARD_CUES: tuple[PhraseCue, ...] = (
     PhraseCue(1.0, None, "quiet"),
-    PhraseCue(5.0, "walk forward", "forward"),
-    PhraseCue(7.2, "stop", "stop"),
+    PhraseCue(36.0, "walk forward", "forward"),
+    PhraseCue(38.5, "stop", "stop"),
 )
 STILL_TIMES = (
     (3.0, "backup", "voice_caller_kit_cam_backup.png"),
-    (3.5, "forward", "voice_caller_kit_cam_forward.png"),
-    (7.0, "stop", "voice_caller_kit_cam_stop.png"),
+    (12.0, "forward", "voice_caller_kit_cam_forward.png"),
+    (38.2, "stop", "voice_caller_kit_cam_stop.png"),
 )
 
 
@@ -531,15 +532,15 @@ def _expect(cond: bool, msg: str, failures: list[str]) -> None:
 def test_phrases() -> list[str]:
     failures: list[str] = []
     doc = __doc__ or ""
-    _expect("+0.417" in doc and "+0.067" in doc and "+0.063" in doc, "module doc omits the stop clip", failures)
-    _expect("end stand" in doc, "module doc omits the stop-clip end mode", failures)
+    _expect("+2.16" in doc and "+0.039" in doc and "+0.063" in doc, "module doc omits the 0.056 clip", failures)
+    _expect("does not send 0.080" in doc, "module doc still sends 0.080", failures)
+    _expect("not the odometry" in doc, "module doc treats 0.056 as body speed", failures)
     _expect("up_z < 0.85" in doc and "was not loosened" in doc, "module doc loosens the tip check", failures)
     _expect("-0.032" in doc, "module doc omits the reverse clamp", failures)
     _expect("does not claim faster" in doc, "module doc claims a faster reverse", failures)
     _expect("-0.053" in doc and "-0.97" in doc, "module doc omits the reverse clip", failures)
-    _expect("+44" in doc and "-17" in doc, "module doc omits the walking-turn holds", failures)
+    _expect("+62" in doc and "-0.28" in doc, "module doc omits the walking-turn holds", failures)
     _expect("not a spin" in doc, "module doc calls the turn a spin", failures)
-    _expect("not a clean walk" in doc, "module doc calls it a clean walk", failures)
     _expect("no room and no map" in doc, "module doc invents a map", failures)
     _expect(
         set(VoiceCommand.__dataclass_fields__) == {"kind", "vx", "yaw_rate", "line"},
@@ -566,14 +567,15 @@ def test_phrases() -> list[str]:
         )
         _expect(command.vx <= FWD_MPS and command.vx >= -BACK_CAP_MPS, f"{phrase!r} left the bus clamp", failures)
     forward = parse_phrase("walk forward")
-    _expect("not a clean walk" in forward.line, "forward line claims a clean walk", failures)
-    _expect("+0.074" in forward.line and "+0.64" in forward.line, "forward line omits the sneak peek", failures)
-    _expect("+0.417" in forward.line and "+0.067" in forward.line and "+0.063" in forward.line, "forward line omits the stop clip", failures)
+    _expect("not the odometry" in forward.line, "forward line treats 0.056 as body speed", failures)
+    _expect("+2.16" in forward.line and "+0.039" in forward.line and "+0.063" in forward.line, "forward line omits the 0.056 clip", failures)
+    _expect("0.080" in forward.line and "1.2" in forward.line, "forward line omits the 0.080 tip", failures)
+    _expect("does not claim faster or farther" in forward.line, "forward line claims a longer walk", failures)
     _expect(forward.vx == FWD_MPS, "forward is not the bus cap", failures)
     left = parse_phrase("turn left")
     right = parse_phrase("turn right")
     _expect("hip bias" in left.line and "not a spin" in left.line, "left line claims a spin", failures)
-    _expect("+44" in left.line and "-17" in left.line, "left line omits the walking holds", failures)
+    _expect("+62" in left.line and "-0.28" in left.line, "left line omits the walking holds", failures)
     _expect(right.yaw_rate == -YAW_RAD_S and "not a spin" in right.line, "right line claims a spin", failures)
     for phrase in ("back up", "walk back", "reverse", "go back", "Back up.", "go to the back"):
         command = parse_phrase(phrase)
@@ -682,7 +684,7 @@ def test_bus() -> list[str]:
         saturated = fresh.tick(t, dt)
     _expect(
         abs(saturated.applied_vx - fwd_cap) < 1e-6 and saturated.applied_vx <= fwd_cap + 1e-12,
-        f"command did not sit on +0.08: {saturated.line()}",
+        f"command did not sit on +0.056: {saturated.line()}",
         failures,
     )
 
@@ -769,6 +771,13 @@ def test_bus() -> list[str]:
     refusal = guard_caller.publish(0.0)
     _expect(refusal == CLAMP_LINE, f"more-negative vx refusal {refusal!r}", failures)
     _expect(guard.target_vx == 0.0, "a more negative vx was applied", failures)
+    fast = steer.CommandBus()
+    fast_caller = VoiceCaller(fast)
+    fast_caller._command = VoiceCommand("vel", 0.08, 0.0, "nope")
+    fast_caller._last_send = -1.0e9
+    fast_refusal = fast_caller.publish(0.0)
+    _expect(fast_refusal == "refused: above the day-1 cap", f"0.080 refusal {fast_refusal!r}", failures)
+    _expect(fast.target_vx == 0.0, "0.080 was sent", failures)
     return failures
 
 
@@ -882,14 +891,14 @@ def _honesty(result: ClipResult) -> str:
         f"{_end_mode_sentence(result.end_mode_forward)} "
         f"{stop_pose}"
         f"End support margin is {_fmt(result.end_margin_forward, '+.3f')} m. "
-        f"Controls' stop clip is the ceiling: about {STOP_DX_M:+.3f} m, "
-        f"mean body speed about {STOP_VX_MPS:+.3f} m/s, "
-        f"end margin {STOP_END_MARGIN_M:+.3f} m, end stand. "
-        "This clip does not claim faster or a longer upright walk than that, "
-        f"and does not claim past the older sneak peek of about {SNEAK_VX_MPS:+.3f} m/s "
-        f"and {SNEAK_DX_M:+.2f} m. It is not a clean walk. "
-        f"Turn left while walking held about {WALK_LEFT_DEG:+.0f} deg. "
-        f"Right was weaker, about {WALK_RIGHT_DEG:+.0f} deg. "
+        f"The command {FWD_MPS:.3f} is not the odometry. "
+        f"Controls' clip at that cap moved about {FWD_CLIP_DX_M:+.2f} m, "
+        f"mean body speed about {FWD_CLIP_VX_MPS:+.3f} m/s, then stood, "
+        f"end margin {FWD_CLIP_MARGIN_M:+.3f} m. "
+        "This clip does not claim faster or farther than that. "
+        "0.080 yaws and tips near 1.2 m. This caller does not send 0.080. "
+        f"Left while walking held about {WALK_LEFT_DEG:+.0f} deg and still moved forward. "
+        f"Right on the short window was about {WALK_RIGHT_RAD:+.2f} rad. "
         f"Both stay inside ±{YAW_RAD_S:.2f} rad/s. That is a hip bias, not a spin. "
         "This clip does not send a turn. "
         "Go to the kitchen or the bathroom stays refused: "
@@ -916,7 +925,7 @@ def _overlay(phrase: str, label: str, report_line: str, now: float, x: float) ->
     if label == "backup":
         note = "cmd -0.032  clip ~-0.053 m/s ~-0.97 m  do not claim faster"
     elif label == "forward":
-        note = "cmd +0.080  stop clip ~+0.067 m/s ~+0.417 m  do not claim faster"
+        note = "cmd +0.056  clip ~+0.039 m/s ~+2.16 m  do not claim farther"
     else:
         note = "stop  |  ceiling end stand margin +0.063  do not claim longer"
     return [
