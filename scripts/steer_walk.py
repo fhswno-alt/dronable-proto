@@ -8,7 +8,7 @@ Plant (Hardware freeze, plus the approved kit_cam copy):
   Foot contact box 145×86 mm (half-size 0.0725 × 0.043 m, friction 1.6).
   Toe spheres are visual (contype 0) and do not hold weight.
   Legs ±2.1 Nm (hip/knee kp 40–45, ankle kp 35). Arms/head ±0.7 Nm.
-  kit_cam is a child of head_tilt_link: pos 0.020 0.019 0.007, xyaxes
+  kit_cam is a child of head_tilt_link: pos 0.050 0.019 0.007, xyaxes
   0 -1 0 0 0 1, fovy 104.82, plus a zero-mass non-contact site. No door
   geometry. This file does not load gate_f / OptC / door plants. The demo
   mp4 uses the offscreen renderer aimed at body_link, not kit_cam.
@@ -45,7 +45,13 @@ Clamps (what we actually apply — not the raw request):
   and slews no faster than the plant clamp, which is below TELEOP_RATE_LIMIT.
   Hip-yaw offset itself slews at TELEOP_RATE_LIMIT rad/s and ignores a desired
   offset smaller than TELEOP_DEADBAND rad. stand/stop/timeout skip the slew
-  and zero velocity the same tick.
+  and zero velocity the same tick. Forward and turn then ease into stand over
+  SETTLE_BLEND_S while the stance damper stays at SETTLE_PLANT_KD for
+  SETTLE_DAMPER_S (100 N/(m/s), 1.20 s). Reverse, if the cut would land in a
+  phase that pitches, finishes at most one mirrored step with the command
+  already at 0, then uses that same damper. With neither, some phases pitch
+  the COM about 8 cm out of the foot boxes and the existing tip check latches.
+  The damper is off again after that window; quiet stand does not keep it.
 
 Gait: scripts/walk_gait_ainex.py gait_targets. Forward uses a shorter cadence
 than Gate D CSF50 (that basin crawled at ~1 cm/s): T=0.55 s, hip amp 0.24 rad,
@@ -109,10 +115,11 @@ from walk_gait import TELEOP_DEADBAND, TELEOP_RATE_LIMIT  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 PLANT_XML = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145.xml"
-# Walk plant after the approved kit_cam + kit_cam_site insert. Pre-camera
-# freeze was fc94709c84f5598d4474ecfc4bb41fdc (mass, feet, actuators unchanged).
-PLANT_MD5 = "e3feef973d7ae1fb09748d13fdbcb4ed"
-KIT_CAM_POS = (0.020, 0.019, 0.007)
+# Walk plant after kit_cam moved to 0.050 0.019 0.007. Feet, friction,
+# forcerange, kp, and mass are the same as the e3feef97… insert. Pre-camera
+# freeze was fc94709c84f5598d4474ecfc4bb41fdc.
+PLANT_MD5 = "71b2c86d133ebc603f58b99c53e496f3"
+KIT_CAM_POS = (0.050, 0.019, 0.007)
 KIT_CAM_FOVY = 104.82
 # xyaxes "0 -1 0 0 0 1" → camera-frame columns (x, y, z). Look is −Z = +X.
 KIT_CAM_AXES = (
@@ -165,6 +172,21 @@ COMMAND_TIMEOUT_S = 0.200
 VEL_RESEND_S = 0.10
 CTRL_DT = 1.0 / wg.CTRL_HZ
 
+# After stop, applied_vx is already 0. Forward and turn blend into stand
+# over SETTLE_BLEND_S while the stance damper is held at SETTLE_PLANT_KD
+# for SETTLE_DAMPER_S. Measured with the damper off: some phases pitch
+# (support margin about −0.08 m) and the tip check latches. The damper is
+# off again after that window. Reverse cuts near phase 0.29–0.40 and
+# 0.84–0.95 pitch, so those finish at most one mirrored step first, then
+# use the same damper. Clamps are unchanged.
+SETTLE_BLEND_S = 0.70
+REVERSE_SETTLE_BLEND_S = 0.45
+SETTLE_PLANT_KD = 100.0
+SETTLE_PLANT_AMP = 0.8
+SETTLE_COAST_MAX_S = 0.55
+# Damper stays on after the pose blend. Some reverse cuts are upright at the
+# end of the blend and pitch once the wrench drops; 1.20 s covers that.
+SETTLE_DAMPER_S = 1.20
 # Tip / fall. up_z 0.85 is the existing upright bar; a short dip slows the
 # gait, a real tip latches fault. Grace covers the drop onto the feet.
 SETTLE_GRACE_S = 0.40
@@ -408,6 +430,14 @@ DEMO_SCRIPT: tuple[DemoSegment, ...] = (
     DemoSegment(9.0, "vel", VX_FWD_CAP, 0.0, "forward"),
     DemoSegment(10.5, "stop", 0.0, 0.0, "stop"),
 )
+# Stop on a gait phase that pitched (support margin about −0.08 m) before
+# the settle damper. Same phase as t=2.35, one visible walk later.
+# Stand 1 s, forward, stop, hold stand past the damper window.
+STOP_SCRIPT: tuple[DemoSegment, ...] = (
+    DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+    DemoSegment(6.75, "vel", VX_FWD_CAP, 0.0, "forward"),
+    DemoSegment(9.5, "stop", 0.0, 0.0, "stop"),
+)
 REVERSE_SCRIPT: tuple[DemoSegment, ...] = (
     DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
     DemoSegment(17.0, "vel", -VX_BACK_CAP, 0.0, "reverse"),
@@ -420,6 +450,7 @@ TURN_SCRIPT: tuple[DemoSegment, ...] = (
 )
 CLIP_SCRIPTS: dict[str, tuple[DemoSegment, ...]] = {
     "forward": DEMO_SCRIPT,
+    "stop": STOP_SCRIPT,
     "reverse": REVERSE_SCRIPT,
     "turn": TURN_SCRIPT,
 }
@@ -724,6 +755,10 @@ class SteerSession:
         self._gait_live = False
         self._blend = 0.0
         self._q_live: dict[str, float] | None = None
+        self._last_amp = 0.0
+        self._last_dir = 0
+        self._coast_until = -1.0
+        self._damper_until = -1.0
         self.hip_yaw_cmd = 0.0
         self.cop_bias: np.ndarray | None = None
         self._cop_samples: list[np.ndarray] = []
@@ -773,7 +808,7 @@ class SteerSession:
         ceiling = self._safety_ceiling()
         if ceiling < 0.999 and report.mode == "move":
             report = self.bus.limit_applied(ceiling)
-        amp, direction = gait_amp_and_dir(report)
+        amp, direction = self._motion_after_stop(report)
         qdes = self._targets(amp, direction, report.applied_yaw_rate)
         wg.set_ctrl(self.model, self.data, qdes, self.act_idx)
         self._servos(amp, direction)
@@ -848,9 +883,49 @@ class SteerSession:
         qdes["r_hip_yaw"] = qdes.get("r_hip_yaw", 0.0) + yaw_cmd
         return qdes
 
+    def _reverse_phase_stands(self) -> bool:
+        """Reverse phases where an immediate blend already ends in stand.
+
+        Measured on this cadence. Late swing of either foot (about 0.29–0.40
+        and 0.84–0.95) pitches. Windows sit inside the passes.
+        """
+        phi = (self.gait_t / max(float(wg.GAIT_T), 1e-6)) % 1.0
+        return phi < 0.22 or (0.50 <= phi < 0.74)
+
+    def _motion_after_stop(self, report: TickReport) -> tuple[float, int]:
+        """Bus amplitude, plus a reverse step-finish after stop.
+
+        stand/stop/timeout already report applied_vx = 0. Forward cuts blend
+        in place (the settle damper holds them). A reverse cut in a pitching
+        phase keeps the last mirrored step until the phase stands up, or one
+        gait cycle, whichever comes first.
+        """
+        amp, direction = gait_amp_and_dir(report)
+        now = float(self.data.time)
+        if amp > 0.02:
+            self._last_amp = amp
+            self._last_dir = direction
+            self._coast_until = -1.0
+            return amp, direction
+        # Below the gait threshold the bus amplitude must still be returned.
+        # Zeroing it drops the first slew tick's ankle servo and the turn
+        # diverges. Reverse step-finish is the only time we replace it.
+        if (
+            self._last_dir < 0
+            and self._gait_live
+            and self._last_amp > 0.02
+            and not self._reverse_phase_stands()
+        ):
+            if self._coast_until < 0.0:
+                self._coast_until = now + SETTLE_COAST_MAX_S
+            if now < self._coast_until:
+                return self._last_amp, -1
+        return amp, direction
+
     def _settle_targets(self) -> dict[str, float]:
         """Ease the last step into the stand pose. applied_vx is already 0."""
-        self._blend = max(0.0, self._blend - CTRL_DT / 0.45)
+        blend_s = SETTLE_BLEND_S if self._last_dir >= 0 else REVERSE_SETTLE_BLEND_S
+        self._blend = max(0.0, self._blend - CTRL_DT / blend_s)
         if self._q_live is None or self._blend <= 0.0:
             return dict(self.q_stand)
         qdes: dict[str, float] = {}
@@ -905,12 +980,32 @@ class SteerSession:
             )
 
     def _substep(self, amp: float, direction: int) -> None:
-        phi = (self.gait_t / wg.GAIT_T) % 1.0 if amp > 0.02 else 0.0
+        # Stop already zeroed applied_vx. Hold the stance damper for
+        # SETTLE_DAMPER_S after the blend starts so a mid-step cut does not
+        # pitch out of the foot boxes. Reverse may still be finishing a step
+        # (amp > 0) and must not start this window until that step ends.
+        now = float(self.data.time)
+        # direction != 0 means a step is still being commanded (including the
+        # slew up and a reverse step-finish). The settle damper is only for
+        # the tick the bus has already zeroed.
+        if amp > 0.05 or direction != 0:
+            self._damper_until = -1.0
+        elif self._damper_until < 0.0 and self._blend > 0.5 and self._last_dir != 0:
+            self._damper_until = now + SETTLE_DAMPER_S
+        settling = self._damper_until >= 0.0 and now < self._damper_until
+        if settling:
+            phi = (self.gait_t / max(float(wg.GAIT_T), 1e-6)) % 1.0
+            plant_amp = SETTLE_PLANT_AMP
+        else:
+            phi = (self.gait_t / wg.GAIT_T) % 1.0 if amp > 0.02 else 0.0
+            plant_amp = amp
         saved_kd = float(wg.PLANT_KD)
-        if direction < 0:
+        if settling:
+            wg.PLANT_KD = SETTLE_PLANT_KD
+        elif direction < 0:
             wg.PLANT_KD = REVERSE_PLANT_KD
         try:
-            self._substep_plant(amp, phi)
+            self._substep_plant(plant_amp, phi)
         finally:
             wg.PLANT_KD = saved_kd
 
@@ -1113,6 +1208,8 @@ class RunSummary:
     tip: bool
     cop_in_box: bool
     peak_torque_nm: float
+    end_mode: str
+    end_margin_m: float
     vx_fwd_cap: float
     vx_back_cap: float
     yaw_rate_cap: float
@@ -1146,6 +1243,7 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
     dyaw = (dyaw + math.pi) % (2.0 * math.pi) - math.pi
     tip = bool(session.min_up_z < 0.85 or (session.bus.fault and "tip" in session.bus.fault_reason))
     cop_in_box = bool(session.max_cop_excursion <= 0.001)
+    tail = session.samples[-1] if session.samples else None
     honesty = (
         "applied_vx is the clamped forward-gait command (amplitude 1 at "
         f"{VX_FWD_CAP:.3f} m/s), not a separate odometry claim. "
@@ -1158,7 +1256,11 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
         f"tip={tip}; CoP in box={cop_in_box} "
         f"(outside {session.max_cop_excursion:.4f} m); "
         f"peak leg torque={session.max_leg_tau:.2f} Nm (limit {LEG_TAU}). "
-        "Stance-slip damper is 25 N/(m/s), down from the CSF50 crawl's 115. "
+        "Stance-slip damper is 25 N/(m/s) while walking forward, down from the "
+        "CSF50 crawl's 115. After stop it is "
+        f"{SETTLE_PLANT_KD:.0f} N/(m/s) for {SETTLE_DAMPER_S:.2f} s "
+        f"(pose blend {SETTLE_BLEND_S:.2f} s), then off. A reverse stop finishes "
+        "at most one step first if that phase would pitch. "
         "Foot box, friction, kp, and ±2.1 Nm are unchanged."
     )
     if session.bus.fault:
@@ -1182,6 +1284,8 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
         tip=tip,
         cop_in_box=cop_in_box,
         peak_torque_nm=float(session.max_leg_tau),
+        end_mode=tail.mode if tail is not None else "stand",
+        end_margin_m=float(tail.margin) if tail is not None else 0.0,
         vx_fwd_cap=VX_FWD_CAP,
         vx_back_cap=VX_BACK_CAP,
         yaw_rate_cap=YAW_RATE_CAP,
@@ -1485,7 +1589,87 @@ def test_smoke_sim() -> list[str]:
     _expect(summary.max_contact_cop_outside_box_m <= 0.005, "CoP left the foot box", failures)
     tail = session.samples[-1]
     _expect(tail.mode == "stand" and abs(tail.applied_vx) < 1e-6, "did not end in stand", failures)
+    _expect(tail.margin > 0.02, f"forward stop margin {tail.margin:+.3f}", failures)
+    failures.extend(test_stop_settle())
     failures.extend(test_reverse_and_turn())
+    return failures
+
+
+def test_stop_settle() -> list[str]:
+    """Forward→stop on phases that used to pitch, plus a 200 ms silence stop.
+
+    The tip check is unchanged. These cuts previously latched
+    'COM outside support and tipping' with margin about −0.08 m.
+    """
+    failures: list[str] = []
+    # Gait phases that faulted with an immediate blend and the damper off.
+    for stop_at in (2.00, 2.25, 2.35, 2.55, 2.60, 2.80, 2.90):
+        script = (
+            DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+            DemoSegment(stop_at, "vel", VX_FWD_CAP, 0.0, "forward"),
+            DemoSegment(stop_at + 2.5, "stop", 0.0, 0.0, "stop"),
+        )
+        session, summary = _run_script(script)
+        tail = session.samples[-1]
+        _expect(not summary.fault, f"stop@{stop_at:.2f} fault: {summary.fault_reason}", failures)
+        _expect(not summary.tip, f"stop@{stop_at:.2f} tip up_z={summary.min_up_z:.3f}", failures)
+        _expect(summary.min_up_z >= 0.90, f"stop@{stop_at:.2f} min up_z={summary.min_up_z:.3f}", failures)
+        _expect(summary.cop_in_box, f"stop@{stop_at:.2f} CoP left the box", failures)
+        _expect(tail.mode == "stand", f"stop@{stop_at:.2f} ended {tail.mode}", failures)
+        _expect(tail.margin > 0.02, f"stop@{stop_at:.2f} end margin {tail.margin:+.3f}", failures)
+    # Reverse cuts that pitched without the step-finish and settle damper.
+    for stop_at in (2.30, 3.40, 3.80):
+        rev_script = (
+            DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+            DemoSegment(stop_at, "vel", -VX_BACK_CAP, 0.0, "reverse"),
+            DemoSegment(stop_at + 2.6, "stop", 0.0, 0.0, "stop"),
+        )
+        rev, rev_sum = _run_script(rev_script)
+        _expect(not rev_sum.fault, f"reverse@{stop_at:.2f} fault: {rev_sum.fault_reason}", failures)
+        _expect(not rev_sum.tip, f"reverse@{stop_at:.2f} tip up_z={rev_sum.min_up_z:.3f}", failures)
+        _expect(rev_sum.min_up_z >= 0.90, f"reverse@{stop_at:.2f} min up_z={rev_sum.min_up_z:.3f}", failures)
+        _expect(rev_sum.cop_in_box, f"reverse@{stop_at:.2f} CoP left the box", failures)
+        _expect(rev.samples[-1].mode == "stand", f"reverse@{stop_at:.2f} ended {rev.samples[-1].mode}", failures)
+        _expect(rev.samples[-1].margin > 0.02, f"reverse@{stop_at:.2f} end margin {rev.samples[-1].margin:+.3f}", failures)
+    rev_script = (
+        DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+        DemoSegment(6.5, "vel", -VX_BACK_CAP, 0.0, "reverse"),
+        DemoSegment(9.0, "stop", 0.0, 0.0, "stop"),
+    )
+    rev, rev_sum = _run_script(rev_script)
+    _expect(not rev_sum.fault, f"short reverse fault: {rev_sum.fault_reason}", failures)
+    _expect(not rev_sum.tip, f"short reverse tip up_z={rev_sum.min_up_z:.3f}", failures)
+    _expect(rev_sum.min_up_z >= 0.90, f"short reverse min up_z={rev_sum.min_up_z:.3f}", failures)
+    _expect(rev_sum.cop_in_box, "short reverse CoP left the box", failures)
+    _expect(rev.samples[-1].mode == "stand", "short reverse did not end in stand", failures)
+    _expect(rev_sum.dx_forward_m < -0.05, f"short reverse Δx={rev_sum.dx_forward_m:.3f}", failures)
+    # Voice path: resend vel at 10 Hz, then silence. The 200 ms watchdog stops.
+    session = SteerSession(video=False)
+    last_send = -1.0
+    t_silent = 2.35
+    duration = 5.0
+    n_ctrl = int(duration * wg.CTRL_HZ)
+    for _ in range(n_ctrl):
+        now = float(session.data.time)
+        if now < 1.0 - 1e-9:
+            if last_send < 0.0:
+                session.bus.stand(now)
+                last_send = now
+        elif now < t_silent - 1e-9:
+            if (now - last_send) >= (VEL_RESEND_S - 1e-9):
+                session.bus.vel(VX_FWD_CAP, 0.0, now)
+                last_send = now
+        session.step()
+    tail = session.samples[-1]
+    _expect(not session.bus.fault, f"silence fault: {session.bus.fault_reason}", failures)
+    _expect(tail.mode == "stand" and abs(tail.applied_vx) < 1e-6, "silence did not end in stand", failures)
+    _expect(session.min_up_z >= 0.90, f"silence min up_z={session.min_up_z:.3f}", failures)
+    _expect(session.max_cop_excursion <= 0.001, "silence CoP left the box", failures)
+    _expect(tail.margin > 0.02, f"silence end margin {tail.margin:+.3f}", failures)
+    print(
+        f"[steer] stop-settle phases ok, short reverse Δx={rev_sum.dx_forward_m:+.3f} m "
+        f"up={rev_sum.min_up_z:.3f}, silence end={tail.mode}"
+    )
     return failures
 
 
@@ -1585,6 +1769,7 @@ def main() -> None:
     script = CLIP_SCRIPTS[args.clip]
     stem = {
         "forward": "steer_walk_forward",
+        "stop": "steer_walk_stop",
         "reverse": "steer_walk_reverse",
         "turn": "steer_walk_turn",
     }[args.clip]

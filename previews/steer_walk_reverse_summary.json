@@ -1,6 +1,6 @@
 {
   "plant": "mujoco/ainex_hiwonder/ainex_controls_m2_145.xml",
-  "plant_md5": "e3feef973d7ae1fb09748d13fdbcb4ed",
+  "plant_md5": "71b2c86d133ebc603f58b99c53e496f3",
   "fault": false,
   "fault_reason": "",
   "dx_forward_m": -0.9671047240654549,
@@ -17,6 +17,8 @@
   "tip": false,
   "cop_in_box": true,
   "peak_torque_nm": 2.1,
+  "end_mode": "stand",
+  "end_margin_m": 0.0635830111432402,
   "vx_fwd_cap": 0.08,
   "vx_back_cap": 0.032,
   "yaw_rate_cap": 0.25,
@@ -26,5 +28,5 @@
   "yaw_slew": 0.4,
   "teleop_deadband": 0.08,
   "teleop_rate_limit": 1.5,
-  "honesty": "applied_vx is the clamped forward-gait command (amplitude 1 at 0.080 m/s), not a separate odometry claim. Reverse command saturates at -0.032 m/s (0.4\u00d7 amplitude) with stance damper 100 N/(m/s). Yaw cap is \u00b10.25 rad/s; hip-yaw clip 0.12 rad plus outside-step scale 0.20. Measured forward \u0394x=-0.967 m, mean body vx=-0.053 m/s. tip=False; CoP in box=True (outside 0.0000 m); peak leg torque=2.10 Nm (limit 2.1). Stance-slip damper is 25 N/(m/s), down from the CSF50 crawl's 115. Foot box, friction, kp, and \u00b12.1 Nm are unchanged."
+  "honesty": "applied_vx is the clamped forward-gait command (amplitude 1 at 0.080 m/s), not a separate odometry claim. Reverse command saturates at -0.032 m/s (0.4\u00d7 amplitude) with stance damper 100 N/(m/s). Yaw cap is \u00b10.25 rad/s; hip-yaw clip 0.12 rad plus outside-step scale 0.20. Measured forward \u0394x=-0.967 m, mean body vx=-0.053 m/s. tip=False; CoP in box=True (outside 0.0000 m); peak leg torque=2.10 Nm (limit 2.1). Stance-slip damper is 25 N/(m/s) while walking forward, down from the CSF50 crawl's 115. After stop it is 100 N/(m/s) for 1.20 s (pose blend 0.70 s), then off. A reverse stop finishes at most one step first if that phase would pitch. Foot box, friction, kp, and \u00b12.1 Nm are unchanged."
 }
