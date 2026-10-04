@@ -66,6 +66,19 @@ Stand only (gait off):
 MUJOCO_GL=osmesa python scripts/walk_gait.py --gait-off --duration 5 --out previews/stand.mp4
 ```
 
+## Day-1 steerable walk (frozen M145, no door)
+
+Velocity only (`stand` / `stop` / `vel`). Voice later calls the same `CommandBus` in `scripts/steer_walk.py`. Plant is read-only `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml` (md5 `fc94709c…`). No OptC / door plant.
+
+```bash
+MUJOCO_GL=osmesa python scripts/steer_walk.py
+MUJOCO_GL=osmesa python scripts/steer_walk.py --no-video
+MUJOCO_GL=glfw  python scripts/steer_walk.py --view
+python scripts/steer_walk.py --self-test
+```
+
+Headless demo writes `previews/steer_walk_day1.mp4` (stand → forward → turn left → stop). Keys, when a display exists: **W/S** ±vx, **A/D** ±yaw (A = left), **Space** stop. Keys latch until Space. AI resends `vel` at 10 Hz; 200 ms of silence stands. `applied_vx` is the clamped CPG command (full gait at 0.03 m/s), not measured body speed — the log records realized vx. Reverse is a best-effort sagittal mirror and can tip. Not a door or Gate Q claim.
+
 Model: `mujoco/dronable_v0.xml`  
 Gait params & teleop stubs: top of `scripts/walk_gait.py` (wired to Controls/AI brief).
 
