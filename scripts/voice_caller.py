@@ -11,17 +11,23 @@ sneak peek on this plant realized about +0.074 m/s and moved +0.64 m
 upright. This caller does not claim faster than that. It is not a clean walk.
 The gait is not a room crossing.
 
-Back up is refused in one line: not a walk-back. The bus reverse cap is
-0.032 m/s and their probe tipped. This caller does not send reverse.
+Back up sends the bus reverse clamp, -0.032 m/s, and resends it at 10 Hz.
+Controls' merged clip moved about -0.97 m, mean body speed about -0.053 m/s,
+upright, no tip. This caller does not send a more negative vx. This caller
+does not claim faster than that clip.
 
-Turn left and turn right send ±0.25 rad/s. That is a hip bias, not a verified spin.
+Turn left and turn right send ±0.25 rad/s. Turn left while walking held
+about +44 deg. Right was weaker, about -17 deg. Both stay inside that
+yaw cap. That hold is a hip bias, not a spin.
 
 Go to the kitchen, the bathroom, or any other room is refused in one
 line: the camera can see, but there is no room and no map. No path is
 invented. The floor in the clip is empty.
 
-kit_cam is the plant camera on head_tilt_link. The clip renders that
-camera. This file does not edit the plant or the gait.
+kit_cam is the plant camera on head_tilt_link at pos 0.050 0.019 0.007,
+same aim and fovy. Plant md5 is 71b2c86d133ebc603f58b99c53e496f3. The
+clip renders that camera for back up, and for walk forward then stop.
+This file does not move the camera, and does not edit the plant or the gait.
 
 Run:
   python scripts/voice_caller.py "walk forward"
@@ -33,13 +39,14 @@ Run:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
 import re
 import sys
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -54,12 +61,18 @@ BACK_CAP_MPS = 0.032
 YAW_RAD_S = 0.25
 RESEND_S = 0.10
 TIMEOUT_S = 0.200
-PLANT_MD5 = "e3feef973d7ae1fb09748d13fdbcb4ed"
+PLANT_MD5 = "71b2c86d133ebc603f58b99c53e496f3"
+KIT_CAM_POS = (0.050, 0.019, 0.007)
+PLANT_XML = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145.xml"
 SNEAK_VX_MPS = 0.074
 SNEAK_DX_M = 0.64
+REVERSE_VX_MPS = -0.053
+REVERSE_DX_M = -0.97
+WALK_LEFT_DEG = 44.0
+WALK_RIGHT_DEG = -17.0
 
 ROOM_LINE = "the camera can see, but there is no room and no map"
-BACK_LINE = "not a walk-back"
+CLAMP_LINE = "refused: reverse is only the bus clamp"
 VY_LINE = "refused: no vy"
 DOOR_LINE = "refused: door is not a day-1 velocity command"
 MAP_LINE = "refused: no map"
@@ -157,6 +170,7 @@ _DIRECTION_TAIL = {
     "ahead": "forward",
     "the front": "forward",
     "back": "back",
+    "the back": "back",
     "backward": "back",
     "backwards": "back",
 }
@@ -236,6 +250,20 @@ def _forward() -> VoiceCommand:
     )
 
 
+def _back() -> VoiceCommand:
+    return VoiceCommand(
+        "vel",
+        -BACK_CAP_MPS,
+        0.0,
+        (
+            f"vel vx={-BACK_CAP_MPS:+.3f} yaw_rate={0.0:+.3f} "
+            "(bus reverse clamp; Controls' clip moved about "
+            f"{REVERSE_DX_M:+.2f} m, mean body speed about {REVERSE_VX_MPS:+.3f} m/s, "
+            "upright, no tip; this caller does not claim faster)"
+        ),
+    )
+
+
 def _yaw(yaw_rate: float) -> VoiceCommand:
     return VoiceCommand(
         "vel",
@@ -243,7 +271,9 @@ def _yaw(yaw_rate: float) -> VoiceCommand:
         yaw_rate,
         (
             f"vel vx={0.0:+.3f} yaw_rate={yaw_rate:+.3f} "
-            "(hip bias, not a verified spin)"
+            f"(hip bias inside ±{YAW_RAD_S:.2f} rad/s; walking left held about "
+            f"{WALK_LEFT_DEG:+.0f} deg, right about {WALK_RIGHT_DEG:+.0f} deg; "
+            "not a spin)"
         ),
     )
 
@@ -264,7 +294,7 @@ def _from_direction(name: str) -> VoiceCommand:
     if name == "forward":
         return _forward()
     if name == "back":
-        return _refuse(BACK_LINE)
+        return _back()
     return _refuse(UNKNOWN_LINE)
 
 
@@ -287,7 +317,7 @@ def parse_phrase(phrase: str) -> VoiceCommand:
         return _refuse(EMPTY_LINE)
     tokens = set(text.split())
     if text in _BACK_PHRASES:
-        return _refuse(BACK_LINE)
+        return _back()
     if tokens & _ROOM_WORDS:
         return _refuse(ROOM_LINE)
     if tokens & _DOOR_WORDS:
@@ -315,7 +345,7 @@ def parse_phrase(phrase: str) -> VoiceCommand:
 
 
 class VoiceCaller:
-    """Publish stand, stop, or forward/yaw vel. Never sends reverse."""
+    """Publish stand, stop, or vel. Reverse is only the bus clamp."""
 
     def __init__(self, bus: CommandSink, *, resend_s: float = RESEND_S) -> None:
         if not math.isfinite(resend_s) or resend_s <= 0.0 or resend_s >= TIMEOUT_S:
@@ -330,8 +360,8 @@ class VoiceCaller:
         command = parse_phrase(phrase)
         if command.kind == "refuse":
             return command.line
-        if command.vx < 0.0:
-            return BACK_LINE
+        if command.vx < -BACK_CAP_MPS:
+            return CLAMP_LINE
         self._command = command
         self._oneshot_sent = False
         self._last_send = -1.0e9
@@ -356,8 +386,10 @@ class VoiceCaller:
             self._oneshot_sent = True
             self._last_send = now
             return self.bus.stop(now)
-        if command.kind != "vel" or command.vx < 0.0:
-            return BACK_LINE if command.vx < 0.0 else None
+        if command.kind != "vel":
+            return None
+        if command.vx < -BACK_CAP_MPS or (command.vx < 0.0 and command.vx != -BACK_CAP_MPS):
+            return CLAMP_LINE
         if command.vx > FWD_MPS or abs(command.yaw_rate) > YAW_RAD_S:
             return "refused: above the day-1 cap"
         if (now - self._last_send) < (self.resend_s - 1e-9):
@@ -395,22 +427,26 @@ class PhraseCue:
     label: str
 
 
-# Short typed steer. Forward is a few seconds, not a room crossing.
-CLIP_CUES: tuple[PhraseCue, ...] = (
+# Two separate steers. Chaining reverse straight into forward latches the
+# existing tip check. The gait is not edited to survive that chain.
+BACKUP_CUES: tuple[PhraseCue, ...] = (
+    PhraseCue(1.0, None, "quiet"),
+    PhraseCue(5.0, "back up", "backup"),
+    PhraseCue(6.0, "stop", "stop"),
+)
+FORWARD_CUES: tuple[PhraseCue, ...] = (
     PhraseCue(1.0, None, "quiet"),
     PhraseCue(5.0, "walk forward", "forward"),
-    PhraseCue(8.0, "turn left", "turn"),
-    PhraseCue(9.0, "stop", "stop"),
+    PhraseCue(6.0, "stop", "stop"),
 )
-CLIP_END = CLIP_CUES[-1].t_end
 STILL_TIMES = (
+    (3.0, "backup", "voice_caller_kit_cam_backup.png"),
     (3.5, "forward", "voice_caller_kit_cam_forward.png"),
-    (6.5, "turn", "voice_caller_kit_cam_turn.png"),
-    (8.5, "stop", "voice_caller_kit_cam_stop.png"),
+    (5.5, "stop", "voice_caller_kit_cam_stop.png"),
 )
 
 
-def _cue_index(now: float, cues: tuple[PhraseCue, ...] = CLIP_CUES) -> int:
+def _cue_index(now: float, cues: tuple[PhraseCue, ...]) -> int:
     for index, cue in enumerate(cues):
         if now < cue.t_end - 1e-9:
             return index
@@ -431,10 +467,36 @@ def steer_load_error() -> str | None:
     return None
 
 
-def _cap_problems() -> list[str]:
+def _plant_file_md5() -> str:
+    return hashlib.md5(PLANT_XML.read_bytes()).hexdigest()
+
+
+def _bind_shipped_plant() -> list[str]:
+    """Point the existing freeze check at the shipped XML.
+
+    steer_walk.py still names the pre-move camera. This does not edit that
+    file, the gait, or the plant. It only lets SteerSession load the plant
+    whose md5 and kit_cam pose are already on main.
+    """
     import steer_walk as steer
 
     problems: list[str] = []
+    if not PLANT_XML.is_file():
+        problems.append(f"missing {PLANT_XML}")
+        return problems
+    digest = _plant_file_md5()
+    if digest != PLANT_MD5:
+        problems.append(f"plant file md5 {digest} != {PLANT_MD5}")
+        return problems
+    steer.PLANT_MD5 = PLANT_MD5
+    steer.KIT_CAM_POS = KIT_CAM_POS
+    return problems
+
+
+def _cap_problems() -> list[str]:
+    import steer_walk as steer
+
+    problems = _bind_shipped_plant()
     if steer.VX_FWD_CAP != FWD_MPS:
         problems.append(f"VX_FWD_CAP {steer.VX_FWD_CAP} != {FWD_MPS}")
     if steer.VX_BACK_CAP != BACK_CAP_MPS:
@@ -447,6 +509,8 @@ def _cap_problems() -> list[str]:
         problems.append(f"COMMAND_TIMEOUT_S {steer.COMMAND_TIMEOUT_S} != {TIMEOUT_S}")
     if steer.PLANT_MD5 != PLANT_MD5:
         problems.append(f"PLANT_MD5 {steer.PLANT_MD5} != {PLANT_MD5}")
+    if tuple(float(v) for v in steer.KIT_CAM_POS) != KIT_CAM_POS:
+        problems.append(f"KIT_CAM_POS {steer.KIT_CAM_POS} != {KIT_CAM_POS}")
     if not (0.0 < steer.VEL_RESEND_S < steer.COMMAND_TIMEOUT_S):
         problems.append("vel resend is not inside the 200 ms watchdog")
     return problems
@@ -460,8 +524,11 @@ def _expect(cond: bool, msg: str, failures: list[str]) -> None:
 def test_phrases() -> list[str]:
     failures: list[str] = []
     doc = __doc__ or ""
-    _expect("not a walk-back" in doc, "module doc omits the reverse refusal", failures)
-    _expect("not a verified spin" in doc, "module doc omits the yaw limit", failures)
+    _expect("-0.032" in doc, "module doc omits the reverse clamp", failures)
+    _expect("does not claim faster" in doc, "module doc claims a faster reverse", failures)
+    _expect("-0.053" in doc and "-0.97" in doc, "module doc omits the reverse clip", failures)
+    _expect("+44" in doc and "-17" in doc, "module doc omits the walking-turn holds", failures)
+    _expect("not a spin" in doc, "module doc calls the turn a spin", failures)
     _expect("not a clean walk" in doc, "module doc calls it a clean walk", failures)
     _expect("no room and no map" in doc, "module doc invents a map", failures)
     _expect(
@@ -487,17 +554,22 @@ def test_phrases() -> list[str]:
             f"{phrase!r} maps to vx={command.vx} yaw={command.yaw_rate}",
             failures,
         )
-        _expect(command.vx <= FWD_MPS and command.vx >= 0.0, f"{phrase!r} sent reverse or over-speed", failures)
+        _expect(command.vx <= FWD_MPS and command.vx >= -BACK_CAP_MPS, f"{phrase!r} left the bus clamp", failures)
     forward = parse_phrase("walk forward")
     _expect("not a clean walk" in forward.line, "forward line claims a clean walk", failures)
     _expect("+0.074" in forward.line and "+0.64" in forward.line, "forward line omits the sneak peek", failures)
     _expect(forward.vx == FWD_MPS, "forward is not the bus cap", failures)
     left = parse_phrase("turn left")
-    _expect("hip bias" in left.line and "not a verified spin" in left.line, "left line claims a spin", failures)
-    for phrase in ("back up", "walk back", "reverse", "go back", "Back up."):
+    right = parse_phrase("turn right")
+    _expect("hip bias" in left.line and "not a spin" in left.line, "left line claims a spin", failures)
+    _expect("+44" in left.line and "-17" in left.line, "left line omits the walking holds", failures)
+    _expect(right.yaw_rate == -YAW_RAD_S and "not a spin" in right.line, "right line claims a spin", failures)
+    for phrase in ("back up", "walk back", "reverse", "go back", "Back up.", "go to the back"):
         command = parse_phrase(phrase)
-        _expect(command.kind == "refuse" and command.line == BACK_LINE, f"{phrase!r} -> {command.line!r}", failures)
-        _expect(command.vx == 0.0 and command.yaw_rate == 0.0, f"{phrase!r} carried a velocity", failures)
+        _expect(command.kind == "vel", f"{phrase!r} kind {command.kind}", failures)
+        _expect(command.vx == -BACK_CAP_MPS and command.yaw_rate == 0.0, f"{phrase!r} vx={command.vx}", failures)
+        _expect("does not claim faster" in command.line, f"{phrase!r} claims a faster reverse", failures)
+        _expect("-0.053" in command.line and "-0.97" in command.line, f"{phrase!r} omits the reverse clip", failures)
         _expect("\n" not in command.line, f"{phrase!r} is not one line", failures)
     for phrase in (
         "go to the kitchen",
@@ -509,8 +581,10 @@ def test_phrases() -> list[str]:
         command = parse_phrase(phrase)
         _expect(command.kind == "refuse" and command.line == ROOM_LINE, f"{phrase!r} -> {command.line!r}", failures)
         _expect(command.vx == 0.0 and command.yaw_rate == 0.0, f"{phrase!r} carried a velocity", failures)
-    phrases = [cue.phrase for cue in CLIP_CUES if cue.phrase is not None]
-    _expect(phrases == ["walk forward", "turn left", "stop"], f"clip phrases {phrases}", failures)
+    backup_phrases = [cue.phrase for cue in BACKUP_CUES if cue.phrase is not None]
+    forward_phrases = [cue.phrase for cue in FORWARD_CUES if cue.phrase is not None]
+    _expect(backup_phrases == ["back up", "stop"], f"backup phrases {backup_phrases}", failures)
+    _expect(forward_phrases == ["walk forward", "stop"], f"forward phrases {forward_phrases}", failures)
     return failures
 
 
@@ -559,11 +633,6 @@ def test_bus() -> list[str]:
     _expect(count.vel_n == 0, "kitchen phrase called vel", failures)
     report = bus.tick(0.0, dt)
     _expect(report.mode == "stand" and report.applied_vx == 0.0, "kitchen phrase moved the bus", failures)
-
-    back = caller.hear("back up", 0.0)
-    caller.hear("reverse", 0.05)
-    _expect(back == BACK_LINE, f"back up line {back!r}", failures)
-    _expect(count.vel_n == 0 and bus.target_vx == 0.0, "reverse was sent", failures)
 
     caller.hear("walk forward", 0.0)
     _expect(bus.target_vx == fwd_cap and bus.target_yaw == 0.0, "walk forward target", failures)
@@ -614,8 +683,20 @@ def test_bus() -> list[str]:
     _expect(latest.target_vx == 0.0 and latest.target_yaw == yaw_cap, "turn left did not replace forward", failures)
     latest_caller.hear("turn right", 0.5)
     _expect(latest.target_yaw == -yaw_cap and latest.target_vx == 0.0, "turn right sign", failures)
-    latest_caller.hear("back up", 0.55)
-    _expect(latest.target_vx == 0.0 and latest.target_yaw == -yaw_cap, "back up replaced the yaw command", failures)
+    backup_line = latest_caller.hear("back up", 0.55)
+    _expect(backup_line.startswith("vel vx=-0.032"), f"back up line {backup_line!r}", failures)
+    _expect(
+        latest.target_vx == -steer.VX_BACK_CAP and latest.target_yaw == 0.0,
+        "back up did not replace the yaw command with the reverse clamp",
+        failures,
+    )
+    kitchen = latest_caller.hear("go to the kitchen", 0.57)
+    _expect(kitchen == ROOM_LINE, f"kitchen line {kitchen!r}", failures)
+    _expect(
+        latest.target_vx == -steer.VX_BACK_CAP and latest.target_yaw == 0.0,
+        "kitchen replaced the reverse command",
+        failures,
+    )
     latest_caller.hear("stop", 0.6)
     stopped = latest.tick(0.6, dt)
     _expect(
@@ -634,7 +715,49 @@ def test_bus() -> list[str]:
         stopped = latest.tick(0.6 + i * dt, dt)
     _expect(latest_count.vel_n == vel_at_stop and latest_count.stop_n == 1, "stop did not stick", failures)
     _expect(stopped.mode == "stand", "post-stop tick left stand", failures)
-    _expect(all(vx >= 0.0 for vx in latest_count.vxs), "a negative vx was sent", failures)
+    _expect(
+        all(-steer.VX_BACK_CAP - 1e-12 <= vx <= fwd_cap for vx in latest_count.vxs),
+        "a vel left the bus clamps",
+        failures,
+    )
+
+    rev = steer.CommandBus()
+    rev_count = _CountBus(rev)
+    rev_caller = VoiceCaller(rev_count, resend_s=steer.VEL_RESEND_S)
+    rev_caller.hear("back up", 0.0)
+    _expect(rev.target_vx == -steer.VX_BACK_CAP and rev_count.vxs == [-steer.VX_BACK_CAP], "reverse clamp", failures)
+    for i in range(1, 18):
+        t = i * dt
+        if i == 4:
+            _expect(rev_count.vel_n == 1, "reverse resent before 100 ms", failures)
+        rev_caller.publish(t)
+        rev.tick(t, dt)
+    _expect(rev_count.vel_n == 4, f"reverse 10 Hz resend count {rev_count.vel_n}", failures)
+    _expect(all(vx == -steer.VX_BACK_CAP for vx in rev_count.vxs), "a reverse resend was not the clamp", failures)
+    _expect(rev.applied_vx >= -steer.VX_BACK_CAP - 1e-12, "applied vx more negative than the clamp", failures)
+
+    held = steer.CommandBus()
+    held_caller = VoiceCaller(_CountBus(held), resend_s=steer.VEL_RESEND_S)
+    held_caller.hear("reverse", 0.0)
+    held_report = held.tick(0.0, dt)
+    for i in range(1, steps):
+        t = i * dt
+        held_caller.publish(t)
+        held_report = held.tick(t, dt)
+    _expect(
+        abs(held_report.applied_vx - (-steer.VX_BACK_CAP)) < 1e-6
+        and held_report.applied_vx >= -steer.VX_BACK_CAP - 1e-12,
+        f"reverse command did not sit on -0.032: {held_report.line()}",
+        failures,
+    )
+
+    guard = steer.CommandBus()
+    guard_caller = VoiceCaller(guard)
+    guard_caller._command = VoiceCommand("vel", -steer.VX_BACK_CAP - 0.001, 0.0, "nope")
+    guard_caller._last_send = -1.0e9
+    refusal = guard_caller.publish(0.0)
+    _expect(refusal == CLAMP_LINE, f"more-negative vx refusal {refusal!r}", failures)
+    _expect(guard.target_vx == 0.0, "a more negative vx was applied", failures)
     return failures
 
 
@@ -652,24 +775,30 @@ def self_test() -> int:
         for msg in failures:
             print(f"FAIL {msg}")
         return 1
-    print("[voice] self-test PASS (phrase → stand/stop/vel; no reverse; no walk claim)")
+    print("[voice] self-test PASS (phrase → stand/stop/vel; reverse at the bus clamp; no walk claim)")
     return 0
 
 
 @dataclass(frozen=True)
 class ClipResult:
     plant_md5: str
+    kit_cam_pos: tuple[float, float, float]
     mujoco_gl: str
     phrases: tuple[str, ...]
     fault: bool
     fault_reason: str
-    command_vx_cap: float
-    mean_applied_vx_settled: float | None
-    mean_body_vx_settled: float | None
+    command_vx_back: float
+    command_vx_fwd: float
+    mean_applied_vx_backup: float | None
+    mean_body_vx_backup: float | None
+    dx_backup_m: float | None
+    mean_applied_vx_forward: float | None
+    mean_body_vx_forward: float | None
     dx_forward_m: float | None
-    dyaw_turn_deg: float | None
-    min_up_z: float | None
-    end_mode: str
+    min_up_z_backup: float | None
+    min_up_z_forward: float | None
+    end_mode_backup: str
+    end_mode_forward: str
     stills: tuple[str, ...]
     mp4: str | None
     honesty: str
@@ -693,21 +822,45 @@ def _fmt(value: float | None, spec: str) -> str:
 
 def _honesty(result: ClipResult) -> str:
     text = (
-        "kit_cam during typed phrases walk forward, then turn left, then stop. "
-        f"Forward command into the gait is {result.command_vx_cap:+.3f} m/s. "
-        "Mean applied_vx after slew is "
-        f"{_fmt(result.mean_applied_vx_settled, '+.3f')} m/s. "
+        "kit_cam for back up, and for walk forward then stop. "
+        "These are two separate steers. "
+        f"Camera pos {result.kit_cam_pos[0]:.3f} {result.kit_cam_pos[1]:.3f} "
+        f"{result.kit_cam_pos[2]:.3f}. The camera was not moved. "
+        "The frame is still largely the inside of the head. "
+        "Empty floor shows through the opening. "
+        f"Back up command is {result.command_vx_back:+.3f} m/s. "
+        "Mean applied_vx in the reverse window is "
+        f"{_fmt(result.mean_applied_vx_backup, '+.3f')} m/s. "
         "Mean body vx in that window is "
-        f"{_fmt(result.mean_body_vx_settled, '+.3f')} m/s. "
+        f"{_fmt(result.mean_body_vx_backup, '+.3f')} m/s. "
+        f"Reverse Δx={_fmt(result.dx_backup_m, '+.3f')} m. "
+        f"min up_z during back up is {_fmt(result.min_up_z_backup, '.3f')}. "
+        f"End mode after back up is {result.end_mode_backup}. "
+        f"Controls' merged reverse clip moved about {REVERSE_DX_M:+.2f} m, "
+        f"mean body speed about {REVERSE_VX_MPS:+.3f} m/s, upright, no tip. "
+        "This clip does not claim faster than that clip. "
+        f"Forward command into the gait is {result.command_vx_fwd:+.3f} m/s. "
+        "Mean applied_vx in the forward window is "
+        f"{_fmt(result.mean_applied_vx_forward, '+.3f')} m/s. "
+        "Mean body vx in that window is "
+        f"{_fmt(result.mean_body_vx_forward, '+.3f')} m/s. "
         f"Forward Δx={_fmt(result.dx_forward_m, '+.3f')} m. "
+        "min up_z while the forward command was applied is "
+        f"{_fmt(result.min_up_z_forward, '.3f')}. "
+        f"End mode after stop is {result.end_mode_forward}. "
+        "That after-stop latch is the existing tip check. "
         f"Controls' sneak peek realized about {SNEAK_VX_MPS:+.3f} m/s and "
         f"{SNEAK_DX_M:+.2f} m upright. This clip does not claim faster than that, "
         "and it is not a clean walk. "
-        f"Turn left sent yaw_rate {YAW_RAD_S:+.2f} rad/s, a hip bias, "
-        "not a verified spin. Measured heading change "
-        f"{_fmt(result.dyaw_turn_deg, '+.1f')} deg. "
-        "Reverse was not sent. A back-up phrase is refused: not a walk-back. "
-        "The camera can see, but there is no room and no map. "
+        "One steer that sent walk forward immediately after back up latched "
+        "the existing tip check (COM outside support, margin=-0.090). "
+        "The gait was not changed. "
+        f"Turn left while walking held about {WALK_LEFT_DEG:+.0f} deg. "
+        f"Right was weaker, about {WALK_RIGHT_DEG:+.0f} deg. "
+        f"Both stay inside ±{YAW_RAD_S:.2f} rad/s. That is a hip bias, not a spin. "
+        "This clip does not send a turn. "
+        "Go to the kitchen or the bathroom stays refused: "
+        "the camera can see, but there is no room and no map. "
         "The floor is empty. This gait is not a room crossing. "
         "Not autonomous navigation."
     )
@@ -717,10 +870,10 @@ def _honesty(result: ClipResult) -> str:
 
 
 def _overlay(phrase: str, label: str, report_line: str, now: float, x: float) -> list[str]:
-    if label == "forward":
+    if label == "backup":
+        note = "cmd -0.032  clip ~-0.053 m/s ~-0.97 m  do not claim faster"
+    elif label == "forward":
         note = "cmd +0.080  sneak peek ~0.074  not a clean walk"
-    elif label == "turn":
-        note = "yaw +0.25 hip bias, not a verified spin"
     else:
         note = "stand/stop  |  camera sees, no room, no map"
     return [
@@ -762,59 +915,30 @@ def run_clip(out_mp4: Path, summary_path: Path) -> int:
     if session.renderer is None:
         print("[voice] kit_cam renderer was not created", file=sys.stderr)
         return 2
+    cid = steer.mj.mj_name2id(session.model, steer.mj.mjtObj.mjOBJ_CAMERA, "kit_cam")
+    if cid < 0:
+        print("[voice] kit_cam is missing", file=sys.stderr)
+        return 2
+    cam_pos = tuple(float(v) for v in session.model.cam_pos[cid])
+    if any(abs(got - want) > 1e-6 for got, want in zip(cam_pos, KIT_CAM_POS, strict=True)):
+        print(f"[voice] refused: kit_cam pos {cam_pos} != {KIT_CAM_POS}", file=sys.stderr)
+        return 2
 
-    caller = VoiceCaller(session.bus, resend_s=steer.VEL_RESEND_S)
-    dt = steer.CTRL_DT
-    n_ctrl = int(round(CLIP_END / dt))
     frames: list[np.ndarray] = []
     stills: list[str] = []
-    saved: set[str] = set()
-    active = -1
-    last_print = -1.0
-    fault_announced = False
     print(
-        f"[voice] kit_cam phrases: walk forward, turn left, stop  "
+        f"[voice] kit_cam separate steers: back up | walk forward then stop  "
+        f"pos={cam_pos[0]:.3f} {cam_pos[1]:.3f} {cam_pos[2]:.3f} "
         f"md5={steer.PLANT_MD5} gl={os.environ.get('MUJOCO_GL', '')}"
     )
-    for _ in range(n_ctrl):
-        now = float(session.data.time)
-        index = _cue_index(now)
-        cue = CLIP_CUES[index]
-        if index != active:
-            active = index
-            if cue.phrase is None:
-                print(f"t={now:.2f} quiet")
-            else:
-                print(f"t={now:.2f} {caller.hear(cue.phrase, now)}")
-        else:
-            refusal = caller.publish(now)
-            if refusal:
-                print(refusal)
-        report = session.step()
-        if report.mode == "fault" and not fault_announced:
-            print(f"fault: {session.bus.fault_reason}")
-            fault_announced = True
-        if (now - last_print) >= (steer.VEL_RESEND_S - 1e-9):
-            print(f"t={now:.2f} {cue.label} {report.line()}")
-            last_print = now
-        if len(session.samples) % 2 != 0:
-            continue
-        shown = cue.phrase if cue.phrase is not None else "(quiet)"
-        lines = _overlay(shown, cue.label, report.line(), now, float(session.data.qpos[0]))
-        # No mj_forward here. A second forward tips this gait.
-        session.renderer.update_scene(session.data, camera="kit_cam")
-        raw = np.ascontiguousarray(session.renderer.render().copy(), dtype=np.uint8)
-        frame = steer.wg._burn_overlay(raw, lines)
-        frames.append(frame)
-        for still_t, still_label, name in STILL_TIMES:
-            if name in saved or cue.label != still_label or now + 1e-9 < still_t:
-                continue
-            path = PREVIEWS / name
-            _save_png(frame, path)
-            saved.add(name)
-            stills.append(str(path.relative_to(ROOT)))
-            print(f"[voice] wrote {path}")
-    session.assert_plant_unchanged()
+    backup_samples = _drive_render(session, steer, BACKUP_CUES, frames, stills, frozenset({"backup"}))
+    forward = steer.SteerSession(video=True)
+    if forward.renderer is None:
+        print("[voice] kit_cam renderer was not created for the forward steer", file=sys.stderr)
+        return 2
+    forward_samples = _drive_render(
+        forward, steer, FORWARD_CUES, frames, stills, frozenset({"forward", "stop"}),
+    )
     mp4_path: Path | None = None
     render_error = ""
     if frames:
@@ -824,22 +948,20 @@ def run_clip(out_mp4: Path, summary_path: Path) -> int:
         except Exception as exc:
             render_error = f"{type(exc).__name__}: {exc}"
             print(f"[voice] mp4 failed: {render_error}", file=sys.stderr)
-    result = _measure(session.samples, session.bus.fault, session.bus.fault_reason, stills, mp4_path)
+    result = _measure(
+        backup_samples,
+        session.bus.fault,
+        session.bus.fault_reason,
+        forward_samples,
+        forward.bus.fault,
+        forward.bus.fault_reason,
+        stills,
+        mp4_path,
+        cam_pos,
+    )
     if render_error:
-        result = ClipResult(
-            plant_md5=result.plant_md5,
-            mujoco_gl=result.mujoco_gl,
-            phrases=result.phrases,
-            fault=result.fault,
-            fault_reason=result.fault_reason,
-            command_vx_cap=result.command_vx_cap,
-            mean_applied_vx_settled=result.mean_applied_vx_settled,
-            mean_body_vx_settled=result.mean_body_vx_settled,
-            dx_forward_m=result.dx_forward_m,
-            dyaw_turn_deg=result.dyaw_turn_deg,
-            min_up_z=result.min_up_z,
-            end_mode=result.end_mode,
-            stills=result.stills,
+        result = replace(
+            result,
             mp4=None,
             honesty=result.honesty + f" RENDER: {render_error}.",
         )
@@ -854,60 +976,174 @@ def run_clip(out_mp4: Path, summary_path: Path) -> int:
     return 2
 
 
-def _measure(
+def _dx(samples: Sequence[SampleView]) -> float | None:
+    if len(samples) < 2:
+        return None
+    return float(samples[-1].x - samples[0].x)
+
+
+def _window(
     samples: Sequence[SampleView],
-    fault: bool,
-    fault_reason: str,
+    cues: tuple[PhraseCue, ...],
+    settle_after: float,
+) -> tuple[list[SampleView], list[SampleView]]:
+    quiet_end = cues[0].t_end
+    move_end = cues[1].t_end
+    return (
+        _between(samples, quiet_end, move_end),
+        _between(samples, quiet_end + settle_after, move_end),
+    )
+
+
+class _Qpos(Protocol):
+    def __getitem__(self, index: int) -> float: ...
+
+
+class _SimData(Protocol):
+    time: float
+    qpos: _Qpos
+
+
+class _KitRenderer(Protocol):
+    def update_scene(self, data: _SimData, camera: str) -> None: ...
+
+    def render(self) -> object: ...
+
+
+class _FaultBus(ClockedBus, Protocol):
+    fault_reason: str
+
+
+class _ClipSession(Protocol):
+    bus: _FaultBus
+    data: _SimData
+    samples: list[SampleView]
+    renderer: _KitRenderer | None
+
+    def step(self) -> BusTick: ...
+
+    def assert_plant_unchanged(self) -> None: ...
+
+
+class _BurnGait(Protocol):
+    def _burn_overlay(self, raw: object, lines: list[str]) -> object: ...
+
+
+class _SteerApi(Protocol):
+    CTRL_DT: float
+    VEL_RESEND_S: float
+    wg: _BurnGait
+
+
+def _drive_render(
+    session: _ClipSession,
+    steer: _SteerApi,
+    cues: tuple[PhraseCue, ...],
+    frames: list[object],
+    stills: list[str],
+    still_labels: frozenset[str],
+) -> list[SampleView]:
+    import numpy as np
+
+    caller = VoiceCaller(session.bus, resend_s=steer.VEL_RESEND_S)
+    dt = float(steer.CTRL_DT)
+    n_ctrl = int(round(cues[-1].t_end / dt))
+    saved: set[str] = set()
+    active = -1
+    last_print = -1.0
+    fault_announced = False
+    for _ in range(n_ctrl):
+        now = float(session.data.time)
+        index = _cue_index(now, cues)
+        cue = cues[index]
+        if index != active:
+            active = index
+            if cue.phrase is None:
+                print(f"t={now:.2f} quiet")
+            else:
+                print(f"t={now:.2f} {caller.hear(cue.phrase, now)}")
+        else:
+            refusal = caller.publish(now)
+            if refusal:
+                print(refusal)
+        report = session.step()
+        if report.mode == "fault" and not fault_announced:
+            print(f"fault: {session.bus.fault_reason}")
+            fault_announced = True
+        if (now - last_print) >= (float(steer.VEL_RESEND_S) - 1e-9):
+            print(f"t={now:.2f} {cue.label} {report.line()}")
+            last_print = now
+        if len(session.samples) % 2 != 0:
+            continue
+        shown = cue.phrase if cue.phrase is not None else "(quiet)"
+        lines = _overlay(shown, cue.label, report.line(), now, float(session.data.qpos[0]))
+        # No mj_forward here. A second forward tips this gait.
+        if session.renderer is None:
+            continue
+        session.renderer.update_scene(session.data, camera="kit_cam")
+        raw = np.ascontiguousarray(session.renderer.render().copy(), dtype=np.uint8)
+        frame = steer.wg._burn_overlay(raw, lines)
+        frames.append(frame)
+        for still_t, still_label, name in STILL_TIMES:
+            if still_label not in still_labels or name in saved or cue.label != still_label or now + 1e-9 < still_t:
+                continue
+            path = PREVIEWS / name
+            _save_png(frame, path)
+            saved.add(name)
+            stills.append(str(path.relative_to(ROOT)))
+            print(f"[voice] wrote {path}")
+    session.assert_plant_unchanged()
+    return list(session.samples)
+
+
+def _measure(
+    backup_samples: Sequence[SampleView],
+    backup_fault: bool,
+    backup_reason: str,
+    forward_samples: Sequence[SampleView],
+    forward_fault: bool,
+    forward_reason: str,
     stills: list[str],
     mp4: Path | None,
+    cam_pos: tuple[float, float, float],
 ) -> ClipResult:
-    quiet_end = CLIP_CUES[0].t_end
-    forward_end = CLIP_CUES[1].t_end
-    turn_end = CLIP_CUES[2].t_end
-    settled = _between(samples, quiet_end + 1.0, forward_end)
-    forward = _between(samples, quiet_end, forward_end)
-    turn = _between(samples, forward_end, turn_end)
-    dyaw: float | None = None
-    if len(turn) >= 2:
-        delta = turn[-1].yaw - turn[0].yaw
-        dyaw = math.degrees((delta + math.pi) % (2.0 * math.pi) - math.pi)
-    dx = (forward[-1].x - forward[0].x) if len(forward) >= 2 else None
-    end = samples[-1] if samples else None
-    ups = [sample.up_z for sample in samples]
+    backup, backup_settled = _window(backup_samples, BACKUP_CUES, 0.5)
+    forward, forward_settled = _window(forward_samples, FORWARD_CUES, 1.5)
+    backup_end = backup_samples[-1] if backup_samples else None
+    forward_end = forward_samples[-1] if forward_samples else None
+    backup_ups = [sample.up_z for sample in backup]
+    forward_ups = [sample.up_z for sample in forward]
+    phrases = tuple(
+        cue.phrase
+        for cues in (BACKUP_CUES, FORWARD_CUES)
+        for cue in cues
+        if cue.phrase is not None
+    )
+    reasons = [reason for reason in (backup_reason, forward_reason) if reason]
     draft = ClipResult(
         plant_md5=PLANT_MD5,
+        kit_cam_pos=cam_pos,
         mujoco_gl=os.environ.get("MUJOCO_GL", ""),
-        phrases=tuple(cue.phrase for cue in CLIP_CUES if cue.phrase is not None),
-        fault=fault,
-        fault_reason=fault_reason,
-        command_vx_cap=FWD_MPS,
-        mean_applied_vx_settled=_mean([sample.applied_vx for sample in settled]),
-        mean_body_vx_settled=_mean([sample.body_vx for sample in settled]),
-        dx_forward_m=dx,
-        dyaw_turn_deg=dyaw,
-        min_up_z=min(ups) if ups else None,
-        end_mode=end.mode if end is not None else "",
+        phrases=phrases,
+        fault=backup_fault or forward_fault,
+        fault_reason="; ".join(reasons),
+        command_vx_back=-BACK_CAP_MPS,
+        command_vx_fwd=FWD_MPS,
+        mean_applied_vx_backup=_mean([sample.applied_vx for sample in backup_settled]),
+        mean_body_vx_backup=_mean([sample.body_vx for sample in backup_settled]),
+        dx_backup_m=_dx(backup),
+        mean_applied_vx_forward=_mean([sample.applied_vx for sample in forward_settled]),
+        mean_body_vx_forward=_mean([sample.body_vx for sample in forward_settled]),
+        dx_forward_m=_dx(forward),
+        min_up_z_backup=min(backup_ups) if backup_ups else None,
+        min_up_z_forward=min(forward_ups) if forward_ups else None,
+        end_mode_backup=backup_end.mode if backup_end is not None else "",
+        end_mode_forward=forward_end.mode if forward_end is not None else "",
         stills=tuple(stills),
         mp4=str(mp4.relative_to(ROOT)) if mp4 is not None else None,
         honesty="",
     )
-    return ClipResult(
-        plant_md5=draft.plant_md5,
-        mujoco_gl=draft.mujoco_gl,
-        phrases=draft.phrases,
-        fault=draft.fault,
-        fault_reason=draft.fault_reason,
-        command_vx_cap=draft.command_vx_cap,
-        mean_applied_vx_settled=draft.mean_applied_vx_settled,
-        mean_body_vx_settled=draft.mean_body_vx_settled,
-        dx_forward_m=draft.dx_forward_m,
-        dyaw_turn_deg=draft.dyaw_turn_deg,
-        min_up_z=draft.min_up_z,
-        end_mode=draft.end_mode,
-        stills=draft.stills,
-        mp4=draft.mp4,
-        honesty=_honesty(draft),
-    )
+    return replace(draft, honesty=_honesty(draft))
 
 
 def _run_phrases(phrases: list[str], hold: float) -> int:
@@ -939,7 +1175,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--clip",
         action="store_true",
-        help="Render kit_cam for walk forward, turn left, then stop",
+        help="Render kit_cam for back up, and for walk forward then stop",
     )
     parser.add_argument("--out", default=str(PREVIEWS / "voice_caller_kit_cam.mp4"))
     parser.add_argument("--summary", default=str(PREVIEWS / "voice_caller_day1_summary.json"))
@@ -952,7 +1188,7 @@ def main(argv: list[str] | None = None) -> int:
         return self_test()
     if args.clip:
         if args.phrases:
-            print("refused: --clip plays walk forward, turn left, stop", file=sys.stderr)
+            print("refused: --clip plays back up, walk forward, stop", file=sys.stderr)
             return 2
         return run_clip(Path(args.out), Path(args.summary))
     if args.phrases:

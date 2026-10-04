@@ -68,7 +68,7 @@ MUJOCO_GL=osmesa python scripts/walk_gait.py --gait-off --duration 5 --out previ
 
 ## Day-1 steerable walk (frozen M145, no door)
 
-Velocity only (`stand` / `stop` / `vel`). `scripts/voice_caller.py` calls the same `CommandBus` in `scripts/steer_walk.py`. Plant is `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml` (md5 `e3feef97…`) with Hardware `kit_cam` on `head_tilt_link` (zero-mass site, fovy 104.82). Foot box, friction, kp, and ±2.1 Nm are unchanged. No OptC / door plant.
+Velocity only (`stand` / `stop` / `vel`). `scripts/voice_caller.py` calls the same `CommandBus` in `scripts/steer_walk.py`. Plant is `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml` (md5 `71b2c86d…`) with Hardware `kit_cam` on `head_tilt_link` at pos `0.050 0.019 0.007` (zero-mass site, same aim, fovy 104.82). Foot box, friction, kp, and ±2.1 Nm are unchanged. No OptC / door plant.
 
 ```bash
 MUJOCO_GL=osmesa python scripts/steer_walk.py
@@ -96,7 +96,7 @@ Forward clamp is **+0.056 m/s**, reverse **−0.032 m/s**, yaw **±0.25 rad/s**.
 
 ## Day-1 voice caller (same bus)
 
-Short phrases become `stand`, `stop`, or `vel` on that bus. `vel` is resent at 10 Hz. Silence longer than 200 ms stands inside the bus. Forward sends at most **+0.08 m/s**. Controls' sneak peek realized about **+0.074 m/s** and **+0.64 m** upright. That is not a clean walk, and the caller does not claim faster. Back up is refused in one line: not a walk-back. Turn left / right stay inside **±0.25 rad/s** (a hip bias, not a verified spin). Go to the kitchen or the bathroom is refused: the camera can see, but there is no room and no map.
+Short phrases become `stand`, `stop`, or `vel` on that bus. `vel` is resent at 10 Hz. Silence longer than 200 ms stands inside the bus. Forward sends at most **+0.08 m/s**. Controls' sneak peek realized about **+0.074 m/s** and **+0.64 m** upright. That is not a clean walk, and the caller does not claim faster. Back up sends the bus clamp **−0.032 m/s** and resends it at 10 Hz. Controls' merged reverse clip moved about **−0.97 m** at about **−0.053 m/s**, upright, no tip. The caller does not send a more negative vx and does not claim faster than that clip. Turn left while walking held about **+44 deg**. Right was weaker, about **−17 deg**. Both stay inside **±0.25 rad/s**. That is a hip bias, not a spin. Go to the kitchen or the bathroom is refused: the camera can see, but there is no room and no map.
 
 ```bash
 python scripts/voice_caller.py "walk forward"
@@ -106,7 +106,7 @@ python scripts/voice_caller.py --self-test
 MUJOCO_GL=osmesa python scripts/voice_caller.py --clip
 ```
 
-`--clip` renders plant `kit_cam` during walk forward, then turn left, then stop. Stills and `previews/voice_caller_kit_cam.mp4` are what the head sees. The floor is empty. Not autonomous navigation.
+`--clip` renders plant `kit_cam` (pos `0.050 0.019 0.007`, not moved) during back up, then walk forward, then stop. Stills and `previews/voice_caller_kit_cam.mp4` are what that camera records. The floor is empty. Not autonomous navigation.
 
 Model: `mujoco/dronable_v0.xml`  
 Gait params & teleop stubs: top of `scripts/walk_gait.py` (wired to Controls/AI brief).
