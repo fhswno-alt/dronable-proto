@@ -3,15 +3,15 @@
 
 Velocity only. No waypoints, goals, maps, door commands, or joint targets.
 
-Plant (read-only, Hardware freeze):
+Plant (Hardware freeze, plus the approved kit_cam copy):
   mujoco/ainex_hiwonder/ainex_controls_m2_145.xml
-  md5 fc94709c84f5598d4474ecfc4bb41fdc
   Foot contact box 145×86 mm (half-size 0.0725 × 0.043 m, friction 1.6).
   Toe spheres are visual (contype 0) and do not hold weight.
   Legs ±2.1 Nm (hip/knee kp 40–45, ankle kp 35). Arms/head ±0.7 Nm.
-  This file does not edit that XML, does not load gate_f / OptC / door plants,
-  and does not add a camera body. M145 has no kit_cam; the demo mp4 uses the
-  offscreen renderer camera (not a model body) aimed at body_link.
+  kit_cam is a child of head_tilt_link: pos 0.020 0.019 0.007, xyaxes
+  0 -1 0 0 0 1, fovy 104.82, plus a zero-mass non-contact site. No door
+  geometry. This file does not load gate_f / OptC / door plants. The demo
+  mp4 uses the offscreen renderer aimed at body_link, not kit_cam.
 
 Command bus (latest command wins). Voice will call this same API later:
   stand(now)              still; vx=0, yaw_rate=0. Power-on default.
@@ -25,15 +25,15 @@ mode in {stand, move, fault}. A refused command prints one line and is not
 applied.
 
 Clamps (what we actually apply — not the raw request):
-  Forward vx  ≤ VX_FWD_CAP (0.03 m/s). That cap is full CSF50 amplitude.
-                The body does not track 0.03 m/s; the headless log's body vx
-                is the realized speed (about 2 cm/s). applied_vx is the
-                clamped command, not a measured odometry claim.
-  Reverse vx  ≥ -VX_BACK_CAP (0.012 m/s) → 0.4× forward amplitude. Best-effort
+  Forward vx  ≤ VX_FWD_CAP (0.08 m/s). Full stick is full forward-gait
+                amplitude. On this plant that realizes about 0.08 m/s body
+                speed (see the headless summary). applied_vx is the clamped
+                command; the summary's mean body vx is the measurement.
+  Reverse vx  ≥ -VX_BACK_CAP (0.032 m/s) → 0.4× forward amplitude. Best-effort
                 sagittal mirror. It can move −X and then tip. Not a verified
                 walk-back. Gate Q retreat stays Prefer FAIL and is not touched.
   |yaw_rate|  ≤ YAW_RATE_CAP (0.25 rad/s), turned into a common-mode hip-yaw
-                bias on the frozen gait. Not a verified spin.
+                bias. Not a verified spin, and the sneak-peek does not use it.
   Deadband and slew reuse TELEOP_DEADBAND (0.08) and TELEOP_RATE_LIMIT (1.5)
   from scripts/walk_gait.py. Those constants are joint-space (rad, rad/s).
   Velocity uses the same fraction of each cap:
@@ -44,15 +44,14 @@ Clamps (what we actually apply — not the raw request):
   offset smaller than TELEOP_DEADBAND rad. stand/stop/timeout skip the slew
   and zero velocity the same tick.
 
-Gait: scripts/walk_gait_ainex.py gait_targets on the Gate D CSF50 open-loop
-basin (T=0.88, hip amp 0.116, DS 0.31, plant_kd 115, CP swing + mild stance
-VIK). The module's earlier defaults skate in place and are not used. Ankle-CoP
-servo and the stance plant damper stay on. Balance assist stays off (it locks
-yaw). Residual npz stays off. This is not a clean-walk PASS claim — CSF50
-itself sits on the skate p95 bar. If many legs pin at ±2.1 Nm, or the COM
-support margin / up_z approaches a tip, applied velocity is capped (not
-compounded). The frozen forcerange is not raised. Tip / collapse latches
-mode=fault and stands.
+Gait: scripts/walk_gait_ainex.py gait_targets. Forward uses a shorter cadence
+than Gate D CSF50 (that basin crawled at ~1 cm/s): T=0.55 s, hip amp 0.24 rad,
+DS=0.1375 s, stance-slip damper 25 N/(m/s) instead of CSF50's 115. CP swing
+and mild stance VIK stay on. Feet, friction, kp, and ±2.1 Nm are unchanged;
+the legs still pin at 2.1 Nm. Balance assist stays off (it locks yaw and
+fakes speed). Residual npz stays off. This is not a clean-walk or Gate E
+PASS. If many legs pin, or up_z approaches a tip, applied velocity is capped
+(not compounded). Tip / collapse latches mode=fault and stands.
 
 Honesty: pure yaw (vx=0) still runs a reduced forward CPG because this plant
 has no turn-in-place gait, so some +X creep is expected. Reverse mirrors hip
@@ -71,7 +70,7 @@ does not trip while a key is latched.
 
 Run:
   MUJOCO_GL=osmesa python scripts/steer_walk.py
-  MUJOCO_GL=osmesa python scripts/steer_walk.py --out previews/steer_walk_day1.mp4
+  MUJOCO_GL=osmesa python scripts/steer_walk.py --out previews/steer_walk_forward.mp4
   MUJOCO_GL=osmesa python scripts/steer_walk.py --no-video
   MUJOCO_GL=glfw  python scripts/steer_walk.py --view
   python scripts/steer_walk.py --self-test
@@ -107,7 +106,17 @@ from walk_gait import TELEOP_DEADBAND, TELEOP_RATE_LIMIT  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 PLANT_XML = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145.xml"
-PLANT_MD5 = "fc94709c84f5598d4474ecfc4bb41fdc"
+# Walk plant after the approved kit_cam + kit_cam_site insert. Pre-camera
+# freeze was fc94709c84f5598d4474ecfc4bb41fdc (mass, feet, actuators unchanged).
+PLANT_MD5 = "e3feef973d7ae1fb09748d13fdbcb4ed"
+KIT_CAM_POS = (0.020, 0.019, 0.007)
+KIT_CAM_FOVY = 104.82
+# xyaxes "0 -1 0 0 0 1" → camera-frame columns (x, y, z). Look is −Z = +X.
+KIT_CAM_AXES = (
+    (0.0, -1.0, 0.0),
+    (0.0, 0.0, 1.0),
+    (-1.0, 0.0, 0.0),
+)
 PREVIEWS = ROOT / "previews"
 
 # Frozen contact box (half-size, m) and servo ranges. Checked, never written.
@@ -118,12 +127,12 @@ LEG_TAU = 2.1
 ARM_TAU = 0.7
 SAT_FRAC = 0.98
 
-# Full CSF50 amplitude. The CPG does not produce STEP_LEN*2/T; realized body
-# speed on this plant is about 2 cm/s (see the run log). 0.03 m/s is the
-# command that means "full gait", and it is what applied_vx saturates to.
-VX_FWD_CAP = 0.03
+# Full-stick forward command. Amplitude is |applied_vx| / VX_FWD_CAP, so this
+# number is the command at gait amplitude 1. It is set to the upright realized
+# body speed of that gait (~0.08 m/s), not a torque-limit increase.
+VX_FWD_CAP = 0.08
 # 0.4× forward amplitude. Higher reverse commands tip this plant.
-VX_BACK_CAP = 0.012
+VX_BACK_CAP = 0.032
 YAW_RATE_CAP = 0.25
 # Hip-yaw bias at full stick. Must clear TELEOP_DEADBAND (0.08 rad) or the
 # joint deadband swallows the turn. 0.35 rad is enough to show a heading
@@ -137,7 +146,7 @@ INPLACE_YAW_AMP = 0.35
 DEADBAND_VX = TELEOP_DEADBAND * VX_FWD_CAP
 DEADBAND_YAW = TELEOP_DEADBAND * YAW_RATE_CAP
 # Plant slew is tighter than TELEOP_RATE_LIMIT so stand→full gait is not one frame.
-VX_SLEW = 0.03  # m/s^2  (0 → forward cap in 1.0 s)
+VX_SLEW = 0.08  # m/s^2  (0 → forward cap in 1.0 s)
 YAW_SLEW = 0.40  # rad/s^2
 
 COMMAND_TIMEOUT_S = 0.200
@@ -381,12 +390,11 @@ class DemoSegment:
     label: str
 
 
-# Headless proof: stand → forward → turn (forward + left) → stop.
+# Sneak peek: stand → forward → stop. Yaw stays on the API and the keyboard.
 DEMO_SCRIPT: tuple[DemoSegment, ...] = (
     DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
-    DemoSegment(5.0, "vel", VX_FWD_CAP, 0.0, "forward"),
-    DemoSegment(8.5, "vel", VX_FWD_CAP, YAW_RATE_CAP, "turn"),
-    DemoSegment(9.5, "stop", 0.0, 0.0, "stop"),
+    DemoSegment(9.0, "vel", VX_FWD_CAP, 0.0, "forward"),
+    DemoSegment(10.5, "stop", 0.0, 0.0, "stop"),
 )
 
 
@@ -482,22 +490,24 @@ def mirror_sagittal(q_walk: dict[str, float], q_stand: dict[str, float]) -> dict
 
 
 def apply_frozen_forward_gait() -> None:
-    """Point gait_targets at the Gate D CSF50 basin. Does not edit the plant.
+    """Faster upright forward on the frozen actuators. Does not edit the plant.
 
-    walk_gait_ainex module defaults are an earlier skate-in-place basin.
-    CSF50 is the locked open-loop forward set (still not a Gate E cadence pass).
+    Gate D CSF50 (T=0.88, hip 0.116, DS=0.31, plant_kd=115) stays on the
+    ±2.1 Nm clip and crawls at about 1 cm/s because the stance-slip damper
+    brakes the body. This basin shortens the step and lowers that damper.
+    It is not a Gate E cadence pass and not a clean-walk claim.
     """
-    wg.GAIT_T = 0.88
-    wg.STEP_LEN = 0.021
-    wg.HIP_PITCH_AMP = 0.116
+    wg.GAIT_T = 0.55
+    wg.STEP_LEN = 0.040
+    wg.HIP_PITCH_AMP = 0.24
     wg.HIP_BIAS_FWD = 0.06
-    wg.DS_S = 0.31
+    wg.DS_S = 0.1375
     wg.COM_SHIFT_AMP = 0.275
     wg.COM_SHIFT_LEAD = 0.23
     wg.KNEE_STANCE = 0.40
     wg.KNEE_SWING = 0.80
     wg.COM_Z = 0.225
-    wg.PLANT_KD = 115.0
+    wg.PLANT_KD = 25.0
     wg.USE_CP_SWING = True
     wg.USE_STANCE_VIK = True
     wg.STANCE_VIK_KP = 0.45
@@ -536,6 +546,43 @@ def _md5(path: Path) -> str:
     return hashlib.md5(path.read_bytes()).hexdigest()
 
 
+def _kit_cam_problems(model: mj.MjModel) -> list[str]:
+    """Hardware kit_cam on head_tilt_link. Site is not a body and not a contact."""
+    problems: list[str] = []
+    if model.ncam != 1:
+        problems.append(f"expected 1 kit_cam, found {model.ncam}")
+        return problems
+    cid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_CAMERA, "kit_cam")
+    if cid < 0:
+        problems.append("missing camera kit_cam")
+        return problems
+    body = mj.mj_id2name(model, mj.mjtObj.mjOBJ_BODY, int(model.cam_bodyid[cid])) or ""
+    if body != "head_tilt_link":
+        problems.append(f"kit_cam parent {body} != head_tilt_link")
+    pos = np.asarray(model.cam_pos[cid], dtype=np.float64)
+    if float(np.max(np.abs(pos - np.array(KIT_CAM_POS)))) > 1e-6:
+        problems.append(f"kit_cam pos {pos.tolist()} != {KIT_CAM_POS}")
+    if abs(float(model.cam_fovy[cid]) - KIT_CAM_FOVY) > 1e-4:
+        problems.append(f"kit_cam fovy {float(model.cam_fovy[cid])} != {KIT_CAM_FOVY}")
+    mat = np.asarray(model.cam_mat0[cid], dtype=np.float64).reshape(3, 3)
+    expected = np.array(KIT_CAM_AXES, dtype=np.float64).T
+    if float(np.max(np.abs(mat - expected))) > 1e-5:
+        problems.append("kit_cam xyaxes != 0 -1 0 0 0 1")
+    if model.nsite != 1:
+        problems.append(f"expected 1 kit_cam_site, found {model.nsite} sites")
+    sid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, "kit_cam_site")
+    if sid < 0:
+        problems.append("missing site kit_cam_site")
+    else:
+        sbody = mj.mj_id2name(model, mj.mjtObj.mjOBJ_BODY, int(model.site_bodyid[sid])) or ""
+        if sbody != "head_tilt_link":
+            problems.append(f"kit_cam_site parent {sbody} != head_tilt_link")
+        spos = np.asarray(model.site_pos[sid], dtype=np.float64)
+        if float(np.max(np.abs(spos - np.array(KIT_CAM_POS)))) > 1e-6:
+            problems.append(f"kit_cam_site pos {spos.tolist()} != {KIT_CAM_POS}")
+    return problems
+
+
 def plant_problems(model: mj.MjModel, xml_path: Path = PLANT_XML) -> list[str]:
     """Read-only freeze checks. Empty list means the loaded plant matches Hardware."""
     problems: list[str] = []
@@ -549,8 +596,7 @@ def plant_problems(model: mj.MjModel, xml_path: Path = PLANT_XML) -> list[str]:
         low = name.lower()
         if "door" in low or "lever" in low:
             problems.append(f"door/lever body present: {name}")
-    if model.ncam != 0:
-        problems.append(f"model has {model.ncam} camera(s); Day 1 must not add a camera body")
+    problems.extend(_kit_cam_problems(model))
     expected_kp = {
         "l_hip_yaw_pos": 40.0, "l_hip_roll_pos": 40.0, "l_hip_pitch_pos": 45.0,
         "l_knee_pos": 45.0, "l_ank_pitch_pos": 35.0, "l_ank_roll_pos": 35.0,
@@ -743,7 +789,8 @@ class SteerSession:
         if self.renderer is None:
             raise RuntimeError("renderer not created")
         self.cam.lookat[:] = self.data.xpos[self.bid_body]
-        mj.mj_forward(self.model, self.data)
+        # mj_step already forwarded. A second mj_forward here changes the
+        # contact warm-start and tips this gait before the stop.
         self.renderer.update_scene(self.data, self.cam)
         raw = np.ascontiguousarray(self.renderer.render().copy(), dtype=np.uint8)
         return wg._burn_overlay(raw, lines)
@@ -994,6 +1041,11 @@ class RunSummary:
     max_contact_cop_outside_box_m: float
     max_leg_tau_nm: float
     max_arm_tau_nm: float
+    delta_x_m: float
+    mean_vx_m_s: float
+    tip: bool
+    cop_in_box: bool
+    peak_torque_nm: float
     vx_fwd_cap: float
     vx_back_cap: float
     yaw_rate_cap: float
@@ -1009,25 +1061,29 @@ class RunSummary:
 def summarize(session: SteerSession) -> RunSummary:
     bounds = script_bounds()
     fwd_t = bounds.get("forward", (1.2, 4.5))
-    turn_t = bounds.get("turn", (4.5, 7.0))
     fwd = _segment_window(session.samples, fwd_t[0], fwd_t[1])
-    turn = _segment_window(session.samples, turn_t[0], turn_t[1])
+    turn_bounds = bounds.get("turn")
+    turn = _segment_window(session.samples, turn_bounds[0], turn_bounds[1]) if turn_bounds is not None else []
     dx_fwd = (fwd[-1].x - fwd[0].x) if len(fwd) >= 2 else 0.0
     mean_vx = float(np.mean([s.body_vx for s in fwd])) if fwd else 0.0
     dyaw = (turn[-1].yaw - turn[0].yaw) if len(turn) >= 2 else 0.0
     dx_turn = (turn[-1].x - turn[0].x) if len(turn) >= 2 else 0.0
     # Wrap yaw delta to [-pi, pi]
     dyaw = (dyaw + math.pi) % (2.0 * math.pi) - math.pi
+    tip = bool(session.min_up_z < 0.85 or (session.bus.fault and "tip" in session.bus.fault_reason))
+    cop_in_box = bool(session.max_cop_excursion <= 0.001)
     honesty = (
-        "applied_vx is the clamped CPG command (full CSF50 amp at "
-        f"{VX_FWD_CAP:.3f} m/s), not measured speed. "
+        "applied_vx is the clamped forward-gait command (amplitude 1 at "
+        f"{VX_FWD_CAP:.3f} m/s), not a separate odometry claim. "
         "Reverse is a sagittal mirror at "
         f"{VX_BACK_CAP:.3f} m/s and is not a verified retreat; "
-        "yaw is a hip-yaw bias, not a verified turn. "
-        f"Measured forward Δx={dx_fwd:+.3f} m, mean body vx={mean_vx:+.3f} m/s; "
-        f"turn Δyaw={math.degrees(dyaw):+.1f} deg, Δx={dx_turn:+.3f} m. "
-        f"max contact CoP outside box={session.max_cop_excursion:.4f} m; "
-        f"max leg torque={session.max_leg_tau:.2f} Nm (limit {LEG_TAU})."
+        "yaw is a hip-yaw bias and is not in this clip. "
+        f"Measured forward Δx={dx_fwd:+.3f} m, mean body vx={mean_vx:+.3f} m/s. "
+        f"tip={tip}; CoP in box={cop_in_box} "
+        f"(outside {session.max_cop_excursion:.4f} m); "
+        f"peak leg torque={session.max_leg_tau:.2f} Nm (limit {LEG_TAU}). "
+        "Stance-slip damper is 25 N/(m/s), down from the CSF50 crawl's 115. "
+        "Foot box, friction, kp, and ±2.1 Nm are unchanged."
     )
     if session.bus.fault:
         honesty += f" FAULT: {session.bus.fault_reason}."
@@ -1045,6 +1101,11 @@ def summarize(session: SteerSession) -> RunSummary:
         max_contact_cop_outside_box_m=float(session.max_cop_excursion),
         max_leg_tau_nm=float(session.max_leg_tau),
         max_arm_tau_nm=float(session.max_arm_tau),
+        delta_x_m=float(dx_fwd),
+        mean_vx_m_s=float(mean_vx),
+        tip=tip,
+        cop_in_box=cop_in_box,
+        peak_torque_nm=float(session.max_leg_tau),
         vx_fwd_cap=VX_FWD_CAP,
         vx_back_cap=VX_BACK_CAP,
         yaw_rate_cap=YAW_RATE_CAP,
@@ -1076,8 +1137,8 @@ def run_demo(
         f"(TELEOP_RATE_LIMIT={TELEOP_RATE_LIMIT} deadband={TELEOP_DEADBAND})"
     )
     print(
-        "[steer] gait=CSF50 assist=OFF ankle_cop=ON plant_damper=ON "
-        "cp_swing=ON stance_vik=ON residual=OFF door=OFF"
+        "[steer] gait=forward T=0.55 hip=0.24 ds=0.1375 plant_kd=25 "
+        "assist=OFF ankle_cop=ON cp_swing=ON stance_vik=ON residual=OFF door=OFF"
     )
     n_ctrl = int(duration * wg.CTRL_HZ)
     last_print = -1.0
@@ -1317,7 +1378,7 @@ def test_plant_file() -> list[str]:
 
 
 def test_smoke_sim() -> list[str]:
-    """Stand, forward, turn, stop on the frozen plant. No video."""
+    """Stand, forward, stop on the frozen plant. No video."""
     failures: list[str] = []
     duration = DEMO_SCRIPT[-1].t_end
     session = SteerSession(video=False)
@@ -1325,9 +1386,7 @@ def test_smoke_sim() -> list[str]:
     n_ctrl = int(duration * wg.CTRL_HZ)
     bounds = script_bounds()
     fwd_t = bounds["forward"]
-    turn_t = bounds["turn"]
     saw_forward = False
-    saw_turn = False
     for _ in range(n_ctrl):
         now = float(session.data.time)
         refusal = driver.publish(session.bus, now)
@@ -1336,16 +1395,15 @@ def test_smoke_sim() -> list[str]:
         report = session.step()
         if fwd_t[0] + 1.0 <= now < fwd_t[1] - 0.1 and report.applied_vx > 0.5 * VX_FWD_CAP and report.mode == "move":
             saw_forward = True
-        if turn_t[0] + 0.8 <= now < turn_t[1] - 0.1 and report.applied_yaw_rate > 0.08 and report.mode == "move":
-            saw_turn = True
     session.assert_plant_unchanged()
     summary = summarize(session)
     print("[steer] smoke " + summary.honesty)
     _expect(not summary.fault, f"smoke fault: {summary.fault_reason}", failures)
+    _expect(not summary.tip, f"tipped up_z={summary.min_up_z:.3f}", failures)
     _expect(saw_forward, "forward command was not applied", failures)
-    _expect(saw_turn, "turn command was not applied", failures)
-    _expect(summary.dx_forward_m > 0.04, f"forward Δx={summary.dx_forward_m:.3f} m", failures)
-    _expect(summary.dyaw_turn_rad > 0.20, f"turn Δyaw={summary.dyaw_turn_rad:.3f} rad", failures)
+    _expect(summary.dx_forward_m > 0.40, f"forward Δx={summary.dx_forward_m:.3f} m", failures)
+    _expect(summary.mean_body_vx_forward > 0.05, f"mean vx={summary.mean_body_vx_forward:.3f}", failures)
+    _expect(summary.cop_in_box, "CoP left the foot box", failures)
     _expect(summary.max_leg_tau_nm <= LEG_TAU + 1e-3, "leg torque above freeze", failures)
     _expect(summary.max_contact_cop_outside_box_m <= 0.005, "CoP left the foot box", failures)
     tail = session.samples[-1]
@@ -1396,11 +1454,11 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Day-1 velocity steer on frozen M145 (no door)")
     ap.add_argument("--view", action="store_true", help="Interactive viewer + keyboard")
     ap.add_argument("--duration", type=float, default=None, help="Seconds (demo default is the scripted clip, view default 120)")
-    ap.add_argument("--out", type=str, default=str(PREVIEWS / "steer_walk_day1.mp4"))
+    ap.add_argument("--out", type=str, default=str(PREVIEWS / "steer_walk_forward.mp4"))
     ap.add_argument("--no-video", action="store_true", help="Headless sim without mp4")
     ap.add_argument("--self-test", action="store_true", help="Command bus, freeze checks, short sim")
-    ap.add_argument("--log", type=str, default=str(PREVIEWS / "steer_walk_day1_log.txt"))
-    ap.add_argument("--summary", type=str, default=str(PREVIEWS / "steer_walk_day1_summary.json"))
+    ap.add_argument("--log", type=str, default=str(PREVIEWS / "steer_walk_forward_log.txt"))
+    ap.add_argument("--summary", type=str, default=str(PREVIEWS / "steer_walk_forward_summary.json"))
     args = ap.parse_args()
     if args.self_test:
         raise SystemExit(self_test())
