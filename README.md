@@ -68,7 +68,7 @@ MUJOCO_GL=osmesa python scripts/walk_gait.py --gait-off --duration 5 --out previ
 
 ## Day-1 steerable walk (frozen M145, no door)
 
-Velocity only (`stand` / `stop` / `vel`). Voice later calls the same `CommandBus` in `scripts/steer_walk.py`. Plant is `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml` (md5 `e3feef97…`) with Hardware `kit_cam` on `head_tilt_link` (zero-mass site, fovy 104.82). Foot box, friction, kp, and ±2.1 Nm are unchanged. No OptC / door plant.
+Velocity only (`stand` / `stop` / `vel`). Voice later calls the same `CommandBus` in `scripts/steer_walk.py`. Plant is `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml` (md5 `71b2c86d…`) with Hardware `kit_cam` on `head_tilt_link` at `0.050 0.019 0.007` (zero-mass site, fovy 104.82). Foot box, friction, kp, and ±2.1 Nm are unchanged. No OptC / door plant.
 
 ```bash
 MUJOCO_GL=osmesa python scripts/steer_walk.py
@@ -81,11 +81,12 @@ Headless clips:
 
 ```bash
 MUJOCO_GL=osmesa python scripts/steer_walk.py --clip forward
+MUJOCO_GL=osmesa python scripts/steer_walk.py --clip stop
 MUJOCO_GL=osmesa python scripts/steer_walk.py --clip reverse
 MUJOCO_GL=osmesa python scripts/steer_walk.py --clip turn
 ```
 
-`forward` is stand → forward → stop. `reverse` is stand → retreat → stop. `turn` is stand → walk while yawing left → stop. Each writes `previews/steer_walk_<clip>.mp4` and a JSON summary (Δx, Δyaw, tip, CoP in box, peak torque). Keys, when a display exists: **W/S** ±vx, **A/D** ±yaw (A = left), **Space** stop. Keys latch until Space. AI resends `vel` at 10 Hz; 200 ms of silence stands. Clamps stay +0.08 / −0.032 m/s and ±0.25 rad/s. Reverse raises the stance-slip damper to 100 N/(m/s) only while backing up. Turning lengthens the outside step. Not a door or Gate Q claim.
+`forward` is stand → forward → stop. `stop` is the same bus on a gait phase that used to pitch after the stop (support margin about −0.08 m) and latch `mode=fault`. `reverse` is stand → retreat → stop. `turn` is stand → walk while yawing left → stop. Each writes `previews/steer_walk_<clip>.mp4` and a JSON summary (Δx, Δyaw, tip, CoP in box, peak torque, end mode). Keys, when a display exists: **W/S** ±vx, **A/D** ±yaw (A = left), **Space** stop. Keys latch until Space. AI resends `vel` at 10 Hz; 200 ms of silence stands. Clamps stay +0.08 / −0.032 m/s and ±0.25 rad/s. Reverse raises the stance-slip damper to 100 N/(m/s) while backing up. After stop that damper stays for 1.20 s (and a reverse cut in a pitching phase finishes at most one step first), then it is off. Turning lengthens the outside step. Not a door or Gate Q claim.
 
 Model: `mujoco/dronable_v0.xml`  
 Gait params & teleop stubs: top of `scripts/walk_gait.py` (wired to Controls/AI brief).

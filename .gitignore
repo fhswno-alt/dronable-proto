@@ -10,6 +10,7 @@ __pycache__/
 *.webm
 !previews/steer_walk_day1.mp4
 !previews/steer_walk_forward.mp4
+!previews/steer_walk_stop.mp4
 !previews/steer_walk_reverse.mp4
 !previews/steer_walk_turn.mp4
 previews/frame_seq/
