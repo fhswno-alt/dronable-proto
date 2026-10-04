@@ -1,0 +1,25 @@
+{
+  "plant_md5": "e3feef973d7ae1fb09748d13fdbcb4ed",
+  "mujoco_gl": "osmesa",
+  "phrases": [
+    "walk forward",
+    "turn left",
+    "stop"
+  ],
+  "fault": false,
+  "fault_reason": "",
+  "command_vx_cap": 0.08,
+  "mean_applied_vx_settled": 0.08,
+  "mean_body_vx_settled": 0.07173591018627137,
+  "dx_forward_m": 0.2547847980894252,
+  "dyaw_turn_deg": 13.909111905486052,
+  "min_up_z": 0.9535730874620898,
+  "end_mode": "stand",
+  "stills": [
+    "previews/voice_caller_kit_cam_forward.png",
+    "previews/voice_caller_kit_cam_turn.png",
+    "previews/voice_caller_kit_cam_stop.png"
+  ],
+  "mp4": "previews/voice_caller_kit_cam.mp4",
+  "honesty": "kit_cam during typed phrases walk forward, then turn left, then stop. Forward command into the gait is +0.080 m/s. Mean applied_vx after slew is +0.080 m/s. Mean body vx in that window is +0.072 m/s. Forward \u0394x=+0.255 m. Controls' sneak peek realized about +0.074 m/s and +0.64 m upright. This clip does not claim faster than that, and it is not a clean walk. Turn left sent yaw_rate +0.25 rad/s, a hip bias, not a verified spin. Measured heading change +13.9 deg. Reverse was not sent. A back-up phrase is refused: not a walk-back. The camera can see, but there is no room and no map. The floor is empty. This gait is not a room crossing. Not autonomous navigation."
+}
