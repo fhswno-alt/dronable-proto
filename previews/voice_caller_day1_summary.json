@@ -10,6 +10,8 @@
     "back up",
     "stop",
     "walk forward",
+    "stop",
+    "turn right",
     "stop"
   ],
   "fault": false,
@@ -27,11 +29,20 @@
   "end_mode_backup": "stand",
   "end_mode_forward": "stand",
   "end_margin_forward": 0.0635682544462543,
+  "dyaw_right_deg": -83.43315431298844,
+  "dx_right_m": 0.45884194039385107,
+  "mean_body_vx_right": 0.05398419772290445,
+  "mean_applied_vx_right": 0.05579621052631579,
+  "min_up_z_right": 0.9549631099233833,
+  "end_mode_right": "stand",
+  "end_margin_right": 0.06299212921810984,
   "stills": [
     "previews/voice_caller_kit_cam_backup.png",
     "previews/voice_caller_kit_cam_forward.png",
-    "previews/voice_caller_kit_cam_stop.png"
+    "previews/voice_caller_kit_cam_stop.png",
+    "previews/voice_caller_kit_cam_turn_right.png",
+    "previews/voice_caller_kit_cam_turn_right_stop.png"
   ],
   "mp4": "previews/voice_caller_kit_cam.mp4",
-  "honesty": "kit_cam for back up, and for walk forward then stop. These are two separate steers. Camera pos 0.050 0.019 0.007. The camera was not moved. The frame is still largely the inside of the head. Empty floor shows through the opening. Back up command is -0.032 m/s. Mean applied_vx in the reverse window is -0.032 m/s. Mean body vx in that window is -0.048 m/s. Reverse \u0394x=-0.283 m. min up_z during back up is 0.903. End mode after back up is stand. Controls' merged reverse clip moved about -0.97 m, mean body speed about -0.053 m/s, upright, no tip. This clip does not claim faster than that clip. Forward command into the gait is +0.056 m/s. Mean applied_vx in the forward window is +0.056 m/s. Mean body vx in that window is +0.040 m/s. Forward \u0394x=+1.471 m. min up_z while the forward command was applied is 0.967. End mode is stand. The stop frame is level. End support margin is +0.064 m. The command 0.056 is not the odometry. Controls' clip at that cap moved about +2.16 m, mean body speed about +0.039 m/s, then stood, end margin +0.063 m. This clip does not claim faster or farther than that. 0.080 yaws and tips near 1.2 m. This caller does not send 0.080. Left while walking held about +62 deg and still moved forward. Right on the short window was about -0.28 rad. Both stay inside \u00b10.25 rad/s. That is a hip bias, not a spin. This clip does not send a turn. Go to the kitchen or the bathroom stays refused: the camera can see, but there is no room and no map. The floor is empty. This gait is not a room crossing. Not autonomous navigation."
+  "honesty": "kit_cam for back up, for walk forward then stop, and for an 11 s right turn. These are three separate steers. Camera pos 0.050 0.019 0.007. The camera was not moved. The frame is still largely the inside of the head. Empty floor shows through the opening. Back up command is -0.032 m/s. Mean applied_vx in the reverse window is -0.032 m/s. Mean body vx in that window is -0.048 m/s. Reverse \u0394x=-0.283 m. min up_z during back up is 0.903. End mode after back up is stand. Controls' merged reverse clip moved about -0.97 m, mean body speed about -0.053 m/s, upright, no tip. This clip does not claim faster than that clip. Forward command into the gait is +0.056 m/s. Mean applied_vx in the forward window is +0.056 m/s. Mean body vx in that window is +0.040 m/s. Forward \u0394x=+1.471 m. min up_z while the forward command was applied is 0.967. Forward end mode is stand. The forward stop frame is level. Forward end support margin is +0.064 m. The command 0.056 is not the odometry. Controls' clip at that cap moved about +2.16 m, mean body speed about +0.039 m/s, then stood, end margin +0.063 m. This clip does not claim faster or farther than that. 0.080 yaws and tips near 1.2 m. This caller does not send 0.080. Turn right while walking publishes vx +0.056 m/s and yaw_rate -0.25 rad/s for 11 s, then stop. Heading in that window is -83.4 deg. Forward \u0394x in that window is +0.459 m. Mean body vx in that window is +0.054 m/s. min up_z during the right turn is 0.955. Right-turn end mode is stand. Right-turn end support margin is +0.063 m. Controls' 11 s window is the ceiling: right heading about -83 deg, still moving forward about +0.46 m, end stand, margin about +0.063 m. This clip does not claim more than that. The 4.5 s window that stalled near -17 deg is obsolete. Left while walking on the same window is about +62 deg. Both stay inside \u00b10.25 rad/s. That is a hip bias, not a spin. Go to the kitchen or the bathroom stays refused: the camera can see, but there is no room and no map. The floor is empty. This gait is not a room crossing. Not autonomous navigation."
 }

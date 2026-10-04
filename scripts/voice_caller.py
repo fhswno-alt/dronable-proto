@@ -986,10 +986,10 @@ def _fmt(value: float | None, spec: str) -> str:
 
 
 def _honesty(result: ClipResult) -> str:
-    stop_pose = "The stop frame is level. " if result.end_mode_forward == "stand" else ""
+    stop_pose = "The forward stop frame is level. " if result.end_mode_forward == "stand" else ""
     text = (
-        "kit_cam for back up, and for walk forward then stop. "
-        "These are two separate steers. "
+        "kit_cam for back up, for walk forward then stop, and for an 11 s right turn. "
+        "These are three separate steers. "
         f"Camera pos {result.kit_cam_pos[0]:.3f} {result.kit_cam_pos[1]:.3f} "
         f"{result.kit_cam_pos[2]:.3f}. The camera was not moved. "
         "The frame is still largely the inside of the head. "
