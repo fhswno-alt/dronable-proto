@@ -39,8 +39,14 @@ Clamps (what we actually apply — not the raw request):
                 lengths, then stop. Not a Gate Q pass.
   |yaw_rate|  ≤ YAW_RATE_CAP (0.25 rad/s). While walking forward this scales
                 the outside step longer than the inside step and adds a
-                hip-yaw bias clipped at YAW_HIP_CLIP. Heading that remains
-                after stop is the measured turn.
+                hip-yaw bias clipped at YAW_HIP_CLIP. Both hip-yaw joints
+                use axis −Z, so that same bias toes the swing foot the
+                other way. Left subtracts TURN_LEFT_BIAS first. Right keeps
+                the full clip, and the swing foot used to land toed against
+                the turn (heading stalled near −16°). The swing leg now
+                keeps TURN_RIGHT_SWING_YAW_SCALE of that command; the stance
+                leg does not. Heading that remains after stop is the measured
+                turn.
   Deadband and slew reuse TELEOP_DEADBAND (0.08) and TELEOP_RATE_LIMIT (1.5)
   from scripts/walk_gait.py. Those constants are joint-space (rad, rad/s).
   Velocity uses the same fraction of each cap:
@@ -165,6 +171,17 @@ TURN_STEP_ASYM = 0.20
 # Subtracted from both hip yaws only while turning left. The open-loop gait
 # already drifts left; without this the left command stacks and tips.
 TURN_LEFT_BIAS = 0.06
+# Right turn only. Fraction of the common-mode hip yaw kept on the swing
+# foot. +hip yaw toes that foot right (axis −Z), which is the wrong way
+# when the command is trying to yaw the body right. Left's swing error is
+# only the post-bias 0.06 rad and still accumulates. Right uses the full
+# 0.12 rad clip, and the swing foot was landing toed left: measured heading
+# reached about −16° by 3 s and then sat there until about 5 s (−14°),
+# while the same 11 s window as the left turn only caught up at the end
+# (−60° vs +62°). 0.40 / 0.60 / 0.80 all stayed upright on that window.
+# 0.60 still walks forward (Δx stays with the left turn) and the early
+# stall is gone. Stance hip yaw is not scaled. Not a yaw-cap or plant change.
+TURN_RIGHT_SWING_YAW_SCALE = 0.60
 # vx=0 and yaw!=0: reduced forward CPG so a step exists to yaw on.
 INPLACE_YAW_AMP = 0.35
 
@@ -458,11 +475,19 @@ TURN_SCRIPT: tuple[DemoSegment, ...] = (
     DemoSegment(12.0, "vel", VX_FWD_CAP, YAW_RATE_CAP, "turn"),
     DemoSegment(14.5, "stop", 0.0, 0.0, "stop"),
 )
+# Same window as TURN_SCRIPT so Δyaw is comparable. The old 4.5 s right
+# clip stopped inside the stall and read about −16°.
+RIGHT_TURN_SCRIPT: tuple[DemoSegment, ...] = (
+    DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+    DemoSegment(12.0, "vel", VX_FWD_CAP, -YAW_RATE_CAP, "turn"),
+    DemoSegment(14.5, "stop", 0.0, 0.0, "stop"),
+)
 CLIP_SCRIPTS: dict[str, tuple[DemoSegment, ...]] = {
     "forward": DEMO_SCRIPT,
     "stop": STOP_SCRIPT,
     "reverse": REVERSE_SCRIPT,
     "turn": TURN_SCRIPT,
+    "turn-right": RIGHT_TURN_SCRIPT,
 }
 
 
@@ -608,6 +633,22 @@ def gait_amp_and_dir(report: TickReport) -> tuple[float, int]:
         amp = INPLACE_YAW_AMP * min(1.0, abs(report.applied_yaw_rate) / YAW_RATE_CAP)
         return amp, 1
     return 0.0, 0
+
+
+def swing_hip_yaw_scale(yaw_rate: float, direction: int, leg_phase: float) -> float:
+    """Stance and double-support keep the full hip-yaw command.
+
+    A right-turn swing foot keeps TURN_RIGHT_SWING_YAW_SCALE so it does not
+    land toed against the turn. Left, reverse, and straight walking return 1.
+    Swing starts at the same phase as gait_targets (stance 0.50, then DS).
+    """
+    if direction < 0 or yaw_rate >= -1e-3:
+        return 1.0
+    ds_frac = max(0.08, min(0.55, float(wg.DS_S) / max(float(wg.GAIT_T), 1e-3)))
+    ds_end = 0.50 + ds_frac
+    if leg_phase >= ds_end:
+        return TURN_RIGHT_SWING_YAW_SCALE
+    return 1.0
 
 
 def _md5(path: Path) -> str:
@@ -889,8 +930,10 @@ class SteerSession:
         yaw_cmd = self._hip_yaw(yaw_rate)
         if yaw_rate > 1e-3 and direction >= 0:
             yaw_cmd -= TURN_LEFT_BIAS
-        qdes["l_hip_yaw"] = qdes.get("l_hip_yaw", 0.0) + yaw_cmd
-        qdes["r_hip_yaw"] = qdes.get("r_hip_yaw", 0.0) + yaw_cmd
+        phi = (self.gait_t / max(float(wg.GAIT_T), 1e-6)) % 1.0 if amp > 0.02 else 0.0
+        for side, name in (("L", "l_hip_yaw"), ("R", "r_hip_yaw")):
+            scale = swing_hip_yaw_scale(yaw_rate, direction, wg.phase_leg(phi, side))
+            qdes[name] = qdes.get(name, 0.0) + scale * yaw_cmd
         return qdes
 
     def _reverse_phase_stands(self) -> bool:
@@ -956,7 +999,9 @@ class SteerSession:
                 qdes[key] = stand + scale * (qdes.get(key, stand) - stand)
 
     def _hip_yaw(self, yaw_rate: float) -> float:
-        """Common-mode hip yaw. Both joints use axis -Z, so +cmd yaws the body left."""
+        """Common-mode hip yaw. Both joints use axis -Z, so +cmd yaws the body left
+        and toes the swing foot right. Right turns scale the swing leg separately.
+        """
         if abs(yaw_rate) < 1e-6:
             self.hip_yaw_cmd = 0.0
             return 0.0
@@ -1234,6 +1279,7 @@ class RunSummary:
     yaw_slew: float
     teleop_deadband: float
     teleop_rate_limit: float
+    mean_yaw_rate_turn: float
     honesty: str
 
 
@@ -1266,6 +1312,10 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
     dx_turn = (turn[-1].x - turn[0].x) if len(turn) >= 2 else 0.0
     # Wrap yaw delta to [-pi, pi]
     dyaw = (dyaw + math.pi) % (2.0 * math.pi) - math.pi
+    if len(turn) >= 2 and (turn[-1].t - turn[0].t) > 1e-6:
+        mean_yaw_rate = dyaw / (turn[-1].t - turn[0].t)
+    else:
+        mean_yaw_rate = 0.0
     dyaw_end = 0.0
     if session.samples:
         dyaw_end = session.samples[-1].yaw - session.samples[0].yaw
@@ -1283,12 +1333,16 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
         f"with stance damper {REVERSE_PLANT_KD:.0f} N/(m/s). "
         f"Yaw cap is ±{YAW_RATE_CAP:.2f} rad/s; hip-yaw clip {YAW_HIP_CLIP:.2f} rad "
         f"plus outside-step scale {TURN_STEP_ASYM:.2f}. "
+        f"Right-turn swing hip yaw keeps {TURN_RIGHT_SWING_YAW_SCALE:.2f} of that "
+        "clip so the foot does not land toed against the turn; stance hip yaw "
+        "and the left turn are unchanged. "
         f"Measured motion Δx={dx_fwd:+.3f} m, mean body vx={mean_vx:+.3f} m/s "
         f"(not the command). Straight-forward net yaw drift="
         f"{math.degrees(dyaw_fwd):+.2f} deg; yaw during that window "
         f"{math.degrees(yaw_lo):+.1f} to {math.degrees(yaw_hi):+.1f} deg. "
         f"Heading at the end of the clip is {math.degrees(dyaw_end):+.2f} deg from the start. "
-        f"Turn-window Δyaw={math.degrees(dyaw):+.2f} deg. "
+        f"Turn-window Δyaw={math.degrees(dyaw):+.2f} deg "
+        f"(mean yaw rate {mean_yaw_rate:+.3f} rad/s, cap ±{YAW_RATE_CAP:.2f}). "
         f"tip={tip}; CoP in box={cop_in_box} "
         f"(outside {session.max_cop_excursion:.4f} m); "
         f"peak leg torque={session.max_leg_tau:.2f} Nm (limit {LEG_TAU}). "
@@ -1336,6 +1390,7 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
         yaw_slew=YAW_SLEW,
         teleop_deadband=float(TELEOP_DEADBAND),
         teleop_rate_limit=float(TELEOP_RATE_LIMIT),
+        mean_yaw_rate_turn=float(mean_yaw_rate),
         honesty=honesty,
     )
 
@@ -1779,24 +1834,49 @@ def test_reverse_and_turn() -> list[str]:
     unwind = abs(turn.samples[-1].yaw - turn_end.yaw)
     _expect(unwind < 0.20, f"heading unwound {unwind:.3f} rad after stop", failures)
 
-    # Right is the weaker direction: the open-loop gait drifts left, so the
-    # same stick does not mirror. This duration stays upright.
-    right_script = (
-        DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
-        DemoSegment(5.5, "vel", VX_FWD_CAP, -YAW_RATE_CAP, "turn"),
-        DemoSegment(7.5, "stop", 0.0, 0.0, "stop"),
-    )
-    _right, right_sum = _run_script(right_script)
-    print(
-        f"[steer] right Δyaw={right_sum.dyaw_turn_rad:+.3f} rad "
-        f"Δx={right_sum.dx_turn_m:+.3f} m up={right_sum.min_up_z:.3f} "
-        f"fault={right_sum.fault_reason or '-'}"
-    )
+    # Same 11 s window as the left turn. Swing-foot yaw scale is what keeps
+    # heading moving; the old 4.5 s cut sat inside the −16° stall.
+    right, right_sum = _run_script(RIGHT_TURN_SCRIPT)
+    print("[steer] right " + right_sum.honesty)
     _expect(not right_sum.fault, f"right fault: {right_sum.fault_reason}", failures)
     _expect(not right_sum.tip, f"right tip up_z={right_sum.min_up_z:.3f}", failures)
-    _expect(right_sum.dyaw_turn_rad < -0.15, f"right Δyaw={right_sum.dyaw_turn_rad:.3f}", failures)
+    _expect(right_sum.dyaw_turn_rad < -0.90, f"right Δyaw={right_sum.dyaw_turn_rad:.3f}", failures)
+    _expect(right_sum.dx_turn_m > 0.25, f"right Δx={right_sum.dx_turn_m:.3f} m", failures)
     _expect(right_sum.min_up_z >= 0.90, f"right min up_z={right_sum.min_up_z:.3f}", failures)
     _expect(right_sum.cop_in_box, "right CoP left the foot box", failures)
+    _expect(right.samples[-1].mode == "stand", "right did not end in stand", failures)
+    _expect(right.samples[-1].margin > 0.02, f"right end margin {right.samples[-1].margin:+.3f}", failures)
+    right_end = [s for s in right.samples if s.t < RIGHT_TURN_SCRIPT[1].t_end][-1]
+    right_unwind = abs(right.samples[-1].yaw - right_end.yaw)
+    _expect(right_unwind < 0.20, f"right heading unwound {right_unwind:.3f} rad after stop", failures)
+    _expect(0.0 < TURN_RIGHT_SWING_YAW_SCALE < 1.0, "swing yaw scale left the measured basin", failures)
+    apply_frozen_forward_gait()
+    _expect(swing_hip_yaw_scale(-YAW_RATE_CAP, 1, 0.10) == 1.0, "stance hip yaw was scaled", failures)
+    _expect(
+        swing_hip_yaw_scale(-YAW_RATE_CAP, 1, 0.90) == TURN_RIGHT_SWING_YAW_SCALE,
+        "right swing hip yaw was not scaled",
+        failures,
+    )
+    _expect(swing_hip_yaw_scale(YAW_RATE_CAP, 1, 0.90) == 1.0, "left swing hip yaw was scaled", failures)
+    _expect(swing_hip_yaw_scale(-YAW_RATE_CAP, -1, 0.90) == 1.0, "reverse swing hip yaw was scaled", failures)
+    # Stop inside the old stall and later in the turn. Tip check is unchanged.
+    for stop_at in (2.40, 4.20, 9.00):
+        cut = (
+            DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+            DemoSegment(stop_at, "vel", VX_FWD_CAP, -YAW_RATE_CAP, "turn"),
+            DemoSegment(stop_at + 2.5, "stop", 0.0, 0.0, "stop"),
+        )
+        cut_sess, cut_sum = _run_script(cut)
+        _expect(not cut_sum.fault, f"right stop@{stop_at:.2f} fault: {cut_sum.fault_reason}", failures)
+        _expect(not cut_sum.tip, f"right stop@{stop_at:.2f} tip up_z={cut_sum.min_up_z:.3f}", failures)
+        _expect(cut_sum.min_up_z >= 0.90, f"right stop@{stop_at:.2f} min up_z={cut_sum.min_up_z:.3f}", failures)
+        _expect(cut_sum.cop_in_box, f"right stop@{stop_at:.2f} CoP left the box", failures)
+        _expect(cut_sess.samples[-1].mode == "stand", f"right stop@{stop_at:.2f} ended {cut_sess.samples[-1].mode}", failures)
+        _expect(
+            cut_sess.samples[-1].margin > 0.02,
+            f"right stop@{stop_at:.2f} end margin {cut_sess.samples[-1].margin:+.3f}",
+            failures,
+        )
     return failures
 
 
@@ -1841,6 +1921,7 @@ def main() -> None:
         "stop": "steer_walk_stop",
         "reverse": "steer_walk_reverse",
         "turn": "steer_walk_turn",
+        "turn-right": "steer_walk_turn_right",
     }[args.clip]
     duration = script[-1].t_end if args.duration is None else float(args.duration)
     out = None if args.no_video else Path(args.out or (PREVIEWS / f"{stem}.mp4"))
