@@ -8,5 +8,6 @@ __pycache__/
 .DS_Store
 *.mp4
 *.webm
+!previews/steer_walk_day1.mp4
 previews/frame_seq/
 previews/ainex_walk/
