@@ -1218,3 +1218,40 @@ Clips are this row. Constrained Baseline, yuv420p, `+faststart`.
 Forward 8.400 s and close-up 7.600 s. Settled up_z after the stop is
 0.966.
 
+## Skate check, no peel
+
+Same kit row. Plant md5 stays `207f3d5e9c6a72e16f7aa0c8d224f75e`. No
+friction, forcerange, or kp edit. x_move stays 0.020 m. The 20 ms
+servo move stays.
+
+`2 · x_move / period` is 8.00 cm/s. While a foot is above 5 N, its
+hip-frame x retreat averages 9.44 / 9.68 cm/s. Steady body vx after
+1.5 s is +14.94 cm/s. The body is faster than that retreat by 3.3 to
+5.5 cm/s, not slower by 1.7. Along-track speed of the loaded box is
+0.19 / 0.18 cm/s. The 1.67 / 1.62 cm/s loaded-foot speed is lateral,
+1.38 / −1.32 cm/s. That is not a stride deficit, so x_move is not trimmed.
+
+Contact-point tangential speed, from the COM velocity plus the
+cross product out to the contact, is 1.27 cm/s on both feet. The box
+has at most four corners. Of the loaded samples, 287 / 442 and
+308 / 475 have one or two contacts. The mean count is 2.52. Ankle
+roll over a loaded bout is 7.1 / 7.9° peak to peak, and the foot
+angular rate averages 0.79 / 0.78 rad/s. The loaded foot is rocking
+on an edge. It is not a flat slide at μ = 1.6.
+
+min up_z 0.932 is at 0.480 s, 80 ms after the walk command. Pitch
+there is 21.17° and roll is −1.58°. acos(0.932) is 21.22°, so the
+extra beyond the 15° lean is pitch. After 1.5 s the mean pitch is
+15.18°. Roll runs from −5.5° to +6.7° and is not what makes up_z
+0.932. The steady minimum, 0.948 at 1.792 s, is pitch 18.11° and
+roll 4.02°.
+
+Hip-pitch `|ctrl − q|` on a loaded foot has p90 5.62 / 5.64°. The
+signed mean is +2.23 / −2.25°, which is the same lag on opposite
+joint axes. 5.6° at the 5.5 rad/s command cap is about 18 ms, the
+locked 20 ms write. Mean body pitch is already the 15° trim. A faster
+hip-pitch approach is the 8 ms and 16 ms rows that railed the knees.
+It is not applied.
+
+No peel. Sole p90, vx, and the rail numbers above are unchanged.
+
