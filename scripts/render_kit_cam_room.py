@@ -101,21 +101,23 @@ ROOMS: dict[str, RoomScene] = {
         name="bathroom",
         xml_name="room_bathroom.xml",
         png_name="kit_cam_room_bathroom.png",
-        bodies=("bathroom", "sink", "toilet"),
+        bodies=("bathroom", "sink", "toilet", "bathtub"),
         geoms=(
             ("bathroom", "bathroom_tile"),
             ("sink", "sink_basin"),
             ("toilet", "toilet_bowl"),
+            ("bathtub", "bathtub_shell"),
         ),
     ),
     "living": RoomScene(
         name="living",
         xml_name="room_living.xml",
         png_name="kit_cam_room_living.png",
-        bodies=("living", "tv"),
+        bodies=("living", "tv", "coffee"),
         geoms=(
             ("living", "living_sofa_back"),
             ("tv", "tv_screen"),
+            ("coffee", "coffee_top"),
         ),
     ),
     "bedroom": RoomScene(
@@ -132,10 +134,12 @@ ROOMS: dict[str, RoomScene] = {
         name="entrance",
         xml_name="room_entrance.xml",
         png_name="kit_cam_room_entrance.png",
-        bodies=("entrance", "mat"),
+        bodies=("entrance", "mat", "shoes", "console"),
         geoms=(
-            ("entrance", "entrance_jamb_left"),
+            ("entrance", "entrance_panel"),
             ("mat", "mat_rug"),
+            ("shoes", "shoes_pair"),
+            ("console", "console_top"),
         ),
     ),
 }
@@ -329,9 +333,40 @@ def _project(
 
 
 def _geom_corners(model: mj.MjModel, data: mj.MjData, geom_id: int) -> np.ndarray:
-    size = np.asarray(model.geom_size[geom_id, :3], dtype=np.float64)
+    """World points that cover one geom. Mesh geoms use their vertices.
+
+    A box-size reading of geom_size is the scale on a mesh, not its extent.
+    Projecting that scale misses the furniture and fails the in-frame check.
+    """
     rotation = np.asarray(data.geom_xmat[geom_id], dtype=np.float64).reshape(3, 3)
     origin = np.asarray(data.geom_xpos[geom_id], dtype=np.float64)
+    gtype = int(model.geom_type[geom_id])
+    if gtype == int(mj.mjtGeom.mjGEOM_MESH):
+        mesh_id = int(model.geom_dataid[geom_id])
+        if mesh_id < 0:
+            return np.zeros((0, 3), dtype=np.float64)
+        vert_adr = int(model.mesh_vertadr[mesh_id])
+        vert_num = int(model.mesh_vertnum[mesh_id])
+        if vert_num <= 0:
+            return np.zeros((0, 3), dtype=np.float64)
+        step = max(1, vert_num // 800)
+        verts = np.asarray(
+            model.mesh_vert[vert_adr:vert_adr + vert_num:step],
+            dtype=np.float64,
+        )
+        # mesh_vert is already in the geom frame. geom_size on a mesh is the
+        # fitted half-extent, not a second scale, so it is not applied here.
+        return origin + (rotation @ verts.T).T
+    size = np.asarray(model.geom_size[geom_id, :3], dtype=np.float64)
+    if gtype == int(mj.mjtGeom.mjGEOM_PLANE):
+        hx = float(size[0])
+        hy = float(size[1])
+        corners = [
+            origin + rotation @ np.array([sx, sy, 0.0], dtype=np.float64)
+            for sx in (-hx, hx)
+            for sy in (-hy, hy)
+        ]
+        return np.stack(corners, axis=0)
     corners: list[np.ndarray] = []
     for sx in (-1.0, 1.0):
         for sy in (-1.0, 1.0):

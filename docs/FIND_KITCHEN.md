@@ -1,5 +1,7 @@
 # Find kitchen (Prefer FAIL)
 
+The current `mujoco/room_kitchen.xml` has no flat yellow backsplash. The counter, pantry, stove, kettle, table, and chair are CC0 textured meshes (`docs/ROOM_ASSETS.md`). `scripts/find_kitchen.py` was not edited. Yellow thresholds, the 0.50 frame bar, the 0.25 m gap, the 0.90 `up_z` bar, and the 1.10 m world-x budget are unchanged. The tables below are measurements of the previous colored-box kitchen. On the mesh scene the stand frame does not log that yellow, so the phrase sends no vel. That Prefer FAIL stays until an AI retargets the finder. This is a visual domain-gap fix for evaluation, not go-anywhere.
+
 `scripts/find_kitchen.py` is a last-mile steer on the frozen walk plant. The phrase path paints `kit_cam` into the explore map and commands from `query_kitchen_like_yellow()` and `frontier_cells()`. It is not SLAM and not an arrival. If that log has no kitchen-like yellow, it sends no vel.
 
 The scene is `mujoco/room_kitchen.xml`, which includes `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml` (md5 `71b2c86d133ebc603f58b99c53e496f3`). The finder does not edit that file. `kit_cam` stays on `head_tilt_link` at `0.050 0.019 0.007`, fovy 104.82. Feet stay 145×86. Leg actuators stay ±2.1 Nm. No second camera, no lidar, no door.

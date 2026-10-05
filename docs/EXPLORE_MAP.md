@@ -2,6 +2,8 @@
 
 `scripts/explore_map.py` walks the frozen plant and builds a partial map from `kit_cam`. It is not a room finder, not SLAM, and not go-anywhere. Finders stay last mile. They can ask this map two questions later: "have I seen kitchen-like yellow?" and "which cells are frontiers?"
 
+The room scenes no longer use flat primary-color boxes (`docs/ROOM_ASSETS.md`). The kitchen has no yellow backsplash, and the entrance mat is hessian, not a saturated violet plane. `scripts/explore_map.py` was not retuned. The yellow fractions, the soft-XY probe, and the mat-as-feature description below were measured on the previous box scenes.
+
 Voice still refuses "explore", "build a map", and "go anywhere" (`scripts/voice_caller.py`). This script is not wired to that caller.
 
 ## What is frozen
@@ -25,7 +27,7 @@ The grid is 0.10 m cells in the world frame, from x −0.80..2.60 m and y −1.8
 | Paint | Pixel test |
 |-------|------------|
 | Free | Low saturation (checker floor). Saturation under 12. |
-| Feature | Saturated and not sky, and the ray meets the floor. The entrance mat is this case. |
+| Feature | Saturated and not sky, and the ray meets the floor. On the previous box entrance the violet mat was this case. The current mat is hessian, and this script was not retuned. |
 | Not a cell | Elevated color. The ray misses the floor inside 2.60 m. Stored as a bearing only. |
 
 The kitchen backsplash is the elevated case. The yellow test is the same pixel rule as `scripts/find_kitchen.py` (red and green high, blue low). At the stand pose that blob is about 0.039 of the frame and the ray does not meet the floor, so `ground_cell_ij` stays empty. The bearing is the camera ray. It is not a waypoint and it is not passed to `choose_velocity`.
