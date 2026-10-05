@@ -38,15 +38,21 @@ MODEL_REV = "cbc355fb364588351c5d51c7f74465e8e7ec6f72"
 # frame is 0.049. The empty plant peaks at 0.004. 0.06 sits in that gap.
 # It is not a per-room threshold.
 SCORE_MIN = 0.06
-# Last poses on the scripted line. Each room's vote is the sum of its
-# object scores over this window. One margin for every room: the leader
+# Last poses on the scripted line. Each frame scores a room as its best
+# object plus a small capped bonus for every other object at the cutoff.
+# The window sums those frame scores. One margin for every room: the leader
 # must clear the runner-up by this much, or the pose stays undecided.
 # bed 0.102 versus bathtub 0.092 is a 0.010 gap and does not commit.
 VOTE_FRAMES = 3
 VOTE_MARGIN = 0.15
+# Each extra object at or above the cutoff adds this much, and the extras
+# stop at the cap. A pile of labels cannot add its full scores on top of
+# the best hit. The cap is one cutoff.
+OBJECT_BONUS = 0.03
+OBJECT_BONUS_CAP = 0.06
 # Bedroom only, after a straight pose stays undecided. Positive yaw faces
-# the nightstand and lamp. Negative yaw faces the dresser, prompted as a
-# wardrobe. Scripted looks. No vel.
+# the nightstand and lamp. Negative yaw faces the dresser. Scripted looks.
+# No vel. Wardrobe and rug are not prompts: both also scored on other rooms.
 RELOOK_YAW = (0.55, 0.90, -0.75, -1.05)
 # Object text, then the room it votes for. Room-name labels are not used.
 # Cupboard is the cabinet hit on this kit_cam. Fridge, oven, stove, and
@@ -63,14 +69,15 @@ OBJECTS: tuple[tuple[str, str], ...] = (
     ("bed", "bedroom"),
     ("pillow", "bedroom"),
     ("nightstand", "bedroom"),
-    ("wardrobe", "bedroom"),
     ("lamp", "bedroom"),
-    ("rug", "bedroom"),
     ("sofa", "living"),
     ("TV", "living"),
     ("couch", "living"),
     ("door", "entrance"),
     ("hallway", "entrance"),
+    ("doormat", "entrance"),
+    ("shoe rack", "entrance"),
+    ("coat hooks", "entrance"),
 )
 # Misses in a row that still reuse the last good box. Then the cue is lost.
 # The gait walk is not this measurement. Detection uses scripted poses.
@@ -469,12 +476,13 @@ def test_phrases() -> list[str]:
     group["bathroom sink"] = 0.10
     group["fridge"] = 0.15
     vote = decide_window([_frame(group)])
-    _expect(vote.room == "bathroom", f"toilet plus sink lost {vote}", failures)
+    _expect(vote.room is None and vote.gap < VOTE_MARGIN, f"thin toilet lead committed {vote}", failures)
     noise = {name: 0.01 for name, _room in OBJECTS}
     vote = decide_window([_frame(noise), _frame(noise), _frame(noise)])
     _expect(vote.room is None and vote.vote < SCORE_MIN, f"plant noise committed {vote}", failures)
     _expect(SCORE_MIN == 0.06, "cutoff moved", failures)
     _expect(VOTE_MARGIN == 0.15, "margin moved", failures)
+    _expect(OBJECT_BONUS_CAP <= SCORE_MIN + 1e-9, "label cap exceeds the cutoff", failures)
     thin = {name: 0.0 for name, _room in OBJECTS}
     thin["bed"] = 0.10
     thin["pillow"] = 0.08
@@ -482,12 +490,16 @@ def test_phrases() -> list[str]:
     thin["sofa"] = 0.08
     vote = decide_window([_frame(thin)])
     _expect(vote.room is None, f"thin bedroom lead committed {vote}", failures)
-    wide = dict(thin)
-    wide["nightstand"] = 0.08
-    wide["lamp"] = 0.08
-    wide["wardrobe"] = 0.08
-    vote = decide_window([_frame(wide)])
-    _expect(vote.room == "bedroom", f"bedroom objects did not commit {vote}", failures)
+    stack = {name: 0.0 for name, _room in OBJECTS}
+    stack["door"] = 0.16
+    for name in ("bed", "pillow", "nightstand", "lamp"):
+        stack[name] = 0.08
+    vote = decide_window([_frame(stack)])
+    _expect(vote.room != "bedroom", f"label stack outvoted the door {vote}", failures)
+    clear = {name: 0.0 for name, _room in OBJECTS}
+    clear["door"] = 0.20
+    vote = decide_window([_frame(clear)])
+    _expect(vote.room == "entrance", f"clear door did not commit {vote}", failures)
     return failures
 
 
@@ -597,18 +609,27 @@ def _frame(object_scores: dict[str, float], object_bias: dict[str, float] | None
 
 
 def _frame_votes(object_scores: dict[str, float]) -> dict[str, float]:
-    """Sum every object in a room. A room with nothing at the cutoff votes 0."""
+    """Best object, plus a capped bonus for each other object at the cutoff.
+
+    A room with nothing at the cutoff votes 0. Extra labels do not add
+    their full scores.
+    """
     rooms = [room for room in STAND_TOP if room != "plant"]
-    votes = {room: 0.0 for room in rooms}
-    eligible = {room: False for room in rooms}
+    best = {room: 0.0 for room in rooms}
+    above: dict[str, list[float]] = {room: [] for room in rooms}
     for name, room in OBJECTS:
         score = float(object_scores.get(name, 0.0))
-        votes[room] += score
         if score >= SCORE_MIN:
-            eligible[room] = True
+            above[room].append(score)
+            if score > best[room]:
+                best[room] = score
+    votes = {room: 0.0 for room in rooms}
     for room in rooms:
-        if not eligible[room]:
-            votes[room] = 0.0
+        if not above[room]:
+            continue
+        others = len(above[room]) - 1
+        bonus = min(OBJECT_BONUS * others, OBJECT_BONUS_CAP)
+        votes[room] = best[room] + bonus
     return votes
 
 
