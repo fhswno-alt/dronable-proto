@@ -399,7 +399,13 @@ class LipmWalker:
                     lift = self.cfg.gm_z_m
                 else:
                     lift = self.cfg.gm_z_m * max(0.0, (1.0 - u) / max(1e-3, 1.0 - hold_u))
-            use_x = shift.x
+            # X_MOVE and Z_MOVE are both phase π/2. The z period is half
+            # the x period, so z peaks at mid-swing and the published foot
+            # x is 0 there (under the hip) on both legs. t=0 is already
+            # split by ±x_move, so the delta from t=0 is still ±x_move at
+            # that peak: left thigh forward, right thigh back. HIP_RISE is
+            # the LIPM Bézier offset and is not added on this clock.
+            use_x = shift.x_abs
             if (
                 self.cfg.gm_drag_gate
                 and phase == side
@@ -409,7 +415,7 @@ class LipmWalker:
             scale_h = lift / VENDOR_CLEAR_M
             scale_x = use_x / VENDOR_STEP_M
             flex = max(0.0, scale_h) * FLEX_PEAK
-            dhip = scale_x * HIP_LAND + max(0.0, scale_h) * HIP_RISE
+            dhip = scale_x * HIP_LAND
             if phase != side:
                 dhip = max(-self.cfg.gm_stance_max, min(self.cfg.gm_stance_max, dhip))
                 flex = 0.0

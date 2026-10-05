@@ -131,11 +131,12 @@ The period is still about 1.7× the slowest published preset and about
 the sine peak. That hold also stays upright for 24 s (Δx +52.4 cm,
 slip 0.41 cm/s) and is not the published shape.
 
-The clips of this 1.00 s row are `previews/gm_forward.mp4` and
-`previews/gm_step_closeup.mp4`. Forward window Δx +15.5 cm, mean body
-vx +1.9 cm/s, sole p90 2.0 cm, min up_z 0.992, peak torque 2.10 Nm.
-Close-up forward Δx +11.3 cm, then stop. It is still a Prefer FAIL
-against a 300–600 ms kit walk. Soft-pass is off.
+The delta-map clips of this 1.00 s row were `previews/gm_forward.mp4`
+and `previews/gm_step_closeup.mp4`. Forward window Δx +15.5 cm, mean
+body vx +1.9 cm/s, pooled sole p90 2.0 cm (the right foot), min up_z
+0.992, peak torque 2.10 Nm. Close-up forward Δx +11.3 cm, then stop.
+Those files are re-rendered below from the absolute-x clock. It is
+still a Prefer FAIL against a 300–600 ms kit walk. Soft-pass is off.
 
 The pooled sole p90 hides which foot moves. On the same 8.4 s window
 the right swing sole is p90 2.03 cm (max 2.19 cm, contact fraction
@@ -185,12 +186,70 @@ feet in −y. `+l_ank_pitch` lowers foot `up[0]`; `+r_ank_pitch` raises
 it, which is what the level term assumes. No pitch sign is backwards,
 and roll is not being mirrored.
 
-The live 1.00 s row still does not use those lifts the same way. At
-the left sole peak, commanded `dhip` is +0.20 (thigh forward) and
-`flex` is +0.31, and the sole is 0.48 cm. At the right sole peak,
-commanded `dhip` is −0.13 (thigh back) and `flex` is +0.30, and the
-sole is 1.96 cm. The clock's body-frame x is positive on the left
-swing and negative on the right swing, and the joint map follows that.
-No swing joint sat on ±2.45 Nm. The left sole stays low because the
-forward hip is the correct sign for a forward target, and that pose
-cuts the clearance the knee has reached. Soft-pass is off.
+On the delta-from-t=0 map, the live 1.00 s row did not use those
+lifts the same way. At the left sole peak, commanded `dhip` was +0.20
+(thigh forward) and `flex` was +0.31, and the sole was 0.48 cm. At
+the right sole peak, commanded `dhip` was −0.13 (thigh back) and
+`flex` was +0.30, and the sole was 1.96 cm. No swing joint sat on
+±2.45 Nm. That split is the t=0 delta, not a wrong pitch sign.
+
+## Lift phase against the published clock
+
+`wSin` phases in `gait_manager_traj.py` match the ROBOTIS OP2 walker
+that Hiwonder's `walking_module.so` embeds:
+
+| Channel | Phase constant | Period |
+| --- | --- | --- |
+| x move | π/2 | `period * ssp` |
+| z move | π/2 | `period * ssp / 2` |
+| x swap | π | `period / 2` |
+| z swap | 3π/2 | `period / 2` |
+
+x and z use the same phase constant. z's period is half of x's, so the
+height sine finishes one full cycle during a swing while fore-aft
+finishes half a cycle. The height peak is mid-swing. It is not a
+quarter-cycle ahead of fore-aft, and it is not a cosine against a sine.
+
+The right swing adds π to x, y, and yaw only. z does not get that
+offset. That is the OP2 `computeLegAngle` branch: the extra π is on
+the fore-aft channels, and z stays anchored to the start of that
+foot's single support.
+
+At period 1.00 s, dsp 0.2, x 0.02 m, z 0.02 m, with the steady-cycle
+half-step already in `previous_x`:
+
+| | t | phase | absolute x (both feet) | delta x from t=0 | foot gap |
+| --- | ---: | --- | --- | --- | ---: |
+| Left height peak | 0.25 s | L | 0.00 cm | L +2.00 cm, R −2.00 cm | +2.00 cm |
+| Right height peak | 0.75 s | R | 0.00 cm | L +2.00 cm, R −2.00 cm | −2.00 cm |
+
+t=0 is already split by ±x_move (left −2 cm, right +2 cm). The delta
+from that split is still ±2 cm when the published endpoint is under
+the hip. Mapping the delta commanded the left thigh forward and the
+right thigh back at the height peak. The half-step offset was not
+missing on z.
+
+The hip command now tracks that absolute x. 0 is under the hip.
+`HIP_RISE` is the LIPM Bézier's extra rise hip and is not added on
+this clock. Both flex commands peak at 0.616 rad with `|dhip| ≤ 0.02`.
+
+24 s, `vel(+0.056, 0)`, same 1.00 s row, pelvis 0, stance hip cap
+0.070 rad: min up_z 0.970, no tip, sat_rate 0, peak torque 2.14 Nm,
+knee band 0.94 (inside the clip, not past it). Left swing sole p90
+0.78 cm (max 1.08 cm, contact 0.14). Right swing sole p90 0.88 cm
+(max 1.81 cm, contact 0.18). Δx +14.1 cm, mean body vx +0.56 cm/s.
+The 8.4 s clip window is min up_z 0.989, Δx +12.9 cm, mean vx
++1.43 cm/s, then the body almost stops: the next 15.6 s add about
+1.2 cm.
+
+At the flex-command peak the hip command is under the hip. The sole
+there stays about 0.9 cm on the left and 1.6 cm on the right. The
+knee command is held to about 0.053 rad per tick, so the joint does
+not reach the 0.62 rad pose before the sine falls. The highest sole
+samples are still just before the hip crossing (left command dhip
+−0.13 at 1.08 cm, right −0.10 at 1.81 cm). No joint sat on ±2.45 Nm.
+
+This is a Prefer FAIL against both feet at about 2 cm and 7–21 cm/s.
+The previous one-sided row was faster (about 1.9 cm/s) and cleared
+only the right foot, by commanding that thigh back at mid-swing. That
+pose is the t=0 delta, not the published endpoint. Soft-pass is off.

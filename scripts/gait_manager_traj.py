@@ -70,13 +70,19 @@ def wsin(time: float, period: float, period_shift: float, mag: float, mag_shift:
 
 @dataclass
 class FootShift:
-    """Body-frame offset from the t=0 pose of this cycle. Metres and radians."""
+    """Body-frame offset from the t=0 pose of this cycle. Metres and radians.
+
+    ``x_abs`` is the published endpoint, not that delta. It is 0 when the
+    foot is under the hip. t=0 is already split fore-aft by ±x_move, so the
+    delta is still ±x_move at mid-swing.
+    """
 
     x: float
     y: float
     z: float
     yaw: float
     pelvis_roll: float
+    x_abs: float = 0.0
 
 
 class GaitManagerClock:
@@ -268,6 +274,7 @@ class GaitManagerClock:
             left[2] - self._zero_l[2],
             left[3] - self._zero_l[3],
             pel_l,
+            x_abs=left[0],
         )
         fr = FootShift(
             right[0] - self._zero_r[0],
@@ -275,6 +282,7 @@ class GaitManagerClock:
             right[2] - self._zero_r[2],
             right[3] - self._zero_r[3],
             pel_r,
+            x_abs=right[0],
         )
         if self.l_ssp_start < self.time <= self.l_ssp_end:
             phase = "L"
