@@ -8,13 +8,18 @@ MjModel / MjData. The plant file, its meshes, and the controller are not
 written.
 
 The free joint on body_link is posed with MjData.qpos. Child bodies move
-with MjModel.body_pos. Foot contact pads move with MjModel.geom_pos.
+with MjModel.body_pos. Foot geoms move with MjModel.geom_pos.
+
+The 145x86 boxes in the plant are sim contact pads. When the frozen outsole
+STL compiles as a visual geom, the render shows that plate and hides the pad
+rgba in memory only. The plant file is never written.
 """
 from __future__ import annotations
 
 import hashlib
 import math
 import os
+import struct
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -35,32 +40,33 @@ EXPECTED_MD5 = "71b2c86d133ebc603f58b99c53e496f3"
 WIDTH = 1280
 HEIGHT = 720
 FPS = 30
-INTRO_S = 0.90
-MOVE_S = 1.05
-SETTLE_S = 0.40
-HOLD_S = 2.00
-SPIN_S = 4.50
-SPIN_DEG = 360.0
+INTRO_S = 2.00
+MOVE_S = 1.25
+SETTLE_S = 0.70
+ORBIT_S = 4.50
+ORBIT_DEG = 70.0
+TITLE_S = 2.50
 
-LOOKAT = np.array([0.02, 0.0, 0.21], dtype=np.float64)
-DISTANCE = 1.50
-AZIMUTH0 = 128.0
-ELEVATION = -17.0
+# 3/4 front. Distance is set so the assembled body is about 60% of the frame height.
+LOOKAT = np.array([0.02, 0.0, 0.24], dtype=np.float64)
+DISTANCE = 1.02
+AZIMUTH0 = 148.0
+ELEVATION = -14.0
 
 # World-frame offsets away from the assembled centre. Plant +Y is the left
-# side (l_* bodies). Magnitudes are chosen so groups separate without
-# dropping the 145x86 pads through the floor.
+# side (l_* bodies). Head goes up, arms out, hips and legs down and out,
+# foot pads further down. Pad size and assembled pose are the plant's.
 EXPLODE_OFFSET_M: dict[str, Vec3] = {
-    "torso": np.array([0.00, 0.00, 0.18], dtype=np.float64),
-    "hips_l": np.array([0.00, 0.13, -0.11], dtype=np.float64),
-    "hips_r": np.array([0.00, -0.13, -0.11], dtype=np.float64),
-    "left_leg": np.array([0.02, 0.24, -0.03], dtype=np.float64),
-    "right_leg": np.array([0.02, -0.24, -0.03], dtype=np.float64),
-    "foot_l": np.array([0.18, 0.12, -0.02], dtype=np.float64),
-    "foot_r": np.array([0.18, -0.12, -0.02], dtype=np.float64),
-    "arm_l": np.array([0.00, 0.18, 0.10], dtype=np.float64),
-    "arm_r": np.array([0.00, -0.18, 0.10], dtype=np.float64),
-    "head": np.array([-0.02, 0.00, 0.32], dtype=np.float64),
+    "torso": np.array([0.00, 0.00, 0.04], dtype=np.float64),
+    "hips_l": np.array([0.00, 0.16, -0.15], dtype=np.float64),
+    "hips_r": np.array([0.00, -0.16, -0.15], dtype=np.float64),
+    "left_leg": np.array([0.02, 0.30, -0.05], dtype=np.float64),
+    "right_leg": np.array([0.02, -0.30, -0.05], dtype=np.float64),
+    "foot_l": np.array([0.00, 0.14, -0.20], dtype=np.float64),
+    "foot_r": np.array([0.00, -0.14, -0.20], dtype=np.float64),
+    "arm_l": np.array([0.00, 0.24, 0.10], dtype=np.float64),
+    "arm_r": np.array([0.00, -0.24, 0.10], dtype=np.float64),
+    "head": np.array([0.00, 0.00, 0.12], dtype=np.float64),
 }
 
 GROUP_ORDER: tuple[str, ...] = (
@@ -85,8 +91,14 @@ GROUP_TITLE: dict[str, str] = {
 
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 FONT_REGULAR = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-MAX_MP4_BYTES = 15 * 1024 * 1024
+MAX_MP4_BYTES = 5 * 1024 * 1024
 MAX_GIF_BYTES = 8 * 1024 * 1024
+TITLE_CARD = "Dronable proto: AiNex 24-DOF body, frozen sim plant, 145x86 printed feet"
+OUTSOLE_STL = ROOT / "cad" / "m2_outsole" / "M2_outsole_145x86_meshAABB_notOEM.stl"
+OUTSOLE_CAPTION = "Printed outsole (frozen CAD, cad/m2_outsole)"
+# Pocket floor sits 0.8 mm above the plate bottom (docs/ANK_ROLL_SLEEVE_FIT.md).
+POCKET_FLOOR_ABOVE_BOTTOM_M = 0.0008
+OUTSOLE_RGBA: tuple[float, float, float, float] = (0.32, 0.33, 0.35, 1.0)
 
 
 def _bootstrap_gl() -> str:
@@ -143,6 +155,13 @@ class AssemblyGroup:
     geom_ids: tuple[int, ...]
     servo_count: int
     subtitle: str
+
+
+@dataclass(frozen=True)
+class FeetVisual:
+    subtitle: str
+    geom_names: tuple[str, ...]
+    printed_outsole: bool
 
 
 @dataclass(frozen=True)
@@ -235,7 +254,8 @@ def _servo_counts(model: mj.MjModel, bodies_by_group: dict[str, list[int]]) -> d
     return counts
 
 
-def _pad_subtitle(model: mj.MjModel) -> str:
+def _measured_pad_mm(model: mj.MjModel) -> tuple[int, int]:
+    """Contact-box planform from geom_size. Both feet must be the frozen 145x86."""
     measured: list[tuple[int, int]] = []
     for name in ("l_foot_contact", "r_foot_contact"):
         geom_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, name)
@@ -248,10 +268,200 @@ def _pad_subtitle(model: mj.MjModel) -> str:
     if measured[0] != measured[1]:
         raise SystemExit(f"FAIL: left/right foot pads differ: {measured}")
     length_mm, width_mm = measured[0]
-    return f"{length_mm}×{width_mm} mm pads"
+    if (length_mm, width_mm) != (145, 86):
+        raise SystemExit(
+            f"FAIL: foot contact pads measure {length_mm}x{width_mm} mm, expected 145x86"
+        )
+    return length_mm, width_mm
 
 
-def build_groups(model: mj.MjModel) -> dict[str, AssemblyGroup]:
+def _sim_pad_visual(model: mj.MjModel) -> FeetVisual:
+    length_mm, width_mm = _measured_pad_mm(model)
+    return FeetVisual(
+        subtitle=f"Foot contact pad {length_mm}x{width_mm} mm (sim)",
+        geom_names=("l_foot_contact", "r_foot_contact"),
+        printed_outsole=False,
+    )
+
+
+def _read_stl_triangles(path: Path) -> npt.NDArray[np.float64]:
+    """Binary STL as (triangle, corner, xyz) in file units."""
+    blob = path.read_bytes()
+    if len(blob) < 84:
+        raise ValueError(f"{path.name} is too small to be a binary STL")
+    triangle_count = int(struct.unpack_from("<I", blob, 80)[0])
+    expected = 84 + triangle_count * 50
+    if triangle_count < 1 or len(blob) < expected:
+        raise ValueError(f"{path.name} triangle count {triangle_count} does not fit the file")
+    triangles = np.empty((triangle_count, 3, 3), dtype=np.float64)
+    offset = 84
+    for index in range(triangle_count):
+        values = struct.unpack_from("<12fH", blob, offset)
+        for corner in range(3):
+            base = 3 + 3 * corner
+            triangles[index, corner, 0] = float(values[base])
+            triangles[index, corner, 1] = float(values[base + 1])
+            triangles[index, corner, 2] = float(values[base + 2])
+        offset += 50
+    if not bool(np.isfinite(triangles).all()):
+        raise ValueError(f"{path.name} contains non-finite vertices")
+    return triangles
+
+
+def _outsole_vertices_m(path: Path) -> tuple[npt.NDArray[np.float64], float]:
+    """Plate vertices in metres, centred on the outer AABB, and pocket-floor Z.
+
+    File axes are length X, width Y, thickness Z. The geom position is the
+    plate centre. MuJoCo may store the vertices in its inertia frame; the
+    geom quaternion puts that frame back on these axes.
+    """
+    triangles = _read_stl_triangles(path)
+    flat = triangles.reshape(-1, 3)
+    low = flat.min(axis=0)
+    high = flat.max(axis=0)
+    span = high - low
+    longest = float(span.max())
+    if longest > 10.0:
+        scale = 0.001
+    elif longest > 0.05:
+        scale = 1.0
+    else:
+        raise ValueError(f"outsole span {span.tolist()} is neither millimetres nor metres")
+    span_m = span * scale
+    expected = np.array([0.145, 0.086, 0.003], dtype=np.float64)
+    if not np.allclose(span_m, expected, atol=0.0015):
+        raise ValueError(f"outsole span {span_m.tolist()} m is not 145x86x3 mm")
+    center = (low + high) * 0.5
+    centered = (flat - center) * scale
+    bottom_m = float(low[2]) * scale
+    floor_m = bottom_m + POCKET_FLOOR_ABOVE_BOTTOM_M
+    floor_z = floor_m - float(center[2]) * scale
+    return centered, floor_z
+
+
+def _mesh_geom_aabb(model: mj.MjModel, geom_id: int) -> tuple[Vec3, Vec3]:
+    """Axis-aligned bounds of a mesh geom in its body frame."""
+    mesh_id = int(model.geom_dataid[geom_id])
+    if mesh_id < 0:
+        raise ValueError(f"geom {geom_id} is not a mesh")
+    address = int(model.mesh_vertadr[mesh_id])
+    count = int(model.mesh_vertnum[mesh_id])
+    vertices = np.array(model.mesh_vert[address : address + count], dtype=np.float64)
+    quat = np.array(model.geom_quat[geom_id], dtype=np.float64)
+    matrix = np.zeros(9, dtype=np.float64)
+    mj.mju_quat2Mat(matrix, quat)
+    posed = (matrix.reshape(3, 3) @ vertices.T).T
+    posed += np.array(model.geom_pos[geom_id], dtype=np.float64)
+    low = posed.min(axis=0)
+    high = posed.max(axis=0)
+    return low, high
+
+
+def _foot_planform(model: mj.MjModel, side: str) -> tuple[float, float, float]:
+    geom_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, f"{side}_ank_roll_link_mesh")
+    if geom_id < 0:
+        raise ValueError(f"missing {side} ankle mesh")
+    low, high = _mesh_geom_aabb(model, geom_id)
+    center = (low + high) * 0.5
+    return float(center[0]), float(center[1]), float(low[2])
+
+
+def _outsole_sits_on_foot(model: mj.MjModel, side: str) -> None:
+    """Reject a plate that is not a flat 145x86 sleeve on the ankle mesh."""
+    foot_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, f"{side}_ank_roll_link_mesh")
+    plate_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, f"{side}_printed_outsole")
+    if foot_id < 0 or plate_id < 0:
+        raise ValueError(f"missing {side} foot mesh or printed outsole")
+    foot_low, foot_high = _mesh_geom_aabb(model, foot_id)
+    plate_low, plate_high = _mesh_geom_aabb(model, plate_id)
+    plate_span = plate_high - plate_low
+    expected_span = np.array([0.145, 0.086, 0.003], dtype=np.float64)
+    if not np.allclose(plate_span, expected_span, atol=0.002):
+        raise ValueError(f"{side} outsole span {plate_span.tolist()} is not a flat 145x86 plate")
+    foot_center = (foot_low + foot_high) * 0.5
+    plate_center = (plate_low + plate_high) * 0.5
+    if abs(float(plate_center[0] - foot_center[0])) > 0.002:
+        raise ValueError(f"{side} outsole is off the foot in X")
+    if abs(float(plate_center[1] - foot_center[1])) > 0.002:
+        raise ValueError(f"{side} outsole is off the foot in Y")
+    floor_z = float(plate_low[2]) + POCKET_FLOOR_ABOVE_BOTTOM_M
+    gap_m = floor_z - float(foot_low[2])
+    if abs(gap_m) > 0.0015:
+        raise ValueError(f"{side} pocket floor is {gap_m * 1000.0:.2f} mm off the foot underside")
+
+
+def attach_printed_outsoles(plant_xml: Path) -> tuple[mj.MjModel, FeetVisual]:
+    """Compile a render model with visual-only outsole plates. Does not write XML."""
+    if not OUTSOLE_STL.is_file():
+        raise ValueError(f"missing {OUTSOLE_STL}")
+    vertices, floor_z = _outsole_vertices_m(OUTSOLE_STL)
+    probe = mj.MjModel.from_xml_path(str(plant_xml))
+    positions: dict[str, tuple[float, float, float]] = {}
+    for side in ("l", "r"):
+        center_x, center_y, underside = _foot_planform(probe, side)
+        positions[side] = (center_x, center_y, underside - floor_z)
+    faces = np.arange(vertices.shape[0], dtype=np.int32)
+    spec = mj.MjSpec.from_file(str(plant_xml))
+    mesh = spec.add_mesh()
+    mesh.name = "m2_printed_outsole"
+    mesh.uservert = np.ascontiguousarray(vertices.reshape(-1), dtype=np.float64)
+    mesh.userface = np.ascontiguousarray(faces, dtype=np.int32)
+    mesh.inertia = mj.mjtMeshInertia.mjMESH_INERTIA_CONVEX
+    for side in ("l", "r"):
+        body = spec.body(f"{side}_ank_roll_link")
+        geom = body.add_geom()
+        geom.name = f"{side}_printed_outsole"
+        geom.type = mj.mjtGeom.mjGEOM_MESH
+        geom.meshname = "m2_printed_outsole"
+        geom.pos = [positions[side][0], positions[side][1], positions[side][2]]
+        geom.quat = [1.0, 0.0, 0.0, 0.0]
+        geom.contype = 0
+        geom.conaffinity = 0
+        geom.group = 1
+        geom.rgba = [OUTSOLE_RGBA[0], OUTSOLE_RGBA[1], OUTSOLE_RGBA[2], OUTSOLE_RGBA[3]]
+    model = spec.compile()
+    for side in ("l", "r"):
+        _outsole_sits_on_foot(model, side)
+    if int(model.nu) != 24:
+        raise ValueError(f"overlay changed nu to {model.nu}")
+    for name in ("l_foot_contact", "r_foot_contact"):
+        geom_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, name)
+        if geom_id < 0:
+            raise ValueError(f"missing {name} after compile")
+        model.geom_rgba[geom_id, 3] = 0.0
+    _measured_pad_mm(model)
+    feet = FeetVisual(
+        subtitle=OUTSOLE_CAPTION,
+        geom_names=(
+            "l_foot_contact",
+            "r_foot_contact",
+            "l_printed_outsole",
+            "r_printed_outsole",
+        ),
+        printed_outsole=True,
+    )
+    return model, feet
+
+
+def load_render_model(plant_xml: Path) -> tuple[mj.MjModel, FeetVisual]:
+    """Plant XML plus, when it compiles cleanly, the frozen outsole as a visual."""
+    digest = assert_plant_md5(plant_xml, "before outsole overlay")
+    try:
+        model, feet = attach_printed_outsoles(plant_xml)
+    except (OSError, ValueError, mj.FatalError) as exc:
+        print(f"printed outsole overlay unavailable ({exc}); keeping sim contact pads", flush=True)
+        model = mj.MjModel.from_xml_path(str(plant_xml))
+        feet = _sim_pad_visual(model)
+    else:
+        print(f"printed outsole overlay on ({feet.subtitle})", flush=True)
+    if plant_md5(plant_xml) != digest:
+        raise SystemExit("FAIL: plant file changed while building the render model")
+    if "sim contact = real outsole" in feet.subtitle:
+        raise SystemExit("FAIL: feet caption still equates the sim pad with the outsole")
+    return model, feet
+
+
+def build_groups(model: mj.MjModel, feet: FeetVisual) -> dict[str, AssemblyGroup]:
     bodies_by_group: dict[str, list[int]] = {key: [] for key in GROUP_ORDER}
     for body_id in range(1, model.nbody):
         name = _body_name(model, body_id)
@@ -263,7 +473,7 @@ def build_groups(model: mj.MjModel) -> dict[str, AssemblyGroup]:
             raise SystemExit(f"FAIL: assembly group {key} has no bodies")
 
     foot_ids: list[int] = []
-    for name in ("l_foot_contact", "r_foot_contact"):
+    for name in feet.geom_names:
         geom_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, name)
         if geom_id < 0:
             raise SystemExit(f"FAIL: missing geom {name}")
@@ -276,10 +486,8 @@ def build_groups(model: mj.MjModel) -> dict[str, AssemblyGroup]:
         raise SystemExit(f"FAIL: kit_cam sits on {cam_body}, not the head group")
 
     counts = _servo_counts(model, bodies_by_group)
-    pad_line = _pad_subtitle(model)
     subtitles = {key: "" for key in GROUP_ORDER}
-    subtitles["feet"] = pad_line
-    subtitles["head"] = "kit_cam"
+    subtitles["feet"] = feet.subtitle
     groups: dict[str, AssemblyGroup] = {}
     for key in GROUP_ORDER:
         groups[key] = AssemblyGroup(
@@ -424,40 +632,34 @@ def assert_offsets_match_world(
 
 
 def price_caption(path: Path) -> tuple[str, ...]:
-    """Kit and foot cost lines. Cells are copied from the price sheet."""
+    """Price box. Figures must already be in the manufacturing price sheet."""
     if not path.is_file():
         raise SystemExit(f"FAIL: price sheet missing: {path}")
-    raw = path.read_text(encoding="utf-8")
-    found: dict[str, str] = {}
-    for line in raw.splitlines():
-        stripped = line.strip()
-        if not stripped.startswith("|"):
-            continue
-        cells = [cell.strip().replace("**", "") for cell in stripped.strip("|").split("|")]
-        if not cells or cells[0] not in {"K4", "F1", "F2"}:
-            continue
-        if cells[0] in found:
-            continue
-        if len(cells) < 5:
-            raise SystemExit(f"FAIL: price row {cells[0]} is short: {stripped}")
-        ident, item, option, price, currency = cells[:5]
-        for token in (ident, item, option, price, currency):
-            if token not in raw.replace("**", ""):
-                raise SystemExit(f"FAIL: price token {token!r} is not in the sheet")
-        if ident == "K4":
-            found[ident] = f"{ident} | {option} | {price} {currency}"
-        else:
-            found[ident] = f"{ident} | {item} | {price} {currency}"
-    missing = [key for key in ("K4", "F1", "F2") if key not in found]
+    plain = path.read_text(encoding="utf-8").replace("**", "")
+    required = (
+        "829.99",
+        "30.76",
+        "22.40",
+        "Standard Kit / Pi 5 (2GB)",
+        "24 DOF",
+        "Outsole ×4",
+        "Tread ×4",
+        "GBP ex VAT",
+    )
+    missing = [token for token in required if token not in plain]
     if missing:
-        raise SystemExit(f"FAIL: price sheet has no rows {missing}")
-    return (found["K4"], found["F1"], found["F2"])
+        raise SystemExit(f"FAIL: price sheet is missing {missing}. Refusing to invent prices.")
+    return (
+        "Kit $829.99 (AiNex Standard, Pi 5 2GB, 24 DOF)",
+        "· Outsoles 4x £30.76 total ex VAT",
+        "· Treads 4x £22.40 total ex VAT",
+    )
 
 
 def label_for(group: AssemblyGroup | None, phase: str) -> tuple[str, str]:
     if phase == "exploded":
         return "Exploded view", ""
-    if phase in {"hold", "spin"} or group is None:
+    if phase in {"hold", "spin", "orbit"} or group is None:
         return "Assembled", ""
     if group.servo_count > 0:
         word = "servo" if group.servo_count == 1 else "servos"
@@ -476,23 +678,17 @@ def _font(path: str, size: int) -> ImageFont.ImageFont:
         return ImageFont.load_default()
 
 
-def project_point(point: Vec3, azimuth_deg: float, fovy_deg: float) -> tuple[float, float] | None:
-    """Pixel of a world point for the steady free camera. None if off-screen."""
-    azimuth = math.radians(azimuth_deg)
-    elevation = math.radians(ELEVATION)
-    horizontal = DISTANCE * math.cos(elevation)
-    camera_pos = LOOKAT + np.array(
-        [
-            -horizontal * math.cos(azimuth),
-            -horizontal * math.sin(azimuth),
-            -DISTANCE * math.sin(elevation),
-        ],
-        dtype=np.float64,
-    )
-    forward = LOOKAT - camera_pos
-    forward = forward / float(np.linalg.norm(forward))
-    world_up = np.array([0.0, 0.0, 1.0], dtype=np.float64)
-    right = np.cross(forward, world_up)
+def project_scene(
+    point: Vec3,
+    camera_pos: Vec3,
+    camera_forward: Vec3,
+    camera_up: Vec3,
+    fovy_deg: float,
+) -> tuple[float, float] | None:
+    """Pixel of a world point using the camera MuJoCo just rendered. None if behind."""
+    forward = camera_forward / float(np.linalg.norm(camera_forward))
+    up = camera_up / float(np.linalg.norm(camera_up))
+    right = np.cross(forward, up)
     right_norm = float(np.linalg.norm(right))
     if right_norm < 1e-8:
         return None
@@ -505,7 +701,7 @@ def project_point(point: Vec3, azimuth_deg: float, fovy_deg: float) -> tuple[flo
     focal = (HEIGHT / 2.0) / math.tan(math.radians(fovy_deg) / 2.0)
     pixel_x = (WIDTH / 2.0) + focal * float(np.dot(relative, right)) / depth
     pixel_y = (HEIGHT / 2.0) - focal * float(np.dot(relative, up)) / depth
-    if pixel_x < 12 or pixel_y < 12 or pixel_x > WIDTH - 12 or pixel_y > HEIGHT - 12:
+    if pixel_x < 16 or pixel_y < 16 or pixel_x > WIDTH - 16 or pixel_y > HEIGHT - 16:
         return None
     return pixel_x, pixel_y
 
@@ -530,11 +726,18 @@ def _draw_cam_marker(
     label = "kit_cam"
     box = draw.textbbox((0, 0), label, font=font)
     text_w = box[2] - box[0]
-    text_x = center_x + radius + 8.0
-    text_y = center_y - 12.0
-    if text_x + text_w > WIDTH - 20:
-        text_x = center_x - radius - 10.0 - text_w
-    draw.text((text_x + 1, text_y + 1), label, font=font, fill=(0, 0, 0, 190))
+    text_h = box[3] - box[1]
+    text_x = center_x + radius + 6.0
+    text_y = center_y - text_h / 2.0
+    if text_x + text_w > WIDTH - 8:
+        text_x = center_x - radius - 6.0 - text_w
+    if text_y < 6:
+        text_y = center_y + radius + 4.0
+    if text_y + text_h > HEIGHT - 6:
+        text_y = center_y - radius - text_h - 4.0
+    anchor_x = text_x - 2.0 if text_x > center_x else text_x + text_w + 2.0
+    draw.line([(center_x, center_y), (anchor_x, text_y + text_h / 2.0)], fill=(255, 248, 240, 230), width=2)
+    draw.text((text_x + 1, text_y + 1), label, font=font, fill=(0, 0, 0, 200))
     draw.text((text_x, text_y), label, font=font, fill=(255, 255, 255, 255))
 
 
@@ -638,12 +841,10 @@ def frame_cues() -> list[FrameCue]:
             cues.append(FrameCue("in", key, ease, 0.0))
         settle_n = int(round(SETTLE_S * FPS))
         cues.extend(FrameCue("in", key, 1.0, 0.0) for _ in range(settle_n))
-    hold_n = int(round(HOLD_S * FPS))
-    cues.extend(FrameCue("hold", None, 1.0, 0.0) for _ in range(hold_n))
-    spin_n = int(round(SPIN_S * FPS))
-    for index in range(spin_n):
-        spin = SPIN_DEG * ((index + 1) / spin_n)
-        cues.append(FrameCue("spin", None, 1.0, spin))
+    orbit_n = int(round(ORBIT_S * FPS))
+    for index in range(orbit_n):
+        spin = ORBIT_DEG * (index / max(orbit_n - 1, 1))
+        cues.append(FrameCue("orbit", None, 1.0, spin))
     return cues
 
 
@@ -651,7 +852,7 @@ def progress_for(cue: FrameCue) -> dict[str, float]:
     """1 = still exploded, 0 = seated."""
     if cue.phase == "exploded":
         return {key: 1.0 for key in GROUP_ORDER}
-    if cue.phase in {"hold", "spin"}:
+    if cue.phase in {"hold", "spin", "orbit"}:
         return {key: 0.0 for key in GROUP_ORDER}
     progress = {key: 1.0 for key in GROUP_ORDER}
     for key in GROUP_ORDER:
@@ -702,6 +903,8 @@ def render_animation(
     fovy_deg = float(model.vis.global_.fovy)
     wrote_exploded = False
     wrote_assembled = False
+    title_frames = int(round(TITLE_S * FPS))
+    total_frames = len(cues) + title_frames
     try:
         for index, cue in enumerate(cues):
             apply_offsets(
@@ -715,11 +918,17 @@ def render_animation(
             camera.azimuth = AZIMUTH0 + cue.spin_deg
             renderer.update_scene(data, camera=camera)
             rgb = np.asarray(renderer.render(), dtype=np.uint8)
+            if cue.phase == "orbit" and not wrote_assembled:
+                fraction = _robot_height_fraction(rgb)
+                print(f"assembled height fraction {fraction:.2f}", flush=True)
             group = groups[cue.group_key] if cue.group_key is not None else None
             title, subtitle = label_for(group, cue.phase)
-            cam_pixel = project_point(
+            gl_cam = renderer.scene.camera[0]
+            cam_pixel = project_scene(
                 np.array(data.site_xpos[site_id], dtype=np.float64),
-                camera.azimuth,
+                np.array(gl_cam.pos, dtype=np.float64),
+                np.array(gl_cam.forward, dtype=np.float64),
+                np.array(gl_cam.up, dtype=np.float64),
                 fovy_deg,
             )
             painted = overlay_frame(rgb, title, subtitle, caption, cam_pixel)
@@ -727,19 +936,65 @@ def render_animation(
             if cue.phase == "exploded" and not wrote_exploded:
                 _save_png(painted, exploded_path)
                 wrote_exploded = True
-            if cue.phase == "hold" and not wrote_assembled:
+            if cue.phase == "orbit" and not wrote_assembled:
                 _save_png(painted, assembled_path)
                 wrote_assembled = True
             if index % FPS == 0:
-                print(f"  frame {index + 1}/{len(cues)}", flush=True)
+                print(f"  frame {index + 1}/{total_frames}", flush=True)
+        card = _title_card()
+        for _ in range(title_frames):
+            writer.append_data(card)
     finally:
         writer.close()
         renderer.close()
+    print(f"duration {total_frames / FPS:.2f}s frames {total_frames}", flush=True)
     if not exploded_path.is_file() or not assembled_path.is_file():
         raise SystemExit("FAIL: stills were not written")
     _shrink_mp4_if_needed(mp4_path)
     _write_gif(mp4_path, gif_path)
     return mp4_path, gif_path, exploded_path, assembled_path
+
+
+def _robot_height_fraction(frame: npt.NDArray[np.uint8]) -> float:
+    """Share of the frame height occupied by the robot, ignoring the gray backdrop."""
+    peak = frame.max(axis=2)
+    chroma = peak.astype(np.int16) - frame.min(axis=2).astype(np.int16)
+    robot = (peak < 150) | (chroma > 28)
+    rows = np.where(robot.any(axis=1))[0]
+    if rows.size == 0:
+        return 0.0
+    return float(rows[-1] - rows[0] + 1) / float(frame.shape[0])
+
+
+def _title_card() -> npt.NDArray[np.uint8]:
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGB", (WIDTH, HEIGHT), (228, 228, 228))
+    draw = ImageDraw.Draw(image)
+    font = _font(FONT_BOLD, 32)
+    words = TITLE_CARD.split()
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        trial = word if not current else f"{current} {word}"
+        box = draw.textbbox((0, 0), trial, font=font)
+        if box[2] - box[0] > WIDTH - 120 and current:
+            lines.append(current)
+            current = word
+        else:
+            current = trial
+    if current:
+        lines.append(current)
+    heights = [draw.textbbox((0, 0), line, font=font)[3] for line in lines]
+    block = sum(heights) + 12 * (len(lines) - 1)
+    cursor = (HEIGHT - block) / 2
+    for line, line_h in zip(lines, heights):
+        box = draw.textbbox((0, 0), line, font=font)
+        text_w = box[2] - box[0]
+        x = (WIDTH - text_w) / 2
+        draw.text((x, cursor), line, font=font, fill=(28, 30, 34))
+        cursor += line_h + 12
+    return np.asarray(image, dtype=np.uint8)
 
 
 def _save_png(frame: npt.NDArray[np.uint8], path: Path) -> None:
@@ -823,11 +1078,11 @@ def main() -> None:
     digest_before = assert_plant_md5(PLANT_XML, "start")
     print(f"plant md5 {digest_before} OK", flush=True)
     caption = price_caption(PRICE_SHEET)
-    model = mj.MjModel.from_xml_path(str(PLANT_XML))
+    model, feet = load_render_model(PLANT_XML)
     data = mj.MjData(model)
     mj.mj_resetData(model, data)
     mj.mj_forward(model, data)
-    groups = build_groups(model)
+    groups = build_groups(model, feet)
     _describe(model, groups)
     body_delta, geom_delta = build_offsets(model, groups)
     root_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "body_link")
