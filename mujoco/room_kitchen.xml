@@ -18,19 +18,26 @@
     <material name="room_ceiling" texture="room_ceiling" texrepeat="2 2" specular="0.02" emission="0.62"/>
     <texture name="room_counter" type="2d" file="assets/rooms/kitchen/upper.png"/>
     <material name="room_counter" texture="room_counter" specular="0.18"/>
-    <mesh name="room_counter" file="assets/rooms/kitchen/upper.obj" scale="0.55 1 1"/>
-    <texture name="room_pantry" type="2d" file="assets/rooms/kitchen/cabinet.png"/>
-    <material name="room_pantry" texture="room_pantry" specular="0.16"/>
-    <mesh name="room_pantry" file="assets/rooms/kitchen/cabinet.obj" scale="0.78 0.78 0.78"/>
+    <!-- Two base cabinets at stove height. Length is the OBJ X axis. -->
+    <mesh name="room_counter" file="assets/rooms/kitchen/upper.obj" scale="0.50 1 1.265"/>
     <texture name="room_stove" type="2d" file="assets/rooms/kitchen/stove.png"/>
     <material name="room_stove" texture="room_stove" specular="0.28"/>
     <mesh name="room_stove" file="assets/rooms/kitchen/stove.obj"/>
     <texture name="room_kettle" type="2d" file="assets/rooms/kitchen/kettle.png"/>
     <material name="room_kettle" texture="room_kettle" specular="0.35"/>
     <mesh name="room_kettle" file="assets/rooms/kitchen/kettle.obj"/>
+    <texture name="room_basin" type="2d" file="assets/rooms/kitchen/basin.png"/>
+    <material name="room_basin" texture="room_basin" specular="0.35"/>
+    <mesh name="room_basin" file="assets/rooms/kitchen/basin.obj" scale="1.45 1.45 1.45"/>
+    <texture name="room_micro" type="2d" file="assets/rooms/kitchen/microwave.png"/>
+    <material name="room_micro" texture="room_micro" specular="0.3"/>
+    <mesh name="room_micro" file="assets/rooms/kitchen/microwave.obj" scale="0.48 0.48 0.48"/>
+    <texture name="room_pot" type="2d" file="assets/rooms/kitchen/pot.png"/>
+    <material name="room_pot" texture="room_pot" specular="0.4"/>
+    <mesh name="room_pot" file="assets/rooms/kitchen/pot.obj" scale="0.90 0.90 0.90"/>
     <texture name="room_table" type="2d" file="assets/rooms/kitchen/table.png"/>
     <material name="room_table" texture="room_table" specular="0.12"/>
-    <mesh name="room_table" file="assets/rooms/kitchen/table.obj" scale="0.36 0.36 0.36"/>
+    <mesh name="room_table" file="assets/rooms/kitchen/table.obj" scale="0.32 0.32 0.32"/>
     <texture name="room_chair" type="2d" file="assets/rooms/kitchen/chair.png"/>
     <material name="room_chair" texture="room_chair" specular="0.12"/>
     <mesh name="room_chair" file="assets/rooms/kitchen/chair.obj" scale="0.82 0.82 0.82"/>
@@ -47,21 +54,24 @@
     <geom name="room_wall_left" type="box" pos="0.86 1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_wall_right" type="box" pos="0.86 -1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_ceiling" type="box" pos="0.86 0 2.48" size="1.64 1.88 0.04" material="room_ceiling" contype="0" conaffinity="0"/>
-    <!-- Counter run along the back wall. Pantry, counter, and stove do not overlap.
-         Stove yaw 180 puts the oven front toward +X. Pantry yaw 270 puts the
-         drawer face toward +X. Table and chair sit image-right, clear of the run. -->
-    <body name="kitchen" pos="1.78 0.08 0">
-      <site name="kitchen" pos="0.0 0.05 0.85" size="0.015" group="4" rgba="0.75 0.62 0.35 1"/>
-      <geom name="kitchen_cabinet" type="mesh" mesh="room_counter" material="room_counter" pos="0 0.02 0" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
-      <geom name="kitchen_pantry" type="mesh" mesh="room_pantry" material="room_pantry" pos="-0.06 1.22 0" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
-      <geom name="kitchen_stove" type="mesh" mesh="room_stove" material="room_stove" pos="0.02 -0.98 0" quat="0 0 0 1" contype="0" conaffinity="0"/>
-      <geom name="kitchen_kettle" type="mesh" mesh="room_kettle" material="room_kettle" pos="0.06 0.02 0.70" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+    <!-- Base cabinets, drop-in basin, stove/oven, microwave, and pot.
+         Stove yaw 180 faces the oven toward +X. Cabinet yaw 270 faces the doors
+         toward +X. The wire pantry is not in this layout. -->
+    <body name="kitchen" pos="1.80 0.00 0">
+      <site name="kitchen" pos="0.0 0.1 0.95" size="0.015" group="4" rgba="0.75 0.62 0.35 1"/>
+      <geom name="kitchen_cabinet" type="mesh" mesh="room_counter" material="room_counter" pos="0 0.92 0" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+      <geom name="kitchen_base" type="mesh" mesh="room_counter" material="room_counter" pos="0 -0.32 0" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+      <geom name="kitchen_sink" type="mesh" mesh="room_basin" material="room_basin" pos="0.02 -0.32 0.86" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+      <geom name="kitchen_stove" type="mesh" mesh="room_stove" material="room_stove" pos="0.01 -1.28 0" quat="0 0 0 1" contype="0" conaffinity="0"/>
+      <geom name="kitchen_kettle" type="mesh" mesh="room_kettle" material="room_kettle" pos="0.02 1.20 0.88" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+      <geom name="kitchen_microwave" type="mesh" mesh="room_micro" material="room_micro" pos="-0.04 0.62 0.86" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+      <geom name="kitchen_pot" type="mesh" mesh="room_pot" material="room_pot" pos="0.0 -1.28 0.88" quat="1 0 0 0" contype="0" conaffinity="0"/>
     </body>
-    <body name="table" pos="1.48 -1.48 0">
-      <site name="table" pos="0 0 0.20" size="0.012" group="4" rgba="0.45 0.28 0.14 1"/>
+    <body name="table" pos="1.18 -1.28 0">
+      <site name="table" pos="0 0 0.18" size="0.012" group="4" rgba="0.45 0.28 0.14 1"/>
       <geom name="table_top" type="mesh" mesh="room_table" material="room_table" contype="0" conaffinity="0"/>
     </body>
-    <body name="chair" pos="0.95 -1.48 0">
+    <body name="chair" pos="0.92 -1.05 0">
       <site name="chair" pos="0 0 0.42" size="0.012" group="4" rgba="0.35 0.22 0.12 1"/>
       <geom name="chair_seat" type="mesh" mesh="room_chair" material="room_chair" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
     </body>

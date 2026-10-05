@@ -16,10 +16,13 @@ The entrance panel file is named `panel.obj` so the loaded MuJoCo name does not 
 
 | Repo file | Poly Haven asset | Author | Page |
 |-----------|------------------|--------|------|
-| `kitchen/upper.obj` | Modern Wooden Cabinet (the long counter) | Patrik Pangerl | https://polyhaven.com/a/modern_wooden_cabinet |
-| `kitchen/cabinet.obj` | Drawer Cabinet (tall pantry) | Ulan Cabanilla | https://polyhaven.com/a/drawer_cabinet |
-| `kitchen/stove.obj` | Electric Stove | Kuutti Siitonen | https://polyhaven.com/a/electric_stove |
+| `kitchen/upper.obj` | Modern Wooden Cabinet (base cabinets, two copies) | Patrik Pangerl | https://polyhaven.com/a/modern_wooden_cabinet |
+| `kitchen/cabinet.obj` | Drawer Cabinet | Ulan Cabanilla | https://polyhaven.com/a/drawer_cabinet |
+| `kitchen/stove.obj` | Electric Stove (cooktop and oven) | Kuutti Siitonen | https://polyhaven.com/a/electric_stove |
 | `kitchen/kettle.obj` | Vintage Electric Kettle | SV Garip | https://polyhaven.com/a/vintage_electric_kettle |
+| `kitchen/microwave.obj` | Vintage Microwave | Adam Nekola | https://polyhaven.com/a/vintage_microwave |
+| `kitchen/pot.obj` | Pot Enamel 01 | Kuutti Siitonen | https://polyhaven.com/a/pot_enamel_01 |
+| `kitchen/basin.obj` | loafbrr Sink_A basin and faucets | loafbrr | see below |
 | `kitchen/table.obj` | Dining Table | Aron Łyczek | https://polyhaven.com/a/dining_table |
 | `kitchen/chair.obj` | Dining Chair 02 | James Ray Cock | https://polyhaven.com/a/dining_chair_02 |
 | `living/sofa.obj` | Sofa 03 | Fran Calvente | https://polyhaven.com/a/sofa_03 |
@@ -69,6 +72,10 @@ Attribution is not required. The pack README asks for credit anyway: loafbrr.
 The four toilet files are one round toilet split by material. They were re-exported from the pack glTF in a shared Z-up frame (Y-up to Z-up, then one floor-center for the whole fixture). An earlier export centered each part on its own, so the tank lay flat and the seat stood on edge. The sink file is Sink_A from the same CC0 pack, not a new download and not a paid model.
 
 The glTF did not embed images. UVs were kept and the pack's diffuse PNGs were assigned. These are textured game meshes, not photogrammetry. They are still shaped fixtures, not flat rgba boxes.
+
+Poly Haven has no kitchen sink. `kitchen/basin.obj` is the same CC0 Sink_A mesh, with the pedestal faces removed so the bowl and faucets sit on the counter. It is a bathroom basin, not an undermount kitchen sink. That style gap is a Prefer FAIL for a photoreal kitchen sink. The faucet is what makes the counter read as a sink from `kit_cam`.
+
+The drawer cabinet file is still in the repo. The kitchen scene does not place it. From `kit_cam` it read as a wire baker's rack, not as base cabinets. The run is two copies of the modern wooden cabinet, the basin, and the electric stove.
 
 Poly Haven has no bathtub. The tub is from Isa Lousberg's **Tiny Treats — Bubbly Bathroom** set, licensed **CC0**:
 
