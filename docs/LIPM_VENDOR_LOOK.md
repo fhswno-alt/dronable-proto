@@ -606,3 +606,10 @@ of airborne travel instead of 4 cm. Stance slip is +0.16 cm, forward,
 not a backward skate. The stance hip stays on the 0.070 rad cap, and
 the body barely moves during the swing. Mean vx stays +1.7 cm/s.
 Soft-pass is off. This is not a kit walk.
+
+The clips are this 1.16 s row. Forward 8.400 s stays up (Δx +12.6 cm,
+mean vx +1.7 cm/s, pooled sole p90 2.5 cm, min up_z 0.996, peak torque
+2.43 Nm, sat_rate 0.003). Close-up 7.600 s stays up through the stop
+(forward Δx +8.0 cm, mean vx +1.5 cm/s, stop Δx +0.1 cm, min up_z
+0.996, peak torque 2.41 Nm). Constrained Baseline, yuv420p,
+`+faststart`.
