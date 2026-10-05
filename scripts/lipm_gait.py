@@ -295,7 +295,9 @@ class LipmWalker:
         Those two share the 0.053 rad linear band (kp 45). The lead is
         5.5 rad/s times the 50 Hz tick, and it does not exceed the HX-35H
         5.8 rad/s. Other joints stay inside |ctrl-q| <= 0.98 * tau / kp.
-        The plant forcerange is unchanged and still clips force at ±2.45 Nm.
+        The value stored here is the end-of-tick target. The physics loop
+        ramps ctrl up to it over the 20 ms move. The plant forcerange is
+        unchanged and still clips force at ±2.45 Nm.
         """
         act = f"{jn}_pos"
         idx = self.act_idx.get(act)

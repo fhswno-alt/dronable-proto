@@ -344,4 +344,34 @@ whole ±2.45 Nm at 1.35 rad/s, and knee damping does that at 1.68 rad/s.
 That cancellation is why the joint stops accelerating near 2–2.7 rad/s.
 It is not the sample that puts `actuator_force` on the rail. The rail
 is the position error while the joint is still slow. Dampratio stays
-as it is. Forcerange stays ±2.45 Nm. No clip re-render on this tip.
+as it is. Forcerange stays ±2.45 Nm.
+
+## Move-time ramp
+
+`write_clipped` runs once per 50 Hz tick, before any `mj_step`, and
+stores the end-of-tick target in `data.ctrl`. The plant then takes 10
+steps of 0.002 s. Before this change those 10 steps held that target
+as a hard step, so the first substep saw the whole position error at
+nearly zero speed.
+
+The physics loop now ramps `ctrl` from the previous command to the new
+target across those 10 steps. The last substep lands on the target.
+Move time is the control tick, 20 ms. Plant kp, dampratio, forcerange,
+and armature are unchanged.
+
+On the same 1.00 s row the right hip still hits ±2.45 Nm. The first
+hit moves from 0.402 s to 0.420 s, which is the last substep of the
+first walking tick. Velocity there is +0.27 rad/s, `kp·error` is
++3.06 Nm (0.068 rad), damping is −0.48 Nm, applied is +2.45 Nm.
+Saturated hip samples fall from 239 to 81. Position is still the
+larger term on every one of them. Both knees stay off the rail
+(peak force 2.23 Nm and 2.32 Nm).
+
+The 0.07 rad hip step does not fit in 20 ms under ±2.45 Nm, so the
+end of the move still has about 0.068 rad of error. 8.4 s of
+`vel(+0.056, 0)` stays up: min up_z 0.938, no tip, sole p90 1.19 cm
+left and 1.07 cm right, mean vx +2.4 cm/s, sat_rate 0.25, peak torque
+2.45 Nm. The same row run to 24 s tips at 10.52 s, COM outside
+support. 0.60 s for 24 s stays up, mean vx +3.8 cm/s, sole p90
+0.42 / 0.62 cm, sat_rate 0.34. Both feet are still short of 2 cm and
+the speed is still short of 7 cm/s. Soft-pass is off.

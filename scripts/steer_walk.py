@@ -1182,12 +1182,16 @@ class SteerSession:
             vx = report.applied_vx
             if report.mode == "move" and self._up_z() < 0.90:
                 vx *= 0.55
+            # The tick writes the end-of-interval target. The physics loop
+            # ramps ctrl from the previous command across this 20 ms, the
+            # way a bus servo move-time does. Snapshot before the write.
+            ctrl_from = np.array(self.data.ctrl, dtype=np.float64, copy=True)
             if self.bus.fault:
                 self.lipm.hold_stand()
             else:
                 walking = report.mode == "move"
                 self.lipm.tick(vx, report.applied_yaw_rate, walking)
-            self._lipm_substep()
+            self._lipm_substep(ctrl_from)
             self.lipm.observe(self._up_z())
         self._update_bias(now)
         margin = self._support_margin()
@@ -1477,9 +1481,23 @@ class SteerSession:
         finally:
             wg.PLANT_KD = saved_kd
 
-    def _lipm_substep(self) -> None:
-        """Integrate the position servos. No root wrench and no foot xfrc."""
-        for _ in range(self.steps_per_ctrl):
+    def _lipm_substep(self, ctrl_from: np.ndarray | None = None) -> None:
+        """Integrate the position servos. No root wrench and no foot xfrc.
+
+        ``data.ctrl`` on entry is the 50 Hz target. A kit
+        ``SERVO_MOVE_TIME_WRITE`` approaches that target over the move
+        time instead of stepping the register. The move time is one
+        control tick (20 ms), applied at the physics rate. The last
+        substep lands on the target. Plant kp, dampratio, forcerange,
+        and armature are untouched.
+        """
+        n = self.steps_per_ctrl
+        ctrl_to = np.array(self.data.ctrl, dtype=np.float64, copy=True)
+        if ctrl_from is None:
+            ctrl_from = ctrl_to
+        for i in range(n):
+            alpha = (i + 1) / float(n)
+            self.data.ctrl[:] = ctrl_from + (ctrl_to - ctrl_from) * alpha
             self.data.qfrc_applied[:] = 0.0
             self.data.xfrc_applied[:] = 0.0
             mj.mj_step(self.model, self.data)
