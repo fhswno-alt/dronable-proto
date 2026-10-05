@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Vision room for kit_cam. Includes the frozen walk plant and does not
+  edit it. Furniture is named scene geometry so a later vision step can
+  point at "bedroom". This is not a navigation map, not a planner input,
+  and not a door. One camera: the plant's kit_cam.
+  The bedroom body is the bed. kit_cam looks along +X at about 0.38 m,
+  so a flat mattress is a thin strip. The headboard is the tall cue:
+  saturated purple, with an indigo duvet band and pink pillows on the
+  near face. The frame and mattress continue behind it.
+-->
+<mujoco model="room_bedroom">
+  <include file="ainex_hiwonder/ainex_controls_m2_145.xml"/>
+  <worldbody>
+    <!-- Headboard faces the robot (+X is kit_cam look). Static bodies, no joints. -->
+    <body name="bedroom" pos="1.05 0.00 0">
+      <site name="bedroom" pos="-0.28 0 0.78" size="0.015" group="4" rgba="0.45 0.08 0.78 1"/>
+      <geom name="bedroom_headboard" type="box" size="0.05 0.62 0.42" pos="-0.28 0 0.62" rgba="0.45 0.08 0.78 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+      <geom name="bedroom_duvet" type="box" size="0.04 0.48 0.14" pos="-0.40 0 0.36" rgba="0.22 0.10 0.62 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+      <geom name="bedroom_pillow" type="box" size="0.035 0.14 0.10" pos="-0.40 0.22 0.78" rgba="0.96 0.55 0.64 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+      <geom name="bedroom_pillow_r" type="box" size="0.035 0.14 0.10" pos="-0.40 -0.22 0.78" rgba="0.96 0.55 0.64 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+      <geom name="bedroom_mattress" type="box" size="0.36 0.48 0.07" pos="0.10 0 0.32" rgba="0.93 0.93 0.95 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+      <geom name="bedroom_bed_frame" type="box" size="0.40 0.52 0.06" pos="0.10 0 0.16" rgba="0.24 0.16 0.32 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+    </body>
+    <body name="nightstand" pos="0.82 0.98 0">
+      <site name="nightstand" pos="0 0 0.62" size="0.012" group="4" rgba="0.12 0.72 0.38 1"/>
+      <geom name="nightstand_top" type="box" size="0.16 0.16 0.025" pos="0 0 0.52" rgba="0.86 0.88 0.90 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+      <geom name="nightstand_leg" type="box" size="0.05 0.05 0.25" pos="0 0 0.25" rgba="0.28 0.30 0.34 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+      <geom name="nightstand_lamp" type="box" size="0.06 0.06 0.16" pos="0 0 0.72" rgba="0.10 0.74 0.36 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+    </body>
+  </worldbody>
+</mujoco>

@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
-"""Stand the frozen plant in the kitchen room and save a kit_cam still.
+"""Stand the frozen plant in a vision room and save a kit_cam still.
 
-The room XML includes the walk plant. This script does not edit that file,
-the gait, the tip check, or CommandBus. It does not build a map.
+Each room XML includes the walk plant and adds static furniture. This
+script does not edit that file, the gait, the tip check, or CommandBus.
+It does not build a map, and it does not claim a go-to or an arrival.
 
-Exit status is 1 when the still is still the empty checkerboard, or when
-the kitchen / table / chair boxes do not land in the kit_cam frame.
+Default (no arguments) is the kitchen scene, written to
+previews/kit_cam_room.png. --room picks one scene. --all renders kitchen
+plus bathroom, living, bedroom, and entrance.
+
+Exit status is 1 when a still is still the empty checkerboard, or when
+that scene's named bodies do not land in the kit_cam frame.
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import math
 import os
+import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 os.environ.setdefault("MUJOCO_GL", "osmesa")
@@ -28,9 +36,8 @@ import steer_walk  # noqa: E402
 import walk_gait_ainex as wg  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-ROOM_XML = ROOT / "mujoco" / "room_kitchen.xml"
 PLANT_XML = steer_walk.PLANT_XML
-OUT_PNG = ROOT / "previews" / "kit_cam_room.png"
+PLANT_INCLUDE = "ainex_hiwonder/ainex_controls_m2_145.xml"
 
 WIDTH = 640
 HEIGHT = 480
@@ -42,12 +49,98 @@ EMPTY_DIFF = 40
 EMPTY_MIN_FRAC = 0.08
 MIN_BOX_PX = 36.0
 
-FURNITURE_BODIES = ("kitchen", "table", "chair")
-FURNITURE_GEOMS = {
-    "kitchen": "kitchen_cabinet",
-    "table": "table_top",
-    "chair": "chair_seat",
+_INCLUDE_RE = re.compile(r'<include\s+file="([^"]+)"\s*/>')
+_BANNED_NAME_TOKENS = ("door", "lever", "latch", "hinge")
+_BANNED_ROOM_TAGS = (
+    "<joint",
+    "<freejoint",
+    "<equality",
+    "<actuator",
+    "<tendon",
+    "<camera",
+    "<sensor",
+)
+
+
+@dataclass(frozen=True)
+class RoomScene:
+    """One vision scene. Bodies are labels, not a navigation map."""
+
+    name: str
+    xml_name: str
+    png_name: str
+    bodies: tuple[str, ...]
+    geoms: tuple[tuple[str, str], ...]
+
+    @property
+    def xml_path(self) -> Path:
+        return ROOT / "mujoco" / self.xml_name
+
+    @property
+    def png_path(self) -> Path:
+        return ROOT / "previews" / self.png_name
+
+    @property
+    def room_body(self) -> str:
+        return self.bodies[0]
+
+
+ROOMS: dict[str, RoomScene] = {
+    "kitchen": RoomScene(
+        name="kitchen",
+        xml_name="room_kitchen.xml",
+        png_name="kit_cam_room.png",
+        bodies=("kitchen", "table", "chair"),
+        geoms=(
+            ("kitchen", "kitchen_cabinet"),
+            ("table", "table_top"),
+            ("chair", "chair_seat"),
+        ),
+    ),
+    "bathroom": RoomScene(
+        name="bathroom",
+        xml_name="room_bathroom.xml",
+        png_name="kit_cam_room_bathroom.png",
+        bodies=("bathroom", "sink", "toilet"),
+        geoms=(
+            ("bathroom", "bathroom_tile"),
+            ("sink", "sink_basin"),
+            ("toilet", "toilet_bowl"),
+        ),
+    ),
+    "living": RoomScene(
+        name="living",
+        xml_name="room_living.xml",
+        png_name="kit_cam_room_living.png",
+        bodies=("living", "tv"),
+        geoms=(
+            ("living", "living_sofa_back"),
+            ("tv", "tv_screen"),
+        ),
+    ),
+    "bedroom": RoomScene(
+        name="bedroom",
+        xml_name="room_bedroom.xml",
+        png_name="kit_cam_room_bedroom.png",
+        bodies=("bedroom", "nightstand"),
+        geoms=(
+            ("bedroom", "bedroom_headboard"),
+            ("nightstand", "nightstand_top"),
+        ),
+    ),
+    "entrance": RoomScene(
+        name="entrance",
+        xml_name="room_entrance.xml",
+        png_name="kit_cam_room_entrance.png",
+        bodies=("entrance", "mat"),
+        geoms=(
+            ("entrance", "entrance_jamb_left"),
+            ("mat", "mat_rug"),
+        ),
+    ),
 }
+
+ROOM_ORDER: tuple[str, ...] = ("kitchen", "bathroom", "living", "bedroom", "entrance")
 
 
 def _md5(path: Path) -> str:
@@ -87,11 +180,48 @@ def _hold_stand(
         mj.mj_step(model, data)
 
 
-def _freeze_problems(model: mj.MjModel) -> list[str]:
+def _names(model: mj.MjModel, obj_type: int) -> list[str]:
+    count = {
+        mj.mjtObj.mjOBJ_BODY: model.nbody,
+        mj.mjtObj.mjOBJ_JOINT: model.njnt,
+        mj.mjtObj.mjOBJ_GEOM: model.ngeom,
+    }[obj_type]
+    return [mj.mj_id2name(model, obj_type, i) or "" for i in range(count)]
+
+
+def _banned_hit(name: str) -> str | None:
+    low = name.lower()
+    for token in _BANNED_NAME_TOKENS:
+        if token in low:
+            return token
+    return None
+
+
+def _room_xml_problems(scene: RoomScene) -> list[str]:
+    """The room file may include only the frozen plant, and no mechanism."""
+    problems: list[str] = []
+    text = scene.xml_path.read_text(encoding="utf-8")
+    includes = _INCLUDE_RE.findall(text)
+    if includes != [PLANT_INCLUDE]:
+        problems.append(f"includes {includes} != [{PLANT_INCLUDE}]")
+    if text.count("<include") != 1:
+        problems.append(f"expected 1 include tag, found {text.count('<include')}")
+    for tag in _BANNED_ROOM_TAGS:
+        if tag in text:
+            problems.append(f"room xml contains {tag}")
+    return problems
+
+
+def _freeze_problems(
+    scene: RoomScene,
+    model: mj.MjModel,
+    plant: mj.MjModel,
+) -> list[str]:
     problems: list[str] = []
     digest = _md5(PLANT_XML)
     if digest != steer_walk.PLANT_MD5:
         problems.append(f"plant md5 {digest} != {steer_walk.PLANT_MD5}")
+    problems.extend(_room_xml_problems(scene))
     if model.ncam != 1:
         problems.append(f"expected 1 camera, found {model.ncam}")
     cam_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_CAMERA, "kit_cam")
@@ -107,19 +237,31 @@ def _freeze_problems(model: mj.MjModel) -> list[str]:
             problems.append(f"kit_cam pos {pos.tolist()} != {steer_walk.KIT_CAM_POS}")
         if abs(float(model.cam_fovy[cam_id]) - steer_walk.KIT_CAM_FOVY) > 1e-4:
             problems.append(f"kit_cam fovy {float(model.cam_fovy[cam_id])}")
-    for body_name in FURNITURE_BODIES:
+        cam_mat = np.asarray(model.cam_mat0[cam_id], dtype=np.float64).reshape(3, 3)
+        expected_mat = np.array(steer_walk.KIT_CAM_AXES, dtype=np.float64).T
+        if float(np.max(np.abs(cam_mat - expected_mat))) > 1e-5:
+            problems.append("kit_cam xyaxes != 0 -1 0 0 0 1")
+    if _names(model, mj.mjtObj.mjOBJ_JOINT) != _names(plant, mj.mjtObj.mjOBJ_JOINT):
+        problems.append("room joints differ from the frozen plant")
+    if model.nu != plant.nu:
+        problems.append(f"room actuators {model.nu} != plant {plant.nu}")
+    for body_name in scene.bodies:
         if mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, body_name) < 0:
             problems.append(f"missing body {body_name}")
         if mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, body_name) < 0:
             problems.append(f"missing site {body_name}")
-    for geom_name in FURNITURE_GEOMS.values():
+    for _body_name, geom_name in scene.geoms:
         if mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, geom_name) < 0:
             problems.append(f"missing geom {geom_name}")
-    for i in range(model.nbody):
-        name = mj.mj_id2name(model, mj.mjtObj.mjOBJ_BODY, i) or ""
-        low = name.lower()
-        if "door" in low or "lever" in low:
-            problems.append(f"door/lever body present: {name}")
+    for kind, names in (
+        ("body", _names(model, mj.mjtObj.mjOBJ_BODY)),
+        ("geom", _names(model, mj.mjtObj.mjOBJ_GEOM)),
+        ("joint", _names(model, mj.mjtObj.mjOBJ_JOINT)),
+    ):
+        for name in names:
+            token = _banned_hit(name)
+            if token is not None:
+                problems.append(f"{kind} name {name!r} contains {token}")
     for geom_name in ("l_foot_contact", "r_foot_contact"):
         geom_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, geom_name)
         if geom_id < 0:
@@ -233,58 +375,113 @@ def _save_png(image: np.ndarray, path: Path) -> None:
     Image.fromarray(image).save(path)
 
 
-def main() -> int:
-    if not ROOM_XML.is_file():
-        print(f"FAIL: missing {ROOM_XML}")
+def _render_scene(
+    scene: RoomScene,
+    plant: mj.MjModel,
+    empty_img: np.ndarray,
+    before: str,
+    targets: dict[str, float],
+    com_z: float,
+) -> int:
+    if not scene.xml_path.is_file():
+        print(f"FAIL {scene.name}: missing {scene.xml_path}")
         return 1
-    if not PLANT_XML.is_file():
-        print(f"FAIL: missing {PLANT_XML}")
-        return 1
-    before = _md5(PLANT_XML)
-    room = mj.MjModel.from_xml_path(str(ROOM_XML))
-    plant = mj.MjModel.from_xml_path(str(PLANT_XML))
-    problems = _freeze_problems(room)
+    room = mj.MjModel.from_xml_path(str(scene.xml_path))
+    problems = _freeze_problems(scene, room, plant)
     if _md5(PLANT_XML) != before:
         problems.append("plant file changed while loading the room")
     if problems:
         for msg in problems:
-            print(f"FAIL: {msg}")
+            print(f"FAIL {scene.name}: {msg}")
         return 1
 
-    targets, com_z = _stand_targets()
     room_data = mj.MjData(room)
-    plant_data = mj.MjData(plant)
     _hold_stand(room, room_data, targets, com_z)
-    _hold_stand(plant, plant_data, targets, com_z)
-
     room_img = _render(room, room_data)
-    empty_img = _render(plant, plant_data)
-    _save_png(room_img, OUT_PNG)
+    _save_png(room_img, scene.png_path)
 
     fraction = _changed_fraction(room_img, empty_img)
     print(
-        f"kit_cam {WIDTH}x{HEIGHT}  changed_frac={fraction:.3f}  "
-        f"(empty-floor fail if < {EMPTY_MIN_FRAC:.2f})  out={OUT_PNG.relative_to(ROOT)}"
+        f"{scene.name}  kit_cam {WIDTH}x{HEIGHT}  changed_frac={fraction:.3f}  "
+        f"(empty-floor fail if < {EMPTY_MIN_FRAC:.2f})  "
+        f"out={scene.png_path.relative_to(ROOT)}"
     )
     if fraction < EMPTY_MIN_FRAC:
-        print("FAIL: kit_cam still is empty floor only")
+        print(f"FAIL {scene.name}: kit_cam still is empty floor only")
         return 1
 
-    for body_name in FURNITURE_BODIES:
+    for body_name in scene.bodies:
         box_w, box_h = _body_box_pixels(room, room_data, body_name)
         print(f"  {body_name} in frame {box_w:.0f}x{box_h:.0f} px")
         if box_w < MIN_BOX_PX or box_h < MIN_BOX_PX:
-            print(f"FAIL: {body_name} is not visible in kit_cam")
+            print(f"FAIL {scene.name}: {body_name} is not visible in kit_cam")
             return 1
 
     cam_id = mj.mj_name2id(room, mj.mjtObj.mjOBJ_CAMERA, "kit_cam")
     cam_world = np.asarray(room_data.cam_xpos[cam_id], dtype=np.float64)
     print(
-        f"PASS  plant md5 {before}  kit_cam world "
+        f"PASS  {scene.name}  named body {scene.room_body} in frame  "
+        f"plant md5 {before}  kit_cam world "
         f"{cam_world[0]:+.3f} {cam_world[1]:+.3f} {cam_world[2]:+.3f}  "
-        "room is a vision scene, not a navigation map"
+        "vision scene only, not a map, no go-to, no arrival"
     )
     return 0
+
+
+def _selected(argv: list[str]) -> list[str] | None:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Render a kit_cam still of a vision room. "
+            "Not a map, not a planner, and not a go-to."
+        )
+    )
+    parser.add_argument(
+        "--room",
+        choices=ROOM_ORDER,
+        default=None,
+        help="One room. Default is kitchen.",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Kitchen plus bathroom, living, bedroom, and entrance.",
+    )
+    args = parser.parse_args(argv)
+    if args.all and args.room is not None:
+        print("FAIL: pass --room or --all, not both")
+        return None
+    if args.all:
+        return list(ROOM_ORDER)
+    if args.room is None:
+        return ["kitchen"]
+    return [args.room]
+
+
+def main(argv: list[str] | None = None) -> int:
+    selected = _selected(sys.argv[1:] if argv is None else argv)
+    if selected is None:
+        return 1
+    if not PLANT_XML.is_file():
+        print(f"FAIL: missing {PLANT_XML}")
+        return 1
+    before = _md5(PLANT_XML)
+    if before != steer_walk.PLANT_MD5:
+        print(f"FAIL: plant md5 {before} != {steer_walk.PLANT_MD5}")
+        return 1
+
+    plant = mj.MjModel.from_xml_path(str(PLANT_XML))
+    targets, com_z = _stand_targets()
+    plant_data = mj.MjData(plant)
+    _hold_stand(plant, plant_data, targets, com_z)
+    empty_img = _render(plant, plant_data)
+
+    status = 0
+    for name in selected:
+        status |= _render_scene(ROOMS[name], plant, empty_img, before, targets, com_z)
+    if _md5(PLANT_XML) != before:
+        print("FAIL: plant file changed while rendering rooms")
+        return 1
+    return status
 
 
 if __name__ == "__main__":
