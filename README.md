@@ -98,7 +98,7 @@ Forward clamp is **+0.056 m/s**, reverse **−0.032 m/s**, yaw **±0.25 rad/s**.
 
 `mujoco/room_kitchen.xml` includes the frozen walk plant and adds a kitchen counter plus a table and a chair (`kitchen`, `table`, `chair`). `kit_cam` is unchanged: one camera, `head_tilt_link`, `0.050 0.019 0.007`. The floor is still the plant plane. Those body names are labels for a later vision step. They are not a navigation map, and this scene is not handed to a planner. `scripts/steer_walk.py` still loads only the frozen plant by default, so stand / forward / reverse / left / right / left-then-right stay on the empty checkerboard. See `docs/KIT_CAM_ROOM.md`.
 
-"Go to the kitchen" is a separate Prefer FAIL finder in `scripts/find_kitchen.py`. It runs only when `room_kitchen.xml` is the loaded scene, and only from the current `kit_cam` frame. A centered backsplash gets a brief forward `vel` inside the same caps (+0.056 / −0.032 m/s, yaw ±0.25). A blob off to one side gets one short yaw toward it, then forward only if the new frame is centered. Bathroom, the empty plant, and a kitchen that is not in the frame send no velocity. That is not a map and not an arrival. See `docs/FIND_KITCHEN.md`.
+"Go to the kitchen" is a Prefer FAIL finder in `scripts/find_kitchen.py`. It runs only when `room_kitchen.xml` is loaded. From a centered backsplash it re-scores `kit_cam` every 0.40 s and sends `vel(+0.056, yaw)` on the same bus. Yaw is 0 while the blob is centered, and a bias trim inside ±0.25 when it drifts. The 0.60 m world-x budget is a stop, not a goal. This room run stopped earlier: `up_z` crossed 0.90 at end x **+0.394 m** (Δx **+0.392 m**), with **0.921 m** still to the kitchen face. That is not arrival. Arrival would require the backsplash to fill at least half the frame and the torso to be within 0.25 m of the kitchen geom. Neither bar holds. The 1.2 s hop remains a self-test (end x +0.036 m). Bathroom and the empty plant still send no velocity. See `docs/FIND_KITCHEN.md`.
 
 ```bash
 MUJOCO_GL=osmesa python scripts/render_kit_cam_room.py
@@ -116,7 +116,7 @@ Gait params & teleop stubs: top of `scripts/walk_gait.py` (wired to Controls/AI 
 - `previews/sim_run_log.txt` — last run proof
 - `previews/ego_cam/` + `EGO_CAM_REPORT.md` — kit-cam FOV / neck-pitch approach stills (Mon review)
 - `previews/kit_cam_room.png` — `kit_cam` still of the kitchen room (not a navigation map)
-- `previews/find_kitchen_before.png` / `find_kitchen_after.png` / `find_kitchen_prefer_fail.png` — kit_cam before a short steer, after it, and an empty-plant Prefer FAIL
+- `previews/find_kitchen_before.png` / `find_kitchen_mid.png` / `find_kitchen_after.png` / `find_kitchen_prefer_fail.png` — kit_cam before the bursts, between them, after the stop, and an empty-plant Prefer FAIL
 
 ## Model summary
 
