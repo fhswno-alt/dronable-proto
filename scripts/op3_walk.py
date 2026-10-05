@@ -9,12 +9,14 @@ same field names (``x_swap_amplitude_``, ``dsp_ratio_``, ``pelvis_swing_``,
 ``arm_swing_gain_``). The aarch64 Cython extension is not loaded.
 
 Limb lengths are read from the loaded plant (thigh, calf, sole drop). They
-are not the OP3's 110 mm / 110 mm / 30.5 mm links. ``init_z_offset`` is the
-cartesian body drop. ``init_y_offset`` is read from the same plant: the sole
-is wider than the hip-yaw spacing, and a zero offset stacks the feet so one
-sole takes the whole weight. ``hit_pitch_offset_`` stays 0: Hiwonder's 15 deg
-is their offset from a different init pose (knee about 1.19 rad), and this IK
-already places the feet 0.015 m closer to the hip.
+are not the OP3's 110 mm / 110 mm / 30.5 mm links. Kit ``init_z_offset`` is
+0.025 m (the cartesian body drop). Kit ``init_y_offset`` is −0.005 m. On
+this plant that pulls the soles together: at 2 s the normals are 23.03 / 0 N
+and the right knee is on +2.45 Nm. The offset that shares the weight is the
+sole-vs-hip gap, 0.018 m (11.51 / 11.52 N at the 0.025 m drop, knee ±0.39 Nm).
+Kit ``hip_pitch_offset`` of 15° is their trim from a different init pose.
+Applied on this IK it pitches the body to up_z 0.966 at a standstill, so
+``hit_pitch_offset_`` stays 0.
 
 The OP3 module steps at 8 ms (``control_cycle_msec_``). This port uses that
 period. The plant timestep stays 0.002 s. Balance is off. No gyro feedback,
@@ -32,7 +34,9 @@ import numpy as np
 STEP_FB_RATIO = 0.028
 Z_SWAP_M = 0.006
 PELVIS_DEG = 5.0
-ARM_SWING_GAIN = math.radians(30.0)
+# walking_param.yaml arm_swing_gain. OP3 multiplies x_move * gain * 1000
+# and treats that product as degrees. 0.5 at x = 0.02 m is 10°.
+ARM_SWING_GAIN = 0.5
 # WalkingModule::control_cycle_msec_. Four plant steps of 0.002 s.
 OP3_CTRL_S = 0.008
 # Frozen hip-roll position gain on this plant. Not written. The 1.29 Nm
@@ -40,7 +44,7 @@ OP3_CTRL_S = 0.008
 # not applied. See the vendor note.
 HIP_ROLL_KP = 40.0
 # Published move(1..4): period s, dsp, y_swap m. x amp and step height are
-# the same on every gear: 0.02 m and 0.02 m. Body drop is 0.015 m.
+# the same on every gear: 0.02 m and 0.02 m. Kit body drop is 0.025 m.
 # Prefer FAIL floor for this draft is 400 ms and slower. 300 ms stays in
 # the published table and is not the success bar. Armature is not a peel.
 KIT_PRESETS: tuple[tuple[float, float, float], ...] = (
@@ -292,6 +296,7 @@ class Op3Walker:
         directions["r_sho_pitch"] = _axis_sum(model, "r_sho_pitch")
         directions["l_sho_pitch"] = _axis_sum(model, "l_sho_pitch")
         walker = cls(lengths_from_model(model), directions, **kwargs)
+        # Kit init_y_offset −0.005 stacks this plant's soles. See the module note.
         walker.y_offset = y_offset_from_model(model)
         return walker
 

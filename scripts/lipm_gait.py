@@ -2,11 +2,11 @@
 """LIPM / ZMP outer loop, Raibert footholds, Bézier swing IK.
 
 Replaces the open-loop CPG as the schedule. CSF50 numbers are not the clock
-and are not swept here. Joint targets go to the existing 50 Hz position
-servos (CTRL_DT 0.02 s). Knee, hip pitch, and ankle pitch store the
-gait target. The physics loop approaches that target over
-HIP_KNEE_MOVE_S (150 ms) at the physics rate, across several 20 ms
-ticks, and does not step faster than the HX slew. Other joints stay
+and are not swept here. Joint targets go to the existing position servos. The Bézier loop is
+50 Hz (CTRL_DT 0.02 s) and approaches knee, hip pitch, and ankle pitch
+over HIP_KNEE_MOVE_S (150 ms). The OP3 path plans at 8 ms and approaches
+those three joints over ``gm_move_s`` (kit servo write 20 ms). Neither
+path steps the command faster than the HX slew. Other joints stay
 inside the linear band (|ctrl-q| <= 0.98 * tau / kp). Nothing in
 this file writes the plant:
 no forcerange, kp, damping, or armature edits, and no free-joint wrench.
@@ -155,10 +155,15 @@ class LipmConfig:
     # near 2 cm and the hip pitch off ±2.45 Nm. 2.80 with that knee rails
     # the hip. The stance clip is not scaled.
     gm_swing_hip_gain: float = 1.75
-    # Cartesian body drop passed to the OP3 IK as init_z_offset. 0.015 m
-    # shortens hip-to-sole by about 1.48 cm on this plant. It is not a
-    # knee-angle add. 0 leaves the geometric full extension.
-    gm_crouch_m: float = 0.0
+    # Kit walking_param init_z_offset. 0.025 m. On this plant, with the
+    # 0.018 m stance width, a 2 s hold is 11.51 / 11.52 N per foot and
+    # knee ±0.39 Nm. 0 leaves the geometric full extension.
+    gm_crouch_m: float = 0.025
+    # OP3 path only. Kit servo_control_cycle is 0.02 s; the planner is
+    # already 8 ms, so a 150 ms approach is a second smoother. 0.008 and
+    # 0.016 are the other measured rows. The Bézier loop ignores this
+    # and keeps HIP_KNEE_MOVE_S.
+    gm_move_s: float = 0.020
     # Unused by the IK path. Kept so older call sites still construct.
     gm_sway_max: float = 0.15
 

@@ -1066,5 +1066,73 @@ floor, so a linear scale from the 1.23 cm sole does not turn that peak
 into the 2 cm knee risk. Knee torque at the missed 2 cm command is
 about 1.1 Nm. The extra inertia of a sole that actually reached 2 cm
 was not measured. Foot height stays 0.020 m. Plant md5 stays
-`17dc4ff37491c8e61900fd83b5d31f0c`. No clips: the gait did not change.
+`17dc4ff37491c8e61900fd83b5d31f0c`.
+
+## Kit offsets, then a 20 ms servo move at 500 ms
+
+Kit `walking_param.yaml` plans at `trajectory_step_s` 0.008 s and
+writes servos at `servo_control_cycle` 0.02 s. The 150 ms approach on
+top of the 8 ms planner was a second smoother. The OP3 path now
+approaches hip pitch, knee, and ankle pitch over `gm_move_s`. The
+shipped value is 0.020 s. The Bézier loop still uses 150 ms. The HX
+command rate stays 5.5 rad/s. Foot-height half stays. Plant md5 stays
+`17dc4ff37491c8e61900fd83b5d31f0c`.
+
+Kit `init_z_offset` 0.025 m with the 0.018 m stance width, held 2.0 s:
+normals 11.51 / 11.52 N, knee ±0.39 Nm, hip roll ±0.05 Nm, up_z 1.000.
+That crouch is what the 500 ms rows use.
+
+Kit `init_y_offset` −0.005 m does not share the load. At the same
+0.025 m drop and a 2.0 s hold the normals are 23.03 / 0.00 N, the right
+sole is off the floor, up_z 0.997, and the right knee is +2.45 Nm.
+The 0.018 m width stays. It is the sole-versus-hip gap on this plant,
+and the kit lateral offset is a stand Prefer FAIL here.
+
+Kit `hip_pitch_offset` 15°, on top of this IK, pitches the body. With
+the even stance and the 0.025 m drop the normals stay 11.51 / 11.52 N
+and up_z is 0.966, which is cos(15°). The offset stays 0. `pelvis_offset`
+stays 5°. `arm_swing_gain` is the yaml 0.5 (x·gain·1000 as degrees).
+Arms stayed off on these rows, so that gain is not in the torques.
+
+500 ms period, dsp 0.2, y_swap 0.020 m, z 0.020 m, walk from 0.40 s
+for 8.4 s. Torque is the peak `|actuator_force|` on every 2 ms step.
+Knee is on the same row as hip roll.
+
+| Servo move | Mean vx | Δx | min up_z | Sole p90 L / R | Max sole | IK sole p90 / max | Hip roll R / L | Knee R / L |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 20 ms | +14.84 cm/s | +120.5 cm | 0.992 | 1.52 / 1.54 cm | 1.97 cm | 2.08 / 2.35 cm | 2.15 / 2.16 Nm | 2.22 / 2.35 Nm |
+| 8 ms | +15.20 cm/s | +123.6 cm | 0.992 | 1.58 / 1.59 cm | 1.98 cm | 2.12 / 2.34 cm | 2.08 / 2.18 Nm | 2.45 / 2.45 Nm |
+| 16 ms | +14.97 cm/s | +121.6 cm | 0.992 | 1.55 / 1.55 cm | 1.99 cm | 2.09 / 2.34 cm | 2.13 / 2.16 Nm | 2.31 / 2.45 Nm |
+
+Endpoint p90 is 1.97 cm on all three. At the 20 ms tick where the posed
+IK sole is 2.35 cm (endpoint gap 2.00 cm), the actual swing sole is
+1.10 cm and the knee error is 0.088 / 0.084 rad (it was ~0.25 rad under
+the 150 ms move). The highest actual sole on that row, 1.97 cm at
+0.848 s, has knee +0.86 / +0.31 Nm and hip roll −0.52 / +0.54 Nm.
+
+20 ms knee peaks are not the hip-roll peaks. Right hip roll +2.15 Nm at
+3.080 s with both soles down and knee +0.40 / +0.25 Nm. Left hip roll
+−2.16 Nm at 2.312 s, soles down, knee −0.24 / −0.39 Nm. Right knee
++2.22 Nm at 0.686 s, soles down. Left knee −2.35 Nm at 0.942 s with the
+right sole at 0.31 cm. None of those cross 2.449 Nm. Hip pitch peaks
+2.01 / 1.74 Nm. sat_rate on swing samples is 0.
+
+8 ms rails both knees at 2.45 Nm and the right hip pitch at 2.45 Nm.
+16 ms rails the left knee at 2.45 Nm (0.938 s, right sole 0.29 cm).
+Those two rows are the torque answer for a faster write. They are not
+the shipped move time. 400 ms was not re-run. The sole amplitude was
+not raised.
+
+The 20 ms sole p90 is 1.5 cm, short of a 2 cm p90. The max reaches
+1.97 cm. Mean vx is above 7 cm/s and min up_z stays above 0.99. Body
+speed is the measured speed, not the 5.6 cm/s stick command.
+
+Clips are the 20 ms row. Constrained Baseline, yuv420p, `+faststart`.
+Forward 8.400 s stays up (Δx +118.5 cm from 0.50 s, mean body vx
++14.8 cm/s, min up_z 0.992, peak torque 2.32 Nm on the control samples,
+yaw drift −1.8 deg). Close-up 7.600 s stays up through the stop
+(forward Δx +81.2 cm, mean vx +14.5 cm/s, stop Δx +1.2 cm, min up_z
+0.992 while walking and 0.999 after the stop). The stop command puts
+the right hip roll on −2.450 Nm at 6.008 s while up_z is 0.999. The
+feet leave the floor. The robot stays standing after the stop.
 

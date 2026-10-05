@@ -1508,21 +1508,23 @@ class SteerSession:
     def _lipm_substep(self, ctrl_from: np.ndarray | None = None) -> None:
         """Integrate the position servos. No root wrench and no foot xfrc.
 
-        ``data.ctrl`` on entry is the latest gait target. A kit
-        ``SERVO_MOVE_TIME_WRITE`` approaches that target over the move
-        time instead of stepping the register. Hip, knee, and ankle
-        pitch take ``HIP_KNEE_MOVE_S`` (about 150 ms). This tick moves
-        only ``CTRL_DT / move_time`` of the remaining gap, spread across
-        the physics steps, and not faster than the HX slew. Other
-        joints still finish this tick. Plant kp, dampratio, forcerange,
-        and armature are untouched.
+        ``data.ctrl`` on entry is the latest gait target. Hip, knee, and
+        ankle pitch approach that target over the move time, spread
+        across the physics steps, and not faster than the HX slew. The
+        Bézier loop uses ``HIP_KNEE_MOVE_S`` (150 ms). The OP3 path uses
+        ``gm_move_s`` (kit servo write, 20 ms) because the 8 ms planner
+        already sampled the trajectory. Other joints still finish this
+        tick. Plant kp, dampratio, forcerange, and armature are untouched.
         """
         n = self.steps_per_ctrl
         ctrl_to = np.array(self.data.ctrl, dtype=np.float64, copy=True)
         if ctrl_from is None:
             ctrl_from = ctrl_to
         dt = float(self.ctrl_dt)
-        move_s = max(float(lipm_gait.HIP_KNEE_MOVE_S), dt)
+        if self.lipm is not None and self.lipm.cfg.schedule == "gait_manager":
+            move_s = max(float(self.lipm.cfg.gm_move_s), dt)
+        else:
+            move_s = max(float(lipm_gait.HIP_KNEE_MOVE_S), dt)
         frac = min(1.0, dt / move_s)
         slew = float(lipm_gait.HX35_SLEW_RAD_S) * dt
         end = ctrl_to.copy()
@@ -1987,6 +1989,7 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
                 f"dsp {session.lipm.cfg.gm_dsp:.2f}, x {session.lipm.cfg.gm_x_m:.3f} m, "
                 f"z {session.lipm.cfg.gm_z_m:.3f} m, y_swap {session.lipm.cfg.gm_y_swap_m:.3f} m, "
                 f"body drop {session.lipm.cfg.gm_crouch_m:.3f} m, "
+                f"servo move {session.lipm.cfg.gm_move_s:.3f} s, "
                 f"pelvis {session.lipm.cfg.gm_pelvis_deg:.0f} deg. "
             )
         else:
