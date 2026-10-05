@@ -8,7 +8,24 @@ MUJOCO_GL=osmesa python scripts/demo_8pm_motion.py
 
 Watch `previews/demo_8pm_motion.mp4`. Stills are `previews/demo_8pm_*.png`. Numbers are `previews/demo_8pm_motion_summary.json` (plant md5, caps, bus commands, Δx/Δyaw, min up_z, peak torque, end mode, upright).
 
-The sequence is the same nav-left windows: 15 s forward, 12.5 s `vel(0.056, +0.25)`, 6 s forward, then `stop`. This step-cycle basin does **not** match the previous +0.598 m / +75.7 deg envelope, and it is a small shift from the first draft of this PR (+0.742 m / +58.7 deg / min up_z 0.960). Measured here: approach Δx **+0.695 m**, turn **+61.1 deg**, resume **+0.340 m** along the new heading, min up_z **0.940**, peak leg torque **2.10 Nm**, CoP in the box, end mode **stand**, upright. End heading is **+60.7 deg**. Caps stay +0.056 / −0.032 m/s and yaw ±0.25 rad/s. Plant `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml` stays md5 `71b2c86d133ebc603f58b99c53e496f3`. Soft-pass is off. Tip and up_z bars are unchanged (upright floor 0.90).
+## Current Prefer FAIL (kit bus)
+
+The clip is the same nav-left times on the kit gait: 15 s `vel(+0.150, 0)`, 12.5 s `vel(+0.150, +0.25)`, 6 s `vel(+0.150, 0)`, then `stop`. Plant `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml` stays md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Caps stay **+0.150 / −0.032** m/s and yaw **±0.25** rad/s. This pack does not raise them. Soft-pass is off. `pelvis_offset` stays **+5°**. The knee bar stays **2.33 Nm**.
+
+| Window | Old claim (plant `71b2c86d…`) | Newly measured |
+| --- | --- | --- |
+| Approach 15 s | +0.598 m | heading **+2.210 m** (Δyaw +1.4 deg, mean body vx +0.139 m/s) |
+| Left 12.5 s | +75.7 deg | **+145.9 deg** |
+| Resume 6 s | +0.317 m | heading **+0.944 m**, drift **+12.4 deg** |
+| Right 11 s (nav-right) | about −77.3 deg | **−136.2 deg**, resume heading +0.950 m |
+| Chained right 11 s (nav-multi) | about −54.9 deg | **−138.6 deg** |
+| Run | min up_z 0.954 | nav-left **0.934**, nav-multi stop dip **0.932**, no tip, no fault, end stand |
+
+Controls' settled rates at `±0.25` rad/s stay **+0.217 / −0.221** rad/s (2.0% apart). Straight settled yaw is **−0.003** rad/s. Window-mean rates include slew and are not a new L/R mismatch. Forward settled body speed stays **0.150 m/s**. Reverse clamp **−0.032** realizes about **−0.031** (ratio 0.98). This is not go-anywhere, not arrival, and not a demo-ready human walk.
+
+The sections below are the previous CPG basin (`+0.695 m / +61.1 deg`, forward clamp `+0.056`). They are not the current claim.
+
+The sequence on that older basin was 15 s forward, 12.5 s `vel(0.056, +0.25)`, 6 s forward, then `stop`. It did not match the earlier +0.598 m / +75.7 deg envelope, and it was a small shift from the first draft of that PR (+0.742 m / +58.7 deg / min up_z 0.960). Measured there: approach Δx **+0.695 m**, turn **+61.1 deg**, resume **+0.340 m** along the new heading, min up_z **0.940**, peak leg torque **2.10 Nm**, CoP in the box, end mode **stand**, upright. End heading was **+60.7 deg**. Caps on that basin were +0.056 / −0.032 m/s and yaw ±0.25 rad/s. Plant md5 on that writeup was `71b2c86d133ebc603f58b99c53e496f3`.
 
 The forward step is what changed. Lateral COM shift is 0.16 rad instead of 0.275, on every step. Mid-swing adds 0.38 rad of knee flexion (forward only). Sole median clearance is still about **2.4 cm** on this nav-left window (re-measured **2.38 cm**, p90 **3.2 cm**). A second pass looked for a deeper step that stays inside about ±10 deg of the shipped **+61.1 deg** arc and an approach still near **0.7 m**. Nothing in that box raised the median enough to see.
 

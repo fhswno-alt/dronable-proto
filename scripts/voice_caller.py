@@ -6,17 +6,23 @@ stand, stop, or vel(vx, yaw_rate) on scripts/steer_walk.py CommandBus.
 This file does not edit the plant, the gait, the tip check, or the bus.
 It does not move kit_cam. It does not add waypoints, a map, or strafe.
 
-Caps stay the bus caps: vx +0.056 / −0.032 m/s, yaw ±0.25 rad/s.
+Caps stay the bus caps: vx +0.150 / −0.032 m/s, yaw ±0.25 rad/s.
 vel is resent at 10 Hz. 200 ms with no command stands inside the bus.
+This caller does not raise those clamps. applied_vx is the clamped
+command. Forward step length is applied_vx / 7.50.
 
-Walk forward publishes vel(+0.056, 0). A turn publishes walk-yaw at the
-forward cap, vel(+0.056, ±0.25). vx=0 with a yaw command does not change
-heading here, so "turn in place" is refused and is not published.
+Walk forward publishes vel(+0.150, 0). A turn publishes walk-yaw at the
+forward cap, vel(+0.150, ±0.25). A signed turn in place publishes
+vel(0, ±0.25). On the kit row that command does change heading.
+An unsigned spin is refused.
 
-The clip is Controls' claimed nav-left window, spoken as phrases:
-stand, walk forward, turn left, walk forward, stop. Same times, same
-vel(+0.056, 0) and vel(+0.056, +0.25). It is not a second arc and not
-a room crossing. Half-cap vel(+0.028, yaw) is the finder trim, not this arc.
+The clip is the nav-left window, spoken as phrases:
+stand, walk forward, turn left, walk forward, stop. Same times.
+Commands are vel(+0.150, 0) and vel(+0.150, +0.25), on the kit gait.
+Prefer FAIL on plant 207f3d5e…: approach heading +2.210 m, left arc
++145.9 deg, resume +0.944 m with +12.4 deg of drift, min up_z 0.934,
+no tip, no fault. The stale +0.598 m / +75.7 deg envelope is not this
+clip. Not a second arc, not a room crossing, not go-anywhere.
 
 Go to the kitchen, the bathroom, anywhere, SLAM, a map, a waypoint, or
 a strafe is refused. Kitchen and bathroom finders are other scripts.
@@ -55,12 +61,12 @@ PREVIEWS = ROOT / "previews"
 PLANT_XML = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145.xml"
 
 # Locked to Controls' bus. self-test refuses if steer_walk drifts.
-FWD_MPS = 0.056
+FWD_MPS = 0.150
 BACK_MPS = 0.032
 YAW_RAD_S = 0.25
-# Half the forward cap. The finder uses this as a trim. It is inside the
-# caps, and it is not the demo turn: heading barely accumulates.
-SOFT_VX = 0.028
+# Half the Day1 forward clamp. Not a published phrase on this caller.
+# The kitchen finder freeze is a different script and is not retuned here.
+SOFT_VX = 0.075
 RESEND_S = 0.10
 TIMEOUT_S = 0.200
 PLANT_MD5 = "207f3d5e9c6a72e16f7aa0c8d224f75e"
@@ -75,11 +81,8 @@ MAP_LINE = "refused: no map, no SLAM, and no go-anywhere"
 VY_LINE = "refused: no vy and no strafe on this bus"
 DOOR_LINE = "refused: door is not a day-1 velocity command"
 JOINT_LINE = "refused: joint targets are not a day-1 velocity command"
-IN_PLACE_LINE = (
-    "refused: vx=0 yaw does not change heading on this plant; "
-    "say turn left or turn right"
-)
-TOO_FAST_LINE = "refused: forward cap is +0.056 m/s; 0.080 tips"
+IN_PLACE_LINE = "refused: say turn left in place or turn right in place"
+TOO_FAST_LINE = "refused: forward cap is +0.150 m/s; this caller does not raise it"
 UNKNOWN_LINE = "refused: not a stand, stop, or vel phrase"
 EMPTY_LINE = "refused: empty phrase"
 CAP_LINE = "refused: above the day-1 cap"
@@ -131,10 +134,10 @@ _LEFT_PHRASES = frozenset({
 _RIGHT_PHRASES = frozenset({
     "turn right", "go right", "yaw right", "right",
 })
+_IN_PLACE_LEFT = frozenset({"turn left in place", "spin left"})
+_IN_PLACE_RIGHT = frozenset({"turn right in place", "spin right"})
 _IN_PLACE_PHRASES = frozenset({
-    "turn left in place", "turn right in place",
-    "turn in place", "spin", "spin left", "spin right",
-    "turn around", "yaw in place",
+    "turn in place", "spin", "turn around", "yaw in place",
 })
 _VY_PHRASES = frozenset({
     "strafe", "strafe left", "strafe right",
@@ -225,8 +228,12 @@ def parse_phrase(phrase: str) -> VoiceCommand:
     text = normalize_phrase(phrase)
     if not text:
         return _refuse(EMPTY_LINE)
-    if "0.080" in text or "0.08" in text or text in _TOO_FAST_PHRASES:
+    if text in _TOO_FAST_PHRASES:
         return _refuse(TOO_FAST_LINE)
+    if text in _IN_PLACE_LEFT:
+        return _vel(0.0, YAW_RAD_S)
+    if text in _IN_PLACE_RIGHT:
+        return _vel(0.0, -YAW_RAD_S)
     if text in _IN_PLACE_PHRASES:
         return _refuse(IN_PLACE_LINE)
     if text in _VY_PHRASES:
@@ -314,8 +321,6 @@ class VoiceCaller:
             return CAP_LINE
         if abs(command.yaw_rate) > YAW_RAD_S:
             return CAP_LINE
-        if command.yaw_rate != 0.0 and command.vx == 0.0:
-            return IN_PLACE_LINE
         if (now - self._last_send) < (self.resend_s - 1e-9):
             return None
         self._last_send = now
@@ -357,7 +362,7 @@ def test_phrases() -> list[str]:
         f"walk {walk}",
         failures,
     )
-    _expect(walk.line == "vel(+0.056, +0.000)", f"walk line {walk.line}", failures)
+    _expect(walk.line == "vel(+0.150, +0.000)", f"walk line {walk.line}", failures)
     back = parse_phrase("back up")
     _expect(back.vx == -BACK_MPS and back.yaw_rate == 0.0, f"back {back}", failures)
     left = parse_phrase("turn left")
@@ -366,20 +371,28 @@ def test_phrases() -> list[str]:
         f"left {left}",
         failures,
     )
-    _expect(left.line == "vel(+0.056, +0.250)", f"left line {left.line}", failures)
+    _expect(left.line == "vel(+0.150, +0.250)", f"left line {left.line}", failures)
     right = parse_phrase("turn right")
     _expect(
         right.vx == FWD_MPS and right.yaw_rate == -YAW_RAD_S and right.vx != 0.0,
         f"right {right}",
         failures,
     )
-    _expect(right.line == "vel(+0.056, -0.250)", f"right line {right.line}", failures)
-    for phrase in (
-        "turn left in place",
-        "spin",
-        "turn around",
-        "yaw in place",
-    ):
+    _expect(right.line == "vel(+0.150, -0.250)", f"right line {right.line}", failures)
+    place_left = parse_phrase("turn left in place")
+    _expect(
+        place_left.kind == "vel" and place_left.vx == 0.0 and place_left.yaw_rate == YAW_RAD_S,
+        f"in place left {place_left}",
+        failures,
+    )
+    _expect(place_left.line == "vel(+0.000, +0.250)", f"in place left line {place_left.line}", failures)
+    place_right = parse_phrase("spin right")
+    _expect(
+        place_right.vx == 0.0 and place_right.yaw_rate == -YAW_RAD_S,
+        f"in place right {place_right}",
+        failures,
+    )
+    for phrase in ("spin", "turn around", "turn in place", "yaw in place"):
         got = parse_phrase(phrase)
         _expect(got.kind == "refuse" and got.line == IN_PLACE_LINE, f"{phrase} {got}", failures)
     for phrase in ("go to the kitchen", "bathroom", "walk to the bedroom"):
@@ -394,7 +407,7 @@ def test_phrases() -> list[str]:
     _expect(parse_phrase("open the door").line == DOOR_LINE, "door", failures)
     _expect(parse_phrase("bend the knee").line == JOINT_LINE, "joint", failures)
     _expect(parse_phrase("walk faster").line == TOO_FAST_LINE, "faster", failures)
-    _expect(parse_phrase("vx 0.080").line == TOO_FAST_LINE, "0.080", failures)
+    _expect(parse_phrase("vx 0.080").line == UNKNOWN_LINE, "0.080 is under the cap", failures)
     _expect(parse_phrase("").line == EMPTY_LINE, "empty", failures)
     _expect(parse_phrase("dance").line == UNKNOWN_LINE, "unknown", failures)
     phrases = [cue.phrase for cue in DEMO_CUES]
@@ -429,11 +442,12 @@ def test_bus() -> list[str]:
     bus = steer.CommandBus()
     caller = VoiceCaller(bus, resend_s=steer.VEL_RESEND_S)
     heard = caller.hear("walk forward", 0.0)
-    _expect(heard == "vel(+0.056, +0.000)", f"hear walk {heard}", failures)
+    _expect(heard == "vel(+0.150, +0.000)", f"hear walk {heard}", failures)
     dt = float(steer.CTRL_DT)
     t = 0.0
     report = bus.tick(t, dt)
-    while t < 1.0 - 1e-9:
+    # 0 → 0.150 m/s at VX_SLEW 0.08 m/s² takes 1.875 s.
+    while t < 2.2 - 1e-9:
         caller.publish(t)
         report = bus.tick(t, dt)
         t += dt
@@ -463,7 +477,7 @@ def test_bus() -> list[str]:
     turn_bus = steer.CommandBus()
     turn = VoiceCaller(turn_bus, resend_s=steer.VEL_RESEND_S)
     turn_line = turn.hear("turn left", 0.0)
-    _expect(turn_line == "vel(+0.056, +0.250)", f"turn hear {turn_line}", failures)
+    _expect(turn_line == "vel(+0.150, +0.250)", f"turn hear {turn_line}", failures)
     _expect(abs(turn_bus.target_vx - FWD_MPS) < 1e-12, f"target vx {turn_bus.target_vx}", failures)
     _expect(abs(turn_bus.target_yaw - YAW_RAD_S) < 1e-12, f"target yaw {turn_bus.target_yaw}", failures)
     script = steer.NAV_LEFT_SCRIPT
@@ -480,15 +494,17 @@ def test_bus() -> list[str]:
                 failures,
             )
 
-    place = VoiceCaller(steer.CommandBus(), resend_s=steer.VEL_RESEND_S)
-    place.command = VoiceCommand("vel", 0.0, YAW_RAD_S, "vel(+0.000, +0.250)")
-    blocked = place.publish(0.0)
-    _expect(blocked == IN_PLACE_LINE, f"zero-vx yaw {blocked}", failures)
+    place_bus = steer.CommandBus()
+    place = VoiceCaller(place_bus, resend_s=steer.VEL_RESEND_S)
+    place_line = place.hear("turn left in place", 0.0)
+    _expect(place_line == "vel(+0.000, +0.250)", f"zero-vx yaw {place_line}", failures)
+    _expect(abs(place_bus.target_vx) < 1e-12, f"in-place vx {place_bus.target_vx}", failures)
+    _expect(abs(place_bus.target_yaw - YAW_RAD_S) < 1e-12, f"in-place yaw {place_bus.target_yaw}", failures)
 
     over = VoiceCaller(steer.CommandBus(), resend_s=steer.VEL_RESEND_S)
-    over.command = VoiceCommand("vel", 0.080, 0.0, "vel(+0.080, +0.000)")
+    over.command = VoiceCommand("vel", 0.200, 0.0, "vel(+0.200, +0.000)")
     blocked = over.publish(0.0)
-    _expect(blocked == CAP_LINE, f"0.080 publish {blocked}", failures)
+    _expect(blocked == CAP_LINE, f"over-cap publish {blocked}", failures)
     return failures
 
 
@@ -657,7 +673,7 @@ def run_demo(*, video: bool, out_mp4: Path | None) -> DemoResult:
     problems = test_bus()
     if problems:
         raise SystemExit("refused: " + "; ".join(problems))
-    session = steer.SteerSession(video=video)
+    session = steer.SteerSession(video=video, lipm=steer.locked_kit_config())
     cam_pos = _kit_cam_tuple(session.model)
     if any(abs(got - want) > 1e-6 for got, want in zip(cam_pos, KIT_CAM_POS, strict=True)):
         raise SystemExit(f"refused: kit_cam pos {cam_pos} != {KIT_CAM_POS}")
@@ -665,7 +681,7 @@ def run_demo(*, video: bool, out_mp4: Path | None) -> DemoResult:
         raise SystemExit(f"refused: plant md5 {_plant_md5()}")
 
     caller = VoiceCaller(session.bus, resend_s=steer.VEL_RESEND_S)
-    dt = float(steer.CTRL_DT)
+    dt = float(session.ctrl_dt)
     n_ctrl = int(round(DEMO_CUES[-1].t_end / dt))
     frames: list[np.ndarray] = []
     stills: list[str] = []
@@ -817,11 +833,17 @@ def _honesty(result: DemoResult) -> str:
         f"CoP in box {result.cop_in_box}. End mode {result.end_mode}. "
         f"End support margin {result.end_margin_m:+.3f} m. "
         f"{fault}; {tip}. This clip {match}. "
-        "Claimed on that envelope: approach +0.598 m, left arc +75.7 deg, "
-        "resume +0.317 m, min up_z 0.954. "
-        "vx=0 yaw was not sent. Not a kitchen trip, not a map, not go-anywhere. "
-        "Prefer FAIL, not this clip: a 14 s left hold from t=15 s tips on the resume; "
-        "a second arc is not published."
+        "Prefer FAIL on this kit remeasure, not the stale envelope "
+        "(approach +0.598 m, left arc +75.7 deg, resume +0.317 m, min up_z 0.954 "
+        "on plant 71b2c86d…). "
+        "Published here: approach +2.210 m, left arc +145.9 deg, "
+        "resume +0.944 m. The resume is not pure straight: heading drifted "
+        "+12.4 deg on that 6 s hold. "
+        "Controls' settled ±0.25 rates stay +0.217 / −0.221 rad/s. "
+        "The window-mean rate above includes slew and is not a new L/R claim. "
+        "Signed vel(0, ±0.25) does turn and was not this clip. "
+        "Not a kitchen trip, not a map, not go-anywhere, not arrival, "
+        "not a demo-ready human walk. Soft-pass is off."
     )
 
 

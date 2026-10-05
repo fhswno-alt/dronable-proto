@@ -3,19 +3,24 @@
 
 This is not a room finder and not go-anywhere. The only commands are
 stand, stop, and vel(vx, yaw_rate) on CommandBus in scripts/steer_walk.py,
-resent at 10 Hz. Caps stay +0.056 / -0.032 m/s and yaw ±0.25 rad/s.
-On the empty plant the walk still starts with the claimed nav-multi
-prefix: a 1.0 s stand so the left arc starts at t = 16 s, then
-vel(+0.056, 0) for 15 s and vel(+0.056, +0.25) for 12.5 s. After
-that the dense frontier rim picks the next held window. When the
-rim is still left, a 4 s forward gap is followed by one 8 s left
-window. A 6 s gap swallows that left command and then crosses
-up_z 0.90. The right leg is one vel(+0.056, -0.25) hold for 34 s.
-About 38 s on that hold crosses up_z 0.90. Furnished scenes cannot
-hold the claimed yaw windows (up_z crosses 0.90). They use the same
-vel(+0.056, -0.25) for 8 s, right first. A short vel(+0.028, +0.25)
-left command is swallowed here. vx=0 yaw does not change heading
-either, so this script never sends it.
+resent at 10 Hz. Caps stay +0.150 / -0.032 m/s and yaw ±0.25 rad/s.
+The walk uses the kit gait. This script does not raise the clamps.
+
+On the empty plant the qualified windows are the remeasured nav-multi
+chain: stand 1.0 s, vel(+0.150, 0) for 15 s, vel(+0.150, +0.25) for
+12.5 s, forward 6 s, vel(+0.150, -0.25) for 11 s, forward 6 s.
+Prefer FAIL on plant 207f3d5e…: approach heading +2.210 m, left
++145.9 deg, right −138.6 deg, min up_z 0.932, no tip, no fault.
+The stale +0.598 m / +75.7 deg envelope is not this path.
+
+The 4 s gap, the 8 s second left, and the 34 s right hold were not
+remeasured on this tip. next_frontier_phase still builds them for
+the planner test. A walk does not append them. Furnished scenes use
+the remeasured 8 s right, vel(+0.150, -0.25). Kitchen and bathroom
+traced the same motion. That is not furniture avoidance.
+
+vel(0, yaw) does change heading on this kit row. This script does
+not send it. The windows are walk-yaw at the forward cap.
 
 The plant file is not edited. kit_cam stays on head_tilt_link at
 0.050 0.019 0.007. Scenes are vision only (room_kitchen.xml and the
@@ -39,12 +44,11 @@ What the map actually is:
     one of those cells. It does not aim at yellow.
   - The walked trail uses the sim freejoint. That is odometry in this
     sim, not visual SLAM.
-  - On the empty plant the claimed left prefix is followed by a
-    frontier window: 4 s forward, then 8 s left when the dense rim
-    is still left, then one 34 s right walk-yaw. That right hold is
-    not a second right after a gap. Furnished scenes stay on the
-    8 s right window. A separate kitchen probe walks half-cap toward
-    the frozen soft XY and does not claim arrival.
+  - On the empty plant the walk is the remeasured nav-multi chain.
+    The 4 s / 8 s / 34 s frontier holds are not claimed. Furnished
+    scenes stay on the remeasured 8 s right window. A separate kitchen
+    probe walks half the forward cap toward the frozen soft XY and
+    does not claim arrival. That probe's old Δx is not republished.
 
 Prefer FAIL: a longer floor fan, plus a bearing if yellow was in
 frame, is not a house map and not an arrival. The last-mile finder
@@ -91,21 +95,15 @@ ARTIFACTS = Path("/opt/cursor/artifacts")
 
 WIDTH = 640
 HEIGHT = 480
-# 1.0 s is the claimed nav-multi stand, so the left arc starts at t = 16 s.
-# A 0.6 s stand starts that same vel 0.4 s earlier. On this plant the 12.5 s
-# left hold then only reached about +35 deg instead of about +75 deg.
+# 1.0 s stand, so the left arc starts at t = 16 s. Same times as nav-left.
 STAND_S = 1.00
 SETTLE_S = 1.20
 PERCEPT_S = 0.40
 FRAME_EVERY_S = 0.20
 UP_Z_ABORT = 0.90
-# Claimed walk speed. Half-cap (+0.028) stays upright, but a left yaw
-# on that speed is swallowed. The windows below are the ones Controls
-# already measured: left ~+75.7 deg in 12.5 s, chained right ~-55 deg
-# in 11 s. Caps are not raised.
+# Day1 forward clamp. This script does not raise it. Half of that clamp
+# is the soft-XY / last-mile trim inside explore_map, not find_kitchen.
 EXPLORE_VX = steer_walk.VX_FWD_CAP
-# Finder last-mile stays at half the forward cap. Full-cap finder
-# bursts crossed up_z 0.90. This is not the explore schedule.
 FINDER_HALF_VX = steer_walk.VX_FWD_CAP * 0.5
 # A yaw arc "tracked" when realized heading moves more than this on
 # the commanded side. The swallowed left command was about -12 deg.
@@ -117,32 +115,22 @@ DEMO_WALK_S = (
     + steer_walk.CLAIMED_RIGHT_ARC_S
     + steer_walk.CLAIMED_RESUME_S
 )
-# Furnished scenes cross up_z 0.90 on the claimed 11 s / 12.5 s windows
-# (kitchen right 11 s reached 0.899, bathroom 0.889; a cold left hold
-# stayed near +5 to +11 deg and then leaned). The same vel(+0.056, -0.25)
-# for 8 s stayed at about 0.919 / 0.934 and the heading followed right.
-# This is not a new cap and not the claimed 11 s window.
+# 8 s of vel(+cap, -0.25) was remeasured in the kitchen and the bathroom.
+# Both traces matched: heading Δx +0.540 m, Δyaw −94.6 deg, run min up_z
+# 0.929 on the stop, no tip, no fault. Furniture did not change the
+# result. The 11 s furnished window was not remeasured, so it is not
+# the room schedule. This is not a new cap.
 FURNISHED_RIGHT_S = 8.0
-# After the claimed left-then-right chain, one more forward window.
-# Same vel(+0.056, 0) and the same 15 s length as the approach.
-# Kept so the open-loop schedule can still be built. The empty-plant
-# demo does not walk this extend. A left command after the claimed
-# 6 s mid is swallowed and then crosses up_z 0.90. Extending the
-# first left hold through ~21 s tips. A separate 8 s left window
-# after a 4 s forward gap yaws and stays up.
+# Extra forward after nav-multi. The schedule builder can still emit it.
+# The qualified walk does not append it.
 EMPTY_FORWARD_EXTEND_S = steer_walk.CLAIMED_APPROACH_S
-# Forward between the claimed left and a second left window.
-# 6 s is the claimed mid, and a left command there does not yaw.
-# 4.0 s is the measured gap where the next 8 s left window tracks.
+# Planner-only holds. Not remeasured on this kit tip, so a walk does
+# not append them and the docs do not claim their old Δyaw.
 FRONTIER_GAP_S = 4.0
-# Dense rim is still on the left after the claimed 12.5 s left.
-# 8 s of vel(+0.056, +0.25) paints that side. Not a longer first hold.
 FRONTIER_SECOND_LEFT_S = 8.0
-# One right walk-yaw after the left windows. The claimed right arc
-# is 11 s. From the pose after the second left, 34 s stays at
-# up_z about 0.939 and walks the rim. About 38 s crosses up_z 0.90.
-# This is one hold, not a second right after yaw returns to 0.
 FRONTIER_RIGHT_HOLD_S = 34.0
+# False: the 4 s / 8 s / 34 s chain is not a qualified envelope.
+QUALIFIED_FRONTIER_CHAIN = False
 FRONTIER_WALK_S = (
     steer_walk.CLAIMED_APPROACH_S
     + steer_walk.CLAIMED_LEFT_ARC_S
@@ -235,11 +223,12 @@ HONESTY = (
     "not a waypoint and not arrival. A soft XY is frozen along that bearing "
     "the first time yellow is logged. Yellow >= 0.50 is not success. "
     "Frontiers are the 8-connected edge of that paint. Pose is the sim freejoint, "
-    "not SLAM. The empty plant holds the claimed left prefix, then a 4 s "
-    "forward gap and an 8 s left window when the dense rim is still left, "
-    "then one vel(+0.056, -0.25) for 34 s. A 6 s gap swallows that left "
-    "window. About 38 s of that right hold crosses up_z 0.90. "
-    "vx=0 yaw is not used. Not go-anywhere."
+    "not SLAM. The empty plant walks the remeasured nav-multi chain at "
+    "vel(+0.150, yaw) on the kit gait: approach heading +2.210 m, left "
+    "+145.9 deg, chained right −138.6 deg, min up_z 0.932, no tip, no fault. "
+    "The 4 s gap, 8 s second left, and 34 s right hold are not claimed. "
+    "vel(0, yaw) turns and is not sent. Not go-anywhere. Not arrival. "
+    "Not a demo-ready human walk."
 )
 
 
@@ -976,6 +965,33 @@ def _frontier_side(weights: FrontierWeights) -> int:
     return 0
 
 
+def qualified_plant_schedule(walk_s: float) -> tuple[ExplorePhase, ...]:
+    """Nav-multi windows remeasured on the kit bus.
+
+    Truncates on a short budget. Does not append the 4 s gap, the 8 s
+    second left, or the 34 s right hold.
+    """
+    remaining = walk_s
+    chosen: list[ExplorePhase] = []
+    for phase in claimed_explore_phases():
+        if remaining <= 1e-9:
+            break
+        duration = min(phase.duration_s, remaining)
+        chosen.append(
+            ExplorePhase(
+                phase.name,
+                duration,
+                phase.vx,
+                phase.yaw_rate,
+                "remeasured nav-multi window on the kit bus",
+            )
+        )
+        remaining -= duration
+        if duration + 1e-6 < phase.duration_s:
+            break
+    return tuple(chosen)
+
+
 def claimed_prefix(walk_s: float) -> tuple[ExplorePhase, ...]:
     """Approach, then the claimed 12.5 s left. Truncates on a short budget.
 
@@ -1017,8 +1033,10 @@ def next_frontier_phase(
 
     The claimed left prefix is not chosen here. A second left is the
     8 s window after the 4 s gap, and only when the rim is still left.
-    The right leg is one 34 s hold after the lefts. A third left is
-    not returned. vx stays at the forward cap. A pure yaw is not returned.
+    The right leg is one 34 s hold after the lefts. Those three holds
+    were not remeasured on this kit tip. QUALIFIED_FRONTIER_CHAIN is
+    false, so a walk does not append them. A third left is not returned.
+    vx stays at the forward cap. A pure yaw is not returned.
     Yellow is not read.
     """
     if remaining_s <= 0.05 or not drive.follow:
@@ -1205,6 +1223,12 @@ def _select_frontier(
 
 
 def _within_caps(vx: float, yaw_rate: float) -> bool:
+    """Day1 caps, plus this script's refusal to send vx=0 yaw.
+
+    vel(0, yaw) is a legal bus command and it does change heading on
+    the kit row. Explore does not use it. The windows are walk-yaw
+    at the forward cap.
+    """
     return (
         -steer_walk.VX_BACK_CAP - 1e-9 <= vx <= steer_walk.VX_FWD_CAP + 1e-9
         and abs(yaw_rate) <= steer_walk.YAW_RATE_CAP + 1e-9
@@ -1364,7 +1388,11 @@ def run_explore(
     record_frames: bool,
 ) -> SceneRun:
     scene_xml = SCENES[scene]
-    session = steer_walk.SteerSession(video=False, scene_xml=scene_xml)
+    session = steer_walk.SteerSession(
+        video=False,
+        scene_xml=scene_xml,
+        lipm=steer_walk.locked_kit_config(),
+    )
     cam = KitCam(session.model)
     feature_map = ExploreMap.empty()
     sent: list[SentCommand] = []
@@ -1389,7 +1417,7 @@ def run_explore(
         trail: list[tuple[float, float]] = [(start.x, start.y)]
         drive = FrontierDrive()
         if scene == "plant":
-            schedule: list[ExplorePhase] = list(claimed_prefix(walk_s))
+            schedule = list(qualified_plant_schedule(walk_s))
             mid_time = float(session.data.time) + (walk_s * 0.5)
         else:
             schedule = list(explore_schedule(walk_s, scene))
@@ -1433,7 +1461,12 @@ def run_explore(
                 _close_phase(pose_now)
                 note_frontier_phase(drive, schedule[phase_i])
                 phase_i += 1
-                if phase_i >= len(schedule) and scene == "plant" and drive.follow:
+                if (
+                    QUALIFIED_FRONTIER_CHAIN
+                    and phase_i >= len(schedule)
+                    and scene == "plant"
+                    and drive.follow
+                ):
                     remaining = walk_end - now
                     if remaining > 0.05:
                         frame, cam_pos, cam_mat, fovy = cam.grab(session.model, session.data)
@@ -1565,7 +1598,11 @@ def run_soft_goal(hold_s: float, *, record_frames: bool) -> SceneRun:
     The command does not read the live yellow fraction. Reaching the
     guessed point is not arrival. A tip or a plant fault stops the walk.
     """
-    session = steer_walk.SteerSession(video=False, scene_xml=SCENES["kitchen"])
+    session = steer_walk.SteerSession(
+        video=False,
+        scene_xml=SCENES["kitchen"],
+        lipm=steer_walk.locked_kit_config(),
+    )
     cam = KitCam(session.model)
     feature_map = ExploreMap.empty()
     sent: list[SentCommand] = []
@@ -2062,7 +2099,11 @@ def test_classify_colors() -> list[str]:
 
 
 def _stand_integrate(scene: SceneName) -> tuple[ExploreMap, IntegrateResult, np.ndarray]:
-    session = steer_walk.SteerSession(video=False, scene_xml=SCENES[scene])
+    session = steer_walk.SteerSession(
+        video=False,
+        scene_xml=SCENES[scene],
+        lipm=steer_walk.locked_kit_config(),
+    )
     cam = KitCam(session.model)
     sent: list[SentCommand] = []
     try:
@@ -2126,11 +2167,12 @@ def test_caps_and_plant() -> list[str]:
     failures: list[str] = []
     digest = _md5(PLANT_XML)
     _expect(digest == steer_walk.PLANT_MD5, f"plant md5 {digest}", failures)
-    _expect(abs(EXPLORE_VX - 0.056) < 1e-9, f"explore vx {EXPLORE_VX}", failures)
-    _expect(abs(FINDER_HALF_VX - 0.028) < 1e-9, f"finder half vx {FINDER_HALF_VX}", failures)
+    _expect(abs(EXPLORE_VX - 0.150) < 1e-9, f"explore vx {EXPLORE_VX}", failures)
+    _expect(abs(FINDER_HALF_VX - 0.075) < 1e-9, f"finder half vx {FINDER_HALF_VX}", failures)
     _expect(abs(steer_walk.CLAIMED_LEFT_ARC_S - 12.5) < 1e-9, "left window moved", failures)
     _expect(abs(steer_walk.CLAIMED_RIGHT_ARC_S - 11.0) < 1e-9, "right window moved", failures)
-    _expect(steer_walk.VX_FWD_CAP == 0.056 and steer_walk.VX_BACK_CAP == 0.032, "vx caps", failures)
+    _expect(abs(steer_walk.VX_FWD_CAP - 0.150) < 1e-9 and steer_walk.VX_BACK_CAP == 0.032, "vx caps", failures)
+    _expect(not QUALIFIED_FRONTIER_CHAIN, "unmeasured frontier chain was enabled", failures)
     _expect(steer_walk.YAW_RATE_CAP == 0.25, "yaw cap", failures)
     _expect(abs(steer_walk.VEL_RESEND_S - 0.10) < 1e-9, "resend", failures)
     _expect(steer_walk.KIT_CAM_POS == (0.050, 0.019, 0.007), "kit_cam pos", failures)
@@ -2461,12 +2503,12 @@ def demo(walk_s: float) -> int:
                 "on the 8-connected edge of that fan, and a yellow bearing when the "
                 "backsplash is in frame. A soft XY is frozen along that bearing. "
                 "Yellow >= 0.50 is not success and arrival is not claimed. "
-                "The empty plant holds the claimed left prefix, then a 4 s forward "
-                "gap and an 8 s left window when the dense rim is still left, then "
-                "one vel(+0.056, -0.25) for 34 s. A 6 s gap swallows that left window. "
-                "About 38 s of the right hold crosses up_z 0.90. "
+                "The empty plant walks the remeasured nav-multi chain at the "
+                "Day1 forward clamp 0.150 m/s. The 4 s gap, 8 s second left, and "
+                "34 s right hold were not remeasured and are not claimed. "
                 "Rooms are separate XML files, not one space. Pose is the sim freejoint. "
-                "vx=0 does not turn. Arrival is still yellow >= 0.50 and torso-to-kitchen <= 0.25 m."
+                "vel(0, yaw) turns and is not sent. Arrival is still yellow >= 0.50 "
+                "and torso-to-kitchen <= 0.25 m. Not go-anywhere. Not a human walk."
             ),
             "later": (
                 "A later land would need one continuous space, metric occupied cells "
@@ -2503,7 +2545,7 @@ def main() -> int:
     parser.add_argument(
         "--walk-s",
         type=float,
-        default=FRONTIER_WALK_S,
+        default=DEMO_WALK_S,
     )
     args = parser.parse_args()
     if args.self_test:
