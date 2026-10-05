@@ -5,20 +5,18 @@ One sequence, empty plant, CommandBus only:
 
   stand → vel(+vx_fwd, 0) → vel(+vx_fwd, +yaw_rate) → vel(+vx_fwd, 0) → stop
 
-The windows are the claimed nav-left arc already measured on main
-(approach 15 s, left yaw hold 12.5 s, resume 6 s, stop hold 2.5 s).
-Caps stay vx_fwd 0.056, vx_back 0.032, yaw_rate ±0.25. Soft-pass is off.
-The plant file is not opened for write.
+The windows are the nav-left arc (approach 15 s, left yaw hold 12.5 s,
+resume 6 s, stop hold 2.5 s). Caps stay vx_fwd 0.056, vx_back 0.032,
+yaw_rate ±0.25. Soft-pass is off. The plant file is not opened for write.
+Numbers will not match the previous +0.598 m / +75.7 deg basin.
 
-A second clip is a short reverse already in the steer self-test
-(stand → vel(-vx_back, 0) for 5.5 s → stop). It is not chained onto the
-turn. If that snippet tips, the JSON says so and the clip is not kept.
+A second clip is a short reverse (stand → vel(-vx_back, 0) for 5.5 s →
+stop). It is not chained onto the turn. If that snippet tips, the JSON
+says so and the clip is not kept.
 
-Prefer FAIL, not this pack: a 14 s left hold that starts at 15 s tips on
-the resume; a second 11 s right hold tips; a second 12.5 s left hold does
-not yaw and then tips; right-then-left stays upright but the left hold
-does not yaw left. The chained nav-multi right arc is shorter than the
-single-arc right (−54.9 deg vs −77.3 deg) and is not this clip.
+A third clip is a side close-up of a few forward steps
+(`previews/demo_step_cycle.mp4`). Other yaw orders are not re-qualified
+here.
 
   MUJOCO_GL=osmesa python scripts/demo_8pm_motion.py
   MUJOCO_GL=osmesa python scripts/demo_8pm_motion.py --no-video
@@ -57,13 +55,18 @@ SHORT_REVERSE_SCRIPT: tuple[sw.DemoSegment, ...] = (
 )
 
 PREFER_FAIL_NOT_THIS_CLIP = (
-    "Prefer FAIL, not this clip: a 14 s left hold that starts at 15 s tips "
-    "on the resume; a second right hold of 11 s tips; a second left hold of "
-    "12.5 s does not yaw and then tips; right-then-left stays upright but "
-    "the left hold does not yaw left. nav-multi keeps the claimed left arc "
-    "then a claimed-length right arc, and that chained right arc measures "
-    "about −54.9 deg rather than the single-arc −77.3 deg. Tip and up_z "
-    "bars are unchanged. Caps are unchanged. Soft-pass is off."
+    "This clip is the same stand → forward → left → resume → stop windows. "
+    "It does not match the previous basin's +0.598 m / +75.7 deg envelope. "
+    "Other orders (a 14 s left that starts at 15 s, a second same-sign arc, "
+    "right-then-left) are not this clip and were not re-qualified here. "
+    "Tip and up_z bars are unchanged. Caps are unchanged. Soft-pass is off."
+)
+
+# Side view of a few forward steps. Same bus and caps. Not the nav arc.
+STEP_CLOSEUP_SCRIPT: tuple[sw.DemoSegment, ...] = (
+    sw.DemoSegment(0.6, "stand", 0.0, 0.0, "stand"),
+    sw.DemoSegment(6.2, "vel", sw.VX_FWD_CAP, 0.0, "forward"),
+    sw.DemoSegment(7.6, "stop", 0.0, 0.0, "stop"),
 )
 
 OVERLAY_TITLE = "8PM motion"
@@ -266,6 +269,9 @@ def _run(
     stem: str,
     *,
     video: bool,
+    cam_distance: float = 1.25,
+    cam_azimuth: float = 135.0,
+    cam_elevation: float = -18.0,
 ) -> sw.RunSummary:
     duration = script[-1].t_end
     out = sw.PREVIEWS / f"{stem}.mp4" if video else None
@@ -277,6 +283,9 @@ def _run(
         script=script,
         overlay_title=OVERLAY_TITLE,
         overlay_footer=OVERLAY_FOOTER,
+        cam_distance=cam_distance,
+        cam_azimuth=cam_azimuth,
+        cam_elevation=cam_elevation,
     )
 
 
@@ -367,9 +376,6 @@ def main() -> None:
         "reverse_snippet": reverse_pack,
         "prefer_fail_not_this_clip": PREFER_FAIL_NOT_THIS_CLIP,
     }
-    out_json = sw.PREVIEWS / "demo_8pm_motion_summary.json"
-    out_json.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    print(f"[8pm] wrote {out_json}")
     print(
         f"[8pm] upright={payload['upright']} tip={payload['tip']} "
         f"Δx={float(payload['delta_x_m']):+.3f} m "
@@ -387,6 +393,38 @@ def main() -> None:
             f"min_up_z={float(reverse_pack['min_up_z']):.3f} "
             f"kept={reverse_pack.get('kept_as_demo_clip')}"
         )
+
+    close = _run(
+        STEP_CLOSEUP_SCRIPT,
+        "demo_step_cycle",
+        video=video,
+        cam_distance=0.82,
+        cam_azimuth=78.0,
+        cam_elevation=-8.0,
+    )
+    close_pack = _pack(
+        close,
+        STEP_CLOSEUP_SCRIPT,
+        clip="stand-forward-stop-side",
+        claimed_match=None,
+    )
+    payload["step_cycle"] = close_pack
+    if not bool(close_pack["upright"]):
+        close_pack["prefer_fail"] = (
+            "Forward close-up left the upright bar. Not a success clip. "
+            "Bars were not lowered."
+        )
+        close_mp4 = sw.PREVIEWS / "demo_step_cycle.mp4"
+        if close_mp4.is_file():
+            close_mp4.unlink()
+    print(
+        f"[8pm] step-cycle upright={close_pack['upright']} "
+        f"Δx={float(close_pack['delta_x_m']):+.3f} m "
+        f"min_up_z={float(close_pack['min_up_z']):.3f}"
+    )
+    out_json = sw.PREVIEWS / "demo_8pm_motion_summary.json"
+    out_json.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    print(f"[8pm] wrote {out_json}")
     if not bool(payload["upright"]):
         raise SystemExit(
             "Prefer FAIL: primary sequence is not upright. "

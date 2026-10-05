@@ -96,7 +96,11 @@ MUJOCO_GL=osmesa python scripts/steer_walk.py --clip nav-multi
 MUJOCO_GL=osmesa python scripts/demo_8pm_motion.py
 ```
 
-That writes `previews/demo_8pm_motion.mp4` and `previews/demo_8pm_motion_summary.json`. Voice uses this `CommandBus` (`stand` | `stop` | `vel(vx, yaw_rate)`), not a kitchen script. Measured on this pack: approach **+0.598 m**, left arc **+75.7 deg**, resume **+0.317 m**, min up_z **0.954**, peak torque **2.10 Nm**, end mode stand, upright, plant md5 unchanged. A separate short reverse (`previews/demo_8pm_reverse.mp4`) is **−0.376 m** with min up_z **0.903** and is not chained after the turn.
+That writes `previews/demo_8pm_motion.mp4`, a side close-up `previews/demo_step_cycle.mp4`, and `previews/demo_8pm_motion_summary.json`. Voice uses this `CommandBus` (`stand` | `stop` | `vel(vx, yaw_rate)`), not a kitchen script.
+
+Step-cycle basin (same caps, same plant): lateral COM shift **0.16 rad** (was 0.275), forward mid-swing knee lift **+0.38 rad**, contralateral arm scale **3.4** inside ±0.7 Nm (about ±0.11 rad; a side view still reads the arms as nearly still — scale 6.0 tips a cold left turn, min up_z 0.42, and is not shipped), yaw only on the airborne foot (**0.10 rad** left / **0.12 rad** right toe; stance hip yaw 0). Reverse does not take the knee lift or the arm scale. This pack measures approach **+0.742 m**, left arc **+58.7 deg**, resume **+0.311 m**, min up_z **0.960**, peak leg torque **2.10 Nm**, end mode stand, CoP in the box. It does not match the previous +0.598 m / +75.7 deg envelope. Short reverse is **−0.415 m**, min up_z **0.905**. Soft-pass is off. See `docs/DEMO_8PM_MOTION.md`.
+
+Older clip stats in the next paragraph (+0.598 m, +75.7 deg, and the matching voice numbers) are the previous basin.
 
 `forward` is stand → forward → stop, long enough for several body lengths. `stop` is the same bus on a gait phase that used to pitch after the stop (support margin about −0.08 m) and latch `mode=fault`. `reverse` is stand → retreat → stop. `turn` is stand → walk while yawing left → stop. `turn-right` is the same 11 s window with yaw_rate −0.25. `nav-left` and `nav-right` are the furniture pattern: walk about 0.6 m, arc with `vel(vx, yaw_rate)` held together, walk a bit further along the new heading, then stop. `nav-multi` chains both claimed holds on one continuous walk: forward, left arc (12.5 s), forward, right arc (11 s), forward, then stop. Each writes `previews/steer_walk_<clip>.mp4` and a JSON summary (Δx, forward yaw drift, Δyaw, tip, CoP in box, peak torque, end mode; `nav-multi` also has per-segment Δx, Δyaw, mean body vx, mean yaw rate, and peak torque). Keys, when a display exists: **W/S** ±vx, **A/D** ±yaw (A = left), **Space** stop. Keys latch until Space. AI resends `vel` at 10 Hz; 200 ms of silence stands.
 
@@ -112,7 +116,7 @@ python scripts/voice_caller.py --self-test
 MUJOCO_GL=osmesa python scripts/voice_caller.py --clip
 ```
 
-The clip is that claimed left arc with the phrase and the bus command on each frame. `kit_cam` is not moved. This run matched the envelope: approach **+0.598 m**, left arc **+75.7 deg**, resume **+0.317 m**, min up_z **0.954**, end mode stand, no tip. Numbers are in `previews/voice_commands_summary.json`.
+The clip is that left arc with the phrase and the bus command on each frame. `kit_cam` is not moved. The voice mp4 on main matched the previous basin (approach **+0.598 m**, left arc **+75.7 deg**). This step-cycle basin changes those walk numbers; see `docs/DEMO_8PM_MOTION.md`. The bus API is unchanged.
 
 ## kit_cam rooms (vision only, not a map)
 
