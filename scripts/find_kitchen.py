@@ -19,16 +19,18 @@ adds a yaw trim scaled by the bias. Full-cap slices and short slices with
 stand pauses between them are not this path: the first crossed up_z 0.90
 near +0.39 m, and the pauses never got past ~0.1 m. The up_z bar stays
 0.90. The 1.2 s hop stays in --self-test at the full forward cap. The
-world-x budget is 1.10 m, a stop, not a goal pose. If the yellow fraction
+world-x budget is 1.10 m, a stop, not a goal pose. While yellow is still
+usable but has fallen from its peak toward 0.015, forward-only slices
+stop at |bias| 0.04 instead of 0.08. The command is still half-cap
+walk-yaw, vel(+0.028, trim), so the blob is recentered before it hits
+zero. vx=0 yaw does not change heading on this plant. If yellow then
 falls below 0.015 while the kitchen body is still in frame, up to two
-soft walk-yaw tries (vel(+0.028, trim toward the last bias), 2 s each)
-may run. vx=0 yaw does not change heading on this plant, so it is not
-the reacquire. Normal half-cap steering resumes only if yellow returns
-to at least 0.015 and the score is usable. Otherwise that is a Prefer
-FAIL and no further vel. Arrival is claimed only when the backsplash
-fills at least half the frame and the torso is within 0.25 m of the
-kitchen geom. Otherwise the summary reports end x and the remaining
-gap and does not say arrived.
+soft walk-yaw tries (2 s each) may run. Normal steering resumes only if
+yellow returns to at least 0.015 and the score is usable. Otherwise
+that is a Prefer FAIL and no further vel. Arrival is claimed only when
+the backsplash fills at least half the frame and the torso is within
+0.25 m of the kitchen geom. Otherwise the summary reports end x and
+the remaining gap and does not say arrived.
 
 The visible signal under this lighting is the yellow backsplash. The wood
 counter's lit face does not separate from the blue cabinet, and the red
@@ -94,7 +96,9 @@ SOFT_VX = steer_walk.VX_FWD_CAP * 0.5
 # stalled walk cannot run forever. 280 * 0.40 s is longer than the 1.10 m
 # budget at that speed, so the distance stop fires first.
 MAX_FORWARD_BURSTS = 280
-MAX_YAW_CORRECTIONS = 80
+# Fade recentering turns some forward-only slices into walk-yaw. The cap
+# stays a stalled-search stop, not the reason a fading blob is abandoned.
+MAX_YAW_CORRECTIONS = 120
 # |bias| at which the trim uses the full yaw cap. Inside CENTER_BIAS, yaw is 0.
 YAW_BIAS_FULL = 0.35
 # World-x progress stop. The kitchen near face is at x = 1.315 m, so 1.10 m
@@ -122,6 +126,12 @@ MAX_REACQUIRE = 2
 # Empty floor and a yaw that hides the kitchen measure 0.
 MIN_YELLOW_FRAC = 0.015
 CENTER_BIAS = 0.08
+# Usable yellow that has fallen from a grown peak. Forward-only stops here
+# so a bias that is still inside 0.08 is not walked off the frame.
+# 0.04 is above the bus yaw deadband once the trim gain is applied.
+FADE_CENTER_BIAS = 0.04
+FADE_PEAK_MIN = 0.05
+FADE_DROP = 0.75
 MID_SHARE_CENTER = 0.45
 MIN_BOX_PX = 36.0
 BOX_PAD_PX = 40.0
@@ -258,6 +268,7 @@ class Approach:
     forward_bursts: int
     yaw_corrections: int
     reacquires: int
+    fade_recenters: int
 
 
 def _md5(path: Path) -> str:
@@ -599,14 +610,15 @@ def command_for(decision: DecisionName) -> tuple[float, float] | None:
     return None
 
 
-def trim_yaw(bias: float) -> float:
+def trim_yaw(bias: float, center_bias: float = CENTER_BIAS) -> float:
     """Yaw rate for one approach slice. Sign faces the blob. Magnitude follows it.
 
     Full cap only when |bias| reaches YAW_BIAS_FULL. A smaller bias gets a
     smaller rate, still above the bus deadband once the blob is outside the
-    center band. This is not a heading setpoint and not a path.
+    center band. center_bias is tighter while yellow is fading. This is not
+    a heading setpoint and not a path.
     """
-    if abs(bias) <= CENTER_BIAS:
+    if abs(bias) <= center_bias:
         return 0.0
     yaw = -bias / YAW_BIAS_FULL * steer_walk.YAW_RATE_CAP
     if yaw > steer_walk.YAW_RATE_CAP:
@@ -645,17 +657,37 @@ def yellow_usable(score: KitchenScore) -> bool:
     )
 
 
+def yellow_fading(yellow_frac: float, peak_yellow: float) -> bool:
+    """Still above 0.015, but down from a grown peak and heading toward that bar."""
+    return (
+        yellow_frac >= MIN_YELLOW_FRAC
+        and peak_yellow >= FADE_PEAK_MIN
+        and yellow_frac < peak_yellow * FADE_DROP
+    )
+
+
+def center_bias_for(yellow_frac: float, peak_yellow: float) -> float:
+    """Tighter forward-only band while the backsplash is fading. Otherwise 0.08."""
+    if yellow_fading(yellow_frac, peak_yellow):
+        return FADE_CENTER_BIAS
+    return CENTER_BIAS
+
+
 def _remember_bias(score: KitchenScore, last_bias: float) -> float:
     if score.centroid_u is not None:
         return score.bias
     return last_bias
 
 
-def correction_command(score: KitchenScore) -> tuple[float, float] | None:
-    """Approach slice: forward cap, plus a bias trim when the blob is off center."""
+def correction_command(
+    score: KitchenScore,
+    *,
+    center_bias: float = CENTER_BIAS,
+) -> tuple[float, float] | None:
+    """Half-cap forward, plus a bias trim. A fading blob uses the tighter band."""
     if score.decision == "fail":
         return None
-    return (SOFT_VX, trim_yaw(score.bias))
+    return (SOFT_VX, trim_yaw(score.bias, center_bias))
 
 
 BurstAction = Literal["forward", "yaw_left", "yaw_right", "stop"]
@@ -1006,8 +1038,10 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
     """Half-cap slices while the backsplash stays valid, with a yaw trim if it drifts.
 
     A dim yellow with the kitchen still in frame gets a short half-cap walk-yaw.
-    The gait stays in move across a forward slice. Stop is the budget, a failed
-    reacquire, or another Prefer FAIL. up_z under 0.90 stops. That bar is not lowered.
+    Before that, a usable yellow that is falling from its peak recenters with
+    the same walk-yaw as soon as |bias| leaves 0.04. The gait stays in move
+    across a forward slice. Stop is the budget, a failed reacquire, or another
+    Prefer FAIL. up_z under 0.90 stops. That bar is not lowered.
     """
     _hold_stand(session, STAND_S)
     before = cam.grab(session.data)
@@ -1020,13 +1054,16 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
     forward_bursts = 0
     yaw_corrections = 0
     reacquires = 0
+    fade_recenters = 0
     last_bias = stand_score.bias
+    peak_yellow = stand_score.yellow_frac
     note = stand_score.line
     stop_kind: BurstKind = "blob"
     if stand_score.decision == "fail":
         return _approach_result(
             session, cam, before, before, stand_score, stand_score, sent, note,
             stop_kind, x0, forward_bursts, yaw_corrections, False, reacquires,
+            fade_recenters,
         )
     while True:
         dx = float(session.data.qpos[0]) - x0
@@ -1049,6 +1086,7 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
                 reacquires += 1
                 score, fail = _reacquire(session, cam, sent, score, last_bias, x0)
                 last_bias = _remember_bias(score, last_bias)
+                peak_yellow = max(peak_yellow, score.yellow_frac)
                 if fail:
                     note = fail
                     stop_kind = _abort_kind(fail)
@@ -1060,13 +1098,16 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
                 note = choice.line
             stop_kind = choice.kind
             break
-        command = correction_command(score)
+        fading = yellow_usable(score) and yellow_fading(score.yellow_frac, peak_yellow)
+        command = correction_command(score, center_bias=center_bias_for(score.yellow_frac, peak_yellow))
         if command is None:
             note = "Prefer FAIL: no bus command for this score"
             stop_kind = "blob"
             break
         if abs(command[1]) > 1e-9:
             yaw_corrections += 1
+            if fading:
+                fade_recenters += 1
             hold_s = BURST_YAW_S
         else:
             forward_bursts += 1
@@ -1079,6 +1120,7 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
         )
         score = score_frame(session.model, session.data, cam.grab(session.data))
         last_bias = _remember_bias(score, last_bias)
+        peak_yellow = max(peak_yellow, score.yellow_frac)
         moved = float(session.data.qpos[0]) - x0
         if mid_image is None and moved >= (PROGRESS_STOP_M * 0.5):
             mid_image = cam.grab(session.data)
@@ -1087,6 +1129,7 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
             reacquires += 1
             score, fail = _reacquire(session, cam, sent, score, last_bias, x0)
             last_bias = _remember_bias(score, last_bias)
+            peak_yellow = max(peak_yellow, score.yellow_frac)
             if fail:
                 note = fail
                 stop_kind = _abort_kind(fail)
@@ -1108,7 +1151,7 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
     return _approach_result(
         session, cam, before, mid_image, stand_score, mid_score, sent, note,
         stop_kind, x0, forward_bursts, yaw_corrections, stop_kind == "arrival",
-        reacquires,
+        reacquires, fade_recenters,
     )
 
 
@@ -1127,6 +1170,7 @@ def _approach_result(
     yaw_corrections: int,
     arrival_candidate: bool,
     reacquires: int,
+    fade_recenters: int,
 ) -> Approach:
     session.bus.stop(float(session.data.time))
     _hold_stand(session, SETTLE_S)
@@ -1177,6 +1221,7 @@ def _approach_result(
         forward_bursts=forward_bursts,
         yaw_corrections=yaw_corrections,
         reacquires=reacquires,
+        fade_recenters=fade_recenters,
     )
 
 
@@ -1357,6 +1402,20 @@ def test_approach_policy() -> list[str]:
     )
     _expect(yellow_usable(centered), "centered yellow is usable", failures)
     _expect(not yellow_usable(dim), "dim yellow is not usable", failures)
+    _expect(not yellow_fading(0.039, 0.039), "stand yellow is not a fade", failures)
+    _expect(not yellow_fading(0.09, 0.10), "a small dip is not a fade", failures)
+    _expect(yellow_fading(0.07, 0.10), "yellow down toward the bar is fading", failures)
+    _expect(not yellow_fading(0.010, 0.10), "below 0.015 is a loss, not a fade recenter", failures)
+    _expect(center_bias_for(0.10, 0.10) == CENTER_BIAS, "healthy yellow keeps 0.08", failures)
+    _expect(center_bias_for(0.07, 0.10) == FADE_CENTER_BIAS, "fading yellow tightens the band", failures)
+    mild_bias = _fake_score("forward", 0.07, -0.06)
+    straight = correction_command(mild_bias)
+    recenter = correction_command(mild_bias, center_bias=FADE_CENTER_BIAS)
+    _expect(straight == (SOFT_VX, 0.0), f"bias 0.06 is still forward-only {straight}", failures)
+    _expect(recenter is not None and abs(recenter[0] - SOFT_VX) < 1e-9, f"fade vx {recenter}", failures)
+    if recenter is not None:
+        _expect(recenter[1] > 0.02, f"fade walk-yaw clears the deadband {recenter}", failures)
+        _expect(recenter[1] <= steer_walk.YAW_RATE_CAP + 1e-9, f"fade yaw cap {recenter}", failures)
     # Half the frame but still far: not arrival, keep steering.
     far_fill = approach_choice(
         full, dx_m=0.20, up_z=0.97, yaw_corrections=0,
@@ -1723,6 +1782,9 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
         "forward_bursts": approach.forward_bursts,
         "yaw_corrections": approach.yaw_corrections,
         "reacquires": approach.reacquires,
+        "fade_recenters": approach.fade_recenters,
+        "fade_center_bias": FADE_CENTER_BIAS,
+        "fade_drop": FADE_DROP,
         "x0_m": approach.x0_m,
         "end_x_m": approach.end_x_m,
         "end_y_m": approach.end_y_m,
@@ -1761,6 +1823,7 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
         f"[find] stop {approach.stop_kind} bursts {approach.forward_bursts} "
         f"yaw_corrections {approach.yaw_corrections} "
         f"reacquires {approach.reacquires} "
+        f"fade_recenters {approach.fade_recenters} "
         f"end mode {approach.end_mode} min_up_z {approach.min_up_z:.3f} "
         f"dx {approach.dx_m:+.3f} m end x {approach.end_x_m:+.3f} m "
         f"remaining {approach.remaining_m:.3f} m "
