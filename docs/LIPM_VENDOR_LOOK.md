@@ -417,3 +417,9 @@ short of 7 cm/s. The body stays upright. Soft-pass is off. This is not
 a kit walk. ±2.45 Nm can keep the position term off the rail when the
 command lead is 0.050 rad, and it does not track the published
 mid-swing knee pose in the swing time.
+
+The clips are this capped 1.00 s row. Forward 8.400 s stays up
+(Δx +7.1 cm, mean vx +0.7 cm/s, pooled sole p90 0.5 cm, min up_z
+0.988, peak torque 2.03 Nm, sat_rate 0). Close-up 7.600 s stays up
+through the stop (forward Δx +1.6 cm, stop Δx −1.8 cm, min up_z 0.969,
+peak torque 2.38 Nm). Constrained Baseline, yuv420p, `+faststart`.
