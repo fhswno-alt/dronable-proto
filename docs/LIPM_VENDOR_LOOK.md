@@ -466,3 +466,41 @@ Measured speed on every row is about 1–2 cm/s. The 4.00 s row that
 reaches the pose has a foot-travel ceiling of 2.0 cm/s, under the
 7 cm/s kit floor, and it does not stay up. Soft-pass is off. This is
 not a kit walk. The 1.00 s clips were not re-rendered.
+
+## Longer swing-foot x
+
+The 0.050 rad tick and the 20 ms ramp stay. Stance hip stays clipped
+at 0.070 rad. `gm_x_m` is raised so the clock's swing-foot travel makes
+`2·Δx / period` at least 7 cm/s. Plant md5 stays
+`17dc4ff37491c8e61900fd83b5d31f0c`.
+
+`kin Δx` is that clock travel. `ach Δx` is the median distance the
+swing foot actually moves along heading while `up_z` is still at least
+0.95. Knee flex and sole p90 use the same upright window.
+
+| Period | x command | kin Δx | kin ceiling | ach Δx | Knee L / R | Sole p90 L / R | Mean vx | Result |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 1.35 s, 24 s | 2.32 cm | 4.7 cm | 7.0 cm/s | 4.2 cm | 0.33 / 0.32 | 1.15 / 1.31 cm | +1.6 cm/s | stays up, min up_z 0.982 |
+| 1.35 s, 24 s | 3.32 cm | 6.8 cm | 10.0 cm/s | 4.2 cm | 0.32 / 0.33 | 1.17 / 1.44 cm | +1.3 cm/s | stays up, step did not grow |
+| 2.00 s | 3.44 cm | 7.0 cm | 7.0 cm/s | 3.3 cm | 0.42 / 0.43 | 1.13 / 1.40 cm | +1.6 cm/s | tips at 3.40 s |
+| 3.00 s | 5.16 cm | 10.5 cm | 7.0 cm/s | 6.1 cm | 0.53 / 0.56 | 1.48 / 2.25 cm | +1.2 cm/s | collapses at 4.28 s |
+| 4.00 s | 6.88 cm | 14.0 cm | 7.0 cm/s | 9.1 cm | 0.60 / 0.61 | 2.97 / 3.34 cm | +1.4 cm/s | tips at 5.46 s |
+| 4.00 s | 13.8 cm | 28.0 cm | 14.0 cm/s | 9.8 cm | 0.60 / 0.61 | 3.33 / 4.85 cm | +1.1 cm/s | tips at 5.14 s |
+
+At 1.35 s the body stays up for 24 s. Raising the clock from a 7 cm/s
+ceiling to a 10 cm/s ceiling leaves the median step at 4.2 cm, the knee
+at 0.33 rad, and the sole p90 near 1.3 cm. Mean vx stays about
++1.5 cm/s. Swing sat_rate is 0. Upright hip-pitch peak is 2.00 Nm,
+knee 1.53 Nm, ankle roll 0.90 Nm.
+
+At 4.00 s the knee still reaches about 0.61 rad and the soles are up
+while `up_z` is at least 0.95, then the body tips around 5.1–5.5 s.
+The median realized step stops near 10 cm even when the clock asks for
+28 cm. `2·10 cm / 4 s` is 5 cm/s. Measured vx is about +1.4 cm/s.
+Upright peaks on that row: hip pitch 2.33 Nm, knee 1.56 Nm, ankle roll
+2.09 Nm. The ±2.45 Nm samples are ankle roll on the 2.00 s rows once
+`up_z` is already about 0.6.
+
+A longer commanded step does not produce 7 cm/s, and it does not keep
+the 0.62 rad / 2 cm pose upright. The 1.00 s clips were not re-rendered.
+Soft-pass is off. This is not a kit walk.
