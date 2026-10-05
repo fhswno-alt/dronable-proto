@@ -6,7 +6,7 @@
   mesh collision off + foot contact boxes, L=orange / R=green shin-foot rgba.
   Path A spend frozen — sim only. Do not claim manufacturer PASS.
 -->
-<!-- Foot contact: mesh AABB 135x76 mm (half-size 0.0675 0.0380 0.008 m; mesh-derived / not OEM). -->
+<!-- Foot contact: mesh AABB 135x76 mm (half-size 0.0675 0.0380 0.008 m; mesh-derived / not OEM). Centre y is the STL AABB centre, 14 mm outboard of the ankle axis: l local +0.014 (xmat I, world +Y), r local -0.014 (world -Y). x/z stay 0.030 / -0.018. -->
 <mujoco model="ainex_controls">
   <visual>
     <global offwidth="960" offheight="720" />
@@ -74,7 +74,7 @@
                   <inertial pos="0.0285085 -0.0128729 -0.017671" quat="0.0257514 0.696659 0.0389182 0.715883" mass="0.0675" diaginertia="0.000126012 9.21991e-05 4.20891e-05" />
                   <joint name="r_ank_roll" range="-2.09 2.09" actuatorfrcrange="-2.45 2.45" damping="0.08" axis="1 0 0" armature="0.01" />
                   <geom pos="0 0 0" quat="1 0 0 0" type="mesh" rgba="0.15 0.75 0.35 1" mesh="r_ank_roll_link" contype="0" conaffinity="0" group="1" name="r_ank_roll_link_mesh" />
-                <geom name="r_foot_contact" type="box" size="0.0675 0.0380 0.008" pos="0.030 0.0 -0.018" rgba="0.15 0.75 0.35 1" friction="1.6 0.1 0.01" contype="1" conaffinity="1" condim="3" group="0" /><geom name="r_toe_viz" type="sphere" size="0.012" pos="0.075 0.0 -0.012" rgba="0.15 0.75 0.35 1" contype="0" conaffinity="0" group="1" /></body>
+                <geom name="r_foot_contact" type="box" size="0.0675 0.0380 0.008" pos="0.030 -0.014 -0.018" rgba="0.15 0.75 0.35 1" friction="1.6 0.1 0.01" contype="1" conaffinity="1" condim="3" group="0" /><geom name="r_toe_viz" type="sphere" size="0.012" pos="0.075 0.0 -0.012" rgba="0.15 0.75 0.35 1" contype="0" conaffinity="0" group="1" /></body>
               </body>
             </body>
           </body>
@@ -104,7 +104,7 @@
                   <inertial pos="0.028508 0.012873 -0.017671" quat="-0.0257514 0.696659 -0.0389182 0.715883" mass="0.0675" diaginertia="0.000126012 9.21991e-05 4.20891e-05" />
                   <joint name="l_ank_roll" range="-2.09 2.09" actuatorfrcrange="-2.45 2.45" damping="0.08" axis="1 0 0" armature="0.01" />
                   <geom pos="0 0 0" quat="1 0 0 0" type="mesh" rgba="0.95 0.45 0.08 1" mesh="l_ank_roll_link" contype="0" conaffinity="0" group="1" name="l_ank_roll_link_mesh" />
-                <geom name="l_foot_contact" type="box" size="0.0675 0.0380 0.008" pos="0.030 0.0 -0.018" rgba="0.95 0.45 0.08 1" friction="1.6 0.1 0.01" contype="1" conaffinity="1" condim="3" group="0" /><geom name="l_toe_viz" type="sphere" size="0.012" pos="0.075 0.0 -0.012" rgba="0.95 0.45 0.08 1" contype="0" conaffinity="0" group="1" /></body>
+                <geom name="l_foot_contact" type="box" size="0.0675 0.0380 0.008" pos="0.030 0.014 -0.018" rgba="0.95 0.45 0.08 1" friction="1.6 0.1 0.01" contype="1" conaffinity="1" condim="3" group="0" /><geom name="l_toe_viz" type="sphere" size="0.012" pos="0.075 0.0 -0.012" rgba="0.95 0.45 0.08 1" contype="0" conaffinity="0" group="1" /></body>
               </body>
             </body>
           </body>
