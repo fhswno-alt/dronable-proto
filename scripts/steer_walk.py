@@ -1142,6 +1142,8 @@ class SteerSession:
             if lipm is None
             else LipmWalker(self.model, self.data, self.act_idx, lipm, self.q_stand)
         )
+        if self.lipm is not None and lipm is not None and lipm.schedule == "gait_manager":
+            self.q_stand = dict(self.lipm.q_stand)
         self._reset_stand()
         self.renderer: mj.Renderer | None = None
         self.cam = mj.MjvCamera()
@@ -1164,6 +1166,14 @@ class SteerSession:
                 self.data.qpos[self.model.jnt_qposadr[jid]] = val
         wg.set_ctrl(self.model, self.data, self.q_stand, self.act_idx)
         mj.mj_forward(self.model, self.data)
+        # The IK crouch is a different leg length than COM_Z's knee-0.40
+        # stand. Seat the soles on the floor. This is the spawn height, not
+        # a plant edit.
+        if self.lipm is not None and self.lipm.cfg.schedule == "gait_manager":
+            seat = min(self.lipm._sole("L"), self.lipm._sole("R"))
+            if abs(seat) > 1e-5:
+                self.data.qpos[2] -= seat
+                mj.mj_forward(self.model, self.data)
 
     def assert_plant_unchanged(self) -> None:
         now = float(np.sum(np.abs(self.model.actuator_forcerange)))
@@ -1961,14 +1971,14 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
         sc = session.lipm.score()
         if session.lipm.cfg.schedule == "gait_manager":
             lead = (
-                "Hiwonder GaitManager wSin schedule into the same 50 Hz "
-                "position servos. Not the open-loop CPG. No root wrench. "
+                "ROBOTIS OP3 walking module with AiNex leg lengths, "
+                "Hiwonder move presets, into the same 50 Hz position servos. "
+                "Not the joint-space preset copy. No root wrench. "
                 f"Row {session.lipm.cfg.name}, period {session.lipm.cfg.gm_period_s:.3f} s, "
                 f"dsp {session.lipm.cfg.gm_dsp:.2f}, x {session.lipm.cfg.gm_x_m:.3f} m, "
                 f"z {session.lipm.cfg.gm_z_m:.3f} m, y_swap {session.lipm.cfg.gm_y_swap_m:.3f} m, "
-                f"pelvis {session.lipm.cfg.gm_pelvis_deg:.0f} deg, "
-                f"stance hip cap {session.lipm.cfg.gm_stance_max:.3f} rad, "
-                f"z_hold={session.lipm.cfg.gm_z_hold}. "
+                f"body drop {session.lipm.cfg.gm_crouch_m:.3f} m, "
+                f"pelvis {session.lipm.cfg.gm_pelvis_deg:.0f} deg. "
             )
         else:
             lead = (

@@ -831,3 +831,70 @@ the stop (forward Δx +4.8 cm, mean vx +0.84 cm/s, stop Δx −2.5 cm,
 pooled sole p90 0.7 cm, min up_z 0.991, peak torque 2.41 Nm, sat_rate
 0.005). The forward peak is the left knee on ±2.45 Nm. Constrained
 Baseline, yuv420p, `+faststart`.
+
+That joint-space row is not a kit gait test. The crouch was a knee
+angle, the sway was a hip-roll lean, and the fore-aft travel was about
+4 cm. The right-only hip-pitch rail on the mirrored legs was a missing
+weight shift, not a plant conclusion.
+
+## OP3 IK, AiNex lengths, kit move(1..4)
+
+Hiwonder's `kinematics.so` / `walking_module.so` are aarch64 Cython
+extensions for Python 3.8. They are not loaded. The walker is the
+Apache-2.0 ROBOTIS OP3 `WalkingModule` plus
+`calcInverseKinematicsForLeg` (`ROBOTIS-GIT/ROBOTIS-OP3`), with this
+plant's link lengths in place of the OP3's 110 / 110 / 30.5 mm chain.
+`scripts/op3_walk.py` reads them from the plant: thigh 9.69 cm, calf
+8.91 cm, sole drop 2.60 cm. Joint-axis signs match the plant
+(`getJointDirection` is the sum of the axis). Balance is off.
+`hit_pitch_offset_` stays 0. Hiwonder's 15 deg is their offset from a
+different init pose, and the IK already places the feet.
+
+`init_z_offset` is 0.015 m. On this plant that shortens hip-yaw to sole
+by 1.48 cm, and the soles stay level (`n_z` = 1). It is not a knee-angle
+add. The stand the IK returns is knee ±0.99 rad and hip pitch ±0.48 rad.
+The spawn seats those soles on the floor. `COM_Z` 0.225 m left them
+9 mm in the air.
+
+The clock is the OP3 `wSin` with the Hiwonder move(1..4) parameters:
+x amplitude 0.02 m, step height 0.02 m, dsp and y_swap as in the table
+above, z_swap 0.006 m, `step_fb_ratio` 0.028, pelvis offset 5 deg.
+Kinematically the swing-stance height gap is 2.00 cm and the y swap
+peaks at 2.00 cm (4 cm is not what this row commands; 600 ms y_swap is
+0.04 m, so that peak is 4 cm). The foot x travel on the same formulas is
+4.07 cm. The x parameter is 0.02 m. The wSin endpoint is not.
+
+8.4 s, soft-pass off, plant md5 `17dc4ff37491c8e61900fd83b5d31f0c`,
+legs still ±2.45 Nm. No XML, forcerange, dampratio, or armature edit.
+
+| Period | Mean vx | min up_z | Sole p90 L / R | Hip pitch R / L | Hip roll R / L | sat_rate | First rail, up_z still ~1 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 300 ms | +0.68 cm/s | 0.985 | −0.04 / 0.65 cm | 2.23 / 1.99 Nm | 2.45 / 2.45 Nm | 0.171 | right knee at 0.420 s, ω +0.13, kp·e +2.67, damp −0.19, F +2.45 |
+| 400 ms | +0.65 cm/s | 0.987 | 0.03 / 0.41 cm | 2.45 / 2.28 Nm | 2.45 / 2.45 Nm | 0.197 | right knee at 0.420 s, ω +0.02, kp·e +2.59, damp −0.02, F +2.45 |
+| 500 ms | +0.92 cm/s | 0.985 | 0.03 / 0.41 cm | 2.45 / 2.45 Nm | 2.45 / 2.45 Nm | 0.332 | right knee at 0.420 s, ω −0.03, kp·e +2.55, damp +0.05, F +2.45 |
+| 600 ms | +0.40 cm/s | 0.977 | −0.17 / 0.40 cm | 2.45 / 2.45 Nm | 2.45 / 2.45 Nm | 0.415 | right knee at 0.500 s, ω +1.29, kp·e +4.15, damp −1.87, F +2.45 |
+
+The first hip rail is the right hip roll, after the knee, still upright:
+
+| Period | Right hip roll |
+| --- | --- |
+| 300 ms | 0.460 s, ω −1.11, kp·e +2.02, damp +1.88, F +2.45, up_z 0.99. Left hip roll at 0.520 s. Hip pitch stays under the rail (2.23 / 1.99 Nm). |
+| 400 ms | 0.460 s, ω −0.91, kp·e +1.06, damp +1.55, F +2.45, up_z 1. Right hip pitch follows at 1.020 s. |
+| 500 ms | 0.480 s, ω −0.84, kp·e +1.62, damp +1.43, F +2.45, up_z 0.99. Both hip pitches follow near 1.15 s. |
+| 600 ms | 0.520 s, ω −1.14, kp·e +1.18, damp +1.94, F +2.45, up_z 0.99. Both hip pitches follow near 1.27 s. |
+
+Weight shift does not happen before the first swing. The IK y target
+moves. The body does not. At the first swing (sole above 5 mm or normal
+under 5 N) the COM is 0.17, 0.01, 0.09, and 0.57 cm off the mid-foot
+line, against a 2 cm y_swap (4 cm at 600 ms). On 300, 400, and 600 ms
+there is no tick after the walk starts, and before that swing, where
+both feet are still above 5 N. The 500 ms row does reach an 80/20
+normal split while both feet are above 5 N, with the COM 0.12 cm off
+center. That is not the 2 cm shift.
+
+All four rows stay upright and do not walk. Mean vx stays under 1 cm/s
+and both soles stay under 1 cm. The rails are inside ±2.45 Nm with the
+IK gait actually running. This is the Hardware armature / inertia
+comparison. No plant edit from this row.
+
+The clips are the 400 ms row, the highest min up_z. It still rails.

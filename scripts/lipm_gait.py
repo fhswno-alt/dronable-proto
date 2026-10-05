@@ -30,6 +30,7 @@ import mujoco as mj
 import numpy as np
 
 import gait_manager_traj as gm
+import op3_walk
 
 CTRL_DT = 0.02
 G = 9.81
@@ -60,12 +61,6 @@ VENDOR_STEP_M = 0.020
 # flex 0.10 / hip 0.16 puts the sole on the floor about 2 cm ahead.
 # A taller clear_m scales the same shape; the servo band may not finish it.
 FLEX_PEAK = 0.62
-# GaitManager swing only. 1.05 rad keeps the knee target inside the
-# ±2.09 ctrlrange (stand knee 0.40, peak command 1.45). Sole p90 lands
-# near 2 cm. 1.90 rad was past the range: the peak sample clipped and
-# the rise did not, and the sole sat near 4.5 cm. The LIPM Bézier still
-# uses FLEX_PEAK.
-GM_FLEX_CMD = 1.05
 FLEX_LAND = 0.10
 HIP_RISE = 0.06
 HIP_REACH = 0.24
@@ -160,14 +155,11 @@ class LipmConfig:
     # near 2 cm and the hip pitch off ±2.45 Nm. 2.80 with that knee rails
     # the hip. The stance clip is not scaled.
     gm_swing_hip_gain: float = 1.75
-    # Body drop from the full stand, controller side. 0.015 m is the kit
-    # crouch. On this stand the leg is nearly straight, so that drop is
-    # +0.34 rad of knee with the sole kept level and the hip left at the
-    # stand angle. 0.36 rad falls over. 0 leaves the full stand.
+    # Cartesian body drop passed to the OP3 IK as init_z_offset. 0.015 m
+    # shortens hip-to-sole by about 1.48 cm on this plant. It is not a
+    # knee-angle add. 0 leaves the geometric full extension.
     gm_crouch_m: float = 0.0
-    # Clamp on the left hip-roll lean, rad. Clock y becomes dy/0.22 rad.
-    # 0.15 rad is the measured basin (|lat| ≤ 1). A 0.04 m y_swap wants
-    # 0.18 rad, so the 600 ms kit gear raises this.
+    # Unused by the IK path. Kept so older call sites still construct.
     gm_sway_max: float = 0.15
 
 
@@ -240,17 +232,26 @@ class LipmWalker:
         self.act_idx = act_idx
         self.cfg = cfg
         self.q_stand = dict(q_stand)
-        if cfg.gm_crouch_m > 0.0:
-            # 0.34 rad knee per 0.015 m, measured with the sole level.
-            extra = 0.34 * (float(cfg.gm_crouch_m) / 0.015)
-            self.q_stand["l_knee"] = self.q_stand.get("l_knee", 0.0) + extra
-            self.q_stand["r_knee"] = self.q_stand.get("r_knee", 0.0) - extra
-            self.q_stand["l_ank_pitch"] = (
-                self.q_stand.get("l_hip_pitch", 0.0) + self.q_stand["l_knee"]
+        self.op3: op3_walk.Op3Walker | None = None
+        if cfg.schedule == "gait_manager":
+            # Cartesian body drop through the OP3 IK. The old +0.34 rad knee
+            # was not a 1.5 cm body-z change and is not applied on this path.
+            self.op3 = op3_walk.Op3Walker.from_model(
+                model,
+                period_s=cfg.gm_period_s,
+                dsp=cfg.gm_dsp,
+                y_swap_m=cfg.gm_y_swap_m,
+                z_move_m=cfg.gm_z_m,
+                x_amp_m=cfg.gm_x_m,
+                z_offset_m=cfg.gm_crouch_m,
+                z_swap_m=cfg.gm_z_swap_m,
+                step_fb=cfg.gm_step_fb,
+                pelvis_deg=cfg.gm_pelvis_deg,
             )
-            self.q_stand["r_ank_pitch"] = (
-                self.q_stand.get("r_hip_pitch", 0.0) + self.q_stand["r_knee"]
-            )
+            for name, val in self.op3.stand_joints().items():
+                if "sho" in name:
+                    continue
+                self.q_stand[name] = val
         self.phase: PhaseName = "stand"
         self.stance: Side = "L"
         self.lat = 0.0
@@ -314,15 +315,6 @@ class LipmWalker:
         for name, kp in expected.items():
             if abs(self._kp.get(name, -1.0) - kp) > 1e-6:
                 raise RuntimeError(f"frozen kp changed for {name}")
-        self.gm_clock = gm.GaitManagerClock(
-            period_s=cfg.gm_period_s,
-            dsp=cfg.gm_dsp,
-            y_swap=cfg.gm_y_swap_m,
-            z_move=cfg.gm_z_m,
-            z_swap=cfg.gm_z_swap_m,
-            step_fb=cfg.gm_step_fb,
-            pelvis_deg=cfg.gm_pelvis_deg,
-        )
         self._gm_swing: Side | None = None
 
     def other(self, side: Side) -> Side:
@@ -390,35 +382,27 @@ class LipmWalker:
         self._write_unused()
 
     def _tick_gait_manager(self, walking: bool) -> None:
-        """Published GaitManager endpoints, same 50 Hz position servos.
+        """OP3 cartesian foot targets through the plant-length IK.
 
-        Foot height is the swing-minus-stance gap (about 2 cm on the demo
-        preset), not a 2 cm cartesian lift of one foot from the floor. Lateral
-        sway is hip roll. The 15 deg hip-pitch offset is their init pose and
-        is not stacked on this stand.
+        y_swap moves both feet sideways in the hip frame, so the pelvis
+        sits over the stance foot. It is not a hip-roll lean of dy/0.22.
+        The body drop is ``gm_crouch_m`` on the IK z offset.
         """
-        clock = self.gm_clock
+        walker = self.op3
+        if walker is None:
+            self.hold_stand()
+            return
         if not walking:
-            clock.set_command(0.0, 0.0, 0.0)
-            clock.time = 0.0
-            clock.previous_x = 0.0
-            clock._update_movement()
-            clock._capture_zero()
+            walker.stop()
             self._gm_swing = None
             self.hold_stand()
             return
         x_amp = 0.0
         if abs(self.cmd_vx) > 1e-4:
-            x_amp = math.copysign(self.cfg.gm_x_m, self.cmd_vx)
-        yaw_deg = 0.0
-        if abs(self.cmd_yaw) > 1e-4:
-            yaw_deg = math.copysign(
-                min(10.0, abs(math.degrees(self.cmd_yaw)) / 0.25 * 10.0),
-                self.cmd_yaw,
-            )
-        clock.set_command(x_amp, 0.0, yaw_deg)
-        left, right, phase = clock.advance(CTRL_DT)
-        shifts = {"L": left, "R": right}
+            x_amp = math.copysign(min(self.cfg.gm_x_m, 0.020), self.cmd_vx)
+        walker.set_command(x_amp, 0.0, 0.0)
+        joints, info = walker.step(CTRL_DT)
+        phase = info.phase
         if phase == "L":
             swing: Side = "L"
             self.phase = "swing"
@@ -439,141 +423,31 @@ class LipmWalker:
                     swing_fn_n=self.foot_normal(swing),
                     com_inside=self.com_inside_foot(self.stance, self.cfg.inside_margin_m),
                     clear_cmd_m=self.cfg.gm_z_m,
-                    z_budget_m=0.0,
+                    z_budget_m=float(info.swap_y_m),
                 )
             )
         self._gm_swing = swing if phase in ("L", "R") else None
-        dy = 0.5 * (left.y + right.y)
-        # +y puts both feet to the left of the pelvis, so the pelvis sits
-        # over the right foot. The clock y is not a cartesian foot target.
-        # It becomes a hip-roll lean of dy/0.22 rad, clamped to gm_sway_max
-        # on the left hip. The right hip keeps the 0.20/0.15 ratio.
-        raw = -dy / 0.22
-        cap = max(1e-6, float(self.cfg.gm_sway_max))
-        roll = max(-cap, min(cap, raw))
-        lat = roll / SHIFT_HIP_L
-        self.lat = lat
-        # The published z is a foot-to-foot gap. Map that gap through the
-        # joint Bézier, then GM_FLEX_CMD, instead of a cartesian target
-        # the stance foot cannot follow through the floor. x maps through
-        # the same hip scale (0.24 rad per 2 cm) and is not enlarged.
-        # A loaded swing foot keeps its current x.
-        z_floor = min(left.z, right.z)
-        for side in ("L", "R"):
-            shift = shifts[side]
-            lift = max(0.0, shift.z - z_floor)
-            if self.cfg.gm_z_hold and phase == side:
-                if phase == "L":
-                    u = (clock.time - clock.l_ssp_start) / max(1e-3, clock.l_ssp_end - clock.l_ssp_start)
-                else:
-                    u = (clock.time - clock.r_ssp_start) / max(1e-3, clock.r_ssp_end - clock.r_ssp_start)
-                hold_u = min(0.92, max(0.2, self.cfg.gm_hold_u))
-                if u < hold_u:
-                    lift = self.cfg.gm_z_m
-                else:
-                    lift = self.cfg.gm_z_m * max(0.0, (1.0 - u) / max(1e-3, 1.0 - hold_u))
-            # X_MOVE and Z_MOVE are both phase π/2. The z period is half
-            # the x period, so z peaks at mid-swing and the published foot
-            # x is 0 there (under the hip) on both legs. t=0 is already
-            # split by ±x_move, so the delta from t=0 is still ±x_move at
-            # that peak: left thigh forward, right thigh back. HIP_RISE is
-            # the LIPM Bézier offset and is not added on this clock.
-            use_x = shift.x_abs
-            if phase == side and self.cfg.gm_hip_lead_s > 0.0:
-                use_x = self._swing_hip_x(side, shift.x_abs)
-            if (
-                self.cfg.gm_drag_gate
-                and phase == side
-                and self.foot_normal(side) > self.cfg.unload_n
-            ):
-                use_x = 0.0
-            scale_h = lift / VENDOR_CLEAR_M
-            scale_x = use_x / VENDOR_STEP_M
-            flex = max(0.0, scale_h) * GM_FLEX_CMD
-            dhip = scale_x * HIP_LAND
-            if phase == side:
-                dhip *= self.cfg.gm_swing_hip_gain
-            else:
-                dhip = max(-self.cfg.gm_stance_max, min(self.cfg.gm_stance_max, dhip))
-                flex = 0.0
-            self._write_leg_delta(side, flex, dhip, shifts[side].yaw)
-        sl = self.q_stand.get("l_hip_roll", -0.05)
-        sr = self.q_stand.get("r_hip_roll", 0.05)
-        al = self.q_stand.get("l_ank_roll", 0.0)
-        ar = self.q_stand.get("r_ank_roll", 0.0)
-        self.write_clipped("l_hip_roll", sl + SHIFT_HIP_L * lat + left.pelvis_roll)
-        self.write_clipped("r_hip_roll", sr + SHIFT_HIP_R * lat + right.pelvis_roll)
-        self.write_clipped("l_ank_roll", al + SHIFT_ANK * lat)
-        self.write_clipped("r_ank_roll", ar + SHIFT_ANK * lat)
-        if phase in ("L", "R"):
-            self._level_swing_roll(swing)
-        self.z_bez = float(shifts[swing].z - shifts[self.stance].z) if phase in ("L", "R") else 0.0
-        self.z_cmd = self.z_bez
-        self._write_gm_arms(x_amp)
-        self._write_unused()
-
-    def _swing_hip_x(self, side: Side, live_x: float) -> float:
-        """Swing-hip x read ahead of the live clock. The knee target is not moved.
-
-        advance() has already stepped the clock, so the sample just used is
-        one tick behind. The lead is skipped on the cycle wrap.
-        """
-        clock = self.gm_clock
-        if clock.time <= float(CTRL_DT) + 1e-9:
-            return live_x
-        t = clock.time - float(CTRL_DT) + float(self.cfg.gm_hip_lead_s)
-        if t >= clock.period:
-            t = clock.period - 1e-4
-        left, right, _, _ = clock._raw(t)
-        return left[0] if side == "L" else right[0]
-
-    def _write_leg_delta(self, side: Side, flex: float, dhip: float, yaw: float) -> None:
-        """Stand pose plus a Bézier flex and a forward hip. Multi-tick move on pitch.
-
-        Plant axes (md5 17dc4ff3…), verified against a pelvis-fixed step:
-        pitch is mirrored (left hip/knee ``0 1 0``, right ``0 -1 0``);
-        ankle pitch is flipped the other way (left ``0 -1 0``, right ``0 1 0``).
-        Positive ``dhip`` is thigh-forward on both legs (left hip decreases,
-        right hip increases) and moves both feet in +x. Positive ``flex``
-        bends both knees (left knee increases, right knee decreases). With
-        the ankle held at hip+knee, that flex raises both soles the same
-        amount. Roll is not mirrored (hip roll ``-1 0 0`` both, ankle roll
-        ``1 0 0`` both), so a lean uses the same sign on both hips.
-        """
-        pref = self.pref(side)
-        hip_sign = -1.0 if side == "L" else 1.0
-        knee_sign = 1.0 if side == "L" else -1.0
-        hip0 = self.q_stand.get(pref + "hip_pitch", 0.0)
-        knee0 = self.q_stand.get(pref + "knee", 0.0)
-        self.write_clipped(pref + "hip_pitch", hip0 + hip_sign * dhip)
-        self.write_clipped(pref + "knee", knee0 + knee_sign * flex)
-        hip_c = float(self.data.ctrl[self.act_idx[pref + "hip_pitch_pos"]])
-        knee_c = float(self.data.ctrl[self.act_idx[pref + "knee_pos"]])
-        ank = hip_c + knee_c
-        up = self.data.xmat[self.bid[side]].reshape(3, 3)[:, 2]
-        sign = 1.0 if side == "L" else -1.0
-        ank += sign * float(up[0])
-        self.write_clipped(pref + "ank_pitch", ank)
-        self.write_clipped(pref + "hip_yaw", self.q_stand.get(pref + "hip_yaw", 0.0) + yaw)
-
-    def _write_gm_arms(self, x_amp: float) -> None:
+        self.lat = float(info.swap_y_m)
         for jn in (
             "l_sho_roll", "r_sho_roll", "l_el_pitch", "r_el_pitch",
             "l_el_yaw", "r_el_yaw", "l_gripper", "r_gripper",
-            "l_sho_pitch", "r_sho_pitch",
         ):
             self.write_clipped(jn, self.q_stand.get(jn, 0.0))
-        if not self.cfg.arms or abs(x_amp) < 1e-6:
+        if joints is None:
+            self._write_unused()
             return
-        # set_step stores arm_swing_gain = radians(arm_swap). The OP2 arm
-        # formula then scales by x_move * gain * 1000 * deg2rad.
-        gain = math.radians(self.cfg.gm_arm_deg)
-        period = max(self.gm_clock.period, 1e-3)
-        mag = x_amp * gain * 1000.0 * (math.pi / 180.0)
-        right = gm.wsin(self.gm_clock.time, period, math.pi * 1.5, -mag, 0.0)
-        left = gm.wsin(self.gm_clock.time, period, math.pi * 1.5, mag, 0.0)
-        self.write_clipped("r_sho_pitch", self.q_stand.get("r_sho_pitch", 0.0) + right)
-        self.write_clipped("l_sho_pitch", self.q_stand.get("l_sho_pitch", 0.0) - left)
+        for name, val in joints.items():
+            if "sho" in name:
+                extra = val if self.cfg.arms else 0.0
+                self.write_clipped(name, self.q_stand.get(name, 0.0) + extra)
+            else:
+                self.write_clipped(name, val)
+        if phase in ("L", "R"):
+            self.z_bez = abs(info.ep_l[2] - info.ep_r[2])
+        else:
+            self.z_bez = 0.0
+        self.z_cmd = self.z_bez
+        self._write_unused()
 
     def _begin_shift(self) -> None:
         self.phase = "shift"
