@@ -61,14 +61,27 @@ Baseline on main, before the fade recenter, "go to the kitchen", room scene, aft
 
 111 centered slices and 50 walking yaw trims were sent at `vx = +0.028`, including the slices after yellow briefly returned. The mid still is the first frame after Δx crossed 0.55 m (yellow 0.105, bias −0.078). That bias is inside the 0.08 forward-only band, so the walk kept going straight while the backsplash later fell to 0.000. 0.291 m is still outside the 0.25 m gap.
 
-This draft recenters with soft walk-yaw once yellow is fading and `|bias|` leaves 0.04, before the fraction hits zero. The room measurement is compared with that main stop.
+This draft recenters with soft walk-yaw once yellow is fading and `|bias|` leaves 0.04, before the fraction hits zero. Measured phrase, "go to the kitchen", room scene, after stand:
+
+| | |
+|--|--|
+| Stop | Prefer FAIL, `stop_kind` blob. 37 fade recenters, then the two-try walk-yaw reacquire. Yellow did not stay usable. No further `vel`. |
+| End x | **+1.038 m** (start x +0.002 m, Δx **+1.036 m**) |
+| End y, yaw | +0.047 m, +0.367 rad |
+| min up_z | **0.980** (bar 0.90, not crossed) |
+| Remaining | **0.277 m** (main was 0.291 m) |
+| Final blob | yellow fraction **0.006**, bias −0.704, kitchen body still in frame. Under the 0.015 bar. |
+| Commands | 104 forward slices, 60 yaw trims, all `vx = +0.028`. `vx = 0` was not sent. |
+| Arrival | **false** |
+
+The mid still is still the frame after Δx crossed 0.55 m (yellow 0.105, bias −0.078). The gap is 0.014 m smaller than main and 0.027 m outside the 0.25 m bar. Settled yellow is a sliver, not the 0.000 on main, and not a usable blob. That is the Prefer FAIL.
 
 ## What would count as arrival
 
 Both bars, on the settled stop frame:
 
-1. Yellow fraction ≥ 0.50. Half the frame is "most of the frame". Stand is 0.039 and this stop is 0.000, so the counter does not fill the frame.
-2. Torso-to-kitchen horizontal gap ≤ 0.25 m. That is contact range for this torso, not a room crossing. 0.291 m is still outside that bar.
+1. Yellow fraction ≥ 0.50. Half the frame is "most of the frame". Stand is 0.039 and this stop is 0.006, so the counter does not fill the frame.
+2. Torso-to-kitchen horizontal gap ≤ 0.25 m. That is contact range for this torso, not a room crossing. 0.277 m is still outside that bar.
 
 Either bar alone is not arrival. A stop inside 0.25 m with the backsplash still small would be Prefer FAIL (`close`), not arrival. The gap is read from the kitchen geom boxes so the summary can state the remaining distance. It does not choose left versus right and it is not a waypoint.
 
