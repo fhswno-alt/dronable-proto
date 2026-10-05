@@ -446,6 +446,9 @@ class LipmWalker:
         x_amp = 0.0
         if abs(self.cmd_vx) > 1e-4:
             x_amp = math.copysign(min(self.cfg.gm_x_m, 0.020), self.cmd_vx)
+        # cmd_yaw is the bus yaw_rate after Controls clamps it. This locked
+        # row does not turn: the step angle stays 0, including vx = 0.
+        # There is no vy channel.
         walker.set_command(x_amp, 0.0, 0.0)
         joints, info = walker.step(op3_walk.OP3_CTRL_S)
         phase = info.phase

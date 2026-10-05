@@ -111,7 +111,12 @@ Run:
   MUJOCO_GL=osmesa python scripts/steer_walk.py --no-video
   MUJOCO_GL=glfw  python scripts/steer_walk.py --view
   python scripts/steer_walk.py --self-test
+  MUJOCO_GL=osmesa python scripts/steer_walk.py --bus-kit
   MUJOCO_GL=osmesa python scripts/demo_8pm_motion.py
+
+`--bus-kit` drives the locked kit walk (500 ms, 20 ms servo, stance
++0.005 m per foot) through this bus. `--view` uses that same row.
+The CPG clips stay on the default command.
 """
 from __future__ import annotations
 
@@ -648,6 +653,40 @@ CLIP_SCRIPTS: dict[str, tuple[DemoSegment, ...]] = {
     "nav-right": NAV_RIGHT_SCRIPT,
     "nav-multi": NAV_MULTI_SCRIPT,
 }
+
+# Accepted kit row. Do not retune these to chase a bus measurement.
+BUS_KIT_STAND_S = 0.50
+BUS_KIT_VEL_S = 6.00
+BUS_KIT_STOP_S = 7.60
+# A 2 ms sample on the forcerange is a rail. The bar is under this.
+BUS_KIT_RAIL_NM = 2.449
+
+
+def locked_kit_config() -> LipmConfig:
+    """Locked kit walk the Day-1 bus actuates. Plant file is not touched."""
+    return LipmConfig(
+        name="kit500",
+        clear_m=0.020,
+        arms=True,
+        schedule="gait_manager",
+        gm_period_s=0.500,
+        gm_dsp=0.20,
+        gm_y_swap_m=0.020,
+        gm_x_m=0.020,
+        gm_z_m=0.020,
+        gm_z_swap_m=0.006,
+        gm_pelvis_deg=5.0,
+        gm_hip_pitch_deg=15.0,
+        gm_crouch_m=0.025,
+        gm_move_s=0.020,
+    )
+
+
+BUS_KIT_SCRIPT: tuple[DemoSegment, ...] = (
+    DemoSegment(BUS_KIT_STAND_S, "stand", 0.0, 0.0, "stand"),
+    DemoSegment(BUS_KIT_VEL_S, "vel", VX_FWD_CAP, 0.0, "forward"),
+    DemoSegment(BUS_KIT_STOP_S, "stop", 0.0, 0.0, "stop"),
+)
 
 
 class ScriptedDriver:
@@ -2247,14 +2286,14 @@ def run_view(duration: float) -> None:
     except ImportError:
         print("refused: mujoco.viewer unavailable", file=sys.stderr)
         raise SystemExit(1)
-    session = SteerSession(video=False)
+    session = SteerSession(video=False, lipm=locked_kit_config())
     keys = KeyboardLatch()
 
     def on_key(keycode: int) -> None:
         keys.on_press(keycode)
 
     print("[steer] view  W/S=±vx  A/D=±yaw (left/right)  space=stop  latched until space")
-    print("[steer] voice later calls CommandBus.stand / stop / vel — same bus")
+    print("[steer] gait=locked kit500 through CommandBus (stand / stop / vel)")
     import time
     with viewer.launch_passive(session.model, session.data, key_callback=on_key) as handle:
         wall0 = time.time()
@@ -2841,6 +2880,285 @@ def self_test() -> int:
     return 0
 
 
+@dataclass
+class _TauPeak:
+    force_nm: float
+    t_s: float
+
+
+def _note_leg_peaks(session: SteerSession, into: dict[str, _TauPeak]) -> None:
+    t = float(session.data.time)
+    for name, idx in session.act_idx.items():
+        if not any(tok in name for tok in ("hip_", "knee", "ank_")):
+            continue
+        force = float(session.data.actuator_force[idx])
+        prev = into.get(name)
+        if prev is None or abs(force) >= abs(prev.force_nm):
+            into[name] = _TauPeak(force, t)
+
+
+def _bus_kit_contract() -> tuple[list[str], list[str]]:
+    """Stand, stop, vel, no vy, latest wins, 10 Hz resend, 200 ms silence.
+
+    Clock is the kit session (8 ms), not the 50 Hz CPG tick.
+    """
+    failures: list[str] = []
+    lines: list[str] = []
+    session = SteerSession(video=False, lipm=locked_kit_config())
+    bus = session.bus
+    _expect(session.ctrl_dt == op3_walk.OP3_CTRL_S, f"kit ctrl_dt {session.ctrl_dt}", failures)
+    report = bus.tick(0.0, session.ctrl_dt)
+    _expect(
+        report.mode == "stand" and report.applied_vx == 0.0 and report.applied_yaw_rate == 0.0,
+        "kit power-on is not stand",
+        failures,
+    )
+    refusal = bus.vel(VX_FWD_CAP, 0.0, 0.0, vy=0.02)
+    _expect(
+        refusal == "refused: vel accepts vx and yaw_rate only (got vy)",
+        f"kit vy refusal got {refusal}",
+        failures,
+    )
+    _expect(bus.mode == "stand" and bus.target_vx == 0.0, "refused vy was applied", failures)
+    bus.vel(0.02, 0.10, 0.0)
+    bus.vel(3.0, -4.0, 0.0)
+    _expect(
+        bus.target_vx == VX_FWD_CAP and bus.target_yaw == -YAW_RATE_CAP,
+        f"latest command did not win the clamps ({bus.target_vx}, {bus.target_yaw})",
+        failures,
+    )
+    lines.append(
+        f"vy refused; latest vel(3.0, -4.0) clamped to "
+        f"vx {bus.target_vx:+.3f} m/s, yaw {bus.target_yaw:+.2f} rad/s"
+    )
+    bus.stop(0.0)
+    _expect(bus.mode == "stand" and bus.applied_vx == 0.0, "stop before the first tick left velocity", failures)
+    now = float(session.data.time)
+    bus.vel(VX_FWD_CAP, YAW_RATE_CAP, now)
+    report = session.step()
+    _expect(report.mode == "move", "yaw vel did not enter move", failures)
+    _expect(report.applied_vx > 0.0 and report.applied_vx <= VX_FWD_CAP, "vx left the clamp", failures)
+    _expect(
+        report.applied_yaw_rate > 0.0 and report.applied_yaw_rate <= YAW_RATE_CAP,
+        "yaw_rate was not returned",
+        failures,
+    )
+    walker = session.lipm.op3 if session.lipm is not None else None
+    _expect(walker is not None and walker.angle_cmd == 0.0, "kit step angle left 0", failures)
+    lines.append(
+        f"yaw tick {report.line()}; kit step angle "
+        f"{0.0 if walker is None else walker.angle_cmd:.3f} rad"
+    )
+    now = float(session.data.time)
+    refusal = bus.stop(now)
+    report = session.step()
+    _expect(refusal is None, f"stop refused {refusal}", failures)
+    _expect(
+        report.mode == "stand" and report.applied_vx == 0.0 and report.applied_yaw_rate == 0.0,
+        f"stop was not the same tick ({report.line()})",
+        failures,
+    )
+    _expect(walker is not None and not walker.ctrl_running, "stop left the kit walker running", failures)
+    last_send = -1.0
+    while float(session.data.time) < 0.40 - 1e-9:
+        now = float(session.data.time)
+        if last_send < 0.0 or (now - last_send) >= (VEL_RESEND_S - 1e-9):
+            bus.vel(VX_FWD_CAP, 0.0, now)
+            last_send = now
+        report = session.step()
+        _expect(report.mode == "move", f"10 Hz resend dropped to {report.mode} at {now:.3f}", failures)
+        _expect(abs(report.applied_vx) <= VX_FWD_CAP + 1e-12, "resend vx exceeded the clamp", failures)
+        if failures:
+            break
+    stood_at: float | None = None
+    stood: TickReport | None = None
+    while float(session.data.time) < 0.90 and stood is None:
+        now = float(session.data.time)
+        report = session.step()
+        if report.mode == "stand":
+            stood_at = now
+            stood = report
+    _expect(stood is not None and stood_at is not None, "200 ms silence did not stand", failures)
+    if stood is not None and stood_at is not None:
+        silent = stood_at - last_send
+        _expect(silent > COMMAND_TIMEOUT_S, f"stood after only {silent:.3f} s", failures)
+        _expect(
+            silent <= COMMAND_TIMEOUT_S + session.ctrl_dt + 1e-9,
+            f"stood late at {silent:.3f} s",
+            failures,
+        )
+        _expect(
+            stood.applied_vx == 0.0 and stood.applied_yaw_rate == 0.0 and stood.mode == "stand",
+            f"silence tick {stood.line()}",
+            failures,
+        )
+        _expect(walker is not None and not walker.ctrl_running, "silence left the walker running", failures)
+        lines.append(
+            f"silence {silent * 1000:.1f} ms → {stood.line()} "
+            f"(watchdog {COMMAND_TIMEOUT_S * 1000:.0f} ms, ctrl {session.ctrl_dt * 1000:.0f} ms)"
+        )
+    session.assert_plant_unchanged()
+    return failures, lines
+
+
+def _window_stats(samples: list[PoseSample]) -> tuple[float, float, float, float]:
+    if not samples:
+        return 0.0, 0.0, 1.0, 0.0
+    dx = samples[-1].x - samples[0].x
+    mean_vx = float(np.mean([s.body_vx for s in samples]))
+    min_up = min(s.up_z for s in samples)
+    dyaw = math.degrees(samples[-1].yaw - samples[0].yaw)
+    return dx, mean_vx, min_up, dyaw
+
+
+def _bus_kit_forward_stop() -> tuple[list[str], list[str]]:
+    """vel forward, then stop, on a cold kit session. Physics-step leg torque."""
+    failures: list[str] = []
+    lines: list[str] = []
+    digest = hashlib.md5(PLANT_XML.read_bytes()).hexdigest()
+    _expect(digest == PLANT_MD5, f"plant md5 {digest}", failures)
+    session = SteerSession(video=False, lipm=locked_kit_config())
+    driver = ScriptedDriver(BUS_KIT_SCRIPT)
+    peaks: dict[str, dict[str, _TauPeak]] = {"stand": {}, "forward": {}, "stop": {}}
+    phase = {"name": "stand"}
+    real_step = mj.mj_step
+
+    def _step(model: mj.MjModel, data: mj.MjData) -> None:
+        real_step(model, data)
+        _note_leg_peaks(session, peaks[phase["name"]])
+
+    mj.mj_step = _step
+    stop_report: TickReport | None = None
+    try:
+        while float(session.data.time) < BUS_KIT_STOP_S - 1e-9:
+            now = float(session.data.time)
+            seg = driver.segment(now)
+            phase["name"] = seg.label if seg.label in peaks else "stand"
+            driver.publish(session.bus, now)
+            report = session.step()
+            if seg.kind == "stop" and stop_report is None:
+                stop_report = report
+            if seg.kind == "vel":
+                _expect(report.mode == "move", f"forward tick {now:.3f} mode {report.mode}", failures)
+                _expect(
+                    abs(report.applied_vx) <= VX_FWD_CAP + 1e-12,
+                    f"applied_vx {report.applied_vx} over cap",
+                    failures,
+                )
+                _expect(abs(report.applied_yaw_rate) < 1e-12, "forward yaw was not 0", failures)
+            if failures and len(failures) > 8:
+                break
+    finally:
+        mj.mj_step = real_step
+    session.assert_plant_unchanged()
+    digest_after = hashlib.md5(PLANT_XML.read_bytes()).hexdigest()
+    _expect(digest_after == PLANT_MD5, f"plant md5 changed to {digest_after}", failures)
+    _expect(not session.bus.fault, f"fault {session.bus.fault_reason}", failures)
+    _expect(
+        stop_report is not None
+        and stop_report.mode == "stand"
+        and stop_report.applied_vx == 0.0
+        and stop_report.applied_yaw_rate == 0.0,
+        "stop tick did not return stand at 0",
+        failures,
+    )
+    fwd = [s for s in session.samples if s.mode == "move"]
+    stop_rows: list[PoseSample] = []
+    seen_move = False
+    for sample in session.samples:
+        if sample.mode == "move":
+            seen_move = True
+        elif seen_move and sample.mode == "stand":
+            stop_rows.append(sample)
+    _expect(bool(fwd) and bool(stop_rows), "missing forward or stop samples", failures)
+    max_applied = max((s.applied_vx for s in fwd), default=0.0)
+    slew_step = VX_SLEW * session.ctrl_dt
+    _expect(max_applied <= VX_FWD_CAP + 1e-9, f"applied_vx {max_applied} over the clamp", failures)
+    _expect(
+        max_applied > VX_FWD_CAP - slew_step - 1e-9,
+        f"applied_vx reached {max_applied}, not the forward clamp",
+        failures,
+    )
+    dx, mean_vx, min_up, dyaw = _window_stats(fwd)
+    sdx, _, smin_up, sdyaw = _window_stats(stop_rows)
+    lines.append(
+        f"plant md5 {digest_after}  ctrl {session.ctrl_dt * 1000:.0f} ms  "
+        f"resend {VEL_RESEND_S * 1000:.0f} ms  silence {COMMAND_TIMEOUT_S * 1000:.0f} ms"
+    )
+    lines.append(
+        f"clamps vx +{VX_FWD_CAP:.3f}/-{VX_BACK_CAP:.3f} m/s  yaw ±{YAW_RATE_CAP:.2f} rad/s  "
+        "on the bus, not the plant"
+    )
+    if stop_report is not None:
+        lines.append(f"stop tick {stop_report.line()}")
+    lines.append(
+        f"forward n={len(fwd)} applied_vx max {max_applied:+.4f}  "
+        f"Δx {dx * 100:+.1f} cm  mean body vx {mean_vx * 100:+.2f} cm/s  "
+        f"min up_z {min_up:.3f}  Δyaw {dyaw:+.1f} deg"
+    )
+    lines.append(
+        f"stop n={len(stop_rows)} Δx {sdx * 100:+.1f} cm  "
+        f"min up_z {smin_up:.3f}  Δyaw {sdyaw:+.1f} deg  "
+        f"tail mode {session.samples[-1].mode if session.samples else '-'}"
+    )
+    for label in ("stand", "forward", "stop"):
+        bucket = peaks[label]
+        worst_name = ""
+        worst = 0.0
+        for name, peak in bucket.items():
+            if abs(peak.force_nm) >= abs(worst):
+                worst = peak.force_nm
+                worst_name = name
+            if abs(peak.force_nm) > BUS_KIT_RAIL_NM:
+                failures.append(
+                    f"{label} {name} {peak.force_nm:+.4f} Nm at {peak.t_s:.3f} s"
+                )
+        def _signed(joint: str) -> str:
+            peak = bucket.get(joint)
+            if peak is None:
+                return "—"
+            return f"{peak.force_nm:+.3f} @{peak.t_s:.3f}s"
+
+        lines.append(
+            f"{label} hip roll R {_signed('r_hip_roll_pos')} L {_signed('l_hip_roll_pos')}  "
+            f"knee R {_signed('r_knee_pos')} L {_signed('l_knee_pos')}  "
+            f"worst {worst_name} {worst:+.3f} Nm"
+        )
+    walker = session.lipm
+    if walker is not None:
+        soles_l: list[float] = []
+        soles_r: list[float] = []
+        tr = walker.trace
+        for i, phase_name in enumerate(tr.phase):
+            if phase_name != "swing" or not (BUS_KIT_STAND_S <= tr.t[i] < BUS_KIT_VEL_S):
+                continue
+            if tr.swing[i] == "L":
+                soles_l.append(tr.sole_l[i])
+            elif tr.swing[i] == "R":
+                soles_r.append(tr.sole_r[i])
+        p90_l = float(np.percentile(np.asarray(soles_l), 90)) if soles_l else 0.0
+        p90_r = float(np.percentile(np.asarray(soles_r), 90)) if soles_r else 0.0
+        lines.append(f"swing sole p90 L {p90_l * 100:.2f} cm  R {p90_r * 100:.2f} cm")
+    return failures, lines
+
+
+def bus_kit_check() -> int:
+    """Day-1 bus on the locked kit row. Non-zero means the Prefer FAIL bar broke."""
+    contract_fail, lines = _bus_kit_contract()
+    torque_fail, torque_lines = _bus_kit_forward_stop()
+    failures = contract_fail + torque_fail
+    lines.extend(torque_lines)
+    print("[bus-kit] Day-1 CommandBus on locked kit500")
+    for line in lines:
+        print(f"[bus-kit] {line}")
+    if failures:
+        for msg in failures:
+            print(f"FAIL {msg}")
+        return 1
+    print("[bus-kit] Prefer FAIL bar holds: forward then stop stayed under ±2.45 Nm")
+    return 0
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Day-1 velocity steer on frozen M145 (no door)")
     ap.add_argument("--view", action="store_true", help="Interactive viewer + keyboard")
@@ -2849,11 +3167,18 @@ def main() -> None:
     ap.add_argument("--out", type=str, default=None)
     ap.add_argument("--no-video", action="store_true", help="Headless sim without mp4")
     ap.add_argument("--self-test", action="store_true", help="Command bus, freeze checks, short sim")
+    ap.add_argument(
+        "--bus-kit",
+        action="store_true",
+        help="Day-1 bus on the locked kit walk: forward then stop, plant cold",
+    )
     ap.add_argument("--log", type=str, default=None)
     ap.add_argument("--summary", type=str, default=None)
     args = ap.parse_args()
     if args.self_test:
         raise SystemExit(self_test())
+    if args.bus_kit:
+        raise SystemExit(bus_kit_check())
     if args.view:
         run_view(120.0 if args.duration is None else float(args.duration))
         return

@@ -1255,3 +1255,49 @@ It is not applied.
 
 No peel. Sole p90, vx, and the rail numbers above are unchanged.
 
+## Day-1 CommandBus on the locked kit row
+
+Plant md5 stays `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass is off.
+The kit numbers are unchanged: period 500 ms, servo move 20 ms, stance
++0.005 m outward on each foot, init_z 0.025 m, arm swing gain 0.5,
+pelvis 5°, hip pitch 15° on stand and walk, z_swap 0.006 m, y_swap
+0.020 m, step x and z 0.020 m.
+
+`CommandBus` is what stand, stop, and vel go through. `vel` takes
+`vx` in m/s and `yaw_rate` in rad/s. A `vy` argument is refused and
+does not change the targets. A later `vel` replaces the earlier one
+on that same call. Controls clamps live on the bus: forward 0.056 m/s,
+back 0.032 m/s, yaw ±0.25 rad/s. `vel(3.0, -4.0)` becomes
++0.056 m/s and −0.25 rad/s. Those three limits are the Controls clamps.
+
+The AI resend is 100 ms. On the kit clock (8 ms) a gap of 200.0 ms
+with no command returns `mode=stand` and `applied_vx=0`. `stop` does
+that on the same tick. Each tick returns `applied_vx`,
+`applied_yaw_rate`, and `mode` in {stand, move, fault}. This run did
+not enter fault.
+
+`applied_yaw_rate` is the clamped, slewed yaw command. One tick of a
+full left command returned `applied_vx=+0.0006`,
+`applied_yaw_rate=+0.0032`, `mode=move`. The kit step angle stayed
+0 rad, so that command is reported and the feet stay on the forward
+pattern. Body yaw in the table is drift.
+
+The Prefer FAIL is a cold start: stand until 0.50 s, `vel(+0.056, 0)`
+resent at 10 Hz until 6.00 s, then `stop` until 7.60 s. Torque is the
+signed peak `|actuator_force|` on every 2 ms step. The forward command
+stays in `mode=move`, so the 200 ms watchdog does not trip while the
+resend is running. `applied_vx` reaches the +0.056 m/s clamp and does
+not go past it. The kit step length stays 0.020 m for any non-zero vx.
+Measured body speed on this window is +13.79 cm/s.
+
+| Window | Δx | Mean body vx | min up_z | Δyaw | Hip roll R / L | Knee R / L | Worst |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Forward | +80.0 cm | +13.79 cm/s | 0.941 | −3.9 deg | +2.114 / −2.154 Nm | +2.423 / −1.797 Nm | right knee +2.423 Nm at 0.788 s |
+| Stop | +1.0 cm | — | 0.953 | +1.3 deg | −1.840 / −1.940 Nm | +2.319 / +1.262 Nm | right knee +2.319 Nm at 6.018 s |
+
+The stop tick is `applied_vx=+0.0000`, `applied_yaw_rate=+0.0000`,
+`mode=stand`. Swing sole p90 on the forward window is 1.74 / 1.72 cm.
+Nothing in stand, forward, or stop crosses 2.449 Nm. The stand peak
+is the right ankle pitch at +1.262 Nm. The clip is
+`previews/bus_kit_forward_stop.mp4`.
+
