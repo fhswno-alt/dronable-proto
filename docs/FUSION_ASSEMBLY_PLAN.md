@@ -1,7 +1,7 @@
 # Fusion / clickable assembly plan — Hiwonder AiNex Standard
 
 **Date:** 27 Sep 2026 (Europe/London)  
-**Goal:** Articulated (kinematics) review assembly so clearance / reach / interference are visible before any Path A spend (~$729.99 list; UK-landed ~$1.05–1.14k).  
+**Goal:** Articulated (kinematics) review assembly so clearance / reach / interference are visible before any Path A spend. The **Standard** kit is **24 DOF**. This week's pick is Pi 5 **2GB at $829.99**. **4GB is $909.99**, later only if voice and vision move onto the kit. **$729.99 is the 20-DOF Starter** and does not match the walk plant. Kit alone, UK landed, **about £754–£785**. Full first build **about £876–£1,026**. See `docs/MFG_FIRST_BUILD_PRICE_SHEET.md`. The old ~$1.05–1.14k band used the $729.99 figure.  
 **Envelope (public):** 193 × 135 × 415 mm, 2.45 kg, 24 DOF, HX bus servos (HX-35H / HX-35HM / HX-12H).  
 **Constraint:** No Onshape / Fusion / SolidWorks MCP on this agent box — assembly work happens on Dave’s CAD seat or via files handed back into `/workspace/dronable-proto`.  
 **Status:** Research only. **No purchase. No assembly share link claimed** (none found).
@@ -25,7 +25,7 @@
 
 | Source | URL | What you get |
 |--------|-----|----------------|
-| Product page | https://www.hiwonder.com/products/ainex | Specs, FAQ, list price $729.99 |
+| Product page | https://www.hiwonder.com/products/ainex | Specs, FAQ. Checked 5 Oct 2026: Standard **24 DOF** is **$829.99** (Pi 5 2GB) and **$909.99** (Pi 5 4GB). **$729.99 is the 20-DOF Starter**, not the walk plant |
 | OpenELAB mirror | https://openelab.io/products/ainex-pi5 | Same gating language for models/source |
 | Wiki (Pi 5 docs) | https://wiki.hiwonder.com/projects/AiNex/en/raspberry-pi5-version/ | Tutorials; §5.3 Simulation Model & URDF |
 | Wiki Appendix | https://wiki.hiwonder.com/projects/AiNex/en/raspberry-pi5-version/docs/Appendix.html | Links to Google Drive resources |

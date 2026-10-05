@@ -3,9 +3,9 @@
 **Product:** Cheap biped, AiNex-class (~415 mm).  
 **Demo (March 2027):** Walk a room + open low prop lever at **250–300 mm** AFF (NOT full UK door height).  
 **Ship-to:** SE1 4AG London.  
-**Budget:** Push under **$1k**; hard ceiling **$1.5k**. Path A UK-landed all-in **~$1,050–1,100** (to **~$1.14k** if courier spikes).  
+**Budget:** Push under **$1k**; hard ceiling **$1.5k**. Kit alone, UK landed, **about £754–£785**. Full first build **about £876–£1,026**. See `docs/MFG_FIRST_BUILD_PRICE_SHEET.md`. The old **~$1,050–1,100** band was built on the $729.99 Starter price.  
 **Owner:** Founding Hardware (mechanical + BOM framing). Controls/AI interfaces stated below. Coordinated with Founding Manufacturing Lead buy sheet.  
-**Status:** Path A **FROZEN** until Dave locks **Standard** Mon + live Hiwonder checkout + kit-matched MJCF/drawings. **China CM scope for unit one = NONE.**  
+**Status:** Path A spend stays **FROZEN** until Dave asks. The OD-2 list-price flag is **resolved** by `docs/MFG_FIRST_BUILD_PRICE_SHEET.md` (5 Oct 2026). UK fab still waits on kit-matched MJCF/drawings. **China CM scope for unit one = NONE.**  
 **Date:** Sun 27 Sep 2026 (London / BST).  
 **Sources:** hiwonder.com/products/ainex; HX-35H / HX-35HM / HX-12H datasheets; Pi 5 power benches; Manufacturing buy sheet [Google Doc](https://docs.google.com/document/d/1w6tZ-UTNqlveMHpFS6vtwDNMyCJV9o0iXAH0SN3DL_Q/edit); Controls input (envelope/DoF/torque/gait/teleop/safety — Sep 2026); AI input (on-body Pi scope, perception cap, sensor must/must-not, Pi power — Sep 2026); `ASSUMPTIONS.md`.
 
@@ -17,12 +17,12 @@
 
 | ID | Decision | Why it blocks | Options / note |
 |----|----------|---------------|----------------|
-| **OD-1** | **Lock AiNex Standard (vs Starter)** | Hands DOF (24 vs 20); lever grasp needs Standard hands | Path A / Manufacturing preference = **Standard 24DOF + hands**; Starter only if founder forces under-$1k and accepts no hands |
-| **OD-2** | **Live Hiwonder checkout** (SKU + Pi 5 4GB) | Exact cart line not locked; list **$729.99** on hiwonder.com | Monday live checkout + cart screenshot; prefer **Pi 5 4GB** |
-| **OD-3** | **Under-$1k vs Path A cart** | UK-landed already **~$1.05–1.10k** (to ~$1.14k courier) | Accept Path A band, or Starter / cut UK thin-fab — founder call |
+| **OD-1** | **Lock AiNex Standard (vs Starter)** | The walk plant is **24 DOF**. **$729.99 is the 20-DOF Starter** and does not match it | Current pick is **Standard 24 DOF + hands** |
+| **OD-2** | **Live Hiwonder price check** (SKU + Pi RAM) | **RESOLVED** by `docs/MFG_FIRST_BUILD_PRICE_SHEET.md` (public page, 5 Oct 2026). No order placed | Standard **24 DOF**, Pi 5 **2GB at $829.99** for this week's MuJoCo work. **4GB at $909.99** only when voice and vision move onto the kit. **$729.99 is the 20-DOF Starter** |
+| **OD-3** | **Under-$1k vs Path A cart** | Old ~$1.05–1.10k band used the $729.99 Starter price | Use the price sheet: kit alone **about £754–£785**; full first build **about £876–£1,026** |
 | **OD-4** | **Battery vs tether for March demo** | Runtime vs trip hazard | Hardware **recommends battery primary + bench tether available** (§6) |
 | **OD-5** | **Kit-matched MJCF + fab drawings gate** | Controls blocker: no credible walk / FOV rebind / UK fab until kit-matched MJCF; exact DoF/ID map OPEN until live SKU + MJCF | Freeze fab + treat walk numbers as **control model only** until kit receipt or Hiwonder STEP + founder OK |
-| **OD-6** | **Pi 5 4GB vs 8GB on cart** | Vision/voice off-board March → 4GB preferred (AI: no on-Pi LLM/NN) | Prefer **4GB** unless price delta trivial |
+| **OD-6** | **Pi 5 RAM on the Standard kit** | Voice and vision stay off the kit for this week's MuJoCo work | **2GB at $829.99** now. Revisit **4GB at $909.99** only when voice and vision move onto the kit. Not 8GB |
 
 Inline OPEN flags also appear in §§1–6.
 
@@ -30,11 +30,11 @@ Inline OPEN flags also appear in §§1–6.
 
 ## PATH A FREEZE RULES
 
-1. **Buy** AiNex **Standard** whole kit (24DOF + hands, Pi 5 prefer 4GB) + listed HX spares + UK eyes parts — per Manufacturing buy sheet.
+1. **Buy** AiNex **Standard** whole kit (**24 DOF** + hands). This week's pick is Pi 5 **2GB at $829.99**. Pi 5 **4GB at $909.99** only when voice and vision move onto the kit. **$729.99 is the 20-DOF Starter** and does not match the walk plant. Plus listed HX spares + UK eyes parts — per Manufacturing buy sheet and `docs/MFG_FIRST_BUILD_PRICE_SHEET.md`.
 2. **UK fab THIN only** (not China CM): face/eye mount, ankle bumpers, prop door+lever 250–300 mm AFF — **after** drawings match kit envelope.
 3. **China CM scope for unit one = NONE.** No CM RFQs. Prior MuJoCo capsule previews failed physics — see §3.
 4. **Do NOT buy:** NVIDIA Orin, 2nd Pi, Hailo, F/T ankles, depth cam, LiDAR, LeRobot open biped, custom legs, Waveshare Pico-ResTouch, TonyPi, **Feetech STS/SMS** (or any non-HX bus spare).
-5. Frozen until: Dave locks Standard Mon + live checkout + kit-matched MJCF/drawings (**OD-1, OD-2, OD-5**).
+5. Spend stays frozen until Dave asks. List price and Pi RAM pick are resolved (**OD-2**, price sheet). UK fab still waits on kit-matched MJCF/drawings (**OD-5**).
 
 **Kit envelope (Manufacturing / quote / model / fab against this):**
 
@@ -43,7 +43,7 @@ Inline OPEN flags also appear in §§1–6.
 | Size | **193 × 135 × 415 mm** |
 | Mass | **2.45 kg** Standard (**2.25 kg** Starter) |
 | DOF | **24** + hands (Standard); Al alloy frame |
-| Compute | Pi + ROS (prefer Pi 5 4GB on cart) |
+| Compute | Pi 5 **2GB** this week. **4GB** only when voice and vision move onto the kit |
 | Walk | Rated / control-model ceiling ~**21 cm/s** (*Controls:* not a shippable walk claim — see §2.6) |
 | Cam | **120° / 1 MP**, 2DOF head |
 | IMU | **9-axis** |
@@ -61,12 +61,12 @@ Inline OPEN flags also appear in §§1–6.
         │
         ├──► Hiwonder HX serial bus (HX-35H · HX-35HM · HX-12H daisy-chain)
         │         └── joint encoders + temp/voltage feedback IN SERVO
-        ├──► Raspberry Pi 5 (prefer 4GB)  ← on-body ONLY (see AI split below)
+        ├──► Raspberry Pi 5 (2GB this week)  ← on-body ONLY (see AI split below)
         ├──► kit IMU (9-axis)
         ├──► 2DOF head + 120° / 1 MP camera (kit)
         └──► [ADD UK] eyes: bare 2.8" SPI IPS ILI9341 + MG90S ×2 (lid/aim) ≤1–2 W display budget
 
-On-body Pi 5 4GB (AI): bus I/O, 50 Hz PD, IMU, E-stop, neck_pitch, Xbox teleop, eye LCD.
+On-body Pi 5 2GB (AI): bus I/O, 50 Hz PD, IMU, E-stop, neck_pitch, Xbox teleop, eye LCD.
   — NOT on-Pi: LLM, NN walk, Orin, Hailo.
 
 Off-board (AI / March): ego preview, OpenCV / lever assist, imitation train, voice —
@@ -76,7 +76,7 @@ Teleop: Xbox → Pi → joint Δq.
 
 | Layer | Path A action | Custom vs OTS |
 |-------|---------------|---------------|
-| Compute | **INHERIT** kit Pi 5 4GB; **no Orin, no Hailo, no 2nd Pi** | OTS (kit) |
+| Compute | **INHERIT** kit Pi 5 **2GB**; **no Orin, no Hailo, no 2nd Pi**. 4GB later only | OTS (kit) |
 | Bus / drivers | **INHERIT** kit bus + **Hiwonder HX** servos only | OTS |
 | Sensors | **INHERIT** kit IMU + servo encoders + head cam | OTS |
 | Eyes | **ADD** bare 2.8" ILI9341 + MG90S ×2 + UK face mount | UK buy + UK fab |
@@ -89,7 +89,7 @@ Teleop: Xbox → Pi → joint Δq.
 
 | Item | Spec | Unit cost USD | Availability | Notes |
 |------|------|---------------|--------------|-------|
-| Kit SBC | **Raspberry Pi 5**, prefer **4GB** | Included in kit ($729.99 list) | China → UK (Hiwonder free ship >$499 to UK) | On-body: bus I/O, **50 Hz PD**, IMU, E-stop, neck_pitch, Xbox, eye LCD. **Not** on-Pi LLM / NN walk / Orin. |
+| Kit SBC | **Raspberry Pi 5 2GB** this week. **4GB** only when voice and vision move onto the kit | In the **Standard 24 DOF** kit: **$829.99** (2GB) or **$909.99** (4GB). **$729.99 is the 20-DOF Starter** and does not match the walk plant | China → UK (Hiwonder free ship >$499 to UK) | On-body: bus I/O, **50 Hz PD**, IMU, E-stop, neck_pitch, Xbox, eye LCD. **Not** on-Pi LLM / NN walk / Orin. |
 | Storage | Kit 32 GB microSD | Included | — | Optional A2 upgrade later if needed |
 
 **Do NOT buy a 2nd Pi, Orin, or Hailo for unit one.**
@@ -98,7 +98,7 @@ Teleop: Xbox → Pi → joint Δq.
 
 | Where | Runs March |
 |-------|------------|
-| **On-body Pi 5 4GB** | HX bus I/O, 50 Hz PD, IMU read, E-stop, neck_pitch, Xbox → Δq, eye LCD |
+| **On-body Pi 5 2GB** | HX bus I/O, 50 Hz PD, IMU read, E-stop, neck_pitch, Xbox → Δq, eye LCD |
 | **Off-board** | Ego preview, OpenCV / lever assist, imitation training, voice |
 
 **Perception cap (AI):** ≤~**2 cores / 1–1.5 GB** on any assist path; cam stream **640×480 ≤30 Hz**; stub latency **50–80 ms**; eyes display ≤**1–2 W**.
@@ -170,7 +170,7 @@ AiNex uses **Hiwonder HX serial bus servos** (UART **115200**, position/temp/vol
 
 | INHERIT | ADD (unit one) | FORBIDDEN (unit one) |
 |---------|----------------|----------------------|
-| Pi 5 4GB, HX bus + all HX servos, IMU, cam, LiPo, Al frame | Bare 2.8" ILI9341, MG90S ×2, UK face/eye mount, ankle bumpers, prop lever; HX-35H ×2 + HX-12H ×1 spares | Orin, Hailo, 2nd Pi, F/T ankles, depth, LiDAR, Feetech STS/SMS, custom legs, LeRobot open biped, TonyPi, Waveshare Pico-ResTouch, China CM parts |
+| Pi 5 **2GB** (this week), HX bus + all HX servos, IMU, cam, LiPo, Al frame | Bare 2.8" ILI9341, MG90S ×2, UK face/eye mount, ankle bumpers, prop lever; HX-35H ×2 + HX-12H ×1 spares | Orin, Hailo, 2nd Pi, F/T ankles, depth, LiDAR, Feetech STS/SMS, custom legs, LeRobot open biped, TonyPi, Waveshare Pico-ResTouch, China CM parts |
 
 ---
 
@@ -195,7 +195,7 @@ AiNex uses **Hiwonder HX serial bus servos** (UART **115200**, position/temp/vol
 | Hands | Standard hands | **HX-12H** |
 | **Total** | **24** (Standard) | — |
 
-**OPEN:** exact joint↔ID↔SKU map frozen only after live checkout + kit-matched MJCF (**OD-2, OD-5**). Do not invent SKUs.
+**OPEN:** exact joint↔ID map still waits on kit-matched MJCF (**OD-5**). The list price and Pi RAM pick are resolved (**OD-2**, `docs/MFG_FIRST_BUILD_PRICE_SHEET.md`). Do not invent joint IDs.
 
 ### 2.3 Teleop → autonomy path *(Controls)*
 
@@ -323,7 +323,7 @@ Kit-matched MJCF **must** include *(Controls blocker = Hardware OD-5)*:
 
 | # | Item | Spec / search | Unit USD | Qty | Notes |
 |---|------|---------------|----------|-----|-------|
-| 1 | **AiNex Standard** | Hiwonder AiNex Standard, **24DOF + hands**, **Pi 5 prefer 4GB** | **$729.99** list | 1 | **FLAG OPEN** — confirm live checkout Mon (**OD-2**). Envelope § above. Assembled ship. |
+| 1 | **AiNex Standard** | Hiwonder AiNex **Standard**, **24 DOF** + hands, Pi 5 **2GB** (this week). 4GB is the later upgrade | **$829.99** (2GB). **$909.99** (4GB) | 1 | **OD-2 RESOLVED** by `docs/MFG_FIRST_BUILD_PRICE_SHEET.md` (5 Oct 2026). **$729.99 is the 20-DOF Starter** and does not match the walk plant. No order. |
 | 2 | **HX-35H** spare | Hiwonder HX-35H; 35 kg·cm; 9–12.6 V; metal gear; 5264-3P | **$18.99** | **2** | Kit-family spare |
 | 3 | **HX-12H** spare | Hiwonder HX-12H; 12 kg·cm | **$16.99** | **1** | Kit-family spare |
 | 4 | **MG90S** | Metal-gear micro PWM | ~$3–9 ea UK | **2** | Eyes only |
@@ -403,21 +403,25 @@ Kit-matched MJCF **must** include *(Controls blocker = Hardware OD-5)*:
 
 ### 6.1 BOM (Path A — Manufacturing-aligned)
 
-| Line | Item | USD |
-|------|------|-----|
-| A | AiNex Standard (Pi 5 prefer 4GB) | **729.99** list |
-| B | UK import VAT/duty/carrier on kit | rolled into landed |
-| C | **Kit UK-landed SE1 4AG all-in** | **~$1,050–1,100** (to **~$1.14k** if courier spikes) |
-| D | HX-35H ×2 | 37.98 |
-| E | HX-12H ×1 | 16.99 |
-| F | MG90S ×2 + ILI9341 bare | ~15–25 EST |
-| G | UK thin fab (face + bumpers + prop) | 55–145 EST |
-| | **Path A honest total** | **~$1.15–1.35k EST** with spares+fab |
-| | **Kit cart alone** | **~$1.05–1.14k** |
+The **Standard** kit is **24 DOF**. **$729.99 is the 20-DOF Starter** and does not match the walk plant. This week's MuJoCo pick is Standard Pi 5 **2GB at $829.99**. Standard Pi 5 **4GB at $909.99** is an upgrade to revisit only when voice and vision move onto the kit. The old **~$1,050–1,100** and **~$1.15–1.35k** bands used the $729.99 figure. Landed totals: `docs/MFG_FIRST_BUILD_PRICE_SHEET.md`.
 
-**FLAG (OD-3):** Under-**$1000** is **not** honest for Standard UK-landed. Accept Path A band or drop to Starter / defer fab.
+| Line | Item | Amount |
+|------|------|--------|
+| A | AiNex Standard, 24 DOF, Pi 5 2GB (this week) | **$829.99** list |
+| A2 | AiNex Standard, Pi 5 4GB (later) | **$909.99** list |
+| — | Starter, 20 DOF (not the walk plant) | $729.99 list |
+| B | UK import VAT / duty / carrier on the 2GB kit | inside the kit-alone range |
+| C | **Kit alone, UK landed (Standard 2GB)** | **about £754–£785** |
+| D | HX-35H ×2 | $37.98 list |
+| E | HX-12H ×1 | $16.99 list |
+| F | MG90S ×2 + ILI9341 bare | ~$15–25 EST (not in the first-build sheet) |
+| G | UK thin fab (face + bumpers + prop) | $55–145 EST (not in the first-build sheet) |
+| | **Full first build** | **about £876–£1,026** |
+| | **Kit alone, UK landed** | **about £754–£785** |
 
-Hard ceiling **$1.5k** — buy list above stays inside if courier behaves.
+**FLAG (OD-3):** Use the price sheet, not the old ~$1,050–1,100 band. Full first build **about £876–£1,026**. Kit alone **about £754–£785**. See `docs/MFG_FIRST_BUILD_PRICE_SHEET.md`.
+
+Hard ceiling **$1.5k**. The price-sheet high end is under that ceiling.
 
 ### 6.2 Power draw
 
@@ -458,7 +462,7 @@ Battery: 11.1 V × 3.5 Ah ≈ **38.9 Wh** → practical demo blocks **20–40 mi
 
 ## REFERENCES
 
-- https://www.hiwonder.com/products/ainex — envelope, $729.99 list (fetched 27 Sep 2026).
+- https://www.hiwonder.com/products/ainex — checked 5 Oct 2026. **Standard is 24 DOF: $829.99** (Pi 5 2GB) and **$909.99** (Pi 5 4GB). **$729.99 is the 20-DOF Starter**, which does not match the walk plant. The 27 Sep 2026 note that called Standard $729.99 was wrong. Detail: `docs/MFG_FIRST_BUILD_PRICE_SHEET.md`.
 - https://www.hiwonder.com/products/hx-35h — $18.99; 35 kg·cm; 9–12.6 V; 5264-3P.
 - https://www.hiwonder.com/products/hx-35hm — hip mag encoder.
 - https://www.hiwonder.com/products/hx-12h — $16.99; 12 kg·cm.
