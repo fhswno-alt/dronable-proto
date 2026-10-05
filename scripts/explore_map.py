@@ -4,14 +4,18 @@
 This is not a room finder and not go-anywhere. The only commands are
 stand, stop, and vel(vx, yaw_rate) on CommandBus in scripts/steer_walk.py,
 resent at 10 Hz. Caps stay +0.056 / -0.032 m/s and yaw ±0.25 rad/s.
-On the empty plant the walk is the claimed nav-multi chain:
-vel(+0.056, +0.25) for 12.5 s, then vel(+0.056, -0.25) for 11 s,
-after a 1.0 s stand so the left arc starts at t = 16 s. A 0.6 s
-stand starts that arc early and the left hold only reaches about
-+35 deg. Furnished scenes cannot hold those windows (up_z crosses
-0.90). They use the same vel(+0.056, -0.25) for 8 s, right first.
-A short vel(+0.028, +0.25) left command is swallowed here. vx=0
-yaw does not change heading either, so this script never sends it.
+On the empty plant the walk still starts with the claimed nav-multi
+prefix: a 1.0 s stand so the left arc starts at t = 16 s, then
+vel(+0.056, 0) for 15 s and vel(+0.056, +0.25) for 12.5 s. After
+that the dense frontier rim picks the next held window. When the
+rim is still left, a 4 s forward gap is followed by one 8 s left
+window. A 6 s gap swallows that left command and then crosses
+up_z 0.90. The right leg is one vel(+0.056, -0.25) hold for 34 s.
+About 38 s on that hold crosses up_z 0.90. Furnished scenes cannot
+hold the claimed yaw windows (up_z crosses 0.90). They use the same
+vel(+0.056, -0.25) for 8 s, right first. A short vel(+0.028, +0.25)
+left command is swallowed here. vx=0 yaw does not change heading
+either, so this script never sends it.
 
 The plant file is not edited. kit_cam stays on head_tilt_link at
 0.050 0.019 0.007. Scenes are vision only (room_kitchen.xml and the
@@ -35,9 +39,10 @@ What the map actually is:
     one of those cells. It does not aim at yellow.
   - The walked trail uses the sim freejoint. That is odometry in this
     sim, not visual SLAM.
-  - On the empty plant the claimed left-then-right chain is followed
-    by one more claimed forward window (15 s, yaw 0). A second yaw
-    hold is not claimable on this plant. Furnished scenes stay on the
+  - On the empty plant the claimed left prefix is followed by a
+    frontier window: 4 s forward, then 8 s left when the dense rim
+    is still left, then one 34 s right walk-yaw. That right hold is
+    not a second right after a gap. Furnished scenes stay on the
     8 s right window. A separate kitchen probe walks half-cap toward
     the frozen soft XY and does not claim arrival.
 
@@ -120,9 +125,31 @@ DEMO_WALK_S = (
 FURNISHED_RIGHT_S = 8.0
 # After the claimed left-then-right chain, one more forward window.
 # Same vel(+0.056, 0) and the same 15 s length as the approach.
-# A second left hold does not yaw and then tips. A second right hold tips.
-# This extend is straight only.
+# Kept so the open-loop schedule can still be built. The empty-plant
+# demo does not walk this extend. A left command after the claimed
+# 6 s mid is swallowed and then crosses up_z 0.90. Extending the
+# first left hold through ~21 s tips. A separate 8 s left window
+# after a 4 s forward gap yaws and stays up.
 EMPTY_FORWARD_EXTEND_S = steer_walk.CLAIMED_APPROACH_S
+# Forward between the claimed left and a second left window.
+# 6 s is the claimed mid, and a left command there does not yaw.
+# 4.0 s is the measured gap where the next 8 s left window tracks.
+FRONTIER_GAP_S = 4.0
+# Dense rim is still on the left after the claimed 12.5 s left.
+# 8 s of vel(+0.056, +0.25) paints that side. Not a longer first hold.
+FRONTIER_SECOND_LEFT_S = 8.0
+# One right walk-yaw after the left windows. The claimed right arc
+# is 11 s. From the pose after the second left, 34 s stays at
+# up_z about 0.939 and walks the rim. About 38 s crosses up_z 0.90.
+# This is one hold, not a second right after yaw returns to 0.
+FRONTIER_RIGHT_HOLD_S = 34.0
+FRONTIER_WALK_S = (
+    steer_walk.CLAIMED_APPROACH_S
+    + steer_walk.CLAIMED_LEFT_ARC_S
+    + FRONTIER_GAP_S
+    + FRONTIER_SECOND_LEFT_S
+    + FRONTIER_RIGHT_HOLD_S
+)
 # First yellow log places a soft XY this far along the camera bearing.
 # Not a measured depth and not an arrival pose.
 SOFT_GOAL_RANGE_M = 1.50
@@ -135,6 +162,17 @@ MAIN_UP_Z = 0.9788405911048443
 MAIN_FREE_CELLS = {"plant": 766, "kitchen": 366, "bathroom": 531}
 MAIN_FRONTIER_CELLS = {"plant": 11, "kitchen": 26, "bathroom": 28}
 MAIN_WALKED_CELLS = {"plant": 41, "kitchen": 7, "bathroom": 10}
+# Open-loop claimed chain on this dense fan. Main after the densify
+# squash. The frontier walk is scored against these, not against the
+# 1.80 m fan above.
+OPEN_LOOP_FREE_CELLS = {"plant": 821, "kitchen": 450, "bathroom": 794}
+OPEN_LOOP_FRONTIER_CELLS = {"plant": 39, "kitchen": 55, "bathroom": 61}
+OPEN_LOOP_WALKED_CELLS = {"plant": 52, "kitchen": 7, "bathroom": 10}
+OPEN_LOOP_MIN_UP_Z = {
+    "plant": 0.9491904220657853,
+    "kitchen": 0.9186315495501423,
+    "bathroom": 0.9337887107030065,
+}
 
 CELL_M = 0.10
 X_MIN = -0.80
@@ -197,9 +235,10 @@ HONESTY = (
     "not a waypoint and not arrival. A soft XY is frozen along that bearing "
     "the first time yellow is logged. Yellow >= 0.50 is not success. "
     "Frontiers are the 8-connected edge of that paint. Pose is the sim freejoint, "
-    "not SLAM. Explore holds the claimed vel(+0.056, ±0.25) windows "
-    "(left 12.5 s, then right 11 s) and, on the empty plant, one more "
-    "vel(+0.056, 0) for 15 s. A second yaw hold is not claimable. "
+    "not SLAM. The empty plant holds the claimed left prefix, then a 4 s "
+    "forward gap and an 8 s left window when the dense rim is still left, "
+    "then one vel(+0.056, -0.25) for 34 s. A 6 s gap swallows that left "
+    "window. About 38 s of that right hold crosses up_z 0.90. "
     "vx=0 yaw is not used. Not go-anywhere."
 )
 
@@ -260,6 +299,7 @@ class ExplorePhase:
     duration_s: float
     vx: float
     yaw_rate: float
+    reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -272,6 +312,7 @@ class PhaseRecord:
     dy_m: float
     dyaw_deg: float
     tracked: bool | None
+    reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -873,6 +914,183 @@ def explore_schedule(walk_s: float, scene: str = "plant") -> tuple[ExplorePhase,
     return tuple(chosen)
 
 
+@dataclass
+class FrontierDrive:
+    """Which held windows have already been used on this walk."""
+
+    left_holds: int = 0
+    right_holds: int = 0
+    gap_done: bool = False
+    second_left_done: bool = False
+    follow: bool = False
+
+
+@dataclass(frozen=True)
+class FrontierWeights:
+    """Dense-rim mass. left/right are outside the ahead cone and not behind."""
+
+    left: float
+    right: float
+    ahead: float
+    count: int
+
+
+def frontier_weights(
+    feature_map: ExploreMap,
+    x: float,
+    y: float,
+    yaw: float,
+) -> FrontierWeights:
+    """Weight the dense explore rim. The finder ring is not this query.
+
+    Ahead is a bearing error inside ±0.40 rad. Left and right run out
+    to ±2.40 rad. Cells nearly behind the body are not a turn.
+    Inverse distance keeps a near rim heavier than the far edge.
+    """
+    left = 0.0
+    right = 0.0
+    ahead = 0.0
+    cells = feature_map.frontier_cells(x, y, dense=True)
+    for cell in cells:
+        err = _wrap(cell.bearing_rad - yaw)
+        weight = 1.0 / max(cell.distance_m, FRONTIER_MIN_M)
+        if abs(err) <= 0.40:
+            ahead += weight
+        elif abs(err) >= 2.40:
+            continue
+        elif err > 0.0:
+            left += weight
+        else:
+            right += weight
+    return FrontierWeights(left=left, right=right, ahead=ahead, count=len(cells))
+
+
+def _frontier_side(weights: FrontierWeights) -> int:
+    """+1 left, -1 right, 0 when the ahead bin wins or the rim is empty."""
+    if weights.ahead > weights.left and weights.ahead > weights.right and weights.ahead > 0.0:
+        return 0
+    if weights.left > weights.right and weights.left > 0.0:
+        return 1
+    if weights.right > weights.left and weights.right > 0.0:
+        return -1
+    return 0
+
+
+def claimed_prefix(walk_s: float) -> tuple[ExplorePhase, ...]:
+    """Approach, then the claimed 12.5 s left. Truncates on a short budget.
+
+    The left arc has to start at t = 16 s. A shorter stand, or a left
+    that starts before the 15 s approach, does not track on this plant.
+    """
+    remaining = walk_s
+    chosen: list[ExplorePhase] = []
+    for phase in claimed_explore_phases():
+        if phase.name not in ("approach", "arc-left"):
+            break
+        if remaining <= 1e-9:
+            break
+        duration = min(phase.duration_s, remaining)
+        chosen.append(
+            ExplorePhase(
+                phase.name,
+                duration,
+                phase.vx,
+                phase.yaw_rate,
+                "claimed prefix so the left arc starts at t = 16 s",
+            )
+        )
+        remaining -= duration
+        if duration + 1e-6 < phase.duration_s:
+            break
+    return tuple(chosen)
+
+
+def next_frontier_phase(
+    feature_map: ExploreMap,
+    x: float,
+    y: float,
+    yaw: float,
+    drive: FrontierDrive,
+    remaining_s: float,
+) -> ExplorePhase | None:
+    """Next held walk-yaw window from the dense rim.
+
+    The claimed left prefix is not chosen here. A second left is the
+    8 s window after the 4 s gap, and only when the rim is still left.
+    The right leg is one 34 s hold after the lefts. A third left is
+    not returned. vx stays at the forward cap. A pure yaw is not returned.
+    Yellow is not read.
+    """
+    if remaining_s <= 0.05 or not drive.follow:
+        return None
+    if not _within_caps(EXPLORE_VX, 0.0):
+        raise RuntimeError("explore vx is outside the bus caps")
+    weights = frontier_weights(feature_map, x, y, yaw)
+    side = _frontier_side(weights)
+    side_note = (
+        f"dense rim left {weights.left:.1f} right {weights.right:.1f} "
+        f"ahead {weights.ahead:.1f} n={weights.count}"
+    )
+    if (
+        drive.left_holds == 1
+        and not drive.gap_done
+        and not drive.second_left_done
+        and side > 0
+    ):
+        duration = min(FRONTIER_GAP_S, remaining_s)
+        return ExplorePhase(
+            "frontier-gap",
+            duration,
+            EXPLORE_VX,
+            0.0,
+            f"forward gap before a second left; {side_note}",
+        )
+    if (
+        drive.left_holds == 1
+        and drive.gap_done
+        and not drive.second_left_done
+        and side > 0
+    ):
+        duration = min(FRONTIER_SECOND_LEFT_S, remaining_s)
+        return ExplorePhase(
+            "frontier-left",
+            duration,
+            EXPLORE_VX,
+            steer_walk.YAW_RATE_CAP,
+            f"frontier is left; 8 s walk-yaw left; {side_note}",
+        )
+    if drive.right_holds == 0 and (drive.second_left_done or side <= 0):
+        duration = min(FRONTIER_RIGHT_HOLD_S, remaining_s)
+        if side > 0:
+            why = "claimed right walk-yaw after the left windows; another left is not this hold"
+        elif side < 0:
+            why = "frontier is right; one right walk-yaw"
+        else:
+            why = "no side rim; one right walk-yaw"
+        return ExplorePhase(
+            "arc-right",
+            duration,
+            EXPLORE_VX,
+            -steer_walk.YAW_RATE_CAP,
+            f"{why}; {side_note}",
+        )
+    return None
+
+
+def note_frontier_phase(drive: FrontierDrive, phase: ExplorePhase) -> None:
+    """Record a window that actually ran."""
+    if phase.name == "arc-left" and phase.duration_s + 1e-3 >= steer_walk.CLAIMED_LEFT_ARC_S:
+        drive.left_holds += 1
+        drive.follow = True
+    elif phase.name == "frontier-gap":
+        drive.gap_done = True
+    elif phase.name == "frontier-left":
+        drive.left_holds += 1
+        drive.second_left_done = True
+    elif phase.name == "arc-right":
+        drive.right_holds += 1
+
+
 def last_mile_from_map(
     feature_map: ExploreMap,
     x: float,
@@ -1169,9 +1387,14 @@ def run_explore(
         kit_mid = frame
         map_mid = map_before
         trail: list[tuple[float, float]] = [(start.x, start.y)]
-        schedule = explore_schedule(walk_s, scene)
-        schedule_s = sum(phase.duration_s for phase in schedule)
-        mid_time = float(session.data.time) + (schedule_s * 0.5)
+        drive = FrontierDrive()
+        if scene == "plant":
+            schedule: list[ExplorePhase] = list(claimed_prefix(walk_s))
+            mid_time = float(session.data.time) + (walk_s * 0.5)
+        else:
+            schedule = list(explore_schedule(walk_s, scene))
+            schedule_s = sum(phase.duration_s for phase in schedule)
+            mid_time = float(session.data.time) + (schedule_s * 0.5)
         if not schedule:
             raise RuntimeError("explore schedule is empty")
         phase_i = 0
@@ -1198,6 +1421,7 @@ def run_explore(
                         phase.yaw_rate,
                         math.degrees(_wrap(pose.yaw - phase_origin.yaw)),
                     ),
+                    reason=phase.reason,
                 )
             )
 
@@ -1207,7 +1431,26 @@ def run_explore(
             if now >= (phase_t0 + phase.duration_s) - 1e-9:
                 pose_now = _pose(session)
                 _close_phase(pose_now)
+                note_frontier_phase(drive, schedule[phase_i])
                 phase_i += 1
+                if phase_i >= len(schedule) and scene == "plant" and drive.follow:
+                    remaining = walk_end - now
+                    if remaining > 0.05:
+                        frame, cam_pos, cam_mat, fovy = cam.grab(session.model, session.data)
+                        feature_map.integrate(
+                            pose_now, frame, cam_pos, cam_mat, fovy, explore_fan=True,
+                        )
+                        last_look = now
+                        nxt = next_frontier_phase(
+                            feature_map,
+                            pose_now.x,
+                            pose_now.y,
+                            pose_now.yaw,
+                            drive,
+                            remaining,
+                        )
+                        if nxt is not None:
+                            schedule.append(nxt)
                 if phase_i >= len(schedule):
                     break
                 phase_origin = pose_now
@@ -1250,6 +1493,8 @@ def run_explore(
                 _close_phase(_pose(session))
         if stop_reason == "claimed walk-yaw schedule" and scene != "plant":
             stop_reason = "furnished right-first window"
+        elif any(phase.name == "frontier-left" for phase in phases) and stop_reason == "claimed walk-yaw schedule":
+            stop_reason = "frontier left window then one right walk-yaw"
         elif any(phase.name == "extend" for phase in phases) and stop_reason == "claimed walk-yaw schedule":
             stop_reason = "claimed left-then-right plus empty-floor forward"
         elif abs(walk_s - DEMO_WALK_S) > 1e-6 and stop_reason == "claimed walk-yaw schedule":
@@ -1627,6 +1872,10 @@ def _run_payload(run: SceneRun) -> dict[str, object]:
         "vs_main_explore_free_cells": MAIN_FREE_CELLS.get(run.scene),
         "vs_main_explore_frontier_cells": MAIN_FRONTIER_CELLS.get(run.scene),
         "vs_main_explore_walked_cells": MAIN_WALKED_CELLS.get(run.scene),
+        "vs_open_loop_free_cells": OPEN_LOOP_FREE_CELLS.get(run.scene),
+        "vs_open_loop_frontier_cells": OPEN_LOOP_FRONTIER_CELLS.get(run.scene),
+        "vs_open_loop_walked_cells": OPEN_LOOP_WALKED_CELLS.get(run.scene),
+        "vs_open_loop_min_up_z": OPEN_LOOP_MIN_UP_Z.get(run.scene),
         "dx_m": run.delta_x(),
         "dy_m": run.delta_y(),
         "dyaw_rad": run.delta_yaw(),
@@ -1692,12 +1941,14 @@ def _scene_limit(run: SceneRun) -> str:
             "Yellow >= 0.50 is not success. Not arrival and not go-anywhere."
         )
     if run.scene == "plant" and not yellow.seen:
-        main_free = MAIN_FREE_CELLS["plant"]
-        main_front = MAIN_FRONTIER_CELLS["plant"]
+        open_free = OPEN_LOOP_FREE_CELLS["plant"]
+        open_front = OPEN_LOOP_FRONTIER_CELLS["plant"]
+        open_walked = OPEN_LOOP_WALKED_CELLS["plant"]
         return (
-            f"Prefer FAIL: empty floor. Vision-free cells {free} (main {main_free}), "
-            f"frontiers {frontiers} (main {main_front}), walked cells {walked} "
-            f"(main {MAIN_WALKED_CELLS['plant']}), floor-feature cells {feature}. "
+            f"Prefer FAIL: empty floor. Vision-free cells {free} (open-loop {open_free}), "
+            f"frontiers {frontiers} (open-loop {open_front}), walked cells {walked} "
+            f"(open-loop {open_walked}), floor-feature cells {feature}. "
+            f"min_up_z {run.min_up_z:.3f} (open-loop {OPEN_LOOP_MIN_UP_Z['plant']:.3f}). "
             "No kitchen-like yellow. Frontiers are the edge of that floor paint, "
             "not rooms. Not go-anywhere."
         )
@@ -2000,12 +2251,82 @@ def test_last_mile_query() -> list[str]:
     return failures
 
 
+def test_frontier_windows() -> list[str]:
+    """The dense rim picks a second left. A right-heavy rim does not."""
+    failures: list[str] = []
+    source = inspect.getsource(next_frontier_phase)
+    _expect("query_kitchen_like_yellow" not in source, "frontier window reads yellow", failures)
+    _expect("soft_goal" not in source, "frontier window is the soft-XY probe", failures)
+    _expect("dense=True" in inspect.getsource(frontier_weights), "frontier weights use the finder ring", failures)
+    idle = FrontierDrive()
+    empty = ExploreMap.empty()
+    _expect(
+        next_frontier_phase(empty, 0.0, 0.0, 0.0, idle, FRONTIER_WALK_S) is None,
+        "frontier follow started before the claimed left",
+        failures,
+    )
+    prefix = claimed_prefix(FRONTIER_WALK_S)
+    _expect(
+        [phase.name for phase in prefix] == ["approach", "arc-left"],
+        f"prefix {prefix}",
+        failures,
+    )
+    _expect(abs(prefix[0].duration_s - 15.0) < 1e-9, "approach length", failures)
+    _expect(abs(prefix[1].duration_s - 12.5) < 1e-9 and prefix[1].yaw_rate > 0.0, "claimed left", failures)
+    short = claimed_prefix(2.0)
+    _expect(len(short) == 1 and short[0].name == "approach" and abs(short[0].duration_s - 2.0) < 1e-9, f"short prefix {short}", failures)
+    left_drive = FrontierDrive(left_holds=1, follow=True)
+    left_map = ExploreMap.empty()
+    _paint_free_rect(left_map, 0.3, 1.2, 0.4, 1.4)
+    gap = next_frontier_phase(left_map, 0.0, 0.0, 0.0, left_drive, FRONTIER_WALK_S)
+    _expect(gap is not None and gap.name == "frontier-gap", f"left rim gap {gap}", failures)
+    if gap is not None:
+        _expect(abs(gap.duration_s - FRONTIER_GAP_S) < 1e-9, f"gap duration {gap.duration_s}", failures)
+        _expect(abs(gap.vx - EXPLORE_VX) < 1e-9 and abs(gap.yaw_rate) < 1e-9, "gap vel", failures)
+        _expect(_within_caps(gap.vx, gap.yaw_rate), "gap outside caps", failures)
+    left_drive.gap_done = True
+    second = next_frontier_phase(left_map, 0.0, 0.0, 0.0, left_drive, FRONTIER_WALK_S)
+    _expect(second is not None and second.name == "frontier-left", f"second left {second}", failures)
+    if second is not None:
+        _expect(abs(second.duration_s - FRONTIER_SECOND_LEFT_S) < 1e-9, "second left duration", failures)
+        _expect(second.yaw_rate > 0.0 and abs(second.vx - EXPLORE_VX) < 1e-9, "second left vel", failures)
+        _expect(not (abs(second.vx) <= 1e-9 and abs(second.yaw_rate) > 1e-9), "second left is vx=0 yaw", failures)
+    left_drive.second_left_done = True
+    left_drive.left_holds = 2
+    right = next_frontier_phase(left_map, 0.0, 0.0, 0.0, left_drive, FRONTIER_WALK_S)
+    _expect(right is not None and right.name == "arc-right" and right.yaw_rate < 0.0, f"right hold {right}", failures)
+    if right is not None:
+        _expect(abs(right.duration_s - FRONTIER_RIGHT_HOLD_S) < 1e-9, "right hold duration", failures)
+        _expect(abs(right.vx - EXPLORE_VX) < 1e-9, "right hold vx", failures)
+    left_drive.right_holds = 1
+    _expect(
+        next_frontier_phase(left_map, 0.0, 0.0, 0.0, left_drive, FRONTIER_WALK_S) is None,
+        "a third yaw window was planned",
+        failures,
+    )
+    right_drive = FrontierDrive(left_holds=1, follow=True)
+    right_map = ExploreMap.empty()
+    _paint_free_rect(right_map, 0.3, 1.2, -1.4, -0.4)
+    skipped = next_frontier_phase(right_map, 0.0, 0.0, 0.0, right_drive, FRONTIER_WALK_S)
+    _expect(
+        skipped is not None and skipped.name == "arc-right" and skipped.yaw_rate < 0.0,
+        f"right rim should skip the second left, got {skipped}",
+        failures,
+    )
+    _expect(abs(FRONTIER_GAP_S - 4.0) < 1e-9, "gap moved", failures)
+    _expect(abs(FRONTIER_SECOND_LEFT_S - 8.0) < 1e-9, "second left moved", failures)
+    _expect(abs(FRONTIER_RIGHT_HOLD_S - 34.0) < 1e-9, "right hold moved", failures)
+    _expect(abs(ARRIVAL_YELLOW_FRAC - 0.50) < 1e-9 and abs(ARRIVAL_REMAINING_M - 0.25) < 1e-9, "arrival bars moved", failures)
+    return failures
+
+
 def self_test() -> int:
     failures: list[str] = []
     failures.extend(test_caps_and_plant())
     failures.extend(test_classify_colors())
     failures.extend(test_policy_uses_frontiers_not_yellow())
     failures.extend(test_claimed_schedule())
+    failures.extend(test_frontier_windows())
     failures.extend(test_last_mile_query())
     failures.extend(test_hole_fill_and_soft_goal())
     failures.extend(test_stand_scenes())
@@ -2111,6 +2432,10 @@ def demo(walk_s: float) -> int:
         "max_range_m": MAX_RANGE_M,
         "frontier_max_m": FRONTIER_MAX_M,
         "empty_forward_extend_s": EMPTY_FORWARD_EXTEND_S,
+        "frontier_gap_s": FRONTIER_GAP_S,
+        "frontier_second_left_s": FRONTIER_SECOND_LEFT_S,
+        "frontier_right_hold_s": FRONTIER_RIGHT_HOLD_S,
+        "frontier_walk_s": FRONTIER_WALK_S,
         "soft_goal_range_m": SOFT_GOAL_RANGE_M,
         "soft_goal_hold_s": SOFT_GOAL_HOLD_S,
         "arrival_yellow_frac": ARRIVAL_YELLOW_FRAC,
@@ -2124,6 +2449,10 @@ def demo(walk_s: float) -> int:
         "main_explore_free_cells": MAIN_FREE_CELLS,
         "main_explore_frontier_cells": MAIN_FRONTIER_CELLS,
         "main_explore_walked_cells": MAIN_WALKED_CELLS,
+        "open_loop_free_cells": OPEN_LOOP_FREE_CELLS,
+        "open_loop_frontier_cells": OPEN_LOOP_FRONTIER_CELLS,
+        "open_loop_walked_cells": OPEN_LOOP_WALKED_CELLS,
+        "open_loop_min_up_z": OPEN_LOOP_MIN_UP_Z,
         "honesty": HONESTY,
         "prefer_fail_bar": {
             "tonight": (
@@ -2132,8 +2461,10 @@ def demo(walk_s: float) -> int:
                 "on the 8-connected edge of that fan, and a yellow bearing when the "
                 "backsplash is in frame. A soft XY is frozen along that bearing. "
                 "Yellow >= 0.50 is not success and arrival is not claimed. "
-                "The empty plant holds the claimed vel(+0.056, ±0.25) windows and "
-                "then one claimed forward. A second yaw hold is not claimable. "
+                "The empty plant holds the claimed left prefix, then a 4 s forward "
+                "gap and an 8 s left window when the dense rim is still left, then "
+                "one vel(+0.056, -0.25) for 34 s. A 6 s gap swallows that left window. "
+                "About 38 s of the right hold crosses up_z 0.90. "
                 "Rooms are separate XML files, not one space. Pose is the sim freejoint. "
                 "vx=0 does not turn. Arrival is still yellow >= 0.50 and torso-to-kitchen <= 0.25 m."
             ),
@@ -2172,7 +2503,7 @@ def main() -> int:
     parser.add_argument(
         "--walk-s",
         type=float,
-        default=DEMO_WALK_S + EMPTY_FORWARD_EXTEND_S,
+        default=FRONTIER_WALK_S,
     )
     args = parser.parse_args()
     if args.self_test:
