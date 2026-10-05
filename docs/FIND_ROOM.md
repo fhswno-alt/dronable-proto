@@ -2,46 +2,56 @@
 
 `scripts/find_room.py` reads the frozen kit_cam. It does not edit `scripts/find_kitchen.py`. The kitchen Prefer PASS walk on main stays the slab cue.
 
-The model is local OWL-ViT `google/owlvit-base-patch32` at Hub revision `cbc355fb364588351c5d51c7f74465e8e7ec6f72`. No paid API. Objects vote for a room. One score cutoff, **0.06**, applies to every scene. It is unchanged. Room-name labels are not the query.
+The model is local OWL-ViT `google/owlvit-base-patch32` at Hub revision `cbc355fb364588351c5d51c7f74465e8e7ec6f72`. No paid API. Objects vote for a room. One score cutoff, **0.06**, applies to every scene. It is unchanged. The commit margin stays **0.15**. Room-name labels are not the query.
 
 This measurement places the stand pose at x = 0.0, 0.3, 0.6, 0.9, and 1.2 m, with y = 0 and yaw = 0, then reads kit_cam. It does not step the gait and it does not publish vel. It does not claim arrival.
 
-Object map: fridge, oven, stove, kitchen sink, and cupboard vote kitchen. Toilet, bathtub, and bathroom sink vote bathroom. Bed votes bedroom. Sofa, TV, and couch vote living. Door and hallway vote entrance.
+Object map: fridge, oven, stove, kitchen sink, and cupboard vote kitchen. Toilet, bathtub, and bathroom sink vote bathroom. Bed, pillow, nightstand, wardrobe, lamp, and rug vote bedroom. Sofa, TV, and couch vote living. Door and hallway vote entrance.
 
-A room's frame vote is the sum of its object scores, and only when at least one of those objects clears 0.06. The path vote is that sum over the last **3** poses. The pose commits when the leader clears the runner-up by **0.15**. A smaller gap stays undecided. Bearing is the score-weighted mean of the committed room's boxes that clear 0.06, over the same three poses.
+A room's frame vote is the sum of its object scores, and only when at least one of those objects clears 0.06. The path vote is that sum over the last **3** poses. The pose commits when the leader clears the runner-up by **0.15**. A smaller gap stays undecided. On the bedroom scene, an undecided straight pose logs a re-look and yaws the stand to +0.55, +0.90, −0.75, and −1.05 rad, toward the nightstand and then the dresser. The first commit ends that look. A pose that still leads by less than 0.15 stays undecided.
 
 ## Detection quality
 
-| Scene | Hits | Commit | Best object | Committed false | Raw objects ≥ 0.06 that lose the vote | Bearing std | Max step |
+| Scene | Hits | Straight | Re-looks | Commit | Committed false | Bearing std | Max step |
 |--|--|--|--|--|--|--|--|
-| Kitchen | 5/5 | kitchen, lead **0.181** | fridge **0.125** | none | none | **0.233** | **0.307** |
-| Bathroom | 5/5 | bathroom, lead **0.559** | toilet **0.399** | none | cupboard 0.149, kitchen sink 0.087, fridge 0.074 | **0.048** | **0.052** |
-| Living | 5/5 | living, lead **0.369** | couch **0.245** | none | bed 0.108, cupboard 0.089, fridge 0.065 | **0.029** | **0.056** |
-| Bedroom | 0/5 | none, closest lead **0.121** | bed **0.102** | none | couch 0.099, bathtub 0.092, sofa 0.082, cupboard 0.078 | — | — |
-| Entrance | 5/5 | entrance, lead **0.188** | door **0.164** | none | none | **0.005** | **0.007** |
-| Empty plant | 0/5 | none | **0.010** (hallway) | none | none | — | — |
+| Kitchen | 5/5 | 5 | 0 | kitchen, lead **0.181** | none | **0.233** | **0.307** |
+| Bathroom | 5/5 | 5 | 0 | bathroom, lead **0.559** | none | **0.048** | **0.052** |
+| Living | 4/5 | 4 | 0 | living, lead **0.275** | none | **0.008** | **0.016** |
+| Bedroom | 3/5 | 2 | 3 | bedroom, lead **0.218** | none | **0.326** | **0.788** |
+| Entrance | 0/5 | 0 | 0 | bedroom on 4 poses | wardrobe 0.150, rug 0.093, nightstand 0.072 | — | — |
+| Empty plant | 0/5 | 0 | 0 | none | none | — | — |
 
-The empty plant stays under 0.06. Entrance and living still hit 5/5.
+Kitchen's mean-bearing step stays **0.307** rad. The empty plant peaks at **0.010**. Bathroom does not commit the kitchen objects or the nightstand. The bedroom sum does commit on the entrance, and the living room loses the pose at x = 0.0 m.
 
 ### Kitchen
 
-Cupboard and fridge both clear 0.06, and both vote kitchen. The raw fridge box at x = 0.6 m sits at bearing −0.891. The three-pose mean at that pose is −0.118. The mean then moves through −0.224 to −0.398 as the window slides. The largest step of the mean is 0.307 rad, down from the raw box step of 1.072. All five poses commit kitchen. The smallest lead is 0.181.
+Unchanged from the previous tip. Cupboard and fridge carry the vote. All five poses commit. The smallest lead is 0.181. The new bedroom prompts stay under 0.06 on this scene (wardrobe peaks at 0.053).
 
 ### Bathroom
 
-Toilet, bathtub, and bathroom sink sum ahead of the kitchen objects on every pose. The smallest lead is 0.559. Toilet still has the highest single score, 0.399. Cupboard 0.149, kitchen sink 0.087, and fridge 0.074 still clear 0.06, and none of them commits. The mean bearing stays between +0.290 and +0.410 because the bathtub box is in the same sum. Its largest step is 0.052 rad.
+Toilet, bathtub, and bathroom sink still lead on every pose. The smallest lead is 0.559. Nightstand now clears 0.06 as well (peak 0.101), with cupboard 0.149, kitchen sink 0.087, and fridge 0.074. None of them commits.
 
 ### Living
 
-Couch, sofa, and TV keep the living vote ahead on every pose. The smallest lead is 0.369. Bed 0.108, cupboard 0.089, and fridge 0.065 clear 0.06 and do not commit. The mean bearing stays near −0.20 to −0.12. Its largest step is 0.056 rad.
+Four poses commit. At x = 0.0 m the lead falls to 0.086, under 0.15, so that pose stays undecided. Rug 0.164, nightstand 0.114, and pillow 0.079 are what shrink the lead. Couch still has the highest single score, 0.240.
 
 ### Bedroom
 
-No pose commits. The largest lead in the window is 0.121, under 0.15, so the pose stays undecided. At x = 1.2 m the raw top object is the bathtub at 0.092 and the window lead is 0.016, so the bathtub does not win. Bed peaks at 0.102 and does not clear the margin against couch and sofa.
+Three poses commit. The bathtub does not win any of them.
+
+| x | Straight | After re-look |
+|--|--|--|
+| 0.0 | undecided, lead 0.058 | still undecided after all four yaws |
+| 0.3 | undecided, lead 0.117 | commits at yaw −1.05, lead 0.218, bed 0.080 and nightstand 0.078 |
+| 0.6 | undecided, lead 0.117 | still undecided after all four yaws |
+| 0.9 | commits, lead 0.271, rug 0.073 | no re-look |
+| 1.2 | commits, lead 0.242 | no re-look. Raw top is the bathtub at 0.092, and it does not win |
+
+The yaws toward the nightstand (+0.55 and +0.90) drop the bed under 0.06 and do not raise the nightstand or the lamp over 0.06. The pose stays a re-look, not a forced commit.
 
 ### Entrance
 
-Door wins all five poses. Hallway stays under 0.06. The smallest lead is 0.188. The mean bearing stays within about ±0.01. Its largest step is 0.007 rad.
+Door remains the highest single score (0.112 to 0.164). Wardrobe scores 0.101 to 0.150 on that same view, and with rug and nightstand the bedroom sum leads by as much as 0.442. Four poses commit bedroom. x = 0.0 m leads by 0.102 and stays undecided. This is a wrong commit. The margin was not lowered to undo it.
 
 ## Not a walk
 
