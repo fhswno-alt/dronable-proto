@@ -80,10 +80,13 @@ slews it back to LOOK_ARM_SCALE. Both stay inside the existing ±0.7 Nm clip.
 Reverse keeps the un-lifted knee: a shorter DS or more swing dorsiflex
 dropped the retreat under up_z 0.90. CP swing and mild stance VIK stay on.
 Feet, friction, kp, and ±2.1 Nm are unchanged; the legs still pin at 2.1 Nm.
-Balance assist stays off (it locks yaw and fakes speed). Residual npz stays
-off. This is not a clean-walk or Gate E PASS. If many legs pin, or up_z
-approaches a tip, applied velocity is capped (not compounded). Tip / collapse
-latches mode=fault and stands.
+Balance assist stays off (it locks yaw and fakes speed). The stance-vx npz
+residual stays off. A forward-only swing residual (hold, contact preload,
+stance push) is in this file and measured off: the swing knee is already on
+the ±2.1 Nm clip, and the variants that stay upright do not raise the median
+sole enough to see. This is not a clean-walk or Gate E PASS.
+If many legs pin, or up_z approaches a tip, applied velocity is capped (not
+compounded). Tip / collapse latches mode=fault and stands.
 
 Honesty: pure yaw (vx=0) still runs a reduced forward CPG because this plant
 has no turn-in-place gait, so some +X creep is expected. Reverse mirrors hip
@@ -235,6 +238,35 @@ LOOK_TOE_RIGHT = 0.12
 LOOK_RIGHT_STEP_ASYM = 0.10
 # vx=0 and yaw!=0: reduced forward CPG so a step exists to yaw on.
 INPLACE_YAW_AMP = 0.35
+# Swing residual. Forward only, after CP swing and stance VIK. Defaults off.
+# Measured on the shipped gait, straight walk, swing sole median 2.31 cm,
+# contact fraction during swing 0.00 (the foot is already ~2 cm up, so a
+# contact-triggered swing kick never fires). Knee / hip-pitch / ankle-pitch
+# sit on the ±2.1 Nm clip for much of the swing; position error is several
+# tenths of a radian, so more swing flexion command does not add torque.
+#   hold (don't reverse into extension while sole < 4.5 cm): median 2.31 cm
+#   contact preload 0.20 rad while the foot is still down: median 2.45 cm
+#   preload 0.45 rad and above lowers the sole (the hip crouches)
+#   stance push 0.10 rad: median 2.59 cm, straight yaw +5.6 deg in 3 s
+#   stance push 0.25 rad: median 2.84 cm, straight yaw +9.4 deg in 3 s
+#   stance push 0.40 rad: tips (min up_z −1)
+# None of the upright cases is a visible step, and the larger pushes walk
+# off heading. Left off so the open-loop baseline (arms ~0.67 rad, sole
+# ~2.4 cm, left arc ~+61 deg) stays the shipped gait. Not a torque or period
+# change. Reverse never takes it.
+USE_SWING_HOLD_RESIDUAL = False
+SWING_HOLD_CLEAR_M = 0.045
+SWING_HOLD_S_MAX = 0.72
+SWING_HOLD_FADE = 0.12
+SWING_HOLD_MARGIN = 0.05
+SWING_HOLD_CLIP = 0.35
+USE_SWING_PRELOAD = False
+SWING_PRELOAD_RAD = 0.20
+SWING_PRELOAD_PHASE0 = 0.48
+USE_STANCE_PUSH = False
+STANCE_PUSH_RAD = 0.10
+STANCE_PUSH_PHASE0 = 0.22
+STANCE_PUSH_PHASE1 = 0.48
 
 # Joint-space constants, scaled into velocity units (see module docstring).
 DEADBAND_VX = TELEOP_DEADBAND * VX_FWD_CAP
@@ -804,6 +836,67 @@ def style_forward_step(
         qdes[name] = swing_joint * blend
 
 
+def swing_hold_residual(
+    sole_m: float, swing_s: float, flex_q: float, flex_cmd: float,
+) -> float:
+    """Extra flexion (rad) so a low swing sole is not yanked into extension.
+
+    Zero when the sole is already clear, the landing fade has started, or
+    the CPG is still commanding more flexion than the joint has reached.
+    The return value is added in the flexion direction; it does not exceed
+    the gap up to the current joint plus a small margin.
+    """
+    if not USE_SWING_HOLD_RESIDUAL:
+        return 0.0
+    if swing_s < 0.0 or swing_s >= SWING_HOLD_S_MAX:
+        return 0.0
+    if sole_m >= SWING_HOLD_CLEAR_M:
+        return 0.0
+    if flex_cmd >= flex_q + SWING_HOLD_MARGIN:
+        return 0.0
+    fade_at = SWING_HOLD_S_MAX - SWING_HOLD_FADE
+    margin = SWING_HOLD_MARGIN
+    if swing_s > fade_at:
+        # Fade the margin only. Scaling the whole gap left the error negative,
+        # so the knee stayed on the extension clip and the sole did not move.
+        fade = max(0.0, (SWING_HOLD_S_MAX - swing_s) / max(SWING_HOLD_FADE, 1e-6))
+        margin *= fade
+    gap = (flex_q + margin) - flex_cmd
+    return min(SWING_HOLD_CLIP, max(0.0, gap))
+
+
+def swing_preload_residual(leg_phase: float, ds_end: float, in_contact: bool) -> float:
+    """Extra flexion (rad) on a planted foot that is about to swing.
+
+    Ramps from SWING_PRELOAD_PHASE0 to toe-off. Zero once the foot is up
+    or the leg is already in swing.
+    """
+    if not USE_SWING_PRELOAD or not in_contact:
+        return 0.0
+    if leg_phase < SWING_PRELOAD_PHASE0 or leg_phase >= ds_end:
+        return 0.0
+    span = max(ds_end - SWING_PRELOAD_PHASE0, 1e-6)
+    u = max(0.0, min(1.0, (leg_phase - SWING_PRELOAD_PHASE0) / span))
+    u = u * u * (3.0 - 2.0 * u)
+    return SWING_PRELOAD_RAD * u
+
+
+def stance_push_residual(leg_phase: float, in_contact: bool) -> float:
+    """Knee extension (positive rad) on a planted stance leg.
+
+    The caller subtracts this from the flexion command. Zero in swing,
+    in double support, and when the foot is up.
+    """
+    if not USE_STANCE_PUSH or not in_contact:
+        return 0.0
+    if leg_phase < STANCE_PUSH_PHASE0 or leg_phase >= STANCE_PUSH_PHASE1:
+        return 0.0
+    span = max(STANCE_PUSH_PHASE1 - STANCE_PUSH_PHASE0, 1e-6)
+    u = max(0.0, min(1.0, (leg_phase - STANCE_PUSH_PHASE0) / span))
+    # Peak mid-window, off at both ends, so toe-off is not a step in command.
+    return STANCE_PUSH_RAD * math.sin(math.pi * u)
+
+
 def swing_hip_yaw_scale(yaw_rate: float, direction: int, leg_phase: float) -> float:
     """Stance and double-support keep the full hip-yaw command.
 
@@ -1275,6 +1368,60 @@ class SteerSession:
                 self.model, self.data, self.act_idx, phi, amp,
                 self.bid_lf, self.bid_rf, self.gid_floor,
             )
+        if amp > 0.05 and direction > 0 and (
+            USE_SWING_HOLD_RESIDUAL or USE_SWING_PRELOAD or USE_STANCE_PUSH
+        ):
+            self._apply_swing_residual(phi)
+
+    def _apply_swing_residual(self, phi: float) -> None:
+        """Contact preload, then a swing hold. Forward only. No forcerange edit.
+
+        Preload bends a still-planted foot that is about to swing. The hold
+        keeps a low sole from being pulled straight once the CPG command falls.
+        Both write ``data.ctrl`` after CP swing and stance VIK.
+        """
+        ds_frac = max(0.08, min(0.55, float(wg.DS_S) / max(float(wg.GAIT_T), 1e-3)))
+        ds_end = 0.50 + ds_frac
+        swing_len = max(0.18, 1.0 - ds_end)
+        for side, pref, flex_sign, gid, bid in (
+            ("L", "l_", 1.0, self.gid_lfoot, self.bid_lf),
+            ("R", "r_", -1.0, self.gid_rfoot, self.bid_rf),
+        ):
+            leg_phase = wg.phase_leg(phi, side)
+            knee = f"{pref}knee"
+            knee_act = wg.act_name(knee)
+            if knee_act not in self.act_idx:
+                continue
+            knee_i = self.act_idx[knee_act]
+            in_contact = wg.foot_floor_contact(
+                self.model, self.data, bid, self.gid_floor,
+            )
+            if leg_phase < ds_end:
+                delta = swing_preload_residual(leg_phase, ds_end, in_contact)
+                delta -= stance_push_residual(leg_phase, in_contact)
+            else:
+                jid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, knee)
+                if jid < 0:
+                    continue
+                flex_q = flex_sign * float(self.data.qpos[self.model.jnt_qposadr[jid]])
+                flex_cmd = flex_sign * float(self.data.ctrl[knee_i])
+                sole_m = float(
+                    self.data.geom_xpos[gid][2] - self.model.geom_size[gid][2]
+                )
+                swing_s = (leg_phase - ds_end) / swing_len
+                delta = swing_hold_residual(sole_m, swing_s, flex_q, flex_cmd)
+            if abs(delta) < 1e-6:
+                continue
+            self.data.ctrl[knee_i] = float(_clamp(
+                float(self.data.ctrl[knee_i]) + flex_sign * delta, -2.0, 2.0,
+            ))
+            ank = f"{pref}ank_pitch"
+            ank_act = wg.act_name(ank)
+            if ank_act in self.act_idx:
+                ank_i = self.act_idx[ank_act]
+                self.data.ctrl[ank_i] = float(_clamp(
+                    float(self.data.ctrl[ank_i]) + flex_sign * delta, -1.2, 1.2,
+                ))
 
     def _substep(self, amp: float, direction: int) -> None:
         # Stop already zeroed applied_vx. Hold the stance damper for
@@ -1829,7 +1976,11 @@ def run_demo(
         f"arm_scale={LOOK_ARM_SCALE_STRAIGHT:.1f}/{LOOK_ARM_SCALE:.1f} "
         f"toe_L={LOOK_TOE_LEFT:.2f} toe_R={LOOK_TOE_RIGHT:.2f} "
         f"amp=|vx|/{GAIT_AMP_VX:.3f} "
-        "assist=OFF ankle_cop=ON cp_swing=ON stance_vik=ON residual=OFF door=OFF"
+        "assist=OFF ankle_cop=ON cp_swing=ON stance_vik=ON "
+        f"swing_hold={'ON' if USE_SWING_HOLD_RESIDUAL else 'OFF'} "
+        f"preload={'ON' if USE_SWING_PRELOAD else 'OFF'} "
+        f"stance_push={'ON' if USE_STANCE_PUSH else 'OFF'} "
+        "stance_residual=OFF door=OFF"
     )
     n_ctrl = int(duration * wg.CTRL_HZ)
     last_print = -1.0
@@ -2053,6 +2204,56 @@ def test_bus() -> list[str]:
     q_right = dict(q_plain)
     style_forward_step(q_right, gait_t, -YAW_RATE_CAP)
     _expect(q_right["l_hip_yaw"] > 0.02, "left swing foot is not toed right", failures)
+    global USE_SWING_HOLD_RESIDUAL, USE_SWING_PRELOAD, USE_STANCE_PUSH
+    _expect(
+        not USE_SWING_HOLD_RESIDUAL and not USE_SWING_PRELOAD and not USE_STANCE_PUSH,
+        "swing residual shipped on; measured path stays off",
+        failures,
+    )
+    saved_flags = (USE_SWING_HOLD_RESIDUAL, USE_SWING_PRELOAD, USE_STANCE_PUSH)
+    USE_SWING_HOLD_RESIDUAL = True
+    USE_SWING_PRELOAD = True
+    USE_STANCE_PUSH = True
+    try:
+        _expect(
+            swing_hold_residual(0.06, 0.50, 1.0, 0.6) == 0.0,
+            "swing hold fired on a clear sole",
+            failures,
+        )
+        _expect(
+            swing_hold_residual(0.02, 0.50, 0.4, 1.0) == 0.0,
+            "swing hold fired while the CPG was still flexing",
+            failures,
+        )
+        _expect(
+            swing_hold_residual(0.02, 0.95, 1.0, 0.4) == 0.0,
+            "swing hold fired in the landing window",
+            failures,
+        )
+        held = swing_hold_residual(0.02, 0.50, 1.0, 0.55)
+        _expect(
+            abs(held - min(SWING_HOLD_CLIP, 1.0 + SWING_HOLD_MARGIN - 0.55)) < 1e-9,
+            f"swing hold did not cover the extension gap ({held})",
+            failures,
+        )
+        _expect(
+            swing_preload_residual(0.20, 0.75, True) == 0.0,
+            "preload fired in early stance",
+            failures,
+        )
+        _expect(
+            swing_preload_residual(0.60, 0.75, False) == 0.0,
+            "preload fired on an airborne foot",
+            failures,
+        )
+        pre = swing_preload_residual(0.70, 0.75, True)
+        _expect(0.0 < pre <= SWING_PRELOAD_RAD, f"preload ramp {pre}", failures)
+        _expect(stance_push_residual(0.10, True) == 0.0, "stance push fired in early stance", failures)
+        _expect(stance_push_residual(0.35, False) == 0.0, "stance push fired in the air", failures)
+        pushed = stance_push_residual(0.35, True)
+        _expect(0.0 < pushed <= STANCE_PUSH_RAD, f"stance push {pushed}", failures)
+    finally:
+        USE_SWING_HOLD_RESIDUAL, USE_SWING_PRELOAD, USE_STANCE_PUSH = saved_flags
     return failures
 
 
