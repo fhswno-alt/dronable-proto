@@ -3,28 +3,55 @@
   Vision room for kit_cam. Includes the frozen walk plant and does not
   edit it. Furniture is named scene geometry so a later vision step can
   point at "kitchen". This is not a navigation map, not a planner input,
-  and not a door. One camera: the plant's kit_cam.
+  and not a mechanism. One camera: the plant's kit_cam.
+  Meshes are CC0 textured models (see docs/ROOM_ASSETS.md). Static bodies.
 -->
 <mujoco model="room_kitchen">
   <include file="ainex_hiwonder/ainex_controls_m2_145.xml"/>
+  <asset>
+    <texture name="room_floor" type="2d" file="assets/rooms/textures/wood_floor.png"/>
+    <material name="room_floor" texture="room_floor" texrepeat="3 3" specular="0.04"/>
+    <texture name="room_wall" type="2d" file="assets/rooms/textures/beige_wall.png"/>
+    <material name="room_wall" texture="room_wall" texrepeat="2.2 1.3" specular="0.02"/>
+    <texture name="room_counter" type="2d" file="assets/rooms/kitchen/upper.png"/>
+    <material name="room_counter" texture="room_counter" specular="0.18"/>
+    <mesh name="room_counter" file="assets/rooms/kitchen/upper.obj"/>
+    <texture name="room_pantry" type="2d" file="assets/rooms/kitchen/cabinet.png"/>
+    <material name="room_pantry" texture="room_pantry" specular="0.16"/>
+    <mesh name="room_pantry" file="assets/rooms/kitchen/cabinet.obj"/>
+    <texture name="room_stove" type="2d" file="assets/rooms/kitchen/stove.png"/>
+    <material name="room_stove" texture="room_stove" specular="0.28"/>
+    <mesh name="room_stove" file="assets/rooms/kitchen/stove.obj"/>
+    <texture name="room_kettle" type="2d" file="assets/rooms/kitchen/kettle.png"/>
+    <material name="room_kettle" texture="room_kettle" specular="0.35"/>
+    <mesh name="room_kettle" file="assets/rooms/kitchen/kettle.obj"/>
+    <texture name="room_table" type="2d" file="assets/rooms/kitchen/table.png"/>
+    <material name="room_table" texture="room_table" specular="0.12"/>
+    <mesh name="room_table" file="assets/rooms/kitchen/table.obj"/>
+    <texture name="room_chair" type="2d" file="assets/rooms/kitchen/chair.png"/>
+    <material name="room_chair" texture="room_chair" specular="0.12"/>
+    <mesh name="room_chair" file="assets/rooms/kitchen/chair.obj"/>
+  </asset>
   <worldbody>
+    <light name="room_key" pos="0.25 -0.5 2.3" dir="0.55 0.12 -1" diffuse="0.78 0.74 0.66"/>
+    <light name="room_fill" pos="0.15 1.2 1.7" dir="0.45 -0.4 -1" diffuse="0.32 0.36 0.42"/>
+    <geom name="room_floor" type="plane" pos="0 0 0.006" size="3 3 0.02" material="room_floor" contype="0" conaffinity="0"/>
+    <geom name="room_wall" type="box" pos="2.55 0 1.25" size="0.04 2.4 1.25" material="room_wall" contype="0" conaffinity="0"/>
     <!-- Counter faces the robot (+X is kit_cam look). Static bodies, no joints. -->
-    <body name="kitchen" pos="1.55 0.05 0">
-      <site name="kitchen" pos="0.05 0 0.90" size="0.015" group="4" rgba="0.95 0.85 0.2 1"/>
-      <geom name="kitchen_cabinet" type="box" size="0.22 0.78 0.42" pos="0 0 0.42" rgba="0.15 0.32 0.78 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
-      <geom name="kitchen_countertop" type="box" size="0.26 0.82 0.025" pos="0.04 0 0.865" rgba="0.90 0.72 0.42 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
-      <geom name="kitchen_backsplash" type="box" size="0.015 0.78 0.16" pos="-0.22 0 1.04" rgba="0.95 0.88 0.30 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
-      <geom name="kitchen_kettle" type="box" size="0.055 0.055 0.07" pos="0.10 0.38 0.96" rgba="0.85 0.12 0.14 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+    <body name="kitchen" pos="1.58 0.10 0">
+      <site name="kitchen" pos="-0.05 0 1.05" size="0.015" group="4" rgba="0.75 0.62 0.35 1"/>
+      <geom name="kitchen_cabinet" type="mesh" mesh="room_counter" material="room_counter" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+      <geom name="kitchen_pantry" type="mesh" mesh="room_pantry" material="room_pantry" pos="0.08 1.72 0" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+      <geom name="kitchen_stove" type="mesh" mesh="room_stove" material="room_stove" pos="0.02 -1.58 0" contype="0" conaffinity="0"/>
+      <geom name="kitchen_kettle" type="mesh" mesh="room_kettle" material="room_kettle" pos="-0.08 0.25 0.68" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
     </body>
-    <body name="table" pos="0.92 -0.58 0">
-      <site name="table" pos="0 0 0.64" size="0.012" group="4" rgba="0.55 0.32 0.16 1"/>
-      <geom name="table_top" type="box" size="0.22 0.16 0.02" pos="0 0 0.62" rgba="0.50 0.28 0.14 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
-      <geom name="table_leg" type="box" size="0.035 0.035 0.30" pos="0 0 0.30" rgba="0.32 0.18 0.10 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+    <body name="table" pos="0.78 -1.15 0">
+      <site name="table" pos="0 0 0.40" size="0.012" group="4" rgba="0.45 0.28 0.14 1"/>
+      <geom name="table_top" type="mesh" mesh="room_table" material="room_table" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
     </body>
-    <body name="chair" pos="0.70 0.50 0">
-      <site name="chair" pos="0 0 0.42" size="0.012" group="4" rgba="0.12 0.55 0.62 1"/>
-      <geom name="chair_seat" type="box" size="0.15 0.15 0.02" pos="0 0 0.40" rgba="0.12 0.55 0.62 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
-      <geom name="chair_back" type="box" size="0.02 0.15 0.16" pos="-0.13 0 0.56" rgba="0.10 0.45 0.55 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+    <body name="chair" pos="0.88 0.95 0">
+      <site name="chair" pos="0 0 0.55" size="0.012" group="4" rgba="0.35 0.22 0.12 1"/>
+      <geom name="chair_seat" type="mesh" mesh="room_chair" material="room_chair" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
     </body>
   </worldbody>
 </mujoco>

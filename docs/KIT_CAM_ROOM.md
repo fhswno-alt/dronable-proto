@@ -2,17 +2,19 @@
 
 These files are vision scenes for the existing `kit_cam`. Each one includes the frozen walk plant `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml` (md5 `71b2c86d133ebc603f58b99c53e496f3`) and adds static bodies. Sites with the same names are labels on that geometry. They are not a map, and nothing here is passed to a planner.
 
-The floor is still the plant's plane. `kit_cam` is still the only camera, still on `head_tilt_link` at `0.050 0.019 0.007`, fovy 104.82. Feet stay 145×86. Leg actuators stay ±2.1 Nm. There is no lidar and no second camera. No room adds a joint. The entrance frame is visual geometry only: jambs, a lintel, side walls, and a mat. There is no hinge, no lever, and no latch.
+The plant's checker plane is still in the included file. Each room adds a non-colliding floor texture plane and a textured back wall as extra worldbody geoms. That is not an edit of the plant. `kit_cam` is still the only camera, still on `head_tilt_link` at `0.050 0.019 0.007`, fovy 104.82. Feet stay 145×86. Leg actuators stay ±2.1 Nm. There is no lidar and no second camera. No room adds a joint. The entrance body is a static visual frame (Poly Haven's castle-door mesh, loaded as `entrance_panel`). There is no hinge, no lever, and no latch.
+
+Furniture is CC0 textured meshes under `mujoco/assets/rooms/`. Licenses, authors, and source URLs are in `docs/ROOM_ASSETS.md`. These stills are a visual domain-gap fix for evaluation. They are not go-anywhere.
 
 | Scene | Bodies | What kit_cam is meant to see |
 |-------|--------|------------------------------|
-| `mujoco/room_kitchen.xml` | `kitchen`, `table`, `chair` | Blue cabinet, wood counter, yellow backsplash, red kettle; brown table; teal chair |
-| `mujoco/room_bathroom.xml` | `bathroom`, `sink`, `toilet` | Cyan tile and a white vanity (not the kitchen yellow); white pedestal sink with a violet faucet; white toilet with a magenta seat |
-| `mujoco/room_living.xml` | `living`, `tv` | Rust sofa (`living`); charcoal television with a pale blue screen |
-| `mujoco/room_bedroom.xml` | `bedroom`, `nightstand` | The bed: purple headboard, indigo duvet band, pink pillows; gray nightstand with a green lamp |
-| `mujoco/room_entrance.xml` | `entrance`, `mat` | Visual doorframe (dark jambs, white trim, teal side walls) and a violet floor mat |
+| `mujoco/room_kitchen.xml` | `kitchen`, `table`, `chair` | Wood counter and tall pantry, stove, kettle; dining table; dining chair. Wood floor, beige wall. No flat yellow backsplash |
+| `mujoco/room_bathroom.xml` | `bathroom`, `sink`, `toilet` | Painted cabinet and ornate mirror on tile; farmhouse sink; round toilet. Marble floor |
+| `mujoco/room_living.xml` | `living`, `tv` | Leather sofa (`living`); CRT television |
+| `mujoco/room_bedroom.xml` | `bedroom`, `nightstand` | Gothic bed; nightstand with an arm lamp. Plaster wall |
+| `mujoco/room_entrance.xml` | `entrance`, `mat` | Static castle-door panel as a visual frame, and a hessian floor mat |
 
-Furniture sits in front of `kit_cam` look (+X), the same idea as the kitchen counter, so a quiet stand sees the named room body.
+Furniture sits in front of `kit_cam` look (+X), so a quiet stand sees the named room body.
 
 ```bash
 MUJOCO_GL=osmesa python scripts/render_kit_cam_room.py
@@ -24,7 +26,7 @@ That stands the robot with the same quiet pose as `scripts/steer_walk.py`, rende
 
 `scripts/steer_walk.py` still loads only the frozen plant by default. Voice can already steer stand / forward / reverse / left / right / left-then-right on that empty checkerboard.
 
-`scripts/find_kitchen.py` is the Prefer FAIL finder for the kitchen scene. "Go to the kitchen" and "go to kitchen" call it only when `room_kitchen.xml` is loaded. The stand frame is painted into the explore map. No logged yellow means no vel. Logged yellow means half-cap `vel(+0.028, yaw)` from `query_kitchen_like_yellow()` and `frontier_cells()`, not from the live blob alone. The torso-to-kitchen distance is one arrival bar, not a path. The world-x budget is 1.10 m. `vx = 0` yaw is not used. This run stopped Prefer FAIL `close` at remaining 0.239 m with settled yellow 0.000, min up_z 0.979. The gap bar alone is not arrival. See `docs/FIND_KITCHEN.md`.
+`scripts/find_kitchen.py` is the Prefer FAIL finder for the kitchen scene. "Go to the kitchen" and "go to kitchen" call it only when `room_kitchen.xml` is loaded. It still keys on kitchen-like yellow (the old flat backsplash). That cue is gone. Thresholds were not retuned and the bars were not lowered. Until an AI retargets the finder, the mesh kitchen Prefer FAILs: no logged yellow means no vel. The numbers in `docs/FIND_KITCHEN.md` are the previous box-scene run (Prefer FAIL `close` at remaining 0.239 m, settled yellow 0.000, min up_z 0.979). The torso-to-kitchen distance is one arrival bar, not a path. The world-x budget stays 1.10 m. `vx = 0` yaw is not used.
 
 The living, bedroom, and entrance scenes have no finder. "Go to the living room", "go to the bedroom", and "go to the entrance" stay refused. Prefer FAIL until an AI finder for that room lands. These scenes do not add a goal command, a map, or an arrival claim. The entrance frame stays visual geometry only.
 
