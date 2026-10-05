@@ -554,3 +554,55 @@ clip tips at 11.76 s. Close-up 7.600 s stays up through the stop
 (forward Δx +12.1 cm, mean vx +2.2 cm/s, stop Δx −1.7 cm, min up_z
 0.993, peak torque 2.34 Nm). Constrained Baseline, yuv420p,
 `+faststart`.
+
+## Deeper swing on the 1.16 s baseline
+
+The 150 ms move and the 1.16 s period stay. Hip pitch is not given a
+larger step. The swing knee command on this clock is 0.75 rad instead
+of 0.62 rad, so the lagged knee lands higher. The LIPM Bézier is still
+0.62 rad. Plant md5 stays `17dc4ff37491c8e61900fd83b5d31f0c`.
+
+At 24 s, upright, min up_z 0.996: knee 0.51 / 0.51 rad, sole p90
+2.11 / 2.69 cm, mean vx +1.71 cm/s, sat_rate 0.001. Upright peaks: hip
+2.44 / 2.32 Nm, knee 1.14 / 1.34 Nm, ankle pitch 1.44 / 2.04 Nm, ankle
+roll 1.72 / 1.92 Nm. No sample reached ±2.45 Nm. The 0.001 sat_rate is
+the 98% flag (2.40 Nm). Both soles clear 2 cm. The knee does not reach
+0.62 rad.
+
+A 0.78 rad command puts the right hip on the rail while `up_z` is still
+1.00 (0.620 s, ω −0.06, kp·e +2.34, F +2.45). A 0.90 rad command reaches
+knee 0.61 rad and sole p90 2.83 / 3.31 cm, and the same hip rail at
+0.604 s. Holding the 0.62 rad target through single support rails the
+hip at 0.52 s and tips by 1.8 s. A faster knee move, hip still at 150 ms,
+does the same: 120 ms reaches knee 0.46 rad and tips at 6.10 s after a
+hip rail at 2.10 s; 100 ms rails the hip at 0.62 s.
+
+## Why 1.7 cm/s against a 7.0 cm/s ceiling
+
+Clock swing-foot travel at x = 0.02 m is 4.07 cm, so
+`2 · 4.07 cm / 1.16 s = 7.0 cm/s`. On the 24 s row the clock still
+runs about −1.94 cm to +2.01 cm in the swing (3.95 cm). The body does
+not.
+
+Per swing, while `up_z` is at least 0.95 (41 swings):
+
+| Quantity | Value |
+| --- | ---: |
+| Clock Δx | 3.95 cm |
+| Swing-foot world Δx | +0.21 cm |
+| Of which, while the foot is unloaded | +0.79 cm |
+| Foot still in contact | 0.16 of the swing |
+| Swing foot relative to the body | +0.20 cm |
+| Body Δx during the swing | +0.01 cm |
+| Stance-foot slip | +0.16 cm |
+| Swing hip command, peak to peak | 0.474 rad |
+| Swing hip achieved, peak to peak | 0.212 rad |
+| Stance hip command (clipped) | 0.070 rad |
+| Stance hip achieved | 0.089 rad |
+
+The foot is mostly in the air, and it does not travel the clock. The
+hip is asked for 0.47 rad and delivers 0.21 rad, which is about 0.8 cm
+of airborne travel instead of 4 cm. Stance slip is +0.16 cm, forward,
+not a backward skate. The stance hip stays on the 0.070 rad cap, and
+the body barely moves during the swing. Mean vx stays +1.7 cm/s.
+Soft-pass is off. This is not a kit walk.

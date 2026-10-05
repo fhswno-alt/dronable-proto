@@ -60,6 +60,13 @@ VENDOR_STEP_M = 0.020
 # flex 0.10 / hip 0.16 puts the sole on the floor about 2 cm ahead.
 # A taller clear_m scales the same shape; the servo band may not finish it.
 FLEX_PEAK = 0.62
+# GaitManager swing only. The 150 ms move lags a 0.62 rad sine and the
+# knee stops near 0.42 rad. A 0.75 rad command is the largest that
+# stayed off the ±2.45 Nm hip rail for 24 s at period 1.16 s: the knee
+# then reaches about 0.51 rad and both soles clear 2 cm. 0.78 rad and
+# a faster knee move put the upright hip on the rail. The LIPM Bézier
+# still uses FLEX_PEAK.
+GM_FLEX_CMD = 0.75
 FLEX_LAND = 0.10
 HIP_RISE = 0.06
 HIP_REACH = 0.24
@@ -413,10 +420,10 @@ class LipmWalker:
         lat = max(-1.0, min(1.0, (-dy / 0.22) / SHIFT_HIP_L))
         self.lat = lat
         # The published z is a foot-to-foot gap. Map that gap through the
-        # joint Bézier measured on this plant (0.62 rad knee clears ~2 cm)
-        # instead of a cartesian target the stance foot cannot follow
-        # through the floor. x maps through the same hip scale (0.24 rad
-        # per 2 cm). A loaded swing foot keeps its current x.
+        # joint Bézier, then GM_FLEX_CMD, instead of a cartesian target
+        # the stance foot cannot follow through the floor. x maps through
+        # the same hip scale (0.24 rad per 2 cm) and is not enlarged.
+        # A loaded swing foot keeps its current x.
         z_floor = min(left.z, right.z)
         for side in ("L", "R"):
             shift = shifts[side]
@@ -446,7 +453,7 @@ class LipmWalker:
                 use_x = 0.0
             scale_h = lift / VENDOR_CLEAR_M
             scale_x = use_x / VENDOR_STEP_M
-            flex = max(0.0, scale_h) * FLEX_PEAK
+            flex = max(0.0, scale_h) * GM_FLEX_CMD
             dhip = scale_x * HIP_LAND
             if phase != side:
                 dhip = max(-self.cfg.gm_stance_max, min(self.cfg.gm_stance_max, dhip))
