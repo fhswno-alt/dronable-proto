@@ -1360,6 +1360,5 @@ From 4 s to 8 s, `vel(+0.150, +0.25)` yaws at +0.217 rad/s and
 `vel(+0.150, −0.25)` yaws at −0.221 rad/s. The magnitudes differ by
 2.0%. Straight walk over that same span is −0.003 rad/s. Knees sit on
 2.330 Nm. The worst other leg sample is hip pitch at 2.401 Nm.
-`vel(0, +0.25)` yaws at +0.213 rad/s. The clip is
-`previews/bus_kit_yaw_left.mp4`.
+`vel(0, +0.25)` yaws at +0.213 rad/s.
 
