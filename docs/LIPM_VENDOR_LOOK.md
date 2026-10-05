@@ -253,3 +253,10 @@ This is a Prefer FAIL against both feet at about 2 cm and 7–21 cm/s.
 The previous one-sided row was faster (about 1.9 cm/s) and cleared
 only the right foot, by commanding that thigh back at mid-swing. That
 pose is the t=0 delta, not the published endpoint. Soft-pass is off.
+
+`previews/gm_forward.mp4` and `previews/gm_step_closeup.mp4` are this
+absolute-x row, Constrained Baseline, yuv420p, `+faststart`. Forward
+clip 8.400 s: Δx +12.7 cm, mean body vx +1.4 cm/s, pooled sole p90
+0.8 cm, swing contact 0.16, min up_z 0.989, peak torque 2.14 Nm, no
+tip. Close-up 7.600 s: forward Δx +9.7 cm, then the stop settles
+Δx −2.3 cm, min up_z 0.960, peak torque 2.12 Nm, no tip.
