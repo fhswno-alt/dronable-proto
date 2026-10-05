@@ -2,7 +2,7 @@
 
 `scripts/explore_map.py` walks the frozen plant and builds a partial map from `kit_cam`. It is not a room finder, not SLAM, and not go-anywhere. Finders stay last mile. They can ask this map two questions later: "have I seen kitchen-like yellow?" and "which cells are frontiers?"
 
-The room scenes no longer use flat primary-color boxes (`docs/ROOM_ASSETS.md`). The kitchen has no yellow backsplash, and the entrance mat is hessian, not a saturated violet plane. `scripts/explore_map.py` was not retuned. The yellow fractions, the soft-XY probe, and the mat-as-feature description below were measured on the previous box scenes.
+The room scenes no longer use flat primary-color boxes (`docs/ROOM_ASSETS.md`). The kitchen cue is cabinet wood grain, the same mask as `scripts/find_kitchen.py`, stored on the yellow log. Flat yellow is not that mask. The entrance mat is hessian, not a saturated violet plane. The walk fractions, the soft-XY probe, and the mat-as-feature counts below were measured on the previous box scenes. The stand-frame cue on the mesh rooms is in `docs/FIND_KITCHEN.md`.
 
 Voice still refuses "explore", "build a map", and "go anywhere" (`scripts/voice_caller.py`). This script is not wired to that caller.
 
@@ -30,13 +30,13 @@ The grid is 0.10 m cells in the world frame, from x −0.80..2.60 m and y −1.8
 | Feature | Saturated and not sky, and the ray meets the floor. On the previous box entrance the violet mat was this case. The current mat is hessian, and this script was not retuned. |
 | Not a cell | Elevated color. The ray misses the floor inside 2.60 m. Stored as a bearing only. |
 
-The kitchen backsplash is the elevated case. The yellow test is the same pixel rule as `scripts/find_kitchen.py` (red and green high, blue low). At the stand pose that blob is about 0.039 of the frame and the ray does not meet the floor, so `ground_cell_ij` stays empty. The bearing is the camera ray. It is not a waypoint and it is not passed to `choose_velocity`.
+The kitchen cue is the warm white slab, the same mask as `scripts/find_kitchen.py` (luminance ≥ 185, saturation ≤ 48, red at least 8 above blue). On the merged kitchen the stand frame is about 0.046 of the image. The bearing is the camera ray. It is not a waypoint and it is not passed to `choose_velocity`. The 0.039 figure below is the previous flat backsplash.
 
 Sky is the empty-plant blue around rgb (70, 100, 140). Cyan tile fails that test (not enough red) and is counted as other chromatic color. Other chromatic pixels are not given a room name.
 
 Frontier cells are unknown cells in the 8-neighborhood of a free cell or a walked cell, between 0.40 m and 2.70 m from the body. The empty-plant walk does not replan every view. At the end of a held window it weights that dense rim into left, right, and a narrow ahead bin. Yellow is not an input. `choose_velocity()` still aims at the nearest cell inside a ±1.20 rad cone, with a left tie-break, and the finder does not call these explore windows. If the lower center of the frame is saturated inside 0.80 m, `choose_velocity()` drops frontiers straight ahead.
 
-`find_kitchen.py` is not edited. It still paints with the main fan, 0.30–1.80 m and no hole fill, and it still calls `frontier_cells()` on the main ring: 4-connected, 0.40–1.60 m. `last_mile_from_map()` does not read a soft XY. The 2.60 m fan, the hole fill, and the 8-connected rim are the explore demo.
+`find_kitchen.py` paints the same main fan, 0.30–1.80 m and no hole fill, and it still calls `frontier_cells()` on the main ring: 4-connected, 0.40–1.60 m. The yellow log on that path is cabinet grain, not the flat backsplash. `last_mile_from_map()` does not read a soft XY. The 2.60 m fan, the hole fill, and the 8-connected rim are the explore demo.
 
 The explore demo can freeze a soft XY 1.50 m along the first yellow bearing. A separate probe walks half-cap toward that guess for up to 20 s. That probe is not the kitchen path. Yellow ≥ 0.50 is not the success test and arrival is not claimed. The measured probe is Prefer FAIL against find-kitchen (remaining 0.982 m vs 0.239 m).
 
@@ -52,13 +52,13 @@ All of these, together:
 2. Metric occupied cells for elevated furniture, from depth or parallax. A floor-plane guess of a backsplash is not that.
 3. A pose that is not the simulator freejoint.
 4. The last-mile finder in `scripts/find_kitchen.py` now queries `query_kitchen_like_yellow()` and `frontier_cells()` and steers from that. It still has no pre-placed waypoint. A query is not this land by itself.
-5. Arrival still belongs to the finder (backsplash fills half the frame and the torso is within 0.25 m). This loop does not claim it.
+5. Arrival still belongs to the finder (cabinet grain fills half the frame and the torso is within 0.25 m). This loop does not claim it.
 
 `vx = 0` yaw still does not turn. A turn-in-place gait would be a different controls change. It is not this slice.
 
 ## Tonight's limit
 
-The empty plant walks the claimed left prefix, then the frontier windows above: 4 s forward, 8 s left, and one 34 s right. Furnished scenes only take the 8 s right-first window, because the claimed yaw windows cross `up_z` 0.90 there. The paint is still a fan from one camera, out to 2.60 m with one-cell holes filled. A yellow bearing is logged when the backsplash is in frame, and a soft XY is frozen along it. Frontiers are the 8-connected edge of the paint. White and gray furniture can fail the saturation test and never become a cell. That is a partial feature map of whatever was in view. It is not go-anywhere.
+The empty plant walks the claimed left prefix, then the frontier windows above: 4 s forward, 8 s left, and one 34 s right. Furnished scenes only take the 8 s right-first window, because the claimed yaw windows cross `up_z` 0.90 there. The paint is still a fan from one camera, out to 2.60 m with one-cell holes filled. A bearing is logged when cabinet grain is in frame, and a soft XY is frozen along it. Frontiers are the 8-connected edge of free cells. The merged entrance stand paints feature cells and one free cell, so the finder ring has a frontier there. White and gray furniture can fail the saturation test and never become a cell. That is a partial feature map of whatever was in view. It is not go-anywhere.
 
 The empty plant is the honest miss: floor cells, no yellow, no room label.
 

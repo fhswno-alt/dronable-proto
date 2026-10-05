@@ -1,12 +1,45 @@
 # Find kitchen (Prefer FAIL)
 
-The current `mujoco/room_kitchen.xml` has no flat yellow backsplash. The counter, pantry, stove, kettle, table, and chair are CC0 textured meshes (`docs/ROOM_ASSETS.md`). `scripts/find_kitchen.py` was not edited. Yellow thresholds, the 0.50 frame bar, the 0.25 m gap, the 0.90 `up_z` bar, and the 1.10 m world-x budget are unchanged. The tables below are measurements of the previous colored-box kitchen. On the mesh scene the stand frame does not log that yellow, so the phrase sends no vel. That Prefer FAIL stays until an AI retargets the finder. This is a visual domain-gap fix for evaluation, not go-anywhere.
+The steer cue is the warm white slab on the merged kitchen, not the old flat-yellow HSV test and not the dark wood band. Arrival bars are unchanged: cue fraction ≥ 0.50 and torso-to-kitchen ≤ 0.25 m. Both are required. This walk misses both. That is Prefer FAIL. Not go-anywhere.
 
-`scripts/find_kitchen.py` is a last-mile steer on the frozen walk plant. The phrase path paints `kit_cam` into the explore map and commands from `query_kitchen_like_yellow()` and `frontier_cells()`. It is not SLAM and not an arrival. If that log has no kitchen-like yellow, it sends no vel.
+`scripts/find_kitchen.py` is a last-mile steer on the frozen walk plant. The phrase path paints `kit_cam` into the explore map and commands from `query_kitchen_like_yellow()` and `frontier_cells()`. The yellow log stores the warm-white slab. It is not SLAM and not an arrival. If that log has no slab, it sends no vel.
+
+## Merged kitchen, this run
+
+On main at `7360ed1` (#38). The cabinet run is white plaster and light oak. The stove faces +X. `mujoco/room_kitchen.xml` includes the frozen plant (md5 `71b2c86d133ebc603f58b99c53e496f3`). `kit_cam` stays at `0.050 0.019 0.007`. The command is half-cap `vel(+0.028, yaw)` inside yaw ±0.25. `vx = 0` yaw is not sent. Phrase "go to the kitchen", after stand:
+
+| | Warm white slab (steer) | Old HSV yellow (reported, not the steer) |
+|--|--|--|
+| Stand | **0.046**, bias **−0.094**, logged | **0.073** |
+| Map peak | **0.466** at bearing **+0.022 rad** | |
+| Walked stop | **0.496** | **0.017** |
+| y = 0 pose inside the gap bar, gap **0.250 m** | **0.770** | **0.021** |
+| Bathroom stand | **0.0007** | **0.0205** |
+| Empty plant | **0.000** | **0.000** |
+| Living / bedroom / entrance stand | **0.0000 / 0.0007 / 0.0000** | **0.146 / 0.002 / 0.213** |
+
+The slab is luminance ≥ 185, saturation ≤ 48, and red at least 8 above blue. That stays under the 0.015 log bar in the bathroom, living room, bedroom, entrance, and empty plant. The dark wood band did not see this kitchen. A wider color box that also marked the other rooms was not used. The retired HSV test logs **0.0205** of the bathroom. It is not the steer.
+
+| | |
+|--|--|
+| Stop | Prefer FAIL, `stop_kind` budget. The 1.10 m world-x budget fired first. Not arrival. |
+| End x | **+1.116 m** (Δx **+1.115 m**) |
+| End y, yaw | +0.056 m, +0.116 rad |
+| min up_z | **0.956** (bar 0.90, not crossed) |
+| Remaining | **0.384 m** |
+| Commands | 15 forward slices and 147 walk-yaw slices, every one `vx = +0.028`, yaw inside ±0.25. `vx = 0` was not sent. |
+| Map | Slab was logged. `map_command_source` is `map`. **325** queries. |
+| Arrival | **false** |
+
+0.384 m misses the 0.25 m gap. Settled slab is 0.496, under 0.50. A y = 0 pose at gap 0.250 m is slab 0.770, so the cue can fill half the frame at the gap bar, but this walk stops on the budget before that pose. The bars were not lowered.
+
+## Previous colored-box run
+
+The tables below are the flat yellow backsplash on the old box kitchen. They are not this mesh run.
 
 The scene is `mujoco/room_kitchen.xml`, which includes `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml` (md5 `71b2c86d133ebc603f58b99c53e496f3`). The finder does not edit that file. `kit_cam` stays on `head_tilt_link` at `0.050 0.019 0.007`, fovy 104.82. Feet stay 145×86. Leg actuators stay ±2.1 Nm. No second camera, no lidar, no door.
 
-## What the pixels are
+## What the pixels were (colored boxes)
 
 From the stand pose the backsplash is the signal that separates the kitchen from the empty checkerboard. Measured on `kit_cam` at 640×480:
 
@@ -80,16 +113,16 @@ This phrase queries the map. Measured "go to the kitchen", room scene, after sta
 
 Both bars, on the settled stop frame:
 
-1. Yellow fraction ≥ 0.50. Half the frame is "most of the frame". Stand is 0.039 and this stop is 0.000, so the counter does not fill the frame.
-2. Torso-to-kitchen horizontal gap ≤ 0.25 m. That is contact range for this torso, not a room crossing. This stop is 0.239 m, inside that bar, and still not arrival without the yellow bar.
+1. Warm-white slab fraction ≥ 0.50. Half the frame is "most of the frame". Stand is 0.046, the y = 0 pose at gap 0.250 m is 0.770, and this stop is 0.496.
+2. Torso-to-kitchen horizontal gap ≤ 0.25 m. That is contact range for this torso, not a room crossing. This stop is 0.384 m, outside that bar.
 
-Either bar alone is not arrival. A stop inside 0.25 m with the backsplash still small would be Prefer FAIL (`close`), not arrival. The gap is read from the kitchen geom boxes so the summary can state the remaining distance. It does not choose left versus right and it is not a waypoint.
+Either bar alone is not arrival. A stop inside 0.25 m with the grain still small is Prefer FAIL (`close`), not arrival. The gap is read from the kitchen geom boxes so the summary can state the remaining distance. It does not choose left versus right and it is not a waypoint.
 
 ## 1.2 s hop (self-test)
 
-`--self-test` still runs one short hop. The sequence is twelve resends of `vel(+0.056, 0)` from t=0.60 s to t=1.70 s, then stop. Measured end x **+0.036 m**, yaw about −0.1 deg, min up_z 0.981, mode stand. Stopping there is not arrival.
+`--self-test` still runs one short hop. The sequence is twelve resends of `vel(+0.056, 0)` from t=0.60 s to t=1.70 s, then stop. Measured end x **+0.035 m**, mode stand. Stopping there is not arrival.
 
-If the blob is off to one side, that self-test uses one `vx = 0` yaw hold (1.0 s, or sooner if the blob reaches the center). Forward comes next only when the new frame is a clear center. A base yaw of −18° (the freejoint, not a camera move) puts the backsplash on the left, bias about −0.35. The self-test sends ten resends of `vel(0, +0.25)` and then stops with no forward.
+If the blob is off to one side, that self-test uses one `vx = 0` yaw hold (1.0 s, or sooner if the blob reaches the center). Forward comes next only when the new frame is a clear center. A base yaw of −18° puts the slab on the left, bias about −0.44. The self-test sends ten resends of `vel(0, +0.25)` and then stops with no forward. The phrase path does not use that `vx = 0` hold.
 
 ## Prefer FAIL
 
@@ -97,10 +130,10 @@ No further `vel` is sent when:
 
 - the phrase is bathroom, or any other room
 - the loaded scene is the empty walk plant
-- the explore map has no kitchen-like yellow yet (the stand frame never logged it)
+- the explore map has no cabinet-grain cue yet
 - `up_z` drops below 0.90
 - the 1.10 m budget is reached, or the slice cap is exhausted
-- the torso is within 0.25 m and the backsplash does not fill half the frame (`close`)
+- the torso is within 0.25 m and the cabinet grain does not fill half the frame (`close`)
 - the stop frame does not meet both arrival bars
 
 ```bash
