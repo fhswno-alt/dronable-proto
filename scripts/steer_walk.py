@@ -2074,8 +2074,9 @@ def run_demo(
             last_print = now
             last_mode = report.mode
         if session.renderer is not None and (len(session.samples) % 2 == 0):
+            plant_tag = "plant thaw ±2.45" if lipm is not None else "M145 frozen"
             lines = [
-                f"{overlay_title}  {seg.label}  M145 frozen  no door",
+                f"{overlay_title}  {seg.label}  {plant_tag}  no door",
                 report.line(),
                 f"t={now:.2f}s  x={session.data.qpos[0]:+.3f}  yaw={math.degrees(session.yaw()):+.1f} deg",
                 overlay_footer,

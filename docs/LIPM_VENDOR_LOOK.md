@@ -35,37 +35,50 @@ about 2 cm. It does not chase the toe.
 
 ## Same 8.4 s forward window, `vel(+0.056, 0)`
 
-Numbers are in `previews/lipm_ab.json`.
+Numbers are in `previews/lipm_ab.json`. Stance hip extension during
+the swing is 0.070 rad. That is the largest value that stayed upright
+for 24 s on this plant. 0.075 rad tips near 12 s.
 
 | Row | Sole median | Sole p90 | Stance slip | sat_rate | min up_z | Δx | Rear unload | Arms |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | LIPM00 CPG | 0.98 cm | 1.92 cm | 1.56 cm/s | 0.51 | 0.976 | +67.8 cm | — | 0.67 rad |
-| LIPM01 clear 2 cm | 1.02 cm | 2.00 cm | 0.23 cm/s | 0.00 | 0.994 | −1.2 cm | 0.98 | — |
-| LIPM02 clear 4 cm | 1.58 cm | 3.86 cm | 0.22 cm/s | 0.00 | 0.995 | −1.3 cm | 0.98 | — |
-| LIPM03 clear 2 cm + arms | 0.98 cm | 2.02 cm | 0.24 cm/s | 0.00 | 0.993 | −1.1 cm | 0.97 | 0.21 rad |
+| LIPM01 clear 2 cm | 1.16 cm | 1.91 cm | 0.23 cm/s | 0.00 | 0.994 | +3.3 cm | 0.98 | — |
+| LIPM02 clear 4 cm | 1.86 cm | 3.96 cm | 0.24 cm/s | 0.008 | 0.995 | +4.1 cm | 0.93 | — |
+| LIPM03 clear 2 cm + arms | 1.15 cm | 1.91 cm | 0.24 cm/s | 0.00 | 0.994 | +3.4 cm | 0.98 | 0.21 rad |
 
 LIPM00 is the old gait, including its root wrench. It is the one that
-moves, and it is the one that skates. LIPM03 is the vendor-height row.
-Four lifts, zero missed gates, sides alternate. Rear-load share gets
-down to 0.03 (unload fraction 0.97). At the lifts that open, the rear
-foot is still about 12% of the contact force and the stance CoP is
-2.2 cm ahead of the ankle in the foot frame (box center is 3.0 cm, so
-this is heel-side of center, not the toe). CoP margin inside the box
-is about 0.9 cm. Swing contact is about 4%. Stance slip is 2.4 mm/s.
-sat_rate on the swing is 0. The shoulder moves 0.21 rad.
+moves, and it is the one that skates. LIPM02 is not the bar. LIPM03 is
+the vendor-height row. Four lifts, zero missed gates, sides alternate.
+Rear-load share gets down to 0.02 (unload fraction 0.98). At the lifts
+that open, the rear foot is still about 11% of the contact force and
+the stance CoP is 2.9 cm ahead of the ankle (box center is 3.0 cm, so
+this is just heel-side of center, not the toe). CoP margin inside the
+box is about 1.1 cm. Swing contact is about 4%. Stance slip is 2.4 mm/s.
+sat_rate on the swing is 0. Peak leg torque on the forward clip is
+2.35 Nm of 2.45. The shoulder moves 0.21 rad.
 
-The body does not go forward. Δx is −1.1 cm. Four steps in 8 s is a
-step period of about 2 s, not 300–600 ms. Shortening the swing to
-0.55–0.70 s dropped the sole p90 to 1.1–1.3 cm and the body still did
-not advance. This is an upright in-place march. It is a Prefer FAIL.
+Δx is positive. It is also tiny. Mean body speed on the 8.4 s window is
++0.4 cm/s against a 5.6 cm/s command. A 24 s continuation of the same
+command stays upright (min up_z 0.994, no fault) and travels +9.2 cm in
+12 lifts. The step period is 2.02 s, not 300–600 ms.
 
-## Thaw, and what it did not buy
+The clips match that. The side view shows one sole a couple of
+centimetres up and the other planted. The body barely leaves the spot
+it started. Arms are off the hips, not a walking swing. It reads as a
+slow upright shuffle.
 
-Swing sat_rate is 0, so ±2.45 Nm is not what the 2 cm clear is short of.
-The gap that is still open is forward progress: the alternating feet
-land beside each other, and the pelvis does not travel onto the new
-lead. A toe CoP at full weight is now inside the thawed clip by a small
-margin, and it was not enough, in this controller, to make Δx positive
-without a tip. No further plant change is in this PR. Stall torque
-3.43 Nm is not the request. The mesh sole is already the 135×76 box
-from #43.
+## Why it is still not a walk
+
+The swing does place the free foot a couple of centimetres ahead. During
+the weight shift the pelvis rocks back about a centimetre, so most of
+the step is given back. Speeding the lateral shift (`shift_k` 2.6 and
+up) tips by about 5 s. Cutting the swing to 0.90 s at this push tips by
+about 10 s. Cutting it to 0.80 s stays upright and drops sole p90 to
+1.3 cm. The sole needs about 0.30 s to reach 1.5 cm and about 0.45 s to
+reach 2 cm, so a 300–600 ms step cannot also reach forward and move the
+weight. Swing sat_rate is 0, so ±2.45 Nm is not what the clear or the
+creep is short of.
+
+No further plant change is in this PR. Stall torque 3.43 Nm is not the
+request. The foot box is already the 135×76 box from #43. This is a
+Prefer FAIL.
