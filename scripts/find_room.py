@@ -7,8 +7,7 @@ the stand pose on a straight line and reads kit_cam. It does not step the
 gait and it does not publish vel. The kitchen slab path in find_kitchen.py
 is not this script.
 
-This pass does not claim arrival. A later walk, after the plant shuffle
-thaws, can use the same object map.
+This pass does not claim arrival. It does not publish vel.
 """
 
 from __future__ import annotations
@@ -39,6 +38,12 @@ MODEL_REV = "cbc355fb364588351c5d51c7f74465e8e7ec6f72"
 # frame is 0.049. The empty plant peaks at 0.004. 0.06 sits in that gap.
 # It is not a per-room threshold.
 SCORE_MIN = 0.06
+# Last poses on the scripted line. Each room's vote is the sum of its
+# object scores over this window. One margin for every room: the leader
+# must clear the runner-up by this much, or the pose stays undecided.
+# bed 0.102 versus bathtub 0.092 is a 0.010 gap and does not commit.
+VOTE_FRAMES = 3
+VOTE_MARGIN = 0.15
 # Object text, then the room it votes for. Room-name labels are not used.
 # Cupboard is the cabinet hit on this kit_cam. Fridge, oven, stove, and
 # kitchen sink stay in the map and score under the door.
@@ -113,6 +118,7 @@ class Detection:
     box: tuple[float, float, float, float] | None
     object_name: str | None = None
     object_scores: dict[str, float] | None = None
+    object_bias: dict[str, float] | None = None
 
 
 @dataclass
@@ -196,6 +202,21 @@ def body_gap(model: mj.MjModel, data: mj.MjData, room: str) -> float | None:
     return nearest
 
 
+def _box_metrics(box, image_w: int, image_h: int) -> tuple[float, float, tuple[float, float, float, float]]:
+    cx, cy, width, height = (float(value) for value in box)
+    x0 = (cx - width / 2.0) * image_w
+    x1 = (cx + width / 2.0) * image_w
+    y0 = (cy - height / 2.0) * image_h
+    y1 = (cy + height / 2.0) * image_h
+    x0 = min(max(x0, 0.0), float(image_w))
+    x1 = min(max(x1, 0.0), float(image_w))
+    y0 = min(max(y0, 0.0), float(image_h))
+    y1 = min(max(y1, 0.0), float(image_h))
+    frac = max(0.0, x1 - x0) * max(0.0, y1 - y0) / float(image_w * image_h)
+    bias = (((x0 + x1) * 0.5) - (image_w * 0.5)) / (image_w * 0.5)
+    return frac, bias, (x0, y0, x1, y1)
+
+
 class RoomDetector:
     """One OWL-ViT. Object votes, one cutoff, local weights."""
 
@@ -221,11 +242,15 @@ class RoomDetector:
         boxes = outputs.pred_boxes[0]
         scores = {room: 0.0 for room in STAND_TOP if room != "plant"}
         object_scores: dict[str, float] = {}
+        object_bias: dict[str, float] = {}
         winner_i = 0
         winner_score = -1.0
         for index, (name, room) in enumerate(OBJECTS):
             score = float(best[index])
             object_scores[name] = score
+            query = int(best_q[index])
+            _frac, bias, _box = _box_metrics(boxes[query], image_w, image_h)
+            object_bias[name] = bias
             if score > scores[room]:
                 scores[room] = score
             if score > winner_score:
@@ -233,20 +258,9 @@ class RoomDetector:
                 winner_i = index
         name, room = OBJECTS[winner_i]
         if winner_score < SCORE_MIN:
-            return Detection(None, winner_score, 0.0, 0.0, scores, None, None, object_scores)
-        query = int(best_q[winner_i])
-        cx, cy, width, height = (float(value) for value in boxes[query])
-        x0 = (cx - width / 2.0) * image_w
-        x1 = (cx + width / 2.0) * image_w
-        y0 = (cy - height / 2.0) * image_h
-        y1 = (cy + height / 2.0) * image_h
-        x0 = min(max(x0, 0.0), float(image_w))
-        x1 = min(max(x1, 0.0), float(image_w))
-        y0 = min(max(y0, 0.0), float(image_h))
-        y1 = min(max(y1, 0.0), float(image_h))
-        frac = max(0.0, x1 - x0) * max(0.0, y1 - y0) / float(image_w * image_h)
-        bias = (((x0 + x1) * 0.5) - (image_w * 0.5)) / (image_w * 0.5)
-        return Detection(room, winner_score, frac, bias, scores, (x0, y0, x1, y1), name, object_scores)
+            return Detection(None, winner_score, 0.0, 0.0, scores, None, None, object_scores, object_bias)
+        _frac, bias, box = _box_metrics(boxes[int(best_q[winner_i])], image_w, image_h)
+        return Detection(room, winner_score, _frac, bias, scores, box, name, object_scores, object_bias)
 
 
 def _hold_slice(
@@ -436,6 +450,20 @@ def test_phrases() -> list[str]:
     step = _bearing_stats([0.1, 0.1, 0.4])["max_step"]
     _expect(step is not None and abs(step - 0.3) < 1e-9, "bearing step", failures)
     _expect("bus.vel" not in inspect.getsource(_set_scripted_pose), "scripted pose publishes vel", failures)
+    close = {name: 0.0 for name, _room in OBJECTS}
+    close["bed"] = 0.102
+    close["bathtub"] = 0.092
+    vote = decide_window([_frame(close)])
+    _expect(vote.room is None, f"bed versus bathtub committed {vote}", failures)
+    group = {name: 0.0 for name, _room in OBJECTS}
+    group["toilet"] = 0.20
+    group["bathroom sink"] = 0.10
+    group["fridge"] = 0.15
+    vote = decide_window([_frame(group)])
+    _expect(vote.room == "bathroom", f"toilet plus sink lost {vote}", failures)
+    noise = {name: 0.01 for name, _room in OBJECTS}
+    vote = decide_window([_frame(noise), _frame(noise), _frame(noise)])
+    _expect(vote.room is None and vote.vote < SCORE_MIN, f"plant noise committed {vote}", failures)
     return failures
 
 
@@ -528,6 +556,74 @@ def _false_object_hits(object_scores: dict[str, float], scene: str) -> list[dict
     return hits
 
 
+@dataclass(frozen=True)
+class Vote:
+    room: str | None
+    vote: float
+    gap: float
+    runner: str | None
+    bearing: float | None
+
+
+def _frame(object_scores: dict[str, float], object_bias: dict[str, float] | None = None) -> dict[str, object]:
+    return {
+        "object_scores": object_scores,
+        "object_bias": object_bias or {name: 0.0 for name, _room in OBJECTS},
+    }
+
+
+def _frame_votes(object_scores: dict[str, float]) -> dict[str, float]:
+    """Sum every object in a room. A room with nothing at the cutoff votes 0."""
+    rooms = [room for room in STAND_TOP if room != "plant"]
+    votes = {room: 0.0 for room in rooms}
+    eligible = {room: False for room in rooms}
+    for name, room in OBJECTS:
+        score = float(object_scores.get(name, 0.0))
+        votes[room] += score
+        if score >= SCORE_MIN:
+            eligible[room] = True
+    for room in rooms:
+        if not eligible[room]:
+            votes[room] = 0.0
+    return votes
+
+
+def _mean_bearing(frames: list[dict[str, object]], room: str, fovy_deg: float) -> float | None:
+    """Score-weighted mean bearing of this room's objects that clear the cutoff."""
+    total = 0.0
+    weight = 0.0
+    for frame in frames:
+        scores = frame["object_scores"]
+        bias = frame["object_bias"]
+        for name, obj_room in OBJECTS:
+            if obj_room != room:
+                continue
+            score = float(scores.get(name, 0.0))
+            if score < SCORE_MIN:
+                continue
+            total += _bearing_rad(float(bias.get(name, 0.0)), fovy_deg) * score
+            weight += score
+    if weight <= 0.0:
+        return None
+    return total / weight
+
+
+def decide_window(frames: list[dict[str, object]], fovy_deg: float = 104.82) -> Vote:
+    """Commit a room from the last frames, or leave the pose undecided."""
+    window = frames[-VOTE_FRAMES:]
+    votes = {room: 0.0 for room in STAND_TOP if room != "plant"}
+    for frame in window:
+        for room, value in _frame_votes(frame["object_scores"]).items():
+            votes[room] += value
+    ranked = sorted(votes.items(), key=lambda item: item[1], reverse=True)
+    winner, win_vote = ranked[0]
+    runner, run_vote = ranked[1]
+    gap = win_vote - run_vote
+    if win_vote < SCORE_MIN or gap < VOTE_MARGIN:
+        return Vote(None, win_vote, gap, runner, None)
+    return Vote(winner, win_vote, gap, runner, _mean_bearing(window, winner, fovy_deg))
+
+
 def _bearing_stats(bearings: list[float]) -> dict[str, float | None]:
     if len(bearings) < 2:
         return {"std": None, "max_step": None}
@@ -550,29 +646,33 @@ def detect_paths(detector: RoomDetector) -> dict[str, object]:
                 _set_scripted_pose(session, x)
                 seen = detector.read(cam.grab(session.data))
                 object_scores = seen.object_scores or {}
-                bearing = None if seen.room is None else _bearing_rad(seen.bias, fovy)
+                object_bias = seen.object_bias or {}
+                samples.append(_frame(object_scores, object_bias))
+                vote = decide_window(samples, fovy)
                 false_hits = _false_object_hits(object_scores, scene)
-                samples.append({
+                raw_bearing = None if seen.room is None else _bearing_rad(seen.bias, fovy)
+                samples[-1].update({
                     "x_m": x,
-                    "object": seen.object_name,
-                    "room": seen.room,
-                    "score": seen.score,
-                    "frac": seen.frac,
-                    "bias": seen.bias,
-                    "bearing_rad": bearing,
+                    "raw_object": seen.object_name,
+                    "raw_room": seen.room,
+                    "raw_score": seen.score,
+                    "room": vote.room,
+                    "vote": vote.vote,
+                    "gap": vote.gap,
+                    "runner": vote.runner,
+                    "bearing_rad": vote.bearing,
+                    "raw_bearing_rad": raw_bearing,
                     "scores": seen.scores,
-                    "object_scores": object_scores,
-                    "false_rooms": _false_objects(seen.scores, scene),
                     "false_objects": false_hits,
-                    "hit": seen.room == scene,
+                    "hit": vote.room == scene,
                 })
         finally:
             cam.close()
         hits = [sample for sample in samples if sample["hit"]]
         bearings = [float(sample["bearing_rad"]) for sample in hits if sample["bearing_rad"] is not None]
         stats = _bearing_stats(bearings)
-        false_rooms = sorted({room for sample in samples for room in sample["false_rooms"]})
         false_best: dict[str, dict[str, object]] = {}
+        committed_false: dict[str, dict[str, object]] = {}
         object_max: dict[str, float] = {}
         for sample in samples:
             for name, score in sample["object_scores"].items():
@@ -582,14 +682,23 @@ def detect_paths(detector: RoomDetector) -> dict[str, object]:
                 prev = false_best.get(key)
                 if prev is None or float(row["score"]) > float(prev["score"]):
                     false_best[key] = row
+                if sample["room"] not in (None, scene):
+                    committed_false[key] = false_best[key]
         if scene == "plant":
             true_object = None
             true_max = 0.0
         else:
             true_pairs = [(name, object_max.get(name, 0.0)) for name, room in OBJECTS if room == scene]
             true_object, true_max = max(true_pairs, key=lambda pair: pair[1])
-        fired = sorted({str(sample["object"]) for sample in hits if sample["object"]})
-        false_objects = sorted(false_best.values(), key=lambda row: float(row["score"]), reverse=True)
+        fired = sorted({
+            str(name)
+            for sample in hits
+            for name, room in OBJECTS
+            if room == scene and float(sample["object_scores"].get(name, 0.0)) >= SCORE_MIN
+        })
+        raw_false = sorted(false_best.values(), key=lambda row: float(row["score"]), reverse=True)
+        wrong = sorted(committed_false.values(), key=lambda row: float(row["score"]), reverse=True)
+        wrong_rooms = sorted({str(sample["room"]) for sample in samples if sample["room"] not in (None, scene)})
         scenes.append({
             "scene": scene,
             "poses": len(samples),
@@ -597,11 +706,13 @@ def detect_paths(detector: RoomDetector) -> dict[str, object]:
             "winner_object": true_object,
             "winner_score": true_max,
             "fired_objects": fired,
-            "false_rooms": false_rooms,
-            "false_objects": false_objects,
+            "false_objects": wrong,
+            "wrong_rooms": wrong_rooms,
+            "raw_false_objects": raw_false,
+            "min_gap": min((float(sample["gap"]) for sample in hits), default=None),
             "bearing_std_rad": stats["std"],
             "bearing_max_step_rad": stats["max_step"],
-            "max_score": max(float(sample["score"]) for sample in samples),
+            "max_score": max(float(sample["raw_score"]) for sample in samples),
             "samples": samples,
         })
     plant = next(row for row in scenes if row["scene"] == "plant")
@@ -609,6 +720,8 @@ def detect_paths(detector: RoomDetector) -> dict[str, object]:
         "model": MODEL_ID,
         "model_rev": MODEL_REV,
         "score_min": SCORE_MIN,
+        "vote_frames": VOTE_FRAMES,
+        "vote_margin": VOTE_MARGIN,
         "objects": [{"name": name, "room": room} for name, room in OBJECTS],
         "path_x_m": list(DETECT_X_M),
         "gait": False,
@@ -641,7 +754,9 @@ def run_detect() -> int:
             f"[room] {scene['scene']:9} hits {scene['hits']}/{scene['poses']} "
             f"object {scene['winner_object']} score {scene['winner_score']:.3f} "
             f"fired {scene['fired_objects'] or '-'} "
-            f"false {[row['object'] for row in scene['false_objects']] or '-'} "
+            f"wrong_rooms {scene['wrong_rooms'] or '-'} "
+            f"committed_false {[row['object'] for row in scene['false_objects']] or '-'} "
+            f"raw_false {[row['object'] for row in scene['raw_false_objects']] or '-'} "
             f"bearing_std {std_s} max_step {step_s} max_score {scene['max_score']:.3f}"
         )
     if not payload["plant_under_cutoff"]:
