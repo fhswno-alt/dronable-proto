@@ -1009,3 +1009,62 @@ mean body vx +8.1 cm/s, min up_z 0.995, peak torque 2.44 Nm, yaw drift
 walking and 0.999 after the stop, peak 2.44 Nm while walking and
 0.98 Nm after the stop). The feet stay close to the floor.
 
+## Foot-height half, target sole vs actual
+
+The port does the OP3 half. `updateMovementParam` sets
+`z_move_amplitude_ = walking_param_.z_move_amplitude / 2`, and
+`loadWalkingParam` stores yaml `foot_height` in `z_move_amplitude`.
+`update_movement` does the same: `_z_move = z_move_cmd / 2`,
+`_z_move_shift = _z_move / 2`. With gait_manager `foot_height` 0.020 m
+the internal amplitude is 0.010 m and the shift is 0.005 m.
+
+The commanded sole is the swing-to-stance gap, which is the full
+yaml value. `wSin` is
+`amp·sin + shift`, so z runs from −0.005 m to +0.015 m. The stance
+foot stays at the negative peak while the swing foot reaches the
+positive peak, and the gap is 0.020 m. Posing those IK joints with
+`mj_forward` (no dynamics) gives a swing-minus-stance sole of 2.25 cm.
+Feeding 0.040 m instead makes the endpoint gap 4.00 cm and the
+kinematic sole 4.23 cm. The yaml value stays 0.020 m. The half stays.
+
+On the live 8.4 s walk the IK target, written into `ctrl` before the
+150 ms slew, is still about 2 cm. The actual sole stays under that.
+
+| Period | Endpoint p90 | IK sole p90 / max | Actual sole p90 L / R | Actual max | Hip roll R / L | Knee R / L |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 400 ms | 1.95 cm | 1.88 / 2.28 cm | 0.28 / 0.22 cm | 0.62 cm | 2.45 / 2.08 Nm | 1.28 / 1.18 Nm |
+| 500 ms | 1.97 cm | 2.01 / 2.36 cm | 0.74 / 0.71 cm | 1.23 cm | 2.28 / 2.27 Nm | 1.10 / 1.42 Nm |
+
+Torque is the peak `|actuator_force|` over every 2 ms physics step.
+Knee is reported on the same row as hip roll. 500 ms is the row with
+hip-roll headroom (2.28 / 2.27 Nm against ±2.45). 400 ms reaches
+2.450 Nm on the right hip roll, so this pass leaves that row's lift
+alone.
+
+The knee peaks land with the sole on the floor, beside the hip-roll
+peaks. At 500 ms the left knee reaches
+−1.42 Nm at 0.772 s on the same tick as the left hip roll (−2.27 Nm),
+with both soles on the floor (−0.15 / −0.04 cm). The right knee reaches
++1.10 Nm at 5.666 s with the right sole at −0.24 cm and the right hip
+roll at +1.58 Nm. The highest actual sole, 1.23 cm at 0.888 s, has
+knee +0.08 / −0.20 Nm and hip roll −0.04 / −0.37 Nm.
+
+At the tick where the posed IK sole is 2.36 cm (endpoint gap 2.00 cm),
+the actual swing sole is 0.20 cm. The 150 ms slew has moved the knee
+0.060 / 0.034 rad of an IK error of 0.256 / 0.218 rad. Knee force on
+that tick is −1.12 / −0.38 Nm, inside ±2.45, and the swing sole stays
+at 0.20 cm. Hip roll on that tick is −1.37 / +0.36 Nm. The 2.28 Nm
+hip-roll peaks are the floor-contact samples above.
+
+Mean vx on these two rows is still +8.06 and +7.76 cm/s, min up_z
+0.995 and 0.991. First unload is still 0.504 s, after both feet have
+been above 5 N. Plant md5 is `17dc4ff37491c8e61900fd83b5d31f0c`.
+
+This is a tracking Prefer FAIL. The command is already the kit 2 cm
+sole. The 1.42 Nm knee peak is the hip-roll load with the sole on the
+floor, so a linear scale from the 1.23 cm sole does not turn that peak
+into the 2 cm knee risk. Knee torque at the missed 2 cm command is
+about 1.1 Nm. The extra inertia of a sole that actually reached 2 cm
+was not measured. Foot height stays 0.020 m. Plant md5 stays
+`17dc4ff37491c8e61900fd83b5d31f0c`. No clips: the gait did not change.
+

@@ -328,6 +328,12 @@ class Op3Walker:
         self._y_move = y
         self._y_move_shift = y if y > 0.0 else -y
         self._y_swap = self.y_swap_cmd + self._y_move_shift * 0.04
+        # OP3 updateMovementParam: z_move_amplitude_ = foot_height / 2, and
+        # the shift is half of that again. wSin then runs from −amp to
+        # +1.5·amp. The stance foot is frozen at the negative peak, so the
+        # swing-to-stance gap is 2·amp, which is the yaml foot_height.
+        # gait_manager 0.02 m therefore already commands a 2 cm sole.
+        # Dropping the /2, or feeding 0.04 to "undo" it, commands ~4 cm.
         self._z_move = self.z_move_cmd / 2.0
         self._z_move_shift = self._z_move / 2.0
         self._z_swap = self.z_swap_cmd
