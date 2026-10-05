@@ -34,6 +34,16 @@ stop by t=37. Do not start that left yaw at 15 s and do not hold it for
 stand stays about +62 deg left and about -83 deg right. Those are not
 this arc. This arc is not a spin.
 
+A continuous path is left then right only. Walk forward from t=1 to t=16
+(approach about +0.60 m), vel(+0.056, +0.25) until t=28.5 (about +76 deg),
+vel(+0.056, 0) until t=34.5 (mid about +0.32 m), vel(+0.056, -0.25) until
+t=45.5 (chained right about -55 deg in that 11 s window, not the single-arc
+-77), vel(+0.056, 0) until t=51.5, stop by t=54. End stand, margin about
++0.063 m. Realized yaw rates stay below the cap. The command is not the
+heading rate. After the chained right, heading may drift before stop.
+A same-sign second arc is not published. A right then left path is not published.
+The 14 s left that starts at 15 s is not published.
+
 Go to the kitchen, the bathroom, or any other room is refused in one
 line: the camera can see, but there is no room and no map. No path is
 invented. The floor in the clip is empty.
@@ -41,8 +51,8 @@ invented. The floor in the clip is empty.
 kit_cam is the plant camera on head_tilt_link at pos 0.050 0.019 0.007,
 same aim and fovy. Plant md5 is 71b2c86d133ebc603f58b99c53e496f3. The
 clip renders that camera for back up, for walk forward then stop, for the
-right nav, and for the left nav inside the claimed envelope, then the stop.
-This file does
+right nav, for the left nav, and for the left-then-right path, then the
+stop. This file does
 not move the camera, and does not edit the plant, the gait, the tip
 check, or the CommandBus.
 
@@ -104,6 +114,14 @@ NAV_RIGHT_STOP_END = 35.5
 NAV_LEFT_YAW_END = 28.5
 NAV_LEFT_RESUME_END = 34.5
 NAV_LEFT_STOP_END = 37.0
+# Continuous path. Left arc, then the chained right. Not a second same-sign arc.
+MULTI_LEFT_END = 28.5
+MULTI_MID_END = 34.5
+MULTI_RIGHT_END = 45.5
+MULTI_RESUME_END = 51.5
+MULTI_STOP_END = 54.0
+CHAINED_RIGHT_DEG = -55.0
+CHAINED_RIGHT_YAW_RATE = -0.087
 
 ROOM_LINE = "the camera can see, but there is no room and no map"
 CLAMP_LINE = "refused: reverse is only the bus clamp"
@@ -113,6 +131,8 @@ MAP_LINE = "refused: no map"
 JOINT_LINE = "refused: joint targets are not a day-1 velocity command"
 UNKNOWN_LINE = "refused: not a stand, stop, or vel phrase"
 EMPTY_LINE = "refused: empty phrase"
+SAME_ARC_LINE = "refused: same-sign second arc"
+ORDER_LINE = "refused: right then left"
 
 Kind = Literal["stand", "stop", "vel", "refuse"]
 
@@ -334,6 +354,9 @@ def _walk_turn(yaw_rate: float) -> VoiceCommand:
             f"from stand, cold-start left is about {COLD_LEFT_DEG:+.0f} deg and "
             f"cold-start right is about {COLD_RIGHT_DEG:+.0f} deg, not this arc; "
             "a left yaw at 15 s held for 14 s tips on the resume and is not claimed; "
+            f"chained right after left is about {CHAINED_RIGHT_DEG:+.0f} deg in 11 s, "
+            f"not the single-arc {NAV_RIGHT_DEG:+.0f}; "
+            "same-sign second arc and right then left are not published; "
             "does not send 0.080)"
         ),
     )
@@ -432,6 +455,28 @@ class VoiceCaller:
         self._command: VoiceCommand | None = None
         self._last_send = -1.0e9
         self._oneshot_sent = False
+        self._arc_signs: list[float] = []
+
+    def _chain_refusal(self, command: VoiceCommand) -> str | None:
+        """A continuous path may yaw left, then right. Other second arcs are not sent."""
+        if command.kind != "vel" or command.vx != FWD_MPS or command.yaw_rate == 0.0:
+            return None
+        if not self._arc_signs:
+            return None
+        sign = 1.0 if command.yaw_rate > 0.0 else -1.0
+        previous = self._arc_signs[-1]
+        if sign == previous:
+            return SAME_ARC_LINE
+        if previous < 0.0 and sign > 0.0:
+            return ORDER_LINE
+        return None
+
+    def _note_arc(self, command: VoiceCommand) -> None:
+        if command.kind in ("stand", "stop"):
+            self._arc_signs = []
+            return
+        if command.kind == "vel" and command.vx == FWD_MPS and command.yaw_rate != 0.0:
+            self._arc_signs.append(1.0 if command.yaw_rate > 0.0 else -1.0)
 
     def hear(self, phrase: str, now: float) -> str:
         command = parse_phrase(phrase)
@@ -439,12 +484,16 @@ class VoiceCaller:
             return command.line
         if command.vx < -BACK_CAP_MPS:
             return CLAMP_LINE
+        chain = self._chain_refusal(command)
+        if chain is not None:
+            return chain
         self._command = command
         self._oneshot_sent = False
         self._last_send = -1.0e9
         refusal = self.publish(now)
         if refusal:
             return refusal
+        self._note_arc(command)
         return command.line
 
     def publish(self, now: float) -> str | None:
@@ -549,6 +598,20 @@ LEFT_STILLS = (
     (27.5, "turn-left", "voice_caller_kit_cam_nav_left.png"),
     (36.7, "stop", "voice_caller_kit_cam_nav_left_stop.png"),
 )
+# One steer. Left then right. Not a second arc of the same sign, and not right then left.
+MULTI_CUES: tuple[PhraseCue, ...] = (
+    PhraseCue(1.0, None, "quiet"),
+    PhraseCue(NAV_APPROACH_END, "walk forward", "approach"),
+    PhraseCue(MULTI_LEFT_END, "turn left", "arc-left"),
+    PhraseCue(MULTI_MID_END, "walk forward", "mid"),
+    PhraseCue(MULTI_RIGHT_END, "turn right", "arc-right"),
+    PhraseCue(MULTI_RESUME_END, "walk forward", "after"),
+    PhraseCue(MULTI_STOP_END, "stop", "stop"),
+)
+MULTI_STILLS = (
+    (44.0, "arc-right", "voice_caller_kit_cam_nav_multi.png"),
+    (53.7, "stop", "voice_caller_kit_cam_nav_multi_stop.png"),
+)
 
 
 def _cue_index(now: float, cues: tuple[PhraseCue, ...]) -> int:
@@ -638,6 +701,8 @@ def test_phrases() -> list[str]:
     _expect("not a cold start" in doc, "module doc treats the arc as a cold start", failures)
     _expect("not the heading rate" in doc, "module doc claims the yaw command as heading rate", failures)
     _expect("15 s" in doc and "14 s" in doc and "not claimed" in doc, "module doc claims the tipping left window", failures)
+    _expect("-55" in doc and "not the single-arc" in doc, "module doc treats the chained right as -77", failures)
+    _expect("same-sign" in doc and "right then left" in doc, "module doc publishes a refused order", failures)
     _expect("not a spin" in doc and "spin in place" not in doc, "module doc calls the turn a spin", failures)
     _expect("turn in place" in doc, "module doc drops the in-place phrase", failures)
     _expect("no room and no map" in doc, "module doc invents a map", failures)
@@ -683,6 +748,8 @@ def test_phrases() -> list[str]:
     _expect(right.vx == FWD_MPS and right.yaw_rate == -YAW_RAD_S, "right is not a walking turn", failures)
     _expect("not a spin" in right.line and "does not send 0.080" in right.line, "right line claims a spin or sends 0.080", failures)
     _expect("-77" in right.line and "+0.60" in right.line and "+0.32" in right.line, "right line omits the nav window", failures)
+    _expect("-55" in right.line and "not the single-arc" in right.line, "right line treats the chained arc as -77", failures)
+    _expect("same-sign second arc" in right.line and "right then left" in right.line, "right line publishes a refused order", failures)
     _expect("not the heading rate" in right.line, "right line claims the yaw command as heading rate", failures)
     for phrase in ("turn right in place", "right in place", "yaw right in place"):
         command = parse_phrase(phrase)
@@ -735,6 +802,23 @@ def test_phrases() -> list[str]:
     left_yaw_s = LEFT_CUES[2].t_end - LEFT_CUES[1].t_end
     _expect(LEFT_CUES[1].t_end != 15.0 and abs(left_yaw_s - 14.0) > 0.1, "left yaw is the tipping window", failures)
     _expect(abs(left_yaw_s - 12.5) < 1e-9, "left yaw is not 12.5 s", failures)
+    multi_phrases = [cue.phrase for cue in MULTI_CUES if cue.phrase is not None]
+    _expect(
+        multi_phrases == ["walk forward", "turn left", "walk forward", "turn right", "walk forward", "stop"],
+        f"multi phrases {multi_phrases}",
+        failures,
+    )
+    _expect(
+        [cue.t_end for cue in MULTI_CUES] == [1.0, 16.0, 28.5, 34.5, 45.5, 51.5, 54.0],
+        f"multi times {[cue.t_end for cue in MULTI_CUES]}",
+        failures,
+    )
+    _expect(MULTI_CUES[2].phrase == "turn left" and MULTI_CUES[4].phrase == "turn right", "multi is not left then right", failures)
+    _expect(MULTI_CUES[1].t_end != 15.0, "multi left starts at 15 s", failures)
+    multi_left_s = MULTI_CUES[2].t_end - MULTI_CUES[1].t_end
+    multi_right_s = MULTI_CUES[4].t_end - MULTI_CUES[3].t_end
+    _expect(abs(multi_left_s - 12.5) < 1e-9 and abs(multi_left_s - 14.0) > 0.1, "multi left is the tipping window", failures)
+    _expect(abs(multi_right_s - 11.0) < 1e-9, "multi right is not 11 s", failures)
     return failures
 
 
@@ -967,6 +1051,35 @@ def test_bus() -> list[str]:
         "a right-turn resend left +0.056 or -0.25",
         failures,
     )
+    chain = steer.CommandBus()
+    chain_count = _CountBus(chain)
+    chain_caller = VoiceCaller(chain_count, resend_s=steer.VEL_RESEND_S)
+    chain_caller.hear("walk forward", 0.0)
+    chain_caller.hear("turn left", 0.2)
+    chain_caller.hear("walk forward", 0.4)
+    chained = chain_caller.hear("turn right", 0.6)
+    _expect(chained.startswith("vel vx=+0.056 yaw_rate=-0.250"), f"left then right {chained!r}", failures)
+    _expect(chain.target_vx == fwd_cap and chain.target_yaw == -yaw_cap, "chained right was not published", failures)
+    same_right = chain_caller.hear("turn right", 0.8)
+    _expect(same_right == SAME_ARC_LINE, f"second right {same_right!r}", failures)
+    _expect(chain_count.yaws[-1] == -yaw_cap and chain.target_yaw == -yaw_cap, "second right was published", failures)
+    same_left = steer.CommandBus()
+    same_left_count = _CountBus(same_left)
+    same_left_caller = VoiceCaller(same_left_count, resend_s=steer.VEL_RESEND_S)
+    same_left_caller.hear("turn left", 0.0)
+    again = same_left_caller.hear("turn left", 0.2)
+    _expect(again == SAME_ARC_LINE, f"second left {again!r}", failures)
+    _expect(same_left.target_yaw == yaw_cap and same_left_count.vel_n == 1, "second left was published", failures)
+    wrong = steer.CommandBus()
+    wrong_count = _CountBus(wrong)
+    wrong_caller = VoiceCaller(wrong_count, resend_s=steer.VEL_RESEND_S)
+    wrong_caller.hear("turn right", 0.0)
+    wrong_line = wrong_caller.hear("turn left", 0.2)
+    _expect(wrong_line == ORDER_LINE, f"right then left {wrong_line!r}", failures)
+    _expect(wrong.target_yaw == -yaw_cap and wrong_count.vel_n == 1, "right then left was published", failures)
+    wrong_caller.hear("stop", 0.4)
+    reset = wrong_caller.hear("turn left", 0.5)
+    _expect(reset.startswith("vel vx=+0.056 yaw_rate=+0.250"), f"stop did not clear the chain {reset!r}", failures)
     return failures
 
 
@@ -988,8 +1101,92 @@ def test_tip_predicate() -> list[str]:
     return failures
 
 
+def _clip_shell(
+    *,
+    fault: bool = False,
+    fault_reason: str = "",
+    min_up_z_multi: float | None = 0.954,
+    end_mode_multi: str = "stand",
+) -> ClipResult:
+    base = ClipResult(
+        plant_md5=PLANT_MD5,
+        kit_cam_pos=KIT_CAM_POS,
+        mujoco_gl="osmesa",
+        phrases=(),
+        fault=fault,
+        fault_reason=fault_reason,
+        command_vx_back=-BACK_CAP_MPS,
+        command_vx_fwd=FWD_MPS,
+        mean_applied_vx_backup=None,
+        mean_body_vx_backup=None,
+        dx_backup_m=None,
+        mean_applied_vx_forward=None,
+        mean_body_vx_forward=None,
+        dx_forward_m=None,
+        min_up_z_backup=None,
+        min_up_z_forward=None,
+        end_mode_backup="",
+        end_mode_forward="",
+        end_margin_forward=None,
+        dx_approach_m=None,
+        dyaw_arc_deg=None,
+        mean_yaw_rate_arc=None,
+        dx_resume_m=None,
+        min_up_z_right=None,
+        end_mode_right="",
+        end_margin_right=None,
+        dx_approach_left_m=None,
+        dyaw_arc_left_deg=None,
+        mean_yaw_rate_left=None,
+        dx_resume_left_m=None,
+        min_up_z_left=None,
+        end_mode_left="",
+        end_margin_left=None,
+        dx_approach_multi_m=0.598,
+        dyaw_left_multi_deg=75.7,
+        mean_yaw_rate_left_multi=0.106,
+        dx_mid_multi_m=0.317,
+        dyaw_right_multi_deg=-54.9,
+        mean_yaw_rate_right_multi=-0.087,
+        dx_resume_multi_m=0.227,
+        dyaw_resume_multi_deg=30.7,
+        dyaw_stop_multi_deg=4.7,
+        min_up_z_multi=min_up_z_multi,
+        end_mode_multi=end_mode_multi,
+        end_margin_multi=0.063,
+        stills=(),
+        mp4=None,
+        honesty="",
+    )
+    return base
+
+
+def test_multi_honesty() -> list[str]:
+    """The written claim stays inside Controls' multi ceiling."""
+    failures: list[str] = []
+    text = _honesty(_clip_shell())
+    _expect("one continuous steer" in text, "honesty splits the multi path", failures)
+    _expect("not the single-arc -77" in text, "honesty treats the chained right as -77", failures)
+    _expect("chained right about -55" in text, "honesty omits the chained-right ceiling", failures)
+    _expect("heading may drift" in text, "honesty claims the heading held", failures)
+    _expect("+30.7" in text, "honesty drops the measured resume drift", failures)
+    _expect("not the heading rate" in text, "honesty claims the yaw command as heading rate", failures)
+    _expect("Same-sign second arc is not published" in text, "honesty publishes a same-sign arc", failures)
+    _expect("Right then left is not published" in text, "honesty publishes right then left", failures)
+    _expect("15 s" in text and "14 s" in text, "honesty claims the tipping left window", failures)
+    _expect("Not a spin." in text and "spin in place" not in text, "honesty calls the path a spin", failures)
+    tipped = _honesty(
+        _clip_shell(fault=True, fault_reason="tipped", min_up_z_multi=0.70, end_mode_multi="fault")
+    )
+    _expect("fault" in tipped, "a tipped multi path is called a stand", failures)
+    _expect("does not claim Controls' envelope" in tipped, "a tipped multi path claims the envelope", failures)
+    _expect("chained right about -55" not in tipped, "a tipped multi path still cites the ceiling", failures)
+    return failures
+
+
 def self_test() -> int:
     failures = test_phrases()
+    failures.extend(test_multi_honesty())
     if steer_load_error() is not None:
         if failures:
             for msg in failures:
@@ -1042,6 +1239,18 @@ class ClipResult:
     min_up_z_left: float | None
     end_mode_left: str
     end_margin_left: float | None
+    dx_approach_multi_m: float | None
+    dyaw_left_multi_deg: float | None
+    mean_yaw_rate_left_multi: float | None
+    dx_mid_multi_m: float | None
+    dyaw_right_multi_deg: float | None
+    mean_yaw_rate_right_multi: float | None
+    dx_resume_multi_m: float | None
+    dyaw_resume_multi_deg: float | None
+    dyaw_stop_multi_deg: float | None
+    min_up_z_multi: float | None
+    end_mode_multi: str
+    end_margin_multi: float | None
     stills: tuple[str, ...]
     mp4: str | None
     honesty: str
@@ -1066,8 +1275,10 @@ def _fmt(value: float | None, spec: str) -> str:
 def _honesty(result: ClipResult) -> str:
     stop_pose = "The forward stop frame is level. " if result.end_mode_forward == "stand" else ""
     text = (
-        "kit_cam for back up, for walk forward then stop, for the right nav, and for the left nav. "
-        "These are four separate steers. "
+        "kit_cam for back up, for walk forward then stop, for the right nav, for the left nav, "
+        "and for the left-then-right path. "
+        "Back up, forward, right nav, and left nav are four separate steers. "
+        "The left-then-right path is one continuous steer. "
         f"Camera pos {result.kit_cam_pos[0]:.3f} {result.kit_cam_pos[1]:.3f} "
         f"{result.kit_cam_pos[2]:.3f}. The camera was not moved. "
         "The frame is still largely the inside of the head. "
@@ -1130,6 +1341,32 @@ def _honesty(result: ClipResult) -> str:
         f"{_end_mode_sentence(result.end_mode_left, 'Left-nav end mode')} "
         f"Left-nav end support margin is {_fmt(result.end_margin_left, '+.3f')} m. "
         f"{_left_claim(result)} "
+        "The continuous path is left then right. "
+        "Walk forward from t=1 to t=16, then "
+        f"vel({FWD_MPS:+.3f}, {YAW_RAD_S:+.2f}) until t=28.5, "
+        f"vel({FWD_MPS:+.3f}, 0) until t=34.5, "
+        f"vel({FWD_MPS:+.3f}, {-YAW_RAD_S:+.2f}) until t=45.5, "
+        f"vel({FWD_MPS:+.3f}, 0) until t=51.5, stop by t=54. "
+        f"Approach Δx={_fmt(result.dx_approach_multi_m, '+.3f')} m. "
+        f"Left heading in that window is {_fmt(result.dyaw_left_multi_deg, '+.1f')} deg. "
+        "Realized yaw rate in the left window is "
+        f"{_fmt(result.mean_yaw_rate_left_multi, '+.3f')} rad/s. "
+        f"The command ±{YAW_RAD_S:.2f} is not the heading rate. "
+        f"Mid along the heading is {_fmt(result.dx_mid_multi_m, '+.3f')} m. "
+        "Chained-right heading in that 11 s window is "
+        f"{_fmt(result.dyaw_right_multi_deg, '+.1f')} deg, "
+        f"not the single-arc {NAV_RIGHT_DEG:+.0f}. "
+        "Realized yaw rate in the chained-right window is "
+        f"{_fmt(result.mean_yaw_rate_right_multi, '+.3f')} rad/s. "
+        f"Resume along the heading is {_fmt(result.dx_resume_multi_m, '+.3f')} m. "
+        "Heading drift during that resume, before stop, is "
+        f"{_fmt(result.dyaw_resume_multi_deg, '+.1f')} deg. "
+        "Heading change during the stop hold is "
+        f"{_fmt(result.dyaw_stop_multi_deg, '+.1f')} deg. "
+        f"min up_z during the multi path is {_fmt(result.min_up_z_multi, '.3f')}. "
+        f"{_end_mode_sentence(result.end_mode_multi, 'Multi end mode')} "
+        f"Multi end support margin is {_fmt(result.end_margin_multi, '+.3f')} m. "
+        f"{_multi_claim(result)} "
         "Not a spin. "
         "Go to the kitchen or the bathroom stays refused: "
         "the camera can see, but there is no room and no map. "
@@ -1139,6 +1376,27 @@ def _honesty(result: ClipResult) -> str:
     if result.fault:
         text += f" FAULT: {result.fault_reason}."
     return text
+
+
+def _multi_claim(result: ClipResult) -> str:
+    tipped = result.min_up_z_multi is not None and result.min_up_z_multi < 0.85
+    if result.end_mode_multi == "fault" or tipped:
+        return (
+            "This multi path faulted or tipped. "
+            "It does not claim Controls' envelope."
+        )
+    return (
+        f"Controls' ceiling is approach about {NAV_APPROACH_DX_M:+.2f} m, "
+        f"left heading about {NAV_LEFT_DEG:+.0f} deg, "
+        f"mid about {NAV_RESUME_DX_M:+.2f} m, "
+        f"chained right about {CHAINED_RIGHT_DEG:+.0f} deg in 11 s, "
+        f"not the single-arc {NAV_RIGHT_DEG:+.0f}, "
+        f"end stand, margin about {NAV_MARGIN_M:+.3f} m. "
+        "This clip does not claim more than that. "
+        "After the chained right, heading may drift before stop. "
+        "Same-sign second arc is not published. Right then left is not published. "
+        "A left yaw at 15 s held for 14 s is not this path."
+    )
 
 
 def _left_claim(result: ClipResult) -> str:
@@ -1178,6 +1436,14 @@ def _overlay(phrase: str, label: str, report_line: str, now: float, x: float) ->
         note = "cmd +0.056 yaw -0.25  nav ~-77 deg  rate is not 0.25"
     elif label == "turn-left":
         note = "cmd +0.056 yaw +0.25  nav ~+76 deg  rate is not 0.25"
+    elif label == "arc-left":
+        note = "cmd +0.056 yaw +0.25  multi ~+76 deg  rate is not 0.25"
+    elif label == "mid":
+        note = "mid cmd +0.056  along heading ~+0.32 m"
+    elif label == "arc-right":
+        note = "cmd +0.056 yaw -0.25  chained ~-55 deg  not the single-arc -77"
+    elif label == "after":
+        note = "after chained right cmd +0.056  heading may drift"
     elif label == "resume":
         note = "resume cmd +0.056  along heading ~+0.32 m"
     else:
@@ -1233,7 +1499,7 @@ def run_clip(out_mp4: Path, summary_path: Path) -> int:
     frames: list[np.ndarray] = []
     stills: list[str] = []
     print(
-        f"[voice] kit_cam separate steers: back up | walk forward | right nav | left nav  "
+        "[voice] kit_cam: back up | walk forward | right nav | left nav | left-then-right  "
         f"pos={cam_pos[0]:.3f} {cam_pos[1]:.3f} {cam_pos[2]:.3f} "
         f"md5={steer.PLANT_MD5} gl={os.environ.get('MUJOCO_GL', '')}"
     )
@@ -1253,6 +1519,11 @@ def run_clip(out_mp4: Path, summary_path: Path) -> int:
         print("[voice] kit_cam renderer was not created for the left nav", file=sys.stderr)
         return 2
     left_samples = _drive_render(left, steer, LEFT_CUES, frames, stills, LEFT_STILLS)
+    multi = steer.SteerSession(video=True)
+    if multi.renderer is None:
+        print("[voice] kit_cam renderer was not created for the multi path", file=sys.stderr)
+        return 2
+    multi_samples = _drive_render(multi, steer, MULTI_CUES, frames, stills, MULTI_STILLS)
     mp4_path: Path | None = None
     render_error = ""
     if frames:
@@ -1275,6 +1546,9 @@ def run_clip(out_mp4: Path, summary_path: Path) -> int:
         left_samples,
         left.bus.fault,
         left.bus.fault_reason,
+        multi_samples,
+        multi.bus.fault,
+        multi.bus.fault_reason,
         stills,
         mp4_path,
         cam_pos,
@@ -1458,6 +1732,9 @@ def _measure(
     left_samples: Sequence[SampleView],
     left_fault: bool,
     left_reason: str,
+    multi_samples: Sequence[SampleView],
+    multi_fault: bool,
+    multi_reason: str,
     stills: list[str],
     mp4: Path | None,
     cam_pos: tuple[float, float, float],
@@ -1472,23 +1749,32 @@ def _measure(
     left_arc = _between(left_samples, LEFT_CUES[1].t_end, LEFT_CUES[2].t_end)
     left_resume = _between(left_samples, LEFT_CUES[2].t_end, LEFT_CUES[3].t_end)
     left_nav = _between(left_samples, LEFT_CUES[0].t_end, LEFT_CUES[-1].t_end)
+    multi_approach = _between(multi_samples, MULTI_CUES[0].t_end, MULTI_CUES[1].t_end)
+    multi_left = _between(multi_samples, MULTI_CUES[1].t_end, MULTI_CUES[2].t_end)
+    multi_mid = _between(multi_samples, MULTI_CUES[2].t_end, MULTI_CUES[3].t_end)
+    multi_right = _between(multi_samples, MULTI_CUES[3].t_end, MULTI_CUES[4].t_end)
+    multi_resume = _between(multi_samples, MULTI_CUES[4].t_end, MULTI_CUES[5].t_end)
+    multi_stop = _between(multi_samples, MULTI_CUES[5].t_end, MULTI_CUES[6].t_end)
+    multi_body = [sample for sample in multi_samples if sample.t >= MULTI_CUES[0].t_end - 1e-9]
     backup_end = backup_samples[-1] if backup_samples else None
     forward_end = forward_samples[-1] if forward_samples else None
     right_end = right_samples[-1] if right_samples else None
     left_end = left_samples[-1] if left_samples else None
+    multi_end = multi_samples[-1] if multi_samples else None
     backup_ups = [sample.up_z for sample in backup]
     forward_ups = [sample.up_z for sample in forward]
     right_ups = [sample.up_z for sample in nav]
     left_ups = [sample.up_z for sample in left_nav]
+    multi_ups = [sample.up_z for sample in multi_body]
     phrases = tuple(
         cue.phrase
-        for cues in (BACKUP_CUES, FORWARD_CUES, RIGHT_CUES, LEFT_CUES)
+        for cues in (BACKUP_CUES, FORWARD_CUES, RIGHT_CUES, LEFT_CUES, MULTI_CUES)
         for cue in cues
         if cue.phrase is not None
     )
     reasons = [
         reason
-        for reason in (backup_reason, forward_reason, right_reason, left_reason)
+        for reason in (backup_reason, forward_reason, right_reason, left_reason, multi_reason)
         if reason
     ]
     draft = ClipResult(
@@ -1496,7 +1782,7 @@ def _measure(
         kit_cam_pos=cam_pos,
         mujoco_gl=os.environ.get("MUJOCO_GL", ""),
         phrases=phrases,
-        fault=backup_fault or forward_fault or right_fault or left_fault,
+        fault=backup_fault or forward_fault or right_fault or left_fault or multi_fault,
         fault_reason="; ".join(reasons),
         command_vx_back=-BACK_CAP_MPS,
         command_vx_fwd=FWD_MPS,
@@ -1525,6 +1811,18 @@ def _measure(
         min_up_z_left=min(left_ups) if left_ups else None,
         end_mode_left=left_end.mode if left_end is not None else "",
         end_margin_left=float(left_end.margin) if left_end is not None else None,
+        dx_approach_multi_m=_dx(multi_approach),
+        dyaw_left_multi_deg=_dyaw_deg(multi_left),
+        mean_yaw_rate_left_multi=_mean_yaw_rate(multi_left),
+        dx_mid_multi_m=_heading_travel(multi_mid),
+        dyaw_right_multi_deg=_dyaw_deg(multi_right),
+        mean_yaw_rate_right_multi=_mean_yaw_rate(multi_right),
+        dx_resume_multi_m=_heading_travel(multi_resume),
+        dyaw_resume_multi_deg=_dyaw_deg(multi_resume),
+        dyaw_stop_multi_deg=_dyaw_deg(multi_stop),
+        min_up_z_multi=min(multi_ups) if multi_ups else None,
+        end_mode_multi=multi_end.mode if multi_end is not None else "",
+        end_margin_multi=float(multi_end.margin) if multi_end is not None else None,
         stills=tuple(stills),
         mp4=str(mp4.relative_to(ROOT)) if mp4 is not None else None,
         honesty="",
@@ -1561,7 +1859,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--clip",
         action="store_true",
-        help="Render kit_cam for back up, walk forward, and both nav windows",
+        help="Render kit_cam for back up, walk forward, both nav windows, and the left-then-right path",
     )
     parser.add_argument("--out", default=str(PREVIEWS / "voice_caller_kit_cam.mp4"))
     parser.add_argument("--summary", default=str(PREVIEWS / "voice_caller_day1_summary.json"))
@@ -1574,7 +1872,10 @@ def main(argv: list[str] | None = None) -> int:
         return self_test()
     if args.clip:
         if args.phrases:
-            print("refused: --clip plays back up, walk forward, and both navs", file=sys.stderr)
+            print(
+                "refused: --clip plays back up, walk forward, both navs, and the left-then-right path",
+                file=sys.stderr,
+            )
             return 2
         return run_clip(Path(args.out), Path(args.summary))
     if args.phrases:
