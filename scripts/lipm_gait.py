@@ -38,6 +38,22 @@ LEG_TAU = 2.45
 # Position-servo saturation boundary. Commanding past this does not add torque
 # on joints that stay inside the linear band.
 SAT_FRAC = 0.98
+# HX-35H knee budget at about 10.5 V. The plant forcerange stays ±2.45.
+# A knee past this is a Prefer FAIL. Not a forcerange edit.
+KNEE_SAG_NM = 2.33
+# Locked kit row. Body speed is about this many (m/s) per meter of OP3
+# x_amp, measured with the step scaled to the command. The bus forward
+# clamp is KIT_BODY_PER_X * KIT_X_RAIL_M, so full stick is the speed the
+# rail-safe step actually produces. KIT_X_RAIL_M is the longest step whose
+# knees stayed at or under KNEE_SAG_NM. 0.020 m is the kit yaml step; it
+# is not used when that step crosses the sag bar.
+KIT_BODY_PER_X = 7.50
+KIT_X_RAIL_M = 0.020
+# Step angle (rad per cycle) = yaw_rate * period * KIT_YAW_GAIN.
+# +yaw_rate is a left turn. The walker already splits angle/2 across the feet.
+# 0.50 keeps a full ±0.25 rad/s command off the hip rail. Straight body
+# speed at x = 0.020 m is 0.150 m/s, so the bus cap is 7.50 * 0.020.
+KIT_YAW_GAIN = 0.50
 # Hiwonder no-load speed, https://www.hiwonder.com/products/hx-35h
 # HX-35H (knee / leg) 0.18 s/60° at 11.1 V ≈ 5.8 rad/s.
 # HX-35HM (hip) 0.19 s/60° ≈ 5.5 rad/s.
@@ -361,13 +377,12 @@ class LipmWalker:
         hi_lim = float(self.model.actuator_ctrlrange[idx, 1])
         self.data.ctrl[idx] = min(hi_lim, max(lo_lim, cmd))
 
-    def write_force_limited(self, jn: str, q_des: float) -> None:
-        """Stand target whose predicted servo force stays inside 0.98·τ.
+    def write_force_limited(self, jn: str, q_des: float, limit_nm: float | None = None) -> None:
+        """Stand target whose predicted servo force stays inside the budget.
 
-        Hip roll and ankle roll are not on the 20 ms move. A full
-        saturation-band step while the joint is still moving adds the
-        damping term to kp·error and clips at ±2.45 Nm. Knee, hip pitch,
-        and ankle pitch keep the move-time path in ``write_clipped``.
+        Predicted force is kp·(ctrl−q) − kv·ω. The default budget is
+        0.98·forcerange. A knee may pass a lower budget (the 10.5 V sag)
+        without editing the plant forcerange.
         """
         act = f"{jn}_pos"
         idx = self.act_idx.get(act)
@@ -380,6 +395,8 @@ class LipmWalker:
         kv = -float(self.model.actuator_biasprm[idx, 2])
         tau = abs(float(self.model.actuator_forcerange[idx, 1]))
         limit = SAT_FRAC * tau
+        if limit_nm is not None:
+            limit = min(limit, float(limit_nm))
         if kp < 1e-6:
             cmd = q_des
         else:
@@ -400,8 +417,11 @@ class LipmWalker:
         self.swing_s = 0.0
         self.lat *= 0.8
         for jn, val in self.q_stand.items():
-            if jn.endswith(("knee", "hip_pitch", "ank_pitch")):
-                self.write_clipped(jn, val)
+            # Stop and silence land here. The 20 ms walk slew is not used:
+            # the caller applies this command on the same tick. Knees stay
+            # inside the sag budget. Other joints stay inside 0.98·τ.
+            if jn.endswith("knee"):
+                self.write_force_limited(jn, val, KNEE_SAG_NM)
             else:
                 self.write_force_limited(jn, val)
 
@@ -443,13 +463,9 @@ class LipmWalker:
             self._gm_swing = None
             self.hold_stand()
             return
-        x_amp = 0.0
-        if abs(self.cmd_vx) > 1e-4:
-            x_amp = math.copysign(min(self.cfg.gm_x_m, 0.020), self.cmd_vx)
-        # cmd_yaw is the bus yaw_rate after Controls clamps it. This locked
-        # row does not turn: the step angle stays 0, including vx = 0.
-        # There is no vy channel.
-        walker.set_command(x_amp, 0.0, 0.0)
+        x_amp, angle = kit_bus_step(self.cmd_vx, self.cmd_yaw, self.cfg.gm_period_s)
+        # No vy. Cycle yaw is the bus yaw_rate; vx scales the step length.
+        walker.set_command(x_amp, 0.0, angle)
         joints, info = walker.step(op3_walk.OP3_CTRL_S)
         phase = info.phase
         if phase == "L":
@@ -1249,6 +1265,22 @@ def sole_clearance(model: mj.MjModel, data: mj.MjData, bid: int, gid: int) -> fl
             )
             zs.append(float((origin + rot @ local)[2]))
     return min(zs)
+
+
+def kit_bus_step(vx: float, yaw_rate: float, period_s: float) -> tuple[float, float]:
+    """OP3 step length (m) and cycle yaw (rad) from a clamped bus command.
+
+    ``vx`` is m/s and ``yaw_rate`` is rad/s, after Controls clamps them.
+    There is no vy. ``x_amp`` tracks ``vx`` so the command is a speed, not
+    a switch into the full 0.020 m step. The cycle angle is the heading
+    change of one period. The walker applies half of it on each foot.
+    """
+    x_amp = 0.0
+    if abs(vx) > 1e-4 and KIT_BODY_PER_X > 1e-9:
+        mag = min(KIT_X_RAIL_M, abs(float(vx)) / KIT_BODY_PER_X)
+        x_amp = math.copysign(mag, float(vx))
+    angle = float(yaw_rate) * float(period_s) * KIT_YAW_GAIN
+    return x_amp, angle
 
 
 def _median(values: list[float]) -> float:

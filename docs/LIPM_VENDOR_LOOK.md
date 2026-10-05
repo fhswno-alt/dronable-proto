@@ -1301,3 +1301,50 @@ Nothing in stand, forward, or stop crosses 2.449 Nm. The stand peak
 is the right ankle pitch at +1.262 Nm. The clip is
 `previews/bus_kit_forward_stop.mp4`.
 
+## Honest vx, sag bar, kit turn
+
+Plant md5 stays `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass is off.
+The forward clamp is no longer 0.056 m/s. That command was a switch
+into the full 0.020 m step, and the body then walked at about 0.138 m/s.
+
+`applied_vx` is still the clamped command. The OP3 step length is
+`applied_vx / 7.50`. At the 0.020 m step the settled body speed is
+0.150 m/s, so the bus forward clamp is 0.150 m/s. Yaw stays ±0.25 rad/s.
+A request of `vel(3.0, −4.0)` clamps to +0.150 m/s and −0.25 rad/s.
+
+Once the slew has reached that clamp, settled body vx is +0.150 m/s.
+The ratio is 1.00. Half of the clamp, 0.075 m/s, settles at +0.078 m/s.
+That residual gain is 1.05. The window mean on the 0.50–6.00 s forward
+row is +0.119 m/s because the slew up to 0.150 m/s takes 1.875 s.
+Reverse is still clamped at 0.032 m/s. At that command the body retreats
+at about 0.023 m/s (ratio 0.71). The reverse cap was not refit.
+
+Knees are reported against 2.33 Nm, the HX-35H budget at about 10.5 V.
+The plant forcerange stays ±2.45. Stop and the 200 ms silence apply the
+stand command through the force limit on that same tick, with the knee
+budget at 2.33 Nm. They do not slew through the walking target.
+
+| Window | Settled body vx | Knee peak | Other peak |
+| --- | ---: | ---: | ---: |
+| Forward, command +0.150 | +0.150 m/s | right +2.173 Nm | hip roll −2.128 Nm |
+| Stop from that walk | — | both knees +2.330 Nm | ankle pitch +2.401 Nm |
+
+Nothing crosses 2.33 Nm on a knee. Nothing crosses 2.449 Nm on a leg.
+Swing sole p90 on this forward row is 1.75 / 1.73 cm. min up_z is 0.941
+while walking and 0.954 after the stop. Δx on the forward command is
++68.9 cm. The stop adds +1.0 cm. 200.0 ms of silence still returns
+`mode=stand` and `applied_vx=0`.
+
+Cycle yaw is `yaw_rate * period * 0.50`. Full stick is 0.062 rad of
+step angle. The walker splits that across the two feet. +yaw_rate is left.
+
+| Command | Step angle | Steady Δyaw | Steady yaw rate | Knee | Worst leg |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| vel(+0.150, +0.25) | 0.062 rad | +25.9 deg | +0.196 rad/s | 2.330 Nm | hip pitch −2.401 Nm |
+| vel(+0.150, −0.25) | 0.062 rad | −33.5 deg | −0.253 rad/s | 2.330 Nm | hip roll −2.413 Nm |
+| vel(0, +0.25) | 0.062 rad | +24.9 deg | +0.188 rad/s | 2.330 Nm | hip pitch +2.401 Nm |
+
+Left is slower than the 0.25 rad/s command (ratio 0.78). Right matches
+it (ratio 1.01). Both headings follow the sign of the command, including
+a turn with vx at 0. The clip is `previews/bus_kit_yaw_left.mp4`.
+

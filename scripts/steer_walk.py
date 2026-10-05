@@ -116,7 +116,8 @@ Run:
 
 `--bus-kit` drives the locked kit walk (500 ms, 20 ms servo, stance
 +0.005 m per foot) through this bus. `--view` uses that same row.
-The CPG clips stay on the default command.
+The forward clamp is the measured kit body speed, 0.150 m/s.
+Yaw stays ±0.25 rad/s and maps into the OP3 step angle.
 """
 from __future__ import annotations
 
@@ -179,10 +180,11 @@ SAT_FRAC = 0.98
 # vx that maps to CPG amplitude 1. Full-stick forward is below this: 0.080
 # yaws off and tips near Δx 1.2 m. Do not divide amplitude by VX_FWD_CAP.
 GAIT_AMP_VX = 0.08
-# Full-stick forward command. |applied_vx| / GAIT_AMP_VX is the CPG amplitude,
-# so this cap is amplitude 0.70. Realized body speed is slower than the
-# command (~0.04 m/s). Not a torque-limit increase.
-VX_FWD_CAP = 0.056
+# Full-stick forward command on the kit walk. This is the measured body
+# speed at the longest step that stays inside the knee sag budget, not the
+# old 0.056 m/s CPG stick. CPG amplitude still divides by GAIT_AMP_VX and
+# saturates at 1. KIT_BODY_PER_X * KIT_X_RAIL_M = 7.50 * 0.020 = 0.150.
+VX_FWD_CAP = lipm_gait.KIT_BODY_PER_X * lipm_gait.KIT_X_RAIL_M
 # |vx| / GAIT_AMP_VX = 0.40. This command, with REVERSE_PLANT_KD, is the
 # upright retreat. A larger reverse command shortens the distance before a tip.
 VX_BACK_CAP = 0.032
@@ -282,7 +284,7 @@ STANCE_PUSH_PHASE1 = 0.48
 DEADBAND_VX = TELEOP_DEADBAND * VX_FWD_CAP
 DEADBAND_YAW = TELEOP_DEADBAND * YAW_RATE_CAP
 # Plant slew is tighter than TELEOP_RATE_LIMIT so stand→full gait is not one frame.
-VX_SLEW = 0.08  # m/s^2  (0 → 0.056 cap in 0.70 s)
+VX_SLEW = 0.08  # m/s^2  (0 → 0.150 cap in 1.875 s)
 YAW_SLEW = 0.40  # rad/s^2
 
 COMMAND_TIMEOUT_S = 0.200
@@ -1251,9 +1253,15 @@ class SteerSession:
             ctrl_from = np.array(self.data.ctrl, dtype=np.float64, copy=True)
             if self.bus.fault:
                 self.lipm.hold_stand()
+                holding = True
             else:
                 walking = report.mode == "move"
                 self.lipm.tick(vx, report.applied_yaw_rate, walking)
+                holding = not walking
+            # A hold is already the force-limited stand command. Slewing
+            # toward it from the walking ctrl is what rails the stop.
+            if holding:
+                ctrl_from = np.array(self.data.ctrl, dtype=np.float64, copy=True)
             self._lipm_substep(ctrl_from)
             self.lipm.observe(self._up_z())
         self._update_bias(now)
@@ -2358,9 +2366,12 @@ def test_bus() -> list[str]:
     _expect(report.mode == "stand" and report.applied_vx == 0.0, "deadband did not zero vx", failures)
     full = TickReport(VX_FWD_CAP, 0.0, "move")
     amp, direction = gait_amp_and_dir(full)
+    # The kit cap can sit above the CPG amplitude reference. The CPG
+    # saturates at 1 instead of taking a stick larger than GAIT_AMP_VX.
+    cpg_full = min(1.0, VX_FWD_CAP / GAIT_AMP_VX)
     _expect(
-        abs(amp - VX_FWD_CAP / GAIT_AMP_VX) < 1e-9 and direction == 1,
-        f"full-stick amp {amp} (divisor must stay {GAIT_AMP_VX})",
+        abs(amp - cpg_full) < 1e-9 and direction == 1,
+        f"full-stick amp {amp} (CPG saturates at {cpg_full})",
         failures,
     )
     back = TickReport(-VX_BACK_CAP, 0.0, "move")
@@ -2370,7 +2381,7 @@ def test_bus() -> list[str]:
         f"reverse amp {amp}",
         failures,
     )
-    _expect(GAIT_AMP_VX + 1e-12 >= VX_FWD_CAP, "amplitude reference below the forward clamp", failures)
+    _expect(cpg_full <= 1.0 + 1e-12, "CPG amplitude left the unit range", failures)
     bus2.declare_fault(0.1, "tip")
     refusal = bus2.vel(0.1, 0.0, 0.1)
     _expect(refusal is not None and refusal.startswith("refused: fault"), f"fault vel got {refusal}", failures)
@@ -2379,7 +2390,11 @@ def test_bus() -> list[str]:
     apply_frozen_forward_gait()
     _expect(wg.COM_SHIFT_AMP == LOOK_COM_SHIFT, "forward COM shift left the look basin", failures)
     _expect(wg.DS_S == 0.1375 and wg.KNEE_SWING == 0.80, "reverse-safe knee/DS moved", failures)
-    _expect(VX_FWD_CAP == 0.056 and VX_BACK_CAP == 0.032 and YAW_RATE_CAP == 0.25, "caps moved", failures)
+    _expect(
+        abs(VX_FWD_CAP - 0.150) < 1e-9 and VX_BACK_CAP == 0.032 and YAW_RATE_CAP == 0.25,
+        "caps moved",
+        failures,
+    )
     gait_t = 0.85 * float(wg.GAIT_T)
     q_plain = wg.gait_targets(gait_t, True, 0.70)
     q_step = dict(q_plain)
@@ -2741,7 +2756,7 @@ def test_nav() -> list[str]:
     CoP stays in the box and the tip check is the existing one.
     """
     failures: list[str] = []
-    _expect(VX_FWD_CAP == 0.056 and VX_BACK_CAP == 0.032, "velocity caps moved", failures)
+    _expect(abs(VX_FWD_CAP - 0.150) < 1e-9 and VX_BACK_CAP == 0.032, "velocity caps moved", failures)
     _expect(YAW_RATE_CAP == 0.25, "yaw cap moved", failures)
     _expect(TURN_RIGHT_SWING_YAW_SCALE == 0.60, "right swing scale moved", failures)
     _expect(_md5(PLANT_XML) == PLANT_MD5, "plant md5 changed", failures)
@@ -2799,7 +2814,7 @@ def test_nav_multi() -> list[str]:
     Prefer FAIL and are not run. The 14 s left that starts at 15 s is not run.
     """
     failures: list[str] = []
-    _expect(VX_FWD_CAP == 0.056 and VX_BACK_CAP == 0.032, "velocity caps moved", failures)
+    _expect(abs(VX_FWD_CAP - 0.150) < 1e-9 and VX_BACK_CAP == 0.032, "velocity caps moved", failures)
     _expect(YAW_RATE_CAP == 0.25, "yaw cap moved", failures)
     _expect(_md5(PLANT_XML) == PLANT_MD5, "plant md5 changed", failures)
     bounds = script_bounds(NAV_MULTI_SCRIPT)
@@ -2944,10 +2959,16 @@ def _bus_kit_contract() -> tuple[list[str], list[str]]:
         failures,
     )
     walker = session.lipm.op3 if session.lipm is not None else None
-    _expect(walker is not None and walker.angle_cmd == 0.0, "kit step angle left 0", failures)
+    period = session.lipm.cfg.gm_period_s if session.lipm is not None else 0.0
+    expect_angle = report.applied_yaw_rate * period * lipm_gait.KIT_YAW_GAIN
+    _expect(
+        walker is not None and abs(walker.angle_cmd - expect_angle) < 1e-9 and abs(walker.angle_cmd) > 1e-6,
+        "kit step angle did not follow yaw_rate",
+        failures,
+    )
     lines.append(
         f"yaw tick {report.line()}; kit step angle "
-        f"{0.0 if walker is None else walker.angle_cmd:.3f} rad"
+        f"{0.0 if walker is None else walker.angle_cmd:.4f} rad"
     )
     now = float(session.data.time)
     refusal = bus.stop(now)
@@ -2958,6 +2979,7 @@ def _bus_kit_contract() -> tuple[list[str], list[str]]:
         f"stop was not the same tick ({report.line()})",
         failures,
     )
+    _expect(walker is not None and walker.angle_cmd == 0.0, "stop left a step angle", failures)
     _expect(walker is not None and not walker.ctrl_running, "stop left the kit walker running", failures)
     last_send = -1.0
     while float(session.data.time) < 0.40 - 1e-9:
@@ -3079,6 +3101,11 @@ def _bus_kit_forward_stop() -> tuple[list[str], list[str]]:
         f"applied_vx reached {max_applied}, not the forward clamp",
         failures,
     )
+    settle_t = BUS_KIT_STAND_S + VX_FWD_CAP / VX_SLEW + 0.40
+    settled = [s for s in fwd if s.t >= settle_t - 1e-9]
+    steady_vx = float(np.mean([s.body_vx for s in settled])) if settled else 0.0
+    ratio = steady_vx / VX_FWD_CAP if VX_FWD_CAP else 0.0
+    _expect(abs(ratio - 1.0) < 0.08, f"settled body/command {ratio:.2f}", failures)
     dx, mean_vx, min_up, dyaw = _window_stats(fwd)
     sdx, _, smin_up, sdyaw = _window_stats(stop_rows)
     lines.append(
@@ -3094,7 +3121,8 @@ def _bus_kit_forward_stop() -> tuple[list[str], list[str]]:
     lines.append(
         f"forward n={len(fwd)} applied_vx max {max_applied:+.4f}  "
         f"Δx {dx * 100:+.1f} cm  mean body vx {mean_vx * 100:+.2f} cm/s  "
-        f"min up_z {min_up:.3f}  Δyaw {dyaw:+.1f} deg"
+        f"min up_z {min_up:.3f}  Δyaw {dyaw:+.1f} deg  "
+        f"settled vx {steady_vx:+.3f} m/s ratio {ratio:.2f}"
     )
     lines.append(
         f"stop n={len(stop_rows)} Δx {sdx * 100:+.1f} cm  "
@@ -3112,6 +3140,10 @@ def _bus_kit_forward_stop() -> tuple[list[str], list[str]]:
             if abs(peak.force_nm) > BUS_KIT_RAIL_NM:
                 failures.append(
                     f"{label} {name} {peak.force_nm:+.4f} Nm at {peak.t_s:.3f} s"
+                )
+            if "knee" in name and abs(peak.force_nm) > lipm_gait.KNEE_SAG_NM + 1e-3:
+                failures.append(
+                    f"{label} {name} {peak.force_nm:+.3f} Nm crosses {lipm_gait.KNEE_SAG_NM:.2f}"
                 )
         def _signed(joint: str) -> str:
             peak = bucket.get(joint)
@@ -3142,12 +3174,91 @@ def _bus_kit_forward_stop() -> tuple[list[str], list[str]]:
     return failures, lines
 
 
+def _bus_kit_yaw() -> tuple[list[str], list[str]]:
+    """Full left and full right. Step angle leaves 0 and heading follows."""
+    failures: list[str] = []
+    lines: list[str] = []
+    for sign, vx, name in (
+        (1.0, VX_FWD_CAP, "left"),
+        (-1.0, VX_FWD_CAP, "right"),
+        (1.0, 0.0, "inplace"),
+    ):
+        session = SteerSession(video=False, lipm=locked_kit_config())
+        stand_s = 0.40
+        move_s = 5.00
+        stop_s = 6.20
+        peaks: dict[str, _TauPeak] = {}
+        real_step = mj.mj_step
+
+        def _step(model: mj.MjModel, data: mj.MjData) -> None:
+            real_step(model, data)
+            _note_leg_peaks(session, peaks)
+
+        mj.mj_step = _step
+        last_send = -1.0
+        angle_peak = 0.0
+        try:
+            while float(session.data.time) < stop_s - 1e-9:
+                now = float(session.data.time)
+                if now < stand_s - 1e-9:
+                    if last_send < 0.0:
+                        session.bus.stand(now)
+                        last_send = now
+                elif now < move_s - 1e-9:
+                    if last_send < stand_s or (now - last_send) >= (VEL_RESEND_S - 1e-9):
+                        session.bus.vel(vx, sign * YAW_RATE_CAP, now)
+                        last_send = now
+                elif last_send < move_s:
+                    session.bus.stop(now)
+                    last_send = move_s + 10.0
+                session.step()
+                walker = session.lipm.op3 if session.lipm is not None else None
+                if walker is not None:
+                    angle_peak = max(angle_peak, abs(walker.angle_cmd))
+        finally:
+            mj.mj_step = real_step
+        move = [s for s in session.samples if s.mode == "move"]
+        settle = stand_s + max(VX_FWD_CAP / VX_SLEW, YAW_RATE_CAP / YAW_SLEW) + 0.40
+        steady = [s for s in move if s.t >= settle - 1e-9]
+        dyaw = 0.0
+        rate = 0.0
+        if len(steady) >= 2:
+            dyaw = math.degrees(steady[-1].yaw - steady[0].yaw)
+            dt = steady[-1].t - steady[0].t
+            rate = math.radians(dyaw) / dt if dt > 1e-6 else 0.0
+        _expect(angle_peak > 0.04, f"{name} step angle {angle_peak:.3f}", failures)
+        _expect(dyaw * sign > 15.0, f"{name} Δyaw {dyaw:+.1f} deg", failures)
+        _expect(session.samples[-1].mode == "stand", f"{name} tail {session.samples[-1].mode}", failures)
+        knee_peak = 0.0
+        worst_name = ""
+        worst = 0.0
+        for joint, peak in peaks.items():
+            if abs(peak.force_nm) >= abs(worst):
+                worst = peak.force_nm
+                worst_name = joint
+            if "knee" in joint:
+                knee_peak = max(knee_peak, abs(peak.force_nm))
+            if abs(peak.force_nm) > BUS_KIT_RAIL_NM:
+                failures.append(f"{name} {joint} {peak.force_nm:+.3f} Nm")
+            if "knee" in joint and abs(peak.force_nm) > lipm_gait.KNEE_SAG_NM + 1e-3:
+                failures.append(f"{name} knee {joint} {peak.force_nm:+.3f} Nm")
+        lines.append(
+            f"{name} angle {angle_peak:.3f} rad  steady Δyaw {dyaw:+.1f} deg  "
+            f"yaw rate {rate:+.3f} rad/s  knee |τ| {knee_peak:.3f}  "
+            f"worst {worst_name} {worst:+.3f} Nm"
+        )
+        session.assert_plant_unchanged()
+    return failures, lines
+
+
 def bus_kit_check() -> int:
     """Day-1 bus on the locked kit row. Non-zero means the Prefer FAIL bar broke."""
     contract_fail, lines = _bus_kit_contract()
     torque_fail, torque_lines = _bus_kit_forward_stop()
-    failures = contract_fail + torque_fail
+    yaw_fail, yaw_lines = _bus_kit_yaw()
+    failures = contract_fail + torque_fail + yaw_fail
     lines.extend(torque_lines)
+    lines.extend(yaw_lines)
     print("[bus-kit] Day-1 CommandBus on locked kit500")
     for line in lines:
         print(f"[bus-kit] {line}")
@@ -3155,7 +3266,10 @@ def bus_kit_check() -> int:
         for msg in failures:
             print(f"FAIL {msg}")
         return 1
-    print("[bus-kit] Prefer FAIL bar holds: forward then stop stayed under ±2.45 Nm")
+    print(
+        "[bus-kit] Prefer FAIL bar holds: settled vx matches the clamp, "
+        "yaw step angle is non-zero, knees stay at or under 2.33 Nm"
+    )
     return 0
 
 
