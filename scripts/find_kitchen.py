@@ -18,8 +18,8 @@ forward cap (0.028 m/s). A centered blob is that vx with yaw 0. A side blob
 adds a yaw trim scaled by the bias. Full-cap slices and short slices with
 stand pauses between them are not this path: the first crossed up_z 0.90
 near +0.39 m, and the pauses never got past ~0.1 m. The up_z bar stays
-0.90. The 1.2 s hop stays in --self-test at the full forward cap. A burst
-budget near 0.6 m is a stop, not a goal pose. Arrival is claimed only when
+0.90. The 1.2 s hop stays in --self-test at the full forward cap. The
+world-x budget is 1.10 m, a stop, not a goal pose. Arrival is claimed only when
 the backsplash fills at least half the frame and the torso is within 0.25 m
 of the kitchen geom. Otherwise the summary reports end x and the remaining
 gap and does not say arrived.
@@ -84,15 +84,18 @@ FORWARD_HOLD_S = 1.20
 BURST_FORWARD_S = 0.40
 BURST_YAW_S = 0.40
 SOFT_VX = steer_walk.VX_FWD_CAP * 0.5
-# Half-cap realized speed is about 0.016 m/s, so the 0.60 m stop needs
-# more slices than a full-cap walk. 120 * 0.40 s covers that with margin.
-MAX_FORWARD_BURSTS = 120
+# Half-cap realized speed is about 0.016 m/s. The slice cap is only so a
+# stalled walk cannot run forever. 280 * 0.40 s is longer than the 1.10 m
+# budget at that speed, so the distance stop fires first.
+MAX_FORWARD_BURSTS = 280
 MAX_YAW_CORRECTIONS = 80
 # |bias| at which the trim uses the full yaw cap. Inside CENTER_BIAS, yaw is 0.
 YAW_BIAS_FULL = 0.35
-# Stop once world-x progress is inside the requested 0.3–0.8 m band.
-# This is a burst budget, not a waypoint at the counter.
-PROGRESS_STOP_M = 0.60
+# World-x progress stop. The kitchen near face is at x = 1.315 m, so 1.10 m
+# of progress from the stand leaves a gap above the 0.25 m arrival bar.
+# This is a burst budget, not a waypoint at the counter. The up_z bar is
+# still 0.90, and arrival still needs both yellow >= 0.50 and gap <= 0.25 m.
+PROGRESS_STOP_M = 1.10
 # First sample under the plant's throttle line stops the approach.
 # A lean that holds under 0.85 also trips the bus fault in this room,
 # because the world COM includes the furniture.
@@ -667,7 +670,7 @@ def approach_choice(
             "stop",
             "budget",
             (
-                f"burst budget {dx_m:.3f} m is inside 0.30–0.80 m; stop; "
+                f"burst budget {dx_m:.3f} m reached; stop; "
                 "this is not a counter pose and not arrival"
             ),
         )
@@ -1146,9 +1149,14 @@ def test_approach_policy() -> list[str]:
         forward_bursts=0, remaining_m=1.20,
     )
     _expect(go.action == "forward" and go.kind == "steer", f"open burst {go}", failures)
-    budget = approach_choice(
+    earlier = approach_choice(
         centered, dx_m=0.60, up_z=0.98, yaw_corrections=0,
         forward_bursts=3, remaining_m=0.70,
+    )
+    _expect(earlier.action == "forward", f"0.60 m is not the budget {earlier}", failures)
+    budget = approach_choice(
+        centered, dx_m=PROGRESS_STOP_M, up_z=0.98, yaw_corrections=0,
+        forward_bursts=3, remaining_m=0.40,
     )
     _expect(budget.action == "stop" and budget.kind == "budget", f"budget {budget}", failures)
     yaw = approach_choice(
@@ -1517,8 +1525,8 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
         )
     if approach.arrival:
         problems.append("arrival was claimed; this draft does not expect the bars to pass")
-    if approach.stop_kind == "budget" and not (0.30 <= approach.dx_m <= 0.85):
-        problems.append(f"budget stop dx {approach.dx_m:.3f} m is outside 0.30–0.85")
+    if approach.stop_kind == "budget" and not (1.00 <= approach.dx_m <= 1.25):
+        problems.append(f"budget stop dx {approach.dx_m:.3f} m is outside 1.00–1.25")
     if approach.stop_kind == "budget" and approach.min_up_z < UP_Z_ABORT:
         problems.append(f"budget stop min up_z {approach.min_up_z:.3f}")
 
