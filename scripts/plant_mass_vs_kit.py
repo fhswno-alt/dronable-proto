@@ -1089,6 +1089,66 @@ def knee_dynamic(
     }
 
 
+# Trial armatures for the sensitivity table. Neither value is written into a plant.
+# 0.01 is the converter default already on the hinges. 0.045 is the Menagerie OP3
+# system-ID result cited in the doc; it is not an HX-35H measurement.
+ARMATURE_TRIALS: tuple[tuple[str, float], ...] = (
+    ("converter_default", 0.01),
+    ("menagerie_op3", 0.045),
+)
+
+
+def armature_sensitivity(
+    pose_name: str,
+    amplitude: float,
+    link_i: float,
+    plant_arm: float,
+    published_rows: list[dict[str, float]],
+    static_ds: float,
+    static_ss: float,
+    rail_nm: float,
+) -> list[dict[str, float | str | bool]]:
+    """Static knee torque plus (I_link + trial armature) * α.
+
+    I_link and the 2 cm knee amplitude stay at the values from ``knee_dynamic``.
+    α = A (2π / T)², the same sinusoid as that section. Viscous damping is not
+    added here; the published period table's "full" columns leave it out too.
+    """
+    rows_out: list[dict[str, float | str | bool]] = []
+    for label, trial in ARMATURE_TRIALS:
+        for period in (0.300, 0.400, 0.500, 0.600):
+            omega = 2.0 * math.pi / period
+            alpha = amplitude * omega * omega
+            tau_arm = trial * alpha
+            tau_link = link_i * alpha
+            tau_full = (link_i + trial) * alpha
+            ds_peak = static_ds + tau_full
+            ss_peak = static_ss + tau_full
+            if abs(trial - plant_arm) < 1e-15:
+                match = next(row for row in published_rows if abs(row["period_s"] - period) < 1e-12)
+                if abs(ds_peak - match["ds_plus_full_nm"]) > 1e-9:
+                    raise SystemExit(f"{pose_name} {period} ds peak drifted from the knee table")
+                if abs(ss_peak - match["ss_plus_full_nm"]) > 1e-9:
+                    raise SystemExit(f"{pose_name} {period} ss peak drifted from the knee table")
+            rows_out.append(
+                {
+                    "pose": pose_name,
+                    "armature_label": label,
+                    "armature": trial,
+                    "period_s": period,
+                    "alpha_rad_s2": alpha,
+                    "tau_arm_nm": tau_arm,
+                    "tau_link_nm": tau_link,
+                    "tau_full_nm": tau_full,
+                    "ds_peak_nm": ds_peak,
+                    "ss_peak_nm": ss_peak,
+                    "ds_clears_rail": ds_peak <= rail_nm + 1e-12,
+                    "ss_clears_rail": ss_peak <= rail_nm + 1e-12,
+                }
+            )
+    return rows_out
+
+
 def pose_snapshot(
     model: mujoco.MjModel,
     data: mujoco.MjData,
@@ -1173,6 +1233,23 @@ def build_knee_report(
             "ss": torques[name]["ss:r:knee"]["abs_nm"],
         }
         dynamics[name] = knee_dynamic(model, data, pose, lifts[name], static_abs)
+    sensitivity: list[dict[str, float | str | bool]] = []
+    for name, dynamic in dynamics.items():
+        published = dynamic["rows"]
+        if not isinstance(published, list):
+            raise SystemExit(f"{name} dynamics rows missing")
+        sensitivity.extend(
+            armature_sensitivity(
+                name,
+                float(dynamic["amplitude_rad"]),
+                float(dynamic["I_link"]),
+                float(dynamic["armature"]),
+                published,
+                torques[name]["ds:r:knee"]["abs_nm"],
+                torques[name]["ss:r:knee"]["abs_nm"],
+                rail_nm,
+            )
+        )
     set_pose(model, data, _pose_only(stand_034))
     stand_drop = body_sole_drop(model, data, "r")
     set_pose(model, data, _pose_only(crouch_034))
@@ -1208,6 +1285,7 @@ def build_knee_report(
         "torques": torques,
         "lifts": lifts,
         "dynamics": dynamics,
+        "armature_sensitivity": sensitivity,
         "op3_clock_snapshot": pose_snapshot(model, data, op3_clock),
         "op3_clock_torque_ds_knee": support_torques(model, data, op3_clock, total_mass)["ds:r:knee"],
     }

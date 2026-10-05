@@ -235,6 +235,29 @@ Peak viscous torque on the OP3 knee at 300 ms is **0.564 N·m**. Added to single
 
 Raising the OP3 foot-target z by 0.02 m, with x, y, and orientation held, changes the right knee by **−0.334 rad**. The hip-held lift above changes it by **−0.337 rad**. The hip pitch also moves **0.136 rad** in that IK, and the table assigns the height to the knee.
 
+## Armature sensitivity
+
+The knee peaks above use armature **0.01**, the value `scripts/convert_ainex_urdf_to_mjcf.py` writes onto a hinge that has none. This section repeats the same right-knee peak at **0.01** and at **0.045**, and does not write either number into a plant. Both plant md5s stay `71b2c86d133ebc603f58b99c53e496f3` and `17dc4ff37491c8e61900fd83b5d31f0c`.
+
+`0.045` is the default joint armature in MuJoCo Menagerie `robotis_op3/op3.xml` (`<joint damping="1.084" armature="0.045" frictionloss="0.03"/>`), present since the initial commit `28ffb48b5c1d409a37fbfbb01c023c12e61cdefd` (2023-05-18) and still on `main`. Haarnoja et al., *Learning Agile Soccer Skills for a Bipedal Robot with Deep Reinforcement Learning*, Science Robotics (2024), DOI `10.1126/scirobotics.adi8022`, arXiv:2304.13653, fitted that actuator on an OP3 motor with a known load. The fitted values they report are damping **1.084 N·m/(rad/s)**, armature **0.045 kg·m²**, friction **0.03**, maximum torque **4.1 N·m**, proportional gain **21.1 N/rad**. The paper's robot is driven by 20 Dynamixel **XM430-350-R** servos. The ROBOTIS OP3 e-manual lists the **XM430-W350** gear ratio as **353.5:1** ([introduction](https://emanual.robotis.com/docs/en/platform/op3/introduction/), fetched 2026-10-05) and names the OP3 actuator **XM430-W350-R**. The fit publishes the reflected armature, not a separate rotor inertia.
+
+That fit is not an HX-35H measurement. Hiwonder's HX-35H page does not publish a gear ratio or a rotor inertia (see the kit-source section). The Thanksbuyer HX-35H listing (fetched 2026-10-05) says the DC motor "is converted to higher torque through a 5-stage reduction ratio" and gives no numeric ratio ([thanksbuyer.com](https://www.thanksbuyer.com/products/hiwonder-hx-35h-35kg-cm-hv-bus-servo-dual-shaft-serial-bus-servo-w-feedback-for-robots-amp-robot-arms)). The Hiwonder SO-ARM101 manual gives **1:147** for the **HX-10HM** and **1:345** for the **HX-30HM** ([user manual](https://docs.hiwonder.com/projects/LeRobot/en/latest/docs/SO_ARM101_Open_Source_6_Axis_Robotic_Arm_User_Manual.html), fetched 2026-10-05). Those are sibling servos, not the HX-35H.
+
+The peak is the same stack as the "full" columns above: `|τ_static| + (I_link + armature) A (2π / T)²`. `A` and `I_link` are the 2 cm hip-held knee lift already solved for each pose. Static torque does not change with the trial armature. Viscous `0.08 A (2π / T)` is left out, as it is in those columns. The script checks that the 0.01 rows match the earlier double-support and single-support full columns to `1×10⁻⁹ N·m`. Menagerie damping 1.084 and frictionloss 0.03 are not substituted.
+
+N·m. A cell past ±2.45 N·m is marked.
+
+| Pose | Armature | 300 ms double | 300 ms single | 400 ms double | 400 ms single | 500 ms double | 500 ms single | 600 ms double | 600 ms single |
+|---|---|---|---|---|---|---|---|---|---|
+| OP3 yaml | 0.01 | 2.110 | **2.567** | 1.334 | 1.791 | 0.974 | 1.432 | 0.779 | 1.237 |
+| 0.015 m crouch | 0.01 | 2.251 | **2.542** | 1.355 | 1.646 | 0.941 | 1.231 | 0.715 | 1.006 |
+| +0.34 rad | 0.01 | 2.001 | **2.510** | 1.293 | 1.802 | 0.965 | 1.474 | 0.787 | 1.296 |
+| OP3 yaml | 0.045 | **7.280** | **7.738** | **4.242** | **4.700** | **2.836** | **3.293** | 2.072 | **2.530** |
+| 0.015 m crouch | 0.045 | **8.265** | **8.556** | **4.738** | **5.029** | **3.106** | **3.397** | 2.219 | **2.510** |
+| +0.34 rad | 0.045 | **6.730** | **7.239** | **3.953** | **4.462** | **2.668** | **3.176** | 1.969 | **2.478** |
+
+**Armature is unknown, and it is not a fix.** No cited HX-35H `J_rotor × N²` exists to replace 0.01, and 0.045 is the XM430 fit above. At 0.01 the single-support peak clears ±2.45 N·m at 400, 500, and 600 ms on all three poses (OP3 pose: **1.791**, **1.432**, **1.237 N·m**) and misses at 300 ms (**2.567 N·m**). **The Controls step-time floor on this bound is >=400 ms.** **400 ms does not clear ±2.45 N·m at armature 0.045.** On the OP3 pose that row is **4.242 N·m** in double support and **4.700 N·m** in single support. At 0.045 the single-support peak stays past the rail through 600 ms on every pose (OP3 pose **2.530 N·m**).
+
 ## Verdict
 
 **sim body matches kit within 15%, so hip rail is gait/Controls.**
@@ -243,4 +266,4 @@ No leg link is a mass or link-inertia candidate for a later plant peel. The sim 
 
 Armature `0.01` is an uncited add, about 1.4× the reflected link inertia at the crouched hips. At the kit gait presets the torque it adds is a fraction of ±2.45 N·m. It is not changed here. A later peel would need a cited rotor inertia; this pass did not find one for the HX-35H.
 
-The OP3 yaml start, scaled to these leg lengths, holds the right knee at **0.336 N·m** in double support and **0.793 N·m** in single support. That is the stand, before the 2 cm lift. The 300 ms single-support stack with the full knee inertia of that lift is **2.567 N·m**, past ±2.45 N·m. The stand by itself is not.
+The OP3 yaml start, scaled to these leg lengths, holds the right knee at **0.336 N·m** in double support and **0.793 N·m** in single support. That is the stand, before the 2 cm lift. The 300 ms single-support stack with the full knee inertia of that lift is **2.567 N·m**, past ±2.45 N·m. The stand by itself is not. At armature 0.01 the same stack clears from 400 ms up, so the Controls step-time floor is >=400 ms. Armature 0.045, the Menagerie XM430 fit, leaves the 400 ms single-support peak at **4.700 N·m**. The HX-35H reflected inertia is still unpublished, and this pass does not change 0.01.
