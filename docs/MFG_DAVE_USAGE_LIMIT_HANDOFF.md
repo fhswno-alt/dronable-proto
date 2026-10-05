@@ -6,6 +6,7 @@
 
 Live freeze sheet: `docs/MFG_FREEZE_STATUS_MONDAY.md`  
 Factory one-pager: `docs/FACTORY_ONE_PAGER.md`  
+First-build prices: `docs/MFG_FIRST_BUILD_PRICE_SHEET.md`  
 Buy sheet (Google): https://docs.google.com/document/d/1w6tZ-UTNqlveMHpFS6vtwDNMyCJV9o0iXAH0SN3DL_Q/edit
 
 ---
@@ -37,7 +38,7 @@ Only after **you** decide sim is good enough:
 1. Open buy sheet + `docs/FACTORY_ONE_PAGER.md`.
 2. Confirm AiNex **Standard** + HX bus only (no Feetech for unit one).
 3. Live Hiwonder checkout → ship-to **SE1 4AG**.
-4. Hard ceiling **$1.5k** landed; kit UK-landed ~$1.05–1.14k is the honest band.
+4. Hard ceiling **$1.5k**. Kit alone, UK landed, **about £754–£785**. Full first build **about £876–£1,026**. See `docs/MFG_FIRST_BUILD_PRICE_SHEET.md`. The **Standard** kit is **24 DOF** at **$829.99** (Pi 5 2GB, this week's pick) or **$909.99** (4GB, later only if voice and vision move onto the kit). **$729.99 is the 20-DOF Starter** and does not match the walk plant. The old ~$1.05–1.14k band used that Starter price. The OD-2 price flag is resolved by the price sheet. Nothing is ordered.
 5. On receipt: run QC outline in factory one-pager § QC (weigh, dims, Pi boot, HX map, E-stop, serials).
 6. UK fab only after kit-matched drawings: face/eye mount, ankle bumpers, prop lever 250–300 mm AFF — **China CM = none** for unit one.
 
