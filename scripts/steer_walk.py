@@ -1946,7 +1946,7 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
             f"md5 {PLANT_MD5}. No further plant edit. "
             "Vendor look is about 2 cm, a 300–600 ms step, forward progress, "
             "no skate, upright, arms not frozen. "
-            "An upright in-place march is a Prefer FAIL."
+            "An upright march or a shuffle that misses that period is a Prefer FAIL."
         )
         if session.bus.fault:
             honesty += f" FAULT: {session.bus.fault_reason}."

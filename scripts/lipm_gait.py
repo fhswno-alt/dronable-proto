@@ -42,9 +42,12 @@ FLEX_LAND = 0.10
 HIP_RISE = 0.06
 HIP_REACH = 0.24
 HIP_LAND = 0.24
-# Stance hip extension (opposite the swing-flex sign) carries the pelvis
-# forward over the planted foot. Positive STANCE_PUSH is that extension.
-STANCE_PUSH = 0.0
+# Stance hip extension during swing (opposite the swing-flex sign) carries
+# the pelvis forward over the planted foot. On the ±2.45 Nm / 135×76 plant,
+# 0.070 rad stays upright for 24 s and Δx is positive. 0.075 rad tips near
+# 12 s. 0.08 rad tipped immediately on the ±2.1 freeze. This is a few
+# millimetres per step, not the 0.056 m/s command.
+STANCE_PUSH = 0.070
 # Rise is long enough for an unloaded knee (dampratio 1, about 1 rad/s)
 # to clear ~2 cm. The reach holds that flexion and swings the hip through,
 # because extending while the foot is still behind plants it early.
