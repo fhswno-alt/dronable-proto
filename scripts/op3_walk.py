@@ -392,13 +392,15 @@ class Op3Walker:
         y_phase = math.pi / 2.0 + 2.0 * math.pi / max(self.y_move_period, 1e-6) * phase_t + extra
         z_phase = math.pi / 2.0 + 2.0 * math.pi / max(self.z_move_period, 1e-6) * phase_t
         a_phase = math.pi / 2.0 + 2.0 * math.pi / max(self.a_move_period, 1e-6) * phase_t + extra
-        y_shift = self._y_move_shift if sign > 0.0 else -self._y_move_shift
-        a_shift = self._a_move_shift if sign > 0.0 else -self._a_move_shift
+        # One negation on the right leg (sign = −1). Negating the shift
+        # again puts the same yaw on both feet. Hip yaw, hip roll, and
+        # ankle roll share an axis across the legs, so that common mode
+        # cancels one turn. Pitch stays mirrored in the joint directions.
         # z is not signed. The stance foot freezes t_z at the other SSP start.
         x = wsin(t_x, self.x_move_period, x_phase, sign * self._x_move, 0.0)
-        y = wsin(t_x, self.y_move_period, y_phase, sign * self._y_move, sign * y_shift)
+        y = wsin(t_x, self.y_move_period, y_phase, sign * self._y_move, sign * self._y_move_shift)
         z = wsin(t_z, self.z_move_period, z_phase, self._z_move, self._z_move_shift)
-        yaw = wsin(t_x, self.a_move_period, a_phase, sign * self._a_move, sign * a_shift)
+        yaw = wsin(t_x, self.a_move_period, a_phase, sign * self._a_move, sign * self._a_move_shift)
         return x, y, z, yaw
 
     def endpoints(self) -> tuple[np.ndarray, np.ndarray, float, float, float]:

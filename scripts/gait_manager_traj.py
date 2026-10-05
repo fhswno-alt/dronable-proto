@@ -253,12 +253,12 @@ class GaitManagerClock:
         y_phase = _Y_MOVE_PHASE + 2.0 * math.pi / max(self.y_move_period, 1e-6) * phase_t + extra
         z_phase = _Z_MOVE_PHASE + 2.0 * math.pi / max(self.z_move_period, 1e-6) * z_anchor
         a_phase = _A_MOVE_PHASE + 2.0 * math.pi / max(self.a_move_period, 1e-6) * phase_t + extra
-        y_shift = self._y_move_shift if sign > 0.0 else -self._y_move_shift
-        a_shift = self._a_move_shift if sign > 0.0 else -self._a_move_shift
+        # Same single negation as op3_walk._leg_move. A second negation of
+        # the shift same-signs both feet.
         x = wsin(t_x, self.x_move_period, x_phase, sign * self._x_move, 0.0)
-        y = wsin(t_x, self.y_move_period, y_phase, sign * self._y_move, sign * y_shift)
+        y = wsin(t_x, self.y_move_period, y_phase, sign * self._y_move, sign * self._y_move_shift)
         z = wsin(t_z, self.z_move_period, z_phase, self._z_move, self._z_move_shift)
-        yaw = wsin(t_x, self.a_move_period, a_phase, sign * self._a_move, sign * a_shift)
+        yaw = wsin(t_x, self.a_move_period, a_phase, sign * self._a_move, sign * self._a_move_shift)
         return sx + x, sy + y, sz + z, yaw
 
     def _capture_zero(self) -> None:

@@ -3185,8 +3185,8 @@ def _bus_kit_yaw() -> tuple[list[str], list[str]]:
     ):
         session = SteerSession(video=False, lipm=locked_kit_config())
         stand_s = 0.40
-        move_s = 5.00
-        stop_s = 6.20
+        move_s = 8.00
+        stop_s = 9.00
         peaks: dict[str, _TauPeak] = {}
         real_step = mj.mj_step
 
@@ -3218,8 +3218,9 @@ def _bus_kit_yaw() -> tuple[list[str], list[str]]:
         finally:
             mj.mj_step = real_step
         move = [s for s in session.samples if s.mode == "move"]
-        settle = stand_s + max(VX_FWD_CAP / VX_SLEW, YAW_RATE_CAP / YAW_SLEW) + 0.40
-        steady = [s for s in move if s.t >= settle - 1e-9]
+        # The slew is done by ~2.3 s. The next couple of steps still
+        # settle the heading. 4–8 s is the steady turn.
+        steady = [s for s in move if s.t >= 4.0 - 1e-9]
         dyaw = 0.0
         rate = 0.0
         if len(steady) >= 2:
@@ -3248,6 +3249,74 @@ def _bus_kit_yaw() -> tuple[list[str], list[str]]:
             f"worst {worst_name} {worst:+.3f} Nm"
         )
         session.assert_plant_unchanged()
+        if name in ("left", "right"):
+            lines.append(f"__rate_{name}={rate:+.6f}")
+    left_rate = right_rate = None
+    kept: list[str] = []
+    for line in lines:
+        if line.startswith("__rate_left="):
+            left_rate = float(line.split("=", 1)[1])
+        elif line.startswith("__rate_right="):
+            right_rate = float(line.split("=", 1)[1])
+        else:
+            kept.append(line)
+    if left_rate is not None and right_rate is not None and max(abs(left_rate), abs(right_rate)) > 1e-6:
+        mismatch = abs(abs(left_rate) - abs(right_rate)) / max(abs(left_rate), abs(right_rate))
+        _expect(mismatch < 0.05, f"left/right yaw rate mismatch {mismatch:.3f}", failures)
+        kept.append(
+            f"left/right |rate| {abs(left_rate):.3f}/{abs(right_rate):.3f} "
+            f"mismatch {mismatch * 100:.1f}%"
+        )
+    return failures, kept
+
+
+def _bus_kit_reverse() -> tuple[list[str], list[str]]:
+    """vel(−0.032) retreats at about that body speed."""
+    failures: list[str] = []
+    lines: list[str] = []
+    session = SteerSession(video=False, lipm=locked_kit_config())
+    peaks: dict[str, _TauPeak] = {}
+    real_step = mj.mj_step
+
+    def _step(model: mj.MjModel, data: mj.MjData) -> None:
+        real_step(model, data)
+        _note_leg_peaks(session, peaks)
+
+    mj.mj_step = _step
+    stand_s, move_s, stop_s = 0.40, 6.50, 7.40
+    last_send = -1.0
+    try:
+        while float(session.data.time) < stop_s - 1e-9:
+            now = float(session.data.time)
+            if now < stand_s - 1e-9:
+                if last_send < 0.0:
+                    session.bus.stand(now)
+                    last_send = now
+            elif now < move_s - 1e-9:
+                if last_send < stand_s or (now - last_send) >= (VEL_RESEND_S - 1e-9):
+                    session.bus.vel(-VX_BACK_CAP, 0.0, now)
+                    last_send = now
+            elif last_send < move_s:
+                session.bus.stop(now)
+                last_send = move_s + 10.0
+            session.step()
+    finally:
+        mj.mj_step = real_step
+    steady = [s for s in session.samples if s.mode == "move" and s.t >= 3.0]
+    body = float(np.mean([s.body_vx for s in steady])) if steady else 0.0
+    ratio = body / -VX_BACK_CAP if VX_BACK_CAP else 0.0
+    _expect(abs(ratio - 1.0) < 0.08, f"reverse body/command {ratio:.2f}", failures)
+    knee = max((abs(p.force_nm) for n, p in peaks.items() if "knee" in n), default=0.0)
+    if knee > lipm_gait.KNEE_SAG_NM + 1e-3:
+        failures.append(f"reverse knee {knee:.3f} Nm")
+    for name, peak in peaks.items():
+        if abs(peak.force_nm) > BUS_KIT_RAIL_NM:
+            failures.append(f"reverse {name} {peak.force_nm:+.3f} Nm")
+    lines.append(
+        f"reverse cmd {-VX_BACK_CAP:+.3f} m/s  settled body {body:+.3f} m/s  "
+        f"ratio {ratio:.2f}  knee |τ| {knee:.3f}"
+    )
+    session.assert_plant_unchanged()
     return failures, lines
 
 
@@ -3256,9 +3325,11 @@ def bus_kit_check() -> int:
     contract_fail, lines = _bus_kit_contract()
     torque_fail, torque_lines = _bus_kit_forward_stop()
     yaw_fail, yaw_lines = _bus_kit_yaw()
-    failures = contract_fail + torque_fail + yaw_fail
+    rev_fail, rev_lines = _bus_kit_reverse()
+    failures = contract_fail + torque_fail + yaw_fail + rev_fail
     lines.extend(torque_lines)
     lines.extend(yaw_lines)
+    lines.extend(rev_lines)
     print("[bus-kit] Day-1 CommandBus on locked kit500")
     for line in lines:
         print(f"[bus-kit] {line}")

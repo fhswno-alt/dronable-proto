@@ -1316,8 +1316,11 @@ Once the slew has reached that clamp, settled body vx is +0.150 m/s.
 The ratio is 1.00. Half of the clamp, 0.075 m/s, settles at +0.078 m/s.
 That residual gain is 1.05. The window mean on the 0.50–6.00 s forward
 row is +0.119 m/s because the slew up to 0.150 m/s takes 1.875 s.
-Reverse is still clamped at 0.032 m/s. At that command the body retreats
-at about 0.023 m/s (ratio 0.71). The reverse cap was not refit.
+Reverse stays clamped at 0.032 m/s. The forward gain of 7.50 made that
+command a 4.3 mm step and the body retreated at 0.023 m/s (ratio 0.71).
+Retreat uses 5.90 (m/s) per meter of step, so the same clamp is a 5.4 mm
+step. Settled body vx is −0.031 m/s (ratio 0.98). Half of that clamp,
+−0.016 m/s, retreats at −0.012 m/s (ratio 0.73).
 
 Knees are reported against 2.33 Nm, the HX-35H budget at about 10.5 V.
 The plant forcerange stays ±2.45. Stop and the 200 ms silence apply the
@@ -1340,11 +1343,23 @@ step angle. The walker splits that across the two feet. +yaw_rate is left.
 
 | Command | Step angle | Steady Δyaw | Steady yaw rate | Knee | Worst leg |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| vel(+0.150, +0.25) | 0.062 rad | +25.9 deg | +0.196 rad/s | 2.330 Nm | hip pitch −2.401 Nm |
-| vel(+0.150, −0.25) | 0.062 rad | −33.5 deg | −0.253 rad/s | 2.330 Nm | hip roll −2.413 Nm |
-| vel(0, +0.25) | 0.062 rad | +24.9 deg | +0.188 rad/s | 2.330 Nm | hip pitch +2.401 Nm |
+| vel(+0.150, +0.25) | 0.062 rad | +49.6 deg | +0.217 rad/s | 2.330 Nm | hip pitch −2.401 Nm |
+| vel(+0.150, −0.25) | 0.062 rad | −50.6 deg | −0.221 rad/s | 2.330 Nm | hip pitch −2.401 Nm |
+| vel(0, +0.25) | 0.062 rad | +48.6 deg | +0.213 rad/s | 2.330 Nm | hip pitch −2.401 Nm |
 
-Left is slower than the 0.25 rad/s command (ratio 0.78). Right matches
-it (ratio 1.01). Both headings follow the sign of the command, including
-a turn with vx at 0. The clip is `previews/bus_kit_yaw_left.mp4`.
+Hip yaw, hip roll, and ankle roll share an axis on the two legs
+(`0 0 -1`, `-1 0 0`, `1 0 0`). Only pitch is mirrored. The right-leg
+yaw shift was negated twice, so both feet took the same step angle.
+That common mode made a left command turn at 0.78× the right command.
+One negation, the OP3 right-leg sign, puts opposite yaw on the two
+feet. `pelvis_offset` stays +5°. Flipping that pair matches the yaw
+rates and drops the straight walk from 0.150 m/s to 0.110 m/s, so the
+5° sign stays.
+
+From 4 s to 8 s, `vel(+0.150, +0.25)` yaws at +0.217 rad/s and
+`vel(+0.150, −0.25)` yaws at −0.221 rad/s. The magnitudes differ by
+2.0%. Straight walk over that same span is −0.003 rad/s. Knees sit on
+2.330 Nm. The worst other leg sample is hip pitch at 2.401 Nm.
+`vel(0, +0.25)` yaws at +0.213 rad/s. The clip is
+`previews/bus_kit_yaw_left.mp4`.
 

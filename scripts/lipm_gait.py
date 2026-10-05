@@ -48,6 +48,10 @@ KNEE_SAG_NM = 2.33
 # knees stayed at or under KNEE_SAG_NM. 0.020 m is the kit yaml step; it
 # is not used when that step crosses the sag bar.
 KIT_BODY_PER_X = 7.50
+# Reverse is a shorter step for the same command. 0.032 m/s at the
+# forward gain walked at about 0.023 m/s. This gain is the retreat
+# per meter of step, so the −0.032 clamp is the body speed.
+KIT_BODY_PER_X_REV = 5.90
 KIT_X_RAIL_M = 0.020
 # Step angle (rad per cycle) = yaw_rate * period * KIT_YAW_GAIN.
 # +yaw_rate is a left turn. The walker already splits angle/2 across the feet.
@@ -1276,8 +1280,9 @@ def kit_bus_step(vx: float, yaw_rate: float, period_s: float) -> tuple[float, fl
     change of one period. The walker applies half of it on each foot.
     """
     x_amp = 0.0
-    if abs(vx) > 1e-4 and KIT_BODY_PER_X > 1e-9:
-        mag = min(KIT_X_RAIL_M, abs(float(vx)) / KIT_BODY_PER_X)
+    per = KIT_BODY_PER_X if float(vx) >= 0.0 else KIT_BODY_PER_X_REV
+    if abs(vx) > 1e-4 and per > 1e-9:
+        mag = min(KIT_X_RAIL_M, abs(float(vx)) / per)
         x_amp = math.copysign(mag, float(vx))
     angle = float(yaw_rate) * float(period_s) * KIT_YAW_GAIN
     return x_amp, angle
