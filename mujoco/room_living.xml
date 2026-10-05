@@ -18,13 +18,13 @@
     <material name="room_ceiling" texture="room_ceiling" texrepeat="2 2" specular="0.02" emission="0.62"/>
     <texture name="room_sofa" type="2d" file="assets/rooms/living/sofa.png"/>
     <material name="room_sofa" texture="room_sofa" specular="0.22"/>
-    <mesh name="room_sofa" file="assets/rooms/living/sofa.obj" scale="0.88 0.88 0.88"/>
+    <mesh name="room_sofa" file="assets/rooms/living/sofa.obj" scale="0.94 0.94 0.94"/>
     <texture name="room_tv" type="2d" file="assets/rooms/living/tv.png"/>
     <material name="room_tv" texture="room_tv" specular="0.3"/>
     <mesh name="room_tv" file="assets/rooms/living/tv.obj"/>
     <texture name="room_coffee" type="2d" file="assets/rooms/living/coffee.png"/>
     <material name="room_coffee" texture="room_coffee" specular="0.12"/>
-    <mesh name="room_coffee" file="assets/rooms/living/coffee.obj" scale="0.48 0.48 0.48"/>
+    <mesh name="room_coffee" file="assets/rooms/living/coffee.obj" scale="0.58 0.58 0.58"/>
   </asset>
   <worldbody>
     <light name="room_key" pos="0.45 -0.2 2.05" dir="0.65 0.02 -1" diffuse="0.82 0.78 0.70"/>
@@ -39,15 +39,15 @@
     <geom name="room_ceiling" type="box" pos="0.86 0 2.48" size="1.64 1.88 0.04" material="room_ceiling" contype="0" conaffinity="0"/>
     <!-- Sofa against the back wall, cushions toward +X. Coffee table in front.
          TV screen (yaw 270) faces +X at image-right. Static bodies. -->
-    <body name="living" pos="1.95 0.38 0">
+    <body name="living" pos="1.92 0.42 0">
       <site name="living" pos="-0.2 0 0.48" size="0.015" group="4" rgba="0.55 0.32 0.18 1"/>
       <geom name="living_sofa_back" type="mesh" mesh="room_sofa" material="room_sofa" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
     </body>
-    <body name="coffee" pos="1.15 0.38 0">
+    <body name="coffee" pos="1.08 0.42 0">
       <site name="coffee" pos="0 0 0.22" size="0.012" group="4" rgba="0.35 0.24 0.14 1"/>
       <geom name="coffee_top" type="mesh" mesh="room_coffee" material="room_coffee" contype="0" conaffinity="0"/>
     </body>
-    <body name="tv" pos="1.55 -1.28 0">
+    <body name="tv" pos="1.88 -1.38 0">
       <site name="tv" pos="0 0 0.28" size="0.012" group="4" rgba="0.25 0.35 0.45 1"/>
       <geom name="tv_screen" type="mesh" mesh="room_tv" material="room_tv" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
     </body>

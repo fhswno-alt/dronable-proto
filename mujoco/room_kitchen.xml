@@ -57,13 +57,13 @@
       <geom name="kitchen_stove" type="mesh" mesh="room_stove" material="room_stove" pos="0.02 -0.98 0" quat="0 0 0 1" contype="0" conaffinity="0"/>
       <geom name="kitchen_kettle" type="mesh" mesh="room_kettle" material="room_kettle" pos="0.06 0.02 0.70" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
     </body>
-    <body name="table" pos="1.08 -1.50 0">
+    <body name="table" pos="1.48 -1.48 0">
       <site name="table" pos="0 0 0.20" size="0.012" group="4" rgba="0.45 0.28 0.14 1"/>
       <geom name="table_top" type="mesh" mesh="room_table" material="room_table" contype="0" conaffinity="0"/>
     </body>
-    <body name="chair" pos="1.02 -1.02 0">
+    <body name="chair" pos="0.95 -1.48 0">
       <site name="chair" pos="0 0 0.42" size="0.012" group="4" rgba="0.35 0.22 0.12 1"/>
-      <geom name="chair_seat" type="mesh" mesh="room_chair" material="room_chair" quat="1 0 0 0" contype="0" conaffinity="0"/>
+      <geom name="chair_seat" type="mesh" mesh="room_chair" material="room_chair" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
     </body>
   </worldbody>
 </mujoco>

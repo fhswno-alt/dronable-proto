@@ -57,24 +57,24 @@
     <geom name="room_wall_right" type="box" pos="0.86 -1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_ceiling" type="box" pos="0.86 0 2.48" size="1.64 1.88 0.04" material="room_ceiling" contype="0" conaffinity="0"/>
     <!-- Back-wall row: vanity left, toilet beside it, tub in the right corner. -->
-    <body name="bathroom" pos="1.78 0.72 0">
+    <body name="bathroom" pos="2.05 0.88 0">
       <site name="bathroom" pos="0.0 0 1.05" size="0.015" group="4" rgba="0.75 0.78 0.80 1"/>
       <geom name="bathroom_tile" type="box" pos="0.28 0 1.05" size="0.02 0.48 0.75" material="room_tile" contype="0" conaffinity="0"/>
       <geom name="bathroom_vanity" type="mesh" mesh="room_vanity" material="room_vanity" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
       <geom name="bathroom_mirror" type="mesh" mesh="room_mirror" material="room_mirror" pos="0.22 0 1.28" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
     </body>
-    <body name="sink" pos="1.62 0.72 0.76">
+    <body name="sink" pos="1.89 0.88 0.76">
       <site name="sink" pos="0 0 0.2" size="0.012" group="4" rgba="0.70 0.72 0.74 1"/>
       <geom name="sink_basin" type="mesh" mesh="room_sink" material="room_sink" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
     </body>
-    <body name="toilet" pos="1.64 -0.08 0">
+    <body name="toilet" pos="1.78 0.05 0">
       <site name="toilet" pos="0 0 0.40" size="0.012" group="4" rgba="0.85 0.86 0.88 1"/>
       <geom name="toilet_bowl" type="mesh" mesh="room_bowl" material="room_bowl" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
       <geom name="toilet_tank" type="mesh" mesh="room_tank" material="room_tank" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
       <geom name="toilet_seat" type="mesh" mesh="room_seat" material="room_seat" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
       <geom name="toilet_handle" type="mesh" mesh="room_handle" material="room_handle" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
     </body>
-    <body name="bathtub" pos="1.55 -1.12 0">
+    <body name="bathtub" pos="1.92 -1.20 0">
       <site name="bathtub" pos="0 0 0.32" size="0.012" group="4" rgba="0.75 0.82 0.88 1"/>
       <geom name="bathtub_shell" type="mesh" mesh="room_tub" material="room_tub" contype="0" conaffinity="0"/>
       <geom name="bathtub_water" type="mesh" mesh="room_tub_water" material="room_tub" contype="0" conaffinity="0"/>

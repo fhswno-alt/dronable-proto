@@ -8,11 +8,11 @@ Furniture is CC0 textured meshes under `mujoco/assets/rooms/`. Licenses, authors
 
 | Scene | Bodies | What kit_cam is meant to see |
 |-------|--------|------------------------------|
-| `mujoco/room_kitchen.xml` | `kitchen`, `table`, `chair` | Counter, drawer-cabinet pantry, stove front, and kettle facing +X, in one run that does not overlap. Dining table and chair sit off to image-right. Closed beige room, wood floor. No flat yellow backsplash |
-| `mujoco/room_bathroom.xml` | `bathroom`, `sink`, `toilet`, `bathtub` | Vanity and mirror on the left, basin on the vanity, toilet beside the vanity, stylized tub along the right. Closed tile room, marble floor |
-| `mujoco/room_living.xml` | `living`, `tv`, `coffee` | Leather sofa (`living`) against the back wall, cushions toward +X; low coffee table in front; CRT screen to image-right. Closed beige room |
-| `mujoco/room_bedroom.xml` | `bedroom`, `nightstand` | Gothic bed against the back wall, long side toward +X, headboard and nightstand with a lamp toward image-left. Closed plaster room |
-| `mujoco/room_entrance.xml` | `entrance`, `mat`, `shoes`, `console` | Static panel in wood trim against the back wall, hessian mat, rubber boots, and a console to image-left. No hinge, no lever, no latch |
+| `mujoco/room_kitchen.xml` | `kitchen`, `table`, `chair` | Counter, drawer-cabinet pantry, stove front, and kettle facing +X, in one run that does not overlap. The table is in the image-right corner and the chair sits at its near side, clear of the stove. Closed beige room, wood floor. No flat yellow backsplash |
+| `mujoco/room_bathroom.xml` | `bathroom`, `sink`, `toilet`, `bathtub` | Vanity, basin, and mirror against the back-left wall, toilet beside them, stylized tub in the back-right corner. Closed tile room, marble floor |
+| `mujoco/room_living.xml` | `living`, `tv`, `coffee` | Larger leather sofa (`living`) against the back wall, cushions toward +X; coffee table in front; CRT beside the sofa at the same depth, screen toward +X. Closed beige room |
+| `mujoco/room_bedroom.xml` | `bedroom`, `nightstand` | Larger gothic bed against the back wall, long side toward +X. Headboard toward image-left, nightstand and a smaller lamp beside the head, not in the mattress. Closed plaster room |
+| `mujoco/room_entrance.xml` | `entrance`, `mat`, `shoes`, `console` | Static panel in thicker wood trim against the back wall. Hessian mat runs up to the leaf. Boots sit image-right of the mat. Console is image-left, clear of the boots. No hinge, no lever, no latch |
 
 Furniture sits in front of `kit_cam` look (+X), so a quiet stand sees the named room body.
 
