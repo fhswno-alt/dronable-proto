@@ -117,3 +117,25 @@ There is no CC0 coat in this set. The shoes cue is the boots, and the hall table
 ## Scene names
 
 Body and site names stay `kitchen`, `table`, `chair`, `bathroom`, `sink`, `toilet`, `living`, `tv`, `bedroom`, `nightstand`, `entrance`, `mat`. Later passes add `bathtub`, `shoes`, `coffee`, `console`, and `dresser`. Each room adds a floor texture, side walls, a back wall, and a ceiling as extra worldbody geoms, using the CC0 textures above. The plant's checker plane is still in the included file. Furniture stays static. The entrance panel is still a visual frame: no hinge, no lever, no latch.
+
+## Hallway front test scene
+
+`mujoco/room_hallway_front.xml` is not one of the five rooms. Assets for it live under `mujoco/assets/rooms/hallway/`. Same CC0 rules. The walk plant is included and not edited. The leaf and the casing are static. There is no hinge, no lever, no latch, and no knob torque. MuJoCo body and geom names omit the word door, same as `entrance/panel.obj`, so the loaded names stay free of that token.
+
+Poly Haven has no flat painted entry-door mesh. The leaf is a generated slab, 0.90 m wide, 2.03 m tall, and 0.04 m thick. Its front face uses the Rough Pine Door albedo, U cropped to 0.275–0.725 so the plank width stays near the 2 m scan. That is a rough pine plank leaf, not a flush painted front door, and not the castle-door mesh in `room_entrance`. The casing and the baseboards are the existing oak veneer on boxes.
+
+The picture frames are scaled 1.55 in the scene XML. At the scan size the near frame was 31 px wide from the frozen camera, under the 36 px bar. The larger scale is so the low camera can read the picture. That is a Prefer FAIL against product scale.
+
+The plant stays at scan size, about 1.35 m tall. Leaf cards use a black-background cutout made from the diffuse JPG. The original mask map is not in the repo. Edges can fringe. The glass primitive on the picture frame was not exported.
+
+The ceiling lamp reuses `kitchen/pendant.obj` (Modern Ceiling Lamp 01). It is not a new download.
+
+| Repo file | Source | Author | Page |
+|-----------|--------|--------|------|
+| `hallway/leaf.png` | Rough Pine Door (albedo on a generated slab) | Dimitrios Savva | https://polyhaven.com/a/rough_pine_door |
+| `hallway/runner.png` | Poly Wool Herringbone, tiled on a 2.20 × 0.70 m runner | colormass (photography), Rico Cilliers (processing) | https://polyhaven.com/a/poly_wool_herringbone |
+| `hallway/frame.obj`, `hallway/artwork.obj` | Hanging Picture Frame 03 (glass omitted) | James Ray Cock | https://polyhaven.com/a/hanging_picture_frame_03 |
+| `hallway/plant_pot.obj`, `hallway/plant_leaves.obj` | Potted Plant 01 | Rico Cilliers | https://polyhaven.com/a/potted_plant_01 |
+| `hallway/sconce.obj`, `hallway/sconce_bulb.obj` | Industrial Wall Sconce | Ulan Cabanilla | https://polyhaven.com/a/industrial_wall_sconce |
+
+Floor, wall, plaster, and oak files are the textures already listed above.

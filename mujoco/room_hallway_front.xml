@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Test scene for Moondream2 / find_room entrance. Prefer FAIL.
+  Includes the frozen walk plant and does not edit it. One camera: kit_cam.
+  A narrow hall ends at a static front leaf in a wood casing. The robot
+  stands in the hall looking along +X, so the low camera sees the leaf,
+  the runner, and the side walls. This is not room_entrance (that scene
+  is a square room with the castle panel, a mat, boots, and a console).
+  Visual geometry only. No hinge, no lever, no latch, no knob torque.
+  Not a navigation map, not a planner input, not an arrival, and not a
+  go-anywhere claim. See docs/KIT_CAM_HALLWAY_FRONT.md and docs/ROOM_ASSETS.md.
+-->
+<mujoco model="room_hallway_front">
+  <include file="ainex_hiwonder/ainex_controls_m2_145.xml"/>
+  <asset>
+    <texture name="room_floor" type="2d" file="assets/rooms/textures/wood_floor.png"/>
+    <material name="room_floor" texture="room_floor" texrepeat="2.4 1.2" specular="0.04"/>
+    <texture name="room_wall" type="2d" file="assets/rooms/textures/beige_wall.png"/>
+    <material name="room_wall" texture="room_wall" texrepeat="1.6 1.2" specular="0.02" emission="0.16"/>
+    <texture name="room_ceiling" type="2d" file="assets/rooms/textures/white_plaster.png"/>
+    <material name="room_ceiling" texture="room_ceiling" texrepeat="2 1" specular="0.02" emission="0.62"/>
+    <texture name="room_trim" type="2d" file="assets/rooms/textures/oak_veneer.png"/>
+    <material name="room_trim" texture="room_trim" texrepeat="1 2" specular="0.08"/>
+    <texture name="room_leaf" type="2d" file="assets/rooms/hallway/leaf.png"/>
+    <material name="room_leaf" texture="room_leaf" specular="0.08"/>
+    <mesh name="room_leaf" file="assets/rooms/hallway/leaf.obj"/>
+    <texture name="room_runner" type="2d" file="assets/rooms/hallway/runner.png"/>
+    <material name="room_runner" texture="room_runner" specular="0.02"/>
+    <mesh name="room_runner" file="assets/rooms/hallway/runner.obj"/>
+    <texture name="room_frame" type="2d" file="assets/rooms/hallway/frame.png"/>
+    <material name="room_frame" texture="room_frame" specular="0.18"/>
+    <mesh name="room_frame" file="assets/rooms/hallway/frame.obj" scale="1.55 1.55 1.55"/>
+    <texture name="room_art" type="2d" file="assets/rooms/hallway/artwork.png"/>
+    <material name="room_art" texture="room_art" specular="0.06"/>
+    <mesh name="room_art" file="assets/rooms/hallway/artwork.obj" scale="1.55 1.55 1.55" inertia="shell"/>
+    <texture name="room_pot" type="2d" file="assets/rooms/hallway/plant_pot.png"/>
+    <material name="room_pot" texture="room_pot" specular="0.12"/>
+    <mesh name="room_pot" file="assets/rooms/hallway/plant_pot.obj"/>
+    <texture name="room_leaves" type="2d" file="assets/rooms/hallway/plant_leaves.png"/>
+    <material name="room_leaves" texture="room_leaves" rgba="1 1 1 1" specular="0.04"/>
+    <mesh name="room_leaves" file="assets/rooms/hallway/plant_leaves.obj" inertia="shell"/>
+    <texture name="room_sconce" type="2d" file="assets/rooms/hallway/sconce.png"/>
+    <material name="room_sconce" texture="room_sconce" specular="0.35"/>
+    <mesh name="room_sconce" file="assets/rooms/hallway/sconce.obj"/>
+    <texture name="room_bulb" type="2d" file="assets/rooms/hallway/sconce_bulb.png"/>
+    <material name="room_bulb" texture="room_bulb" specular="0.2" emission="0.35"/>
+    <mesh name="room_bulb" file="assets/rooms/hallway/sconce_bulb.obj"/>
+    <texture name="room_lamp" type="2d" file="assets/rooms/kitchen/pendant.png"/>
+    <material name="room_lamp" texture="room_lamp" specular="0.35" emission="0.22"/>
+    <mesh name="room_lamp" file="assets/rooms/kitchen/pendant.obj" scale="0.42 0.42 0.42"/>
+  </asset>
+  <worldbody>
+    <light name="room_key" pos="0.55 0.0 2.15" dir="0.85 0 -1" diffuse="1.00 0.96 0.88" cutoff="80"/>
+    <light name="room_fill" pos="0.35 0.40 1.55" dir="0.9 -0.12 -0.55" diffuse="0.50 0.52 0.54" cutoff="75"/>
+    <light name="room_up" pos="1.50 0 0.55" dir="0 0 1" diffuse="0.48 0.46 0.40" cutoff="100"/>
+    <light name="room_leaf" pos="1.70 0.0 1.15" dir="1 0 -0.08" diffuse="0.95 0.88 0.76" cutoff="60"/>
+    <light name="room_side_l" pos="1.40 0.20 1.50" dir="0 1 0.1" diffuse="0.36 0.34 0.30" cutoff="70"/>
+    <light name="room_side_r" pos="1.40 -0.20 1.50" dir="0 -1 0.1" diffuse="0.36 0.34 0.30" cutoff="70"/>
+    <geom name="room_floor" type="plane" pos="1.25 0 0.006" size="2.3 1.15 0.02" material="room_floor" contype="0" conaffinity="0"/>
+    <!-- Narrow closed shell. Side walls start behind the camera so the wide FOV stays in the hall. -->
+    <geom name="room_wall" type="box" pos="3.12 0 1.22" size="0.045 0.81 1.22" material="room_wall" contype="0" conaffinity="0"/>
+    <geom name="room_wall_left" type="box" pos="1.25 0.765 1.22" size="1.92 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
+    <geom name="room_wall_right" type="box" pos="1.25 -0.765 1.22" size="1.92 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
+    <geom name="room_wall_back" type="box" pos="-0.62 0 1.22" size="0.04 0.72 1.22" material="room_wall" contype="0" conaffinity="0"/>
+    <geom name="room_ceiling" type="box" pos="1.25 0 2.46" size="1.96 0.81 0.04" material="room_ceiling" contype="0" conaffinity="0"/>
+    <geom name="room_base_left" type="box" pos="1.15 0.705 0.055" size="1.70 0.018 0.055" material="room_trim" contype="0" conaffinity="0"/>
+    <geom name="room_base_right" type="box" pos="1.15 -0.705 0.055" size="1.70 0.018 0.055" material="room_trim" contype="0" conaffinity="0"/>
+    <!-- Static leaf set in casing at the end of the hall. No mechanism. -->
+    <body name="front" pos="3.02 0 0">
+      <site name="front" pos="0 0 1.00" size="0.015" group="4" rgba="0.45 0.32 0.18 1"/>
+      <geom name="front_leaf" type="mesh" mesh="room_leaf" material="room_leaf" contype="0" conaffinity="0"/>
+      <geom name="front_jamb_left" type="box" pos="0.01 0.505 1.04" size="0.055 0.048 1.04" material="room_trim" contype="0" conaffinity="0"/>
+      <geom name="front_jamb_right" type="box" pos="0.01 -0.505 1.04" size="0.055 0.048 1.04" material="room_trim" contype="0" conaffinity="0"/>
+      <geom name="front_lintel" type="box" pos="0.01 0 2.075" size="0.055 0.555 0.045" material="room_trim" contype="0" conaffinity="0"/>
+      <geom name="front_sill" type="box" pos="0.02 0 0.018" size="0.07 0.45 0.018" material="room_trim" contype="0" conaffinity="0"/>
+    </body>
+    <body name="runner" pos="1.70 0 0">
+      <site name="runner" pos="0 0 0.02" size="0.012" group="4" rgba="0.55 0.28 0.22 1"/>
+      <geom name="runner_rug" type="mesh" mesh="room_runner" material="room_runner" contype="0" conaffinity="0"/>
+    </body>
+    <body name="plant" pos="1.45 0.38 0">
+      <site name="plant" pos="0 0 0.70" size="0.012" group="4" rgba="0.20 0.45 0.22 1"/>
+      <geom name="plant_pot" type="mesh" mesh="room_pot" material="room_pot" contype="0" conaffinity="0"/>
+      <geom name="plant_leaves" type="mesh" mesh="room_leaves" material="room_leaves" contype="0" conaffinity="0"/>
+    </body>
+    <body name="frame" pos="0.82 0.66 0.58">
+      <site name="frame" pos="0 0 0.25" size="0.012" group="4" rgba="0.55 0.42 0.22 1"/>
+      <geom name="frame_wood" type="mesh" mesh="room_frame" material="room_frame" contype="0" conaffinity="0"/>
+      <geom name="frame_art" type="mesh" mesh="room_art" material="room_art" contype="0" conaffinity="0"/>
+    </body>
+    <body name="picture" pos="1.18 -0.66 0.58">
+      <site name="picture" pos="0 0 0.25" size="0.012" group="4" rgba="0.55 0.42 0.22 1"/>
+      <geom name="picture_wood" type="mesh" mesh="room_frame" material="room_frame" quat="0 0 0 1" contype="0" conaffinity="0"/>
+      <geom name="picture_art" type="mesh" mesh="room_art" material="room_art" quat="0 0 0 1" contype="0" conaffinity="0"/>
+    </body>
+    <body name="sconce" pos="2.25 -0.56 1.05">
+      <site name="sconce" pos="0 0 0.16" size="0.012" group="4" rgba="0.72 0.62 0.28 1"/>
+      <geom name="sconce_cage" type="mesh" mesh="room_sconce" material="room_sconce" quat="0 0 0 1" contype="0" conaffinity="0"/>
+      <geom name="sconce_bulb" type="mesh" mesh="room_bulb" material="room_bulb" quat="0 0 0 1" contype="0" conaffinity="0"/>
+    </body>
+    <body name="lamp" pos="1.85 0 2.02">
+      <site name="lamp" pos="0 0 0.20" size="0.012" group="4" rgba="0.85 0.82 0.70 1"/>
+      <geom name="lamp_shade" type="mesh" mesh="room_lamp" material="room_lamp" contype="0" conaffinity="0"/>
+    </body>
+  </worldbody>
+</mujoco>

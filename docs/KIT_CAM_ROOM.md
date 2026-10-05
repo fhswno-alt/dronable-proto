@@ -30,4 +30,6 @@ That stands the robot with the same quiet pose as `scripts/steer_walk.py`, rende
 
 The living, bedroom, and entrance scenes have no finder. "Go to the living room", "go to the bedroom", and "go to the entrance" stay refused. Prefer FAIL until an AI finder for that room lands. These scenes do not add a goal command, a map, or an arrival claim. The entrance frame stays visual geometry only.
 
+`mujoco/room_hallway_front.xml` is a separate test scene, not a sixth room in `--all` and not a retune of `room_entrance`. It is a narrow hall ending at a static front leaf, for a Moondream2 / find_room entrance still. Prefer FAIL. It is not an arrival and not a go-anywhere claim. See `docs/KIT_CAM_HALLWAY_FRONT.md`.
+
 `scripts/explore_map.py` can load one of these files as vision input. It paints a partial grid from `kit_cam` and does not read the body names. See `docs/EXPLORE_MAP.md`. That is not a finder and not an arrival.
