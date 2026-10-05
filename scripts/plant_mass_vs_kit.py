@@ -683,6 +683,24 @@ _LEG_R: tuple[str, ...] = ("r_hip_yaw", "r_hip_roll", "r_hip_pitch", "r_knee", "
 _LEG_L: tuple[str, ...] = ("l_hip_yaw", "l_hip_roll", "l_hip_pitch", "l_knee", "l_ank_pitch", "l_ank_roll")
 STEP_HEIGHT_M = 0.02
 RAIL_NM = 2.45
+# HX-35H product page: static maximum 35 kg·cm at 11.1 V. 1 kgf·cm = 0.0980665 N·m,
+# so 35 kgf·cm = 3.4323275 N·m. The stall bound uses 3.43 N·m, that figure to 0.01 N·m.
+STALL_NM = 3.43
+KGF_CM_TO_NM = 0.0980665
+HX35H_STATIC_KGF_CM = 35.0
+# move(1) reads dsp_ratio[0] and the live walking param. walking_param.yaml is what
+# ainex_controller loads. Heights below are sole rises for the same knee solve;
+# 0.020 m is the yaml z_move_amplitude, 0.015 m is the separate app speed==4 command.
+KIT_PERIOD_S = 0.300
+KIT_DSP = 0.2
+KIT_Y_SWAP_M = 0.02
+KIT_Z_MOVE_M = 0.02
+KIT_Z_OFFSET_M = 0.025
+KIT_X_OFFSET_M = 0.0
+KIT_Y_OFFSET_M = -0.005
+KIT_HIP_PITCH_DEG = 15.0
+KIT_X_AMP_CAP_M = 0.02
+LIFT_GRID_M = (0.005, 0.010, 0.015, 0.020)
 
 
 def _rot_x(angle: float) -> np.ndarray:
@@ -828,6 +846,60 @@ def op3_pose(
     angles.update(_apply_ik_leg(raw_r, directions, _LEG_R, hip_pitch_offset))
     angles.update(_apply_ik_leg(raw_l, directions, _LEG_L, hip_pitch_offset))
     return angles
+
+
+def swing_peak_rise(foot_height: float, period_s: float, dsp: float) -> dict[str, float]:
+    """Peak swing-foot rise above the stance foot, OP3 ``wSin`` on z.
+
+    ``updateMovementParam`` sets ``z_move_amplitude_ = foot_height / 2`` and
+    ``z_move_amplitude_shift_ = z_move_amplitude_ / 2``, with phase ``π/2`` and
+    ``z_move_period_time_ = period * ssp_ratio / 2``. Over the left-swing window
+    the sine goes from −1 to +1 and back, so the foot rises by ``foot_height``
+    above the value held on the stance foot. The internal half is not a half-height step.
+    """
+    ssp = 1.0 - dsp
+    start = (1.0 - ssp) * period_s / 4.0
+    end = (1.0 + ssp) * period_s / 4.0
+    z_period = period_s * ssp / 2.0
+    mag = foot_height / 2.0
+    shift = mag / 2.0
+    phase0 = math.pi / 2.0
+
+    def wsin(time: float) -> float:
+        phase = phase0 + 2.0 * math.pi / z_period * start
+        return mag * math.sin(2.0 * math.pi / z_period * time - phase) + shift
+
+    endpoint = wsin(start)
+    if abs(wsin(end) - endpoint) > 1e-9:
+        raise SystemExit("swing z does not return to the same height at both ends")
+    peak = endpoint
+    for i in range(1001):
+        z = wsin(start + (end - start) * i / 1000.0)
+        if z > peak:
+            peak = z
+    rise = peak - endpoint
+    if abs(rise - foot_height) > 1e-6:
+        raise SystemExit(f"swing rise {rise} != commanded {foot_height}")
+    return {
+        "commanded_m": foot_height,
+        "endpoint_m": endpoint,
+        "peak_m": peak,
+        "rise_m": rise,
+    }
+
+
+def armature_ceiling(
+    limit_nm: float,
+    static_ss_nm: float,
+    amplitude_rad: float,
+    link_i: float,
+    period_s: float,
+) -> float:
+    """Largest armature with ``static_ss + (I_link + J) A (2π/T)² <= limit``."""
+    alpha = amplitude_rad * (2.0 * math.pi / period_s) ** 2
+    if alpha <= 0.0:
+        raise SystemExit("knee amplitude is zero")
+    return (limit_nm - static_ss_nm) / alpha - link_i
 
 
 def clock0_z_added(period_s: float, dsp: float, foot_height: float, z_swap: float) -> float:
@@ -987,12 +1059,19 @@ def solve_knee_lift(
     base: dict[str, float],
     side: str,
     height_m: float,
+    knee_lo: float | None = None,
+    knee_hi: float | None = None,
 ) -> dict[str, float]:
     """Knee change that raises this sole by ``height_m``.
 
     Hip pitch, hip roll, and hip yaw stay at the pose. Ankle pitch is the
     value that makes the contact box's world Z axis as vertical as that
     one joint can. The search is on the right knee for the rail.
+
+    ``knee_lo`` and ``knee_hi`` restrict the search. The default window is
+    the stance knee ±1.2 rad, which is what the 2 cm table uses. A second
+    root exists once the knee extends through straight; the kit-walk bound
+    passes a window that stays on the flexed side of the stance knee.
     """
     prefix = "r_" if side == "r" else "l_"
     clean = _pose_only(base)
@@ -1015,7 +1094,9 @@ def solve_knee_lift(
     best_ank = float(clean[f"{prefix}ank_pitch"])
     best_sole = sole0
     best_up = 0.0
-    for knee in np.linspace(knee0 - 1.2, knee0 + 1.2, 49):
+    lo = knee0 - 1.2 if knee_lo is None else knee_lo
+    hi = knee0 + 1.2 if knee_hi is None else knee_hi
+    for knee in np.linspace(lo, hi, 49):
         err, ank, sole, up = evaluate(float(knee))
         if abs(err) < best:
             best = abs(err)
@@ -1256,6 +1337,7 @@ def build_knee_report(
     crouch_drop = body_sole_drop(model, data, "r")
     set_pose(model, data, dict(INIT_ARM))
     straight_drop = body_sole_drop(model, data, "r")
+    kit_bound = kit_walk_armature_bound(model, data, lengths, total_mass, dynamics, torques)
     return {
         "lengths_ainex": {
             "thigh_m": lengths.thigh_m,
@@ -1286,8 +1368,107 @@ def build_knee_report(
         "lifts": lifts,
         "dynamics": dynamics,
         "armature_sensitivity": sensitivity,
+        "kit_walk_bound": kit_bound,
         "op3_clock_snapshot": pose_snapshot(model, data, op3_clock),
         "op3_clock_torque_ds_knee": support_torques(model, data, op3_clock, total_mass)["ds:r:knee"],
+    }
+
+
+def kit_walk_armature_bound(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    lengths: LegLengths,
+    total_mass: float,
+    dynamics: dict[str, dict[str, object]],
+    torques: dict[str, dict[str, dict[str, float]]],
+) -> dict[str, object]:
+    """Max knee armature at 300 ms, single support, for the move(1) stand.
+
+    The stance is the walking-yaml IK (z offset, hip-pitch offset, x and y),
+    sinusoids at zero. Each row is the hip-held sole rise used by the knee
+    section. The yaml command and the app speed-4 command are two of those rows.
+    """
+    rise = swing_peak_rise(KIT_Z_MOVE_M, KIT_PERIOD_S, KIT_DSP)
+    rise_015 = swing_peak_rise(0.015, KIT_PERIOD_S, KIT_DSP)
+    pose = op3_pose(
+        model,
+        lengths,
+        KIT_Z_OFFSET_M,
+        KIT_X_OFFSET_M,
+        KIT_Y_OFFSET_M,
+        KIT_HIP_PITCH_DEG * math.pi / 180.0,
+    )
+    snapshot = pose_snapshot(model, data, pose)
+    kit_tau = support_torques(model, data, pose, total_mass)
+    static_ss = kit_tau["ss:r:knee"]["abs_nm"]
+    static_ds = kit_tau["ds:r:knee"]["abs_nm"]
+    set_pose(model, data, _pose_only(pose))
+    _total_i, _arm, link_i = reflected_link_inertia(model, data, "r_knee")
+    rows: list[dict[str, float | str | bool]] = []
+    for height in LIFT_GRID_M:
+        knee0 = float(_pose_only(pose)["r_knee"])
+        lift = solve_knee_lift(model, data, pose, "r", height, knee_lo=knee0 - 1.2, knee_hi=knee0)
+        if abs(float(lift["height_err_m"])) > 1e-4:
+            raise SystemExit(f"kit lift {height} residual {lift['height_err_m']}")
+        amplitude = abs(float(lift["d_knee_rad"]))
+        alpha = amplitude * (2.0 * math.pi / KIT_PERIOD_S) ** 2
+        rail_j = armature_ceiling(RAIL_NM, static_ss, amplitude, link_i, KIT_PERIOD_S)
+        stall_j = armature_ceiling(STALL_NM, static_ss, amplitude, link_i, KIT_PERIOD_S)
+        rows.append(
+            {
+                "lift_m": height,
+                "achieved_m": float(lift["height_m"]),
+                "amplitude_rad": amplitude,
+                "alpha_rad_s2": alpha,
+                "I_link": link_i,
+                "static_ss_nm": static_ss,
+                "rail_nm": RAIL_NM,
+                "stall_nm": STALL_NM,
+                "j_max_rail": rail_j,
+                "j_max_stall": stall_j,
+                "tau_at_j0_nm": static_ss + link_i * alpha,
+                "is_yaml_z_move": abs(height - KIT_Z_MOVE_M) < 1e-12,
+                "is_app_speed4_z": abs(height - 0.015) < 1e-12,
+            }
+        )
+    published: list[dict[str, float | str]] = []
+    for name, dynamic in dynamics.items():
+        amplitude = float(dynamic["amplitude_rad"])
+        link = float(dynamic["I_link"])
+        static_ss_pose = torques[name]["ss:r:knee"]["abs_nm"]
+        published.append(
+            {
+                "pose": name,
+                "amplitude_rad": amplitude,
+                "I_link": link,
+                "static_ss_nm": static_ss_pose,
+                "j_max_rail": armature_ceiling(RAIL_NM, static_ss_pose, amplitude, link, KIT_PERIOD_S),
+                "j_max_stall": armature_ceiling(STALL_NM, static_ss_pose, amplitude, link, KIT_PERIOD_S),
+            }
+        )
+    return {
+        "period_s": KIT_PERIOD_S,
+        "dsp_ratio": KIT_DSP,
+        "y_swap_m": KIT_Y_SWAP_M,
+        "z_move_m": KIT_Z_MOVE_M,
+        "z_offset_m": KIT_Z_OFFSET_M,
+        "x_offset_m": KIT_X_OFFSET_M,
+        "y_offset_m": KIT_Y_OFFSET_M,
+        "hip_pitch_deg": KIT_HIP_PITCH_DEG,
+        "x_amplitude_cap_m": KIT_X_AMP_CAP_M,
+        "stall_kgf_cm": HX35H_STATIC_KGF_CM,
+        "stall_nm_from_kgf_cm": HX35H_STATIC_KGF_CM * KGF_CM_TO_NM,
+        "stall_nm": STALL_NM,
+        "rail_nm": RAIL_NM,
+        "swing_rise_yaml": rise,
+        "swing_rise_0_015": rise_015,
+        "snapshot": snapshot,
+        "static_ds_nm": static_ds,
+        "static_ss_nm": static_ss,
+        "cop_x_m": kit_tau["ss:r:knee"]["cop_x_m"],
+        "I_link": link_i,
+        "rows": rows,
+        "published_pose_2cm": published,
     }
 
 
