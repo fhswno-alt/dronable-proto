@@ -705,5 +705,10 @@ The 0.22 s / gain 2.80 row on that 8.4 s window is +6.47 cm/s with no
 rail and the same 2.18 Nm left-hip peak. Soft-pass is off. This is
 not a kit walk beyond these bars.
 
-The clips are this gain row. Forward 8.400 s and close-up 7.600 s are
-Constrained Baseline, yuv420p, `+faststart`.
+The clips are this gain row. Forward 8.400 s stays up (Δx +51.7 cm,
+mean vx +6.5 cm/s, pooled sole p90 4.8 cm, min up_z 0.997, peak torque
+2.10 Nm, sat_rate 0). Close-up 7.600 s stays up through the stop
+(forward Δx +33.0 cm, mean vx +5.9 cm/s, stop Δx +0.9 cm, pooled sole
+p90 4.7 cm, min up_z 0.993, sat_rate 0). The close-up peak is 2.42 Nm
+on the right knee at the stop (t = 6.22 s, up_z 0.999), not a hip-pitch
+rail. Constrained Baseline, yuv420p, `+faststart`.
