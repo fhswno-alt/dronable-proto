@@ -40,8 +40,9 @@ invented. The floor in the clip is empty.
 
 kit_cam is the plant camera on head_tilt_link at pos 0.050 0.019 0.007,
 same aim and fovy. Plant md5 is 71b2c86d133ebc603f58b99c53e496f3. The
-clip renders that camera for back up, for walk forward then stop, and
-for the right nav window, then the stop. This file does
+clip renders that camera for back up, for walk forward then stop, for the
+right nav, and for the left nav inside the claimed envelope, then the stop.
+This file does
 not move the camera, and does not edit the plant, the gait, the tip
 check, or the CommandBus.
 
@@ -520,7 +521,7 @@ FORWARD_CUES: tuple[PhraseCue, ...] = (
     PhraseCue(38.5, "stop", "stop"),
 )
 # Nav window. Yaw starts after the approach, not on the first step.
-# Left is the contract only. A yaw from t=15 held for 14 s tips and is not played.
+# Left yaw starts at t=16 and ends at t=28.5. A start at t=15 held for 14 s tips.
 RIGHT_CUES: tuple[PhraseCue, ...] = (
     PhraseCue(1.0, None, "quiet"),
     PhraseCue(NAV_APPROACH_END, "walk forward", "approach"),
@@ -543,6 +544,10 @@ FORWARD_STILLS = (
 RIGHT_STILLS = (
     (26.0, "turn-right", "voice_caller_kit_cam_nav_right.png"),
     (35.2, "stop", "voice_caller_kit_cam_nav_right_stop.png"),
+)
+LEFT_STILLS = (
+    (27.5, "turn-left", "voice_caller_kit_cam_nav_left.png"),
+    (36.7, "stop", "voice_caller_kit_cam_nav_left_stop.png"),
 )
 
 
@@ -1030,6 +1035,13 @@ class ClipResult:
     min_up_z_right: float | None
     end_mode_right: str
     end_margin_right: float | None
+    dx_approach_left_m: float | None
+    dyaw_arc_left_deg: float | None
+    mean_yaw_rate_left: float | None
+    dx_resume_left_m: float | None
+    min_up_z_left: float | None
+    end_mode_left: str
+    end_margin_left: float | None
     stills: tuple[str, ...]
     mp4: str | None
     honesty: str
@@ -1054,8 +1066,8 @@ def _fmt(value: float | None, spec: str) -> str:
 def _honesty(result: ClipResult) -> str:
     stop_pose = "The forward stop frame is level. " if result.end_mode_forward == "stand" else ""
     text = (
-        "kit_cam for back up, for walk forward then stop, and for the right nav, then the stop. "
-        "These are three separate steers. "
+        "kit_cam for back up, for walk forward then stop, for the right nav, and for the left nav. "
+        "These are four separate steers. "
         f"Camera pos {result.kit_cam_pos[0]:.3f} {result.kit_cam_pos[1]:.3f} "
         f"{result.kit_cam_pos[2]:.3f}. The camera was not moved. "
         "The frame is still largely the inside of the head. "
@@ -1105,10 +1117,20 @@ def _honesty(result: ClipResult) -> str:
         "This clip does not claim more than that. "
         f"Cold-start from stand is about {COLD_LEFT_DEG:+.0f} deg left and "
         f"{COLD_RIGHT_DEG:+.0f} deg right. Those are not this arc. "
-        f"Left on the same approach is about {NAV_LEFT_DEG:+.0f} deg, "
-        "yaw from t=16 to t=28.5, not from 15 s and not for 14 s. "
-        "That earlier window tips on the resume and is not claimed. "
-        "This clip does not render the left arc. Not a spin. "
+        "Left nav walks forward from t=1 to t=16, then holds "
+        f"vel({FWD_MPS:+.3f}, {YAW_RAD_S:+.2f}) until t=28.5, "
+        "then forward only until t=34.5, then stop by t=37. "
+        "Yaw does not start at 15 s and is not held for 14 s. "
+        f"Approach Δx={_fmt(result.dx_approach_left_m, '+.3f')} m. "
+        f"Heading while still walking is {_fmt(result.dyaw_arc_left_deg, '+.1f')} deg. "
+        f"Realized yaw rate in that window is {_fmt(result.mean_yaw_rate_left, '+.3f')} rad/s. "
+        f"The command ±{YAW_RAD_S:.2f} is not the heading rate. "
+        f"Resume along the new heading is {_fmt(result.dx_resume_left_m, '+.3f')} m. "
+        f"min up_z during the left nav is {_fmt(result.min_up_z_left, '.3f')}. "
+        f"{_end_mode_sentence(result.end_mode_left, 'Left-nav end mode')} "
+        f"Left-nav end support margin is {_fmt(result.end_margin_left, '+.3f')} m. "
+        f"{_left_claim(result)} "
+        "Not a spin. "
         "Go to the kitchen or the bathroom stays refused: "
         "the camera can see, but there is no room and no map. "
         "The floor is empty. This gait is not a room crossing. "
@@ -1117,6 +1139,22 @@ def _honesty(result: ClipResult) -> str:
     if result.fault:
         text += f" FAULT: {result.fault_reason}."
     return text
+
+
+def _left_claim(result: ClipResult) -> str:
+    tipped = result.min_up_z_left is not None and result.min_up_z_left < 0.85
+    if result.end_mode_left == "fault" or tipped:
+        return (
+            "This left nav faulted or tipped. "
+            "It does not claim Controls' envelope."
+        )
+    return (
+        f"Controls' ceiling is approach about {NAV_APPROACH_DX_M:+.2f} m, "
+        f"heading about {NAV_LEFT_DEG:+.0f} deg, resume about {NAV_RESUME_DX_M:+.2f} m, "
+        f"end stand, margin about {NAV_MARGIN_M:+.3f} m. "
+        "This clip does not claim more than that. "
+        "A left yaw at 15 s held for 14 s tips on the resume and is not claimed."
+    )
 
 
 def _end_mode_sentence(mode: str, what: str = "End mode") -> str:
@@ -1138,6 +1176,8 @@ def _overlay(phrase: str, label: str, report_line: str, now: float, x: float) ->
         note = "approach cmd +0.056  nav ~+0.60 m  not a cold start"
     elif label == "turn-right":
         note = "cmd +0.056 yaw -0.25  nav ~-77 deg  rate is not 0.25"
+    elif label == "turn-left":
+        note = "cmd +0.056 yaw +0.25  nav ~+76 deg  rate is not 0.25"
     elif label == "resume":
         note = "resume cmd +0.056  along heading ~+0.32 m"
     else:
@@ -1193,7 +1233,7 @@ def run_clip(out_mp4: Path, summary_path: Path) -> int:
     frames: list[np.ndarray] = []
     stills: list[str] = []
     print(
-        f"[voice] kit_cam separate steers: back up | walk forward then stop | right nav  "
+        f"[voice] kit_cam separate steers: back up | walk forward | right nav | left nav  "
         f"pos={cam_pos[0]:.3f} {cam_pos[1]:.3f} {cam_pos[2]:.3f} "
         f"md5={steer.PLANT_MD5} gl={os.environ.get('MUJOCO_GL', '')}"
     )
@@ -1208,6 +1248,11 @@ def run_clip(out_mp4: Path, summary_path: Path) -> int:
         print("[voice] kit_cam renderer was not created for the right turn", file=sys.stderr)
         return 2
     right_samples = _drive_render(right, steer, RIGHT_CUES, frames, stills, RIGHT_STILLS)
+    left = steer.SteerSession(video=True)
+    if left.renderer is None:
+        print("[voice] kit_cam renderer was not created for the left nav", file=sys.stderr)
+        return 2
+    left_samples = _drive_render(left, steer, LEFT_CUES, frames, stills, LEFT_STILLS)
     mp4_path: Path | None = None
     render_error = ""
     if frames:
@@ -1227,6 +1272,9 @@ def run_clip(out_mp4: Path, summary_path: Path) -> int:
         right_samples,
         right.bus.fault,
         right.bus.fault_reason,
+        left_samples,
+        left.bus.fault,
+        left.bus.fault_reason,
         stills,
         mp4_path,
         cam_pos,
@@ -1407,6 +1455,9 @@ def _measure(
     right_samples: Sequence[SampleView],
     right_fault: bool,
     right_reason: str,
+    left_samples: Sequence[SampleView],
+    left_fault: bool,
+    left_reason: str,
     stills: list[str],
     mp4: Path | None,
     cam_pos: tuple[float, float, float],
@@ -1417,25 +1468,35 @@ def _measure(
     arc = _between(right_samples, RIGHT_CUES[1].t_end, RIGHT_CUES[2].t_end)
     resume = _between(right_samples, RIGHT_CUES[2].t_end, RIGHT_CUES[3].t_end)
     nav = _between(right_samples, RIGHT_CUES[0].t_end, RIGHT_CUES[-1].t_end)
+    left_approach = _between(left_samples, LEFT_CUES[0].t_end, LEFT_CUES[1].t_end)
+    left_arc = _between(left_samples, LEFT_CUES[1].t_end, LEFT_CUES[2].t_end)
+    left_resume = _between(left_samples, LEFT_CUES[2].t_end, LEFT_CUES[3].t_end)
+    left_nav = _between(left_samples, LEFT_CUES[0].t_end, LEFT_CUES[-1].t_end)
     backup_end = backup_samples[-1] if backup_samples else None
     forward_end = forward_samples[-1] if forward_samples else None
     right_end = right_samples[-1] if right_samples else None
+    left_end = left_samples[-1] if left_samples else None
     backup_ups = [sample.up_z for sample in backup]
     forward_ups = [sample.up_z for sample in forward]
     right_ups = [sample.up_z for sample in nav]
+    left_ups = [sample.up_z for sample in left_nav]
     phrases = tuple(
         cue.phrase
-        for cues in (BACKUP_CUES, FORWARD_CUES, RIGHT_CUES)
+        for cues in (BACKUP_CUES, FORWARD_CUES, RIGHT_CUES, LEFT_CUES)
         for cue in cues
         if cue.phrase is not None
     )
-    reasons = [reason for reason in (backup_reason, forward_reason, right_reason) if reason]
+    reasons = [
+        reason
+        for reason in (backup_reason, forward_reason, right_reason, left_reason)
+        if reason
+    ]
     draft = ClipResult(
         plant_md5=PLANT_MD5,
         kit_cam_pos=cam_pos,
         mujoco_gl=os.environ.get("MUJOCO_GL", ""),
         phrases=phrases,
-        fault=backup_fault or forward_fault or right_fault,
+        fault=backup_fault or forward_fault or right_fault or left_fault,
         fault_reason="; ".join(reasons),
         command_vx_back=-BACK_CAP_MPS,
         command_vx_fwd=FWD_MPS,
@@ -1457,6 +1518,13 @@ def _measure(
         min_up_z_right=min(right_ups) if right_ups else None,
         end_mode_right=right_end.mode if right_end is not None else "",
         end_margin_right=float(right_end.margin) if right_end is not None else None,
+        dx_approach_left_m=_dx(left_approach),
+        dyaw_arc_left_deg=_dyaw_deg(left_arc),
+        mean_yaw_rate_left=_mean_yaw_rate(left_arc),
+        dx_resume_left_m=_heading_travel(left_resume),
+        min_up_z_left=min(left_ups) if left_ups else None,
+        end_mode_left=left_end.mode if left_end is not None else "",
+        end_margin_left=float(left_end.margin) if left_end is not None else None,
         stills=tuple(stills),
         mp4=str(mp4.relative_to(ROOT)) if mp4 is not None else None,
         honesty="",
@@ -1493,7 +1561,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--clip",
         action="store_true",
-        help="Render kit_cam for back up, walk forward, and the right nav window",
+        help="Render kit_cam for back up, walk forward, and both nav windows",
     )
     parser.add_argument("--out", default=str(PREVIEWS / "voice_caller_kit_cam.mp4"))
     parser.add_argument("--summary", default=str(PREVIEWS / "voice_caller_day1_summary.json"))
@@ -1506,7 +1574,7 @@ def main(argv: list[str] | None = None) -> int:
         return self_test()
     if args.clip:
         if args.phrases:
-            print("refused: --clip plays back up, walk forward, and the right nav", file=sys.stderr)
+            print("refused: --clip plays back up, walk forward, and both navs", file=sys.stderr)
             return 2
         return run_clip(Path(args.out), Path(args.summary))
     if args.phrases:
