@@ -140,6 +140,7 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 import walk_gait_ainex as wg  # noqa: E402
+from lipm_gait import LipmConfig, LipmWalker  # noqa: E402
 from walk_gait import TELEOP_DEADBAND, TELEOP_RATE_LIMIT  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1052,6 +1053,7 @@ class SteerSession:
         cam_distance: float = 1.25,
         cam_azimuth: float = 135.0,
         cam_elevation: float = -18.0,
+        lipm: LipmConfig | None = None,
     ) -> None:
         problems = []
         if not PLANT_XML.is_file():
@@ -1126,6 +1128,12 @@ class SteerSession:
         self.fault_announced = False
         self.sim_dt = float(self.model.opt.timestep)
         self.steps_per_ctrl = max(1, int(round(CTRL_DT / self.sim_dt)))
+        self.lipm_cfg = lipm
+        self.lipm = (
+            None
+            if lipm is None
+            else LipmWalker(self.model, self.data, self.act_idx, lipm, self.q_stand)
+        )
         self._reset_stand()
         self.renderer: mj.Renderer | None = None
         self.cam = mj.MjvCamera()
@@ -1157,14 +1165,28 @@ class SteerSession:
     def step(self) -> TickReport:
         now = float(self.data.time)
         report = self.bus.tick(now, CTRL_DT)
-        ceiling = self._safety_ceiling()
-        if ceiling < 0.999 and report.mode == "move":
-            report = self.bus.limit_applied(ceiling)
-        amp, direction = self._motion_after_stop(report)
-        qdes = self._targets(amp, direction, report.applied_yaw_rate)
-        wg.set_ctrl(self.model, self.data, qdes, self.act_idx)
-        self._servos(amp, direction)
-        self._substep(amp, direction)
+        if self.lipm is None:
+            ceiling = self._safety_ceiling()
+            if ceiling < 0.999 and report.mode == "move":
+                report = self.bus.limit_applied(ceiling)
+            amp, direction = self._motion_after_stop(report)
+            qdes = self._targets(amp, direction, report.applied_yaw_rate)
+            wg.set_ctrl(self.model, self.data, qdes, self.act_idx)
+            self._servos(amp, direction)
+            self._substep(amp, direction)
+        else:
+            # LIPM does not use the CPG saturation throttle. A falling torso
+            # still cuts the velocity command the outer loop integrates.
+            vx = report.applied_vx
+            if report.mode == "move" and self._up_z() < 0.90:
+                vx *= 0.55
+            if self.bus.fault:
+                self.lipm.hold_stand()
+            else:
+                walking = report.mode == "move"
+                self.lipm.tick(vx, report.applied_yaw_rate, walking)
+            self._lipm_substep()
+            self.lipm.observe(self._up_z())
         self._update_bias(now)
         margin = self._support_margin()
         up_z = self._up_z()
@@ -1452,6 +1474,13 @@ class SteerSession:
             self._substep_plant(plant_amp, phi)
         finally:
             wg.PLANT_KD = saved_kd
+
+    def _lipm_substep(self) -> None:
+        """Integrate the position servos. No root wrench and no foot xfrc."""
+        for _ in range(self.steps_per_ctrl):
+            self.data.qfrc_applied[:] = 0.0
+            self.data.xfrc_applied[:] = 0.0
+            mj.mj_step(self.model, self.data)
 
     def _substep_plant(self, amp: float, phi: float) -> None:
         for _ in range(self.steps_per_ctrl):
@@ -1888,6 +1917,31 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
         honesty += _multi_honesty(stats)
     if session.bus.fault:
         honesty += f" FAULT: {session.bus.fault_reason}."
+    if session.lipm is not None:
+        sc = session.lipm.score()
+        honesty = (
+            "LIPM/ZMP schedule with a joint-space Bézier into the 50 Hz "
+            "position servos. Not the open-loop CPG. No root wrench. "
+            f"Row {session.lipm.cfg.name}, clear command {session.lipm.cfg.clear_m:.3f} m, "
+            f"arms={session.lipm.cfg.arms}. "
+            f"Swing sole median {float(sc['sole_median_m']):.3f} m, "
+            f"p90 {float(sc['sole_p90_m']):.3f} m, "
+            f"swing contact {float(sc['swing_contact_frac']):.3f}, "
+            f"stance slip {float(sc['stance_slip_m_s']):.4f} m/s, "
+            f"sat_rate {float(sc['sat_rate']):.3f}, "
+            f"lifts {int(sc['n_lifts'])}, missed gates {int(sc['n_missed_gates'])}. "
+            f"Measured Δx={dx_fwd:+.3f} m, mean body vx={mean_vx:+.3f} m/s "
+            f"(not the command). "
+            f"Turn-window Δyaw={math.degrees(dyaw):+.2f} deg "
+            f"(mean yaw rate {mean_yaw_rate:+.3f} rad/s). "
+            f"tip={tip}; min_up_z={session.min_up_z:.3f}; "
+            f"peak leg torque={session.max_leg_tau:.2f} Nm (limit {LEG_TAU}). "
+            "Foot box, friction, kp, and ±2.1 Nm are unchanged. "
+            "Vendor bar is about 2 cm of sole plus a push. "
+            "Clearance without forward progress is a Prefer FAIL."
+        )
+        if session.bus.fault:
+            honesty += f" FAULT: {session.bus.fault_reason}."
     return RunSummary(
         plant=str(PLANT_XML.relative_to(ROOT)),
         plant_md5=PLANT_MD5,
@@ -1954,6 +2008,7 @@ def run_demo(
     cam_distance: float = 1.25,
     cam_azimuth: float = 135.0,
     cam_elevation: float = -18.0,
+    lipm: LipmConfig | None = None,
 ) -> RunSummary:
     video = out_mp4 is not None
     session = SteerSession(
@@ -1961,6 +2016,7 @@ def run_demo(
         cam_distance=cam_distance,
         cam_azimuth=cam_azimuth,
         cam_elevation=cam_elevation,
+        lipm=lipm,
     )
     segments = _clip_script(script, duration)
     driver = ScriptedDriver(segments)
@@ -1970,7 +2026,14 @@ def run_demo(
         f"slew vx={VX_SLEW:.2f} yaw={YAW_SLEW:.2f} "
         f"(TELEOP_RATE_LIMIT={TELEOP_RATE_LIMIT} deadband={TELEOP_DEADBAND})"
     )
-    print(
+    if lipm is not None:
+        print(
+            f"[steer] gait=lipm {lipm.name} clear={lipm.clear_m:.3f} "
+            f"arms={lipm.arms} t_swing={lipm.t_swing:.2f} "
+            "assist=OFF root_wrench=OFF"
+        )
+    else:
+        print(
         "[steer] gait=forward T=0.55 hip=0.24 ds=0.1375 plant_kd=25 "
         f"com_shift={LOOK_COM_SHIFT:.2f} knee_lift={LOOK_KNEE_LIFT:.2f} "
         f"arm_scale={LOOK_ARM_SCALE_STRAIGHT:.1f}/{LOOK_ARM_SCALE:.1f} "
