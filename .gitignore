@@ -7,6 +7,7 @@ __pycache__/
 .mypy_cache/
 .DS_Store
 *.mp4
+!docs/previews/assembly/assembly.mp4
 *.webm
 !previews/steer_walk_day1.mp4
 !previews/steer_walk_forward.mp4
