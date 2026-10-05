@@ -898,3 +898,11 @@ IK gait actually running. This is the Hardware armature / inertia
 comparison. No plant edit from this row.
 
 The clips are the 400 ms row, the highest min up_z. It still rails.
+Forward 8.400 s stays up (Δx +4.9 cm, mean vx +0.6 cm/s, pooled sole
+p90 0.3 cm, min up_z 0.987, peak torque 2.45 Nm). Close-up 7.600 s
+stays up through the stop (forward Δx +1.9 cm, mean vx +0.4 cm/s,
+stop Δx +1.1 cm, min up_z 0.987 on the forward window and 0.998 after
+the stop, peak 2.45 Nm while walking and 1.90 Nm after the stop).
+The picture is an upright shuffle: the feet barely leave the floor and
+the body drifts a few centimetres. Constrained Baseline, yuv420p,
+`+faststart`.
