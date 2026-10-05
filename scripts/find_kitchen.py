@@ -9,10 +9,11 @@ vel is resent at 10 Hz. 200 ms of silence stands.
 
 This is not SLAM and not an arrival. The phrase path paints kit_cam into
 the explore map and steers from query_kitchen_like_yellow() and
-frontier_cells(). If that log has no kitchen-like yellow, it sends no
-vel. A live blob is the arrival fraction, not the command. Named
-kitchen / table / chair boxes stay a sim honesty check. They are not
-waypoints and they are not given to the map query.
+frontier_cells(). The logged cue is cabinet wood grain, not flat yellow.
+If that log has no cabinet grain, it sends no vel. A live blob is the
+arrival fraction, not the command. Named kitchen / table / chair boxes
+stay a sim honesty check. They are not waypoints and they are not given
+to the map query.
 
 The last-mile walks at half the forward cap (0.028 m/s), because a
 full-cap finder burst crossed up_z 0.90. Yaw comes from the logged
@@ -20,14 +21,13 @@ camera ray or the frontier nearest that ray, inside ±0.25. vx=0 yaw
 does not change heading on this plant and is not sent. The up_z bar
 stays 0.90. The 1.2 s hop stays in --self-test at the full forward cap.
 The world-x budget is 1.10 m, a stop, not a goal pose. Arrival is
-claimed only when the backsplash fills at least half the frame and the
-torso is within 0.25 m of the kitchen geom. Otherwise the summary
-reports end x and the remaining gap and does not say arrived.
+claimed only when the cabinet-grain cue fills at least half the frame
+and the torso is within 0.25 m of the kitchen geom. Otherwise the
+summary reports end x and the remaining gap and does not say arrived.
 
-The visible signal under this lighting is the yellow backsplash. The wood
-counter's lit face does not separate from the blue cabinet, and the red
-kettle renders brown, so neither is the blob. Empty floor and a yaw that
-puts the kitchen behind the camera measure zero of that yellow.
+The visible signal is dark cabinet wood with 15 px grain. Flat yellow
+HSV is measured and reported, and it is not the steer. Empty floor and
+a yaw that puts the kitchen behind the camera measure zero of the grain.
 
 The camera stays on head_tilt_link at 0.050 0.019 0.007, fovy 104.82.
 The plant file is not edited.
@@ -109,13 +109,13 @@ ARRIVAL_YELLOW_FRAC = 0.50
 ARRIVAL_REMAINING_M = 0.25
 PERCEPT_S = 0.40
 BUDGET_STOP = "burst budget reached; stop"
-# Dim backsplash, kitchen body still in frame. Half-cap walk-yaw toward the
+# Dim cabinet grain, kitchen body still in frame. Half-cap walk-yaw toward the
 # last bias. vx=0 yaw does not change heading here, so it is not used.
 # Not a search: two tries, 2 s each, then stop if yellow is still not usable.
 REACQUIRE_S = 2.0
 REACQUIRE_SLICE_S = 0.40
 MAX_REACQUIRE = 2
-# Stand kit_cam measures yellow fraction ~0.039 and bias ~-0.014.
+# Stand kit_cam measures cabinet-grain fraction ~0.030 and bias ~0.
 # Empty floor and a yaw that hides the kitchen measure 0.
 MIN_YELLOW_FRAC = 0.015
 CENTER_BIAS = 0.08
@@ -156,22 +156,23 @@ VY_LINE = "refused: no vy"
 UNKNOWN_LINE = "refused: not a find-kitchen phrase"
 EMPTY_PHRASE_LINE = "refused: empty phrase"
 NOT_IN_FRAME_LINE = "Prefer FAIL: kitchen is not in the kit_cam frame; no motion"
-NO_PIXELS_LINE = "Prefer FAIL: kit_cam pixels do not show the backsplash; no motion"
+NO_PIXELS_LINE = "Prefer FAIL: kit_cam pixels do not show cabinet grain; no motion"
 MAP_NO_YELLOW = (
-    "Prefer FAIL: explore map has no kitchen-like yellow yet; no motion"
+    "Prefer FAIL: explore map has no cabinet-grain cue yet; no motion"
 )
 REACQUIRE_LOST = (
-    "Prefer FAIL: soft walk-yaw reacquire lost the backsplash; no further vel"
+    "Prefer FAIL: soft walk-yaw reacquire lost the cabinet grain; no further vel"
 )
 AMBIGUOUS_LINE = "Prefer FAIL: kitchen blob is ambiguous; no motion"
-BLOCKED_LINE = "Prefer FAIL: backsplash fills the lower center; no forward"
+BLOCKED_LINE = "Prefer FAIL: cabinet grain fills the lower center; no forward"
 HONESTY = (
     "Last-mile steer from the explore map query. Not SLAM, not a waypoint, "
-    "and not an arrival unless the backsplash fills at least half the frame "
+    "and not an arrival unless the cabinet-grain cue fills at least half the frame "
     "and the torso is within 0.25 m of the kitchen geom. "
     "query_kitchen_like_yellow() and frontier_cells() pick the half-cap vel. "
     "A live blob is the arrival fraction, not the command. "
-    "No yellow in the map log sends no vel. "
+    "No cabinet grain in the map log sends no vel. "
+    "Flat yellow is reported and does not steer. "
     "The kitchen geom distance is only the arrival bar and the reported gap."
 )
 
@@ -327,18 +328,16 @@ def phrase_hook(phrase: str, *, scene: SceneName) -> PhraseResult:
 
 
 def backsplash_mask(image: np.ndarray) -> np.ndarray:
-    """Yellow backsplash. Empty kit_cam floor does not pass this test."""
-    red = image[:, :, 0].astype(np.int16)
-    green = image[:, :, 1].astype(np.int16)
-    blue = image[:, :, 2].astype(np.int16)
-    return (
-        (red > 110)
-        & (green > 100)
-        & (blue < 100)
-        & (red > blue + 40)
-        & (green > blue + 30)
-        & (np.abs(red - green) < 60)
-    )
+    """Cabinet-grain cue. The name stays so the map query path is unchanged.
+
+    Empty kit_cam floor does not pass. Flat yellow does not pass.
+    """
+    return explore_map.cabinet_grain_mask(image)
+
+
+def legacy_yellow_mask(image: np.ndarray) -> np.ndarray:
+    """Old HSV yellow. Reported against the mesh kitchen. Not the steer."""
+    return explore_map.legacy_yellow_mask(image)
 
 
 def read_pixels(image: np.ndarray) -> PixelRead:
@@ -356,7 +355,7 @@ def read_pixels(image: np.ndarray) -> PixelRead:
             bimodal=False,
             lower_center_blocked=False,
             decision="fail",
-            reason="no backsplash pixels",
+            reason="no cabinet-grain pixels",
         )
     rows, cols = np.nonzero(mask)
     centroid_u = float(cols.mean())
@@ -372,19 +371,19 @@ def read_pixels(image: np.ndarray) -> PixelRead:
     blocked = bool(lower.size) and float(lower.mean()) > LOWER_BLOCK_FRAC
     if frac < MIN_YELLOW_FRAC:
         decision: DecisionName = "fail"
-        reason = "backsplash fraction below the visible bar"
+        reason = "cabinet-grain fraction below the visible bar"
     elif bimodal:
         decision = "fail"
-        reason = "backsplash is split left and right"
+        reason = "cabinet grain is split left and right"
     elif abs(bias) <= CENTER_BIAS and mid_share >= MID_SHARE_CENTER:
         decision = "forward"
-        reason = "backsplash is in the center of the frame"
+        reason = "cabinet grain is in the center of the frame"
     elif bias < 0.0:
         decision = "yaw_left"
-        reason = "backsplash is left of center"
+        reason = "cabinet grain is left of center"
     else:
         decision = "yaw_right"
-        reason = "backsplash is right of center"
+        reason = "cabinet grain is right of center"
     return PixelRead(
         frac=frac,
         centroid_u=centroid_u,
@@ -563,7 +562,7 @@ def score_frame(model: mj.MjModel, data: mj.MjData, image: np.ndarray) -> Kitche
     if not on_kitchen or (on_other and not on_kitchen):
         return KitchenScore(
             decision="fail",
-            reason="backsplash centroid is not on the kitchen body",
+            reason="cabinet-grain centroid is not on the kitchen body",
             line=AMBIGUOUS_LINE,
             needs_map=False,
             bias=pixels.bias,
@@ -575,7 +574,7 @@ def score_frame(model: mj.MjModel, data: mj.MjData, image: np.ndarray) -> Kitche
     if pixels.lower_center_blocked and pixels.decision == "forward":
         return KitchenScore(
             decision="fail",
-            reason="backsplash blocks the lower center",
+            reason="cabinet grain blocks the lower center",
             line=BLOCKED_LINE,
             needs_map=False,
             bias=pixels.bias,
@@ -736,7 +735,7 @@ def approach_choice(
             "stop",
             "arrival",
             (
-                "arrival bars met: backsplash fills at least half the frame "
+                "arrival bars met: cabinet grain fills at least half the frame "
                 f"and torso-to-kitchen is {remaining_m:.3f} m"
             ),
         )
@@ -747,7 +746,7 @@ def approach_choice(
             (
                 "Prefer FAIL: torso is within "
                 f"{ARRIVAL_REMAINING_M:.2f} m of the kitchen geom "
-                "but the backsplash does not fill the frame; not arrival"
+                "but the cabinet grain does not fill the frame; not arrival"
             ),
         )
     if dx_m >= PROGRESS_STOP_M:
@@ -962,7 +961,7 @@ def run_attempt(
     if abort:
         note = abort
     else:
-        note = "brief forward on a centered backsplash, then stop"
+        note = "brief forward on a centered cabinet grain, then stop"
     session.bus.stop(float(session.data.time))
     _hold_stand(session, SETTLE_S)
     after = cam.grab(session.data)
@@ -1093,7 +1092,7 @@ def _last_mile_stop(
             "stop",
             "arrival",
             (
-                "arrival bars met: backsplash fills at least half the frame "
+                "arrival bars met: cabinet grain fills at least half the frame "
                 f"and torso-to-kitchen is {remaining_m:.3f} m"
             ),
         )
@@ -1104,7 +1103,7 @@ def _last_mile_stop(
             (
                 "Prefer FAIL: torso is within "
                 f"{ARRIVAL_REMAINING_M:.2f} m of the kitchen geom "
-                "but the backsplash does not fill the frame; not arrival"
+                "but the cabinet grain does not fill the frame; not arrival"
             ),
         )
     if dx_m >= PROGRESS_STOP_M or forward_bursts >= MAX_FORWARD_BURSTS:
@@ -1239,7 +1238,7 @@ def _approach_result(
     arrival = arrival_bars(final.yellow_frac, remaining) and math.isfinite(remaining)
     if arrival:
         note = (
-            "arrival bars met on the stop frame: backsplash fills at least half "
+            "arrival bars met on the stop frame: cabinet grain fills at least half "
             f"the frame and torso-to-kitchen is {remaining:.3f} m"
         )
         stop_kind = "arrival"
@@ -1356,6 +1355,23 @@ def _commands_legal(sent: list[SentVel], *, allow_walk_yaw: bool = False) -> str
         if command.vx != 0.0 and command.yaw_rate != 0.0:
             return "yaw and forward were sent together"
     return None
+
+
+def _paint_grain(cx: int, cy: int, box_w: int, box_h: int) -> np.ndarray:
+    """Sky field with a dark-wood checker. Flat yellow is not this blob."""
+    image = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
+    image[:, :] = (70, 100, 140)
+    u0 = max(0, cx - box_w // 2)
+    u1 = min(WIDTH, cx + box_w // 2)
+    v0 = max(0, cy - box_h // 2)
+    v1 = min(HEIGHT, cy + box_h // 2)
+    ys = np.arange(v0, v1)[:, None]
+    xs = np.arange(u0, u1)[None, :]
+    on = ((xs // 2 + ys // 2) & 1) == 0
+    patch = image[v0:v1, u0:u1]
+    patch[on] = (80, 60, 12)
+    patch[~on] = (36, 8, 8)
+    return image
 
 
 def _paint(cx: int, cy: int, box_w: int, box_h: int, color: tuple[int, int, int]) -> np.ndarray:
@@ -1506,19 +1522,25 @@ def test_approach_policy() -> list[str]:
 
 def test_pixels() -> list[str]:
     failures: list[str] = []
-    yellow = (150, 140, 50)
-    left = read_pixels(_paint(120, 160, 160, 40, yellow))
-    right = read_pixels(_paint(520, 160, 160, 40, yellow))
-    center = read_pixels(_paint(320, 150, 140, 40, yellow))
+    left = read_pixels(_paint_grain(120, 160, 180, 90))
+    right = read_pixels(_paint_grain(520, 160, 180, 90))
+    center = read_pixels(_paint_grain(320, 150, 180, 90))
     empty = read_pixels(np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8))
-    _expect(left.decision == "yaw_left", f"left blob {left.decision} bias {left.bias:+.2f}", failures)
-    _expect(right.decision == "yaw_right", f"right blob {right.decision} bias {right.bias:+.2f}", failures)
-    _expect(center.decision == "forward", f"center blob {center.decision} bias {center.bias:+.2f}", failures)
+    flat_yellow = read_pixels(_paint(320, 150, 200, 120, (150, 140, 50)))
+    _expect(left.decision == "yaw_left", f"left blob {left.decision} bias {left.bias:+.2f} frac {left.frac:.3f}", failures)
+    _expect(right.decision == "yaw_right", f"right blob {right.decision} bias {right.bias:+.2f} frac {right.frac:.3f}", failures)
+    _expect(center.decision == "forward", f"center blob {center.decision} bias {center.bias:+.2f} frac {center.frac:.3f}", failures)
     _expect(empty.decision == "fail" and empty.frac == 0.0, "empty image did not fail", failures)
-    split = _paint(100, 160, 70, 36, yellow)
-    split[140:180, 500:570] = yellow
+    _expect(
+        flat_yellow.frac < MIN_YELLOW_FRAC and flat_yellow.decision == "fail",
+        f"flat yellow still counts frac {flat_yellow.frac:.3f}",
+        failures,
+    )
+    split = _paint_grain(100, 160, 90, 80)
+    right_blob = _paint_grain(540, 160, 90, 80)
+    split[:, 430:] = right_blob[:, 430:]
     split_read = read_pixels(split)
-    _expect(split_read.bimodal and split_read.decision == "fail", "split blob was not ambiguous", failures)
+    _expect(split_read.bimodal and split_read.decision == "fail", f"split blob was not ambiguous {split_read}", failures)
     _expect(command_for("fail") is None, "fail produced a command", failures)
     _expect(command_for("yaw_left") == (0.0, steer_walk.YAW_RATE_CAP), "yaw left command", failures)
     _expect(command_for("yaw_right") == (0.0, -steer_walk.YAW_RATE_CAP), "yaw right command", failures)
@@ -1620,6 +1642,57 @@ def test_scenes() -> list[str]:
     return failures
 
 
+def _fraction(mask: np.ndarray) -> float:
+    return float(mask.mean()) if mask.size else 0.0
+
+
+def test_cue_bars() -> list[str]:
+    """Old yellow and the grain cue stay under the log bar off the kitchen.
+
+    Near 0.25 m, neither cue fills half the frame. The bars are not lowered.
+    """
+    failures: list[str] = []
+    scenes: tuple[tuple[str, Path | None], ...] = (
+        ("bathroom", ROOT / "mujoco" / "room_bathroom.xml"),
+        ("plant", None),
+        ("living", ROOT / "mujoco" / "room_living.xml"),
+        ("bedroom", ROOT / "mujoco" / "room_bedroom.xml"),
+        ("entrance", ROOT / "mujoco" / "room_entrance.xml"),
+    )
+    for name, xml in scenes:
+        session = steer_walk.SteerSession(video=False, scene_xml=xml)
+        cam = KitCam(session.model)
+        try:
+            _hold_stand(session, STAND_S)
+            image = cam.grab(session.data)
+        finally:
+            cam.close()
+        grain = _fraction(backsplash_mask(image))
+        legacy = _fraction(legacy_yellow_mask(image))
+        _expect(grain < MIN_YELLOW_FRAC, f"{name} grain {grain:.4f} false-triggers", failures)
+        if name in ("bathroom", "plant"):
+            _expect(legacy < MIN_YELLOW_FRAC, f"{name} old yellow {legacy:.4f} false-triggers", failures)
+    room = steer_walk.SteerSession(video=False, scene_xml=ROOM_XML)
+    cam = KitCam(room.model)
+    try:
+        _hold_stand(room, STAND_S)
+        room.data.qpos[0] = 1.01
+        room.data.qvel[:] = 0.0
+        mj.mj_forward(room.model, room.data)
+        image = cam.grab(room.data)
+        gap = kitchen_clearance(room.model, room.data)
+    finally:
+        cam.close()
+    _expect(gap is not None and gap[0] <= ARRIVAL_REMAINING_M, f"close gap {gap}", failures)
+    grain = _fraction(backsplash_mask(image))
+    legacy = _fraction(legacy_yellow_mask(image))
+    _expect(grain < ARRIVAL_YELLOW_FRAC, f"close grain {grain:.3f} met the 0.50 bar", failures)
+    _expect(legacy < ARRIVAL_YELLOW_FRAC, f"close old yellow {legacy:.3f} met the 0.50 bar", failures)
+    gap_m = float("nan") if gap is None else gap[0]
+    print(f"[find] close gap {gap_m:.3f} m grain {grain:.3f} old yellow {legacy:.3f}")
+    return failures
+
+
 def test_short_hop() -> list[str]:
     """Regression: the 1.2 s single forward hop, not the multi-burst approach."""
     failures: list[str] = []
@@ -1649,7 +1722,7 @@ def test_short_hop() -> list[str]:
     end_x = float(session.data.qpos[0])
     _expect(end_x < 0.15, f"hop end x {end_x:.3f} m is no longer the short hop", failures)
     _expect(
-        attempt.note == "brief forward on a centered backsplash, then stop",
+        attempt.note == "brief forward on a centered cabinet grain, then stop",
         f"hop note {attempt.note}",
         failures,
     )
@@ -1764,6 +1837,7 @@ def self_test() -> int:
             print(f"FAIL {msg}")
         return 1
     failures.extend(test_scenes())
+    failures.extend(test_cue_bars())
     failures.extend(test_map_query())
     failures.extend(test_short_hop())
     failures.extend(test_biased_yaw())
@@ -1834,6 +1908,18 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
     finally:
         empty_cam.close()
 
+    bathroom = steer_walk.SteerSession(
+        video=False, scene_xml=ROOT / "mujoco" / "room_bathroom.xml",
+    )
+    bath_cam = KitCam(bathroom.model)
+    try:
+        _hold_stand(bathroom, STAND_S)
+        bath_image = bath_cam.grab(bathroom.data)
+    finally:
+        bath_cam.close()
+    bath_grain = _fraction(backsplash_mask(bath_image))
+    bath_legacy = _fraction(legacy_yellow_mask(bath_image))
+
     before_path = PREVIEWS / "find_kitchen_before.png"
     mid_path = PREVIEWS / "find_kitchen_mid.png"
     after_path = PREVIEWS / "find_kitchen_after.png"
@@ -1865,6 +1951,12 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
         problems.append("kitchen was in frame but no vel was sent")
     if fail_score.decision != "fail":
         problems.append(f"empty plant scored {fail_score.decision}")
+    if bath_grain >= MIN_YELLOW_FRAC:
+        problems.append(f"bathroom grain false-trigger {bath_grain:.4f}")
+    if bath_legacy >= MIN_YELLOW_FRAC:
+        problems.append(f"bathroom old yellow false-trigger {bath_legacy:.4f}")
+    if _fraction(legacy_yellow_mask(fail_image)) >= MIN_YELLOW_FRAC:
+        problems.append("empty plant old yellow false-trigger")
     if after_md5 != before_md5 or after_md5 != steer_walk.PLANT_MD5:
         problems.append(f"plant md5 changed {before_md5} -> {after_md5}")
     if approach.end_mode != "stand":
@@ -1925,6 +2017,12 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
         "final": _score_dict(approach.final),
         "commands": _collapse(approach.sent),
         "prefer_fail_empty_plant": _score_dict(fail_score),
+        "legacy_yellow_stand": _fraction(legacy_yellow_mask(approach.before)),
+        "legacy_yellow_final": _fraction(legacy_yellow_mask(approach.after)),
+        "legacy_yellow_empty": _fraction(legacy_yellow_mask(fail_image)),
+        "legacy_yellow_bathroom": bath_legacy,
+        "cabinet_grain_bathroom": bath_grain,
+        "cue": "cabinet_grain",
         "stills": {
             "before": str(before_path.relative_to(ROOT)),
             "mid": str(mid_path.relative_to(ROOT)),

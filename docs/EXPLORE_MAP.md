@@ -2,7 +2,7 @@
 
 `scripts/explore_map.py` walks the frozen plant and builds a partial map from `kit_cam`. It is not a room finder, not SLAM, and not go-anywhere. Finders stay last mile. They can ask this map two questions later: "have I seen kitchen-like yellow?" and "which cells are frontiers?"
 
-The room scenes no longer use flat primary-color boxes (`docs/ROOM_ASSETS.md`). The kitchen has no yellow backsplash, and the entrance mat is hessian, not a saturated violet plane. `scripts/explore_map.py` was not retuned. The yellow fractions, the soft-XY probe, and the mat-as-feature description below were measured on the previous box scenes.
+The room scenes no longer use flat primary-color boxes (`docs/ROOM_ASSETS.md`). The kitchen cue is cabinet wood grain, the same mask as `scripts/find_kitchen.py`, stored on the yellow log. Flat yellow is not that mask. The entrance mat is hessian, not a saturated violet plane. The walk fractions, the soft-XY probe, and the mat-as-feature counts below were measured on the previous box scenes. The stand-frame cue on the mesh rooms is in `docs/FIND_KITCHEN.md`.
 
 Voice still refuses "explore", "build a map", and "go anywhere" (`scripts/voice_caller.py`). This script is not wired to that caller.
 
@@ -30,7 +30,7 @@ The grid is 0.10 m cells in the world frame, from x −0.80..2.60 m and y −1.8
 | Feature | Saturated and not sky, and the ray meets the floor. On the previous box entrance the violet mat was this case. The current mat is hessian, and this script was not retuned. |
 | Not a cell | Elevated color. The ray misses the floor inside 2.60 m. Stored as a bearing only. |
 
-The kitchen backsplash is the elevated case. The yellow test is the same pixel rule as `scripts/find_kitchen.py` (red and green high, blue low). At the stand pose that blob is about 0.039 of the frame and the ray does not meet the floor, so `ground_cell_ij` stays empty. The bearing is the camera ray. It is not a waypoint and it is not passed to `choose_velocity`.
+The cabinet grain is the elevated case. The pixel test is the same mask as `scripts/find_kitchen.py` (15 px luminance std and a dark warm band). On the mesh kitchen the stand frame is about 0.030 of the image and the ray does not meet the floor, so `ground_cell_ij` stays empty. The bearing is the camera ray. It is not a waypoint and it is not passed to `choose_velocity`. The 0.039 figure below is the previous flat backsplash.
 
 Sky is the empty-plant blue around rgb (70, 100, 140). Cyan tile fails that test (not enough red) and is counted as other chromatic color. Other chromatic pixels are not given a room name.
 

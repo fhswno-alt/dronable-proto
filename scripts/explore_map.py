@@ -29,11 +29,11 @@ What the map actually is:
     Saturated floor hits (a mat, for example) are feature cells.
     Unknown cells with three or four free neighbors are filled once
     per view, so the fan is not a dotted rim.
-  - Elevated color, including the kitchen backsplash, does not meet
-    that plane in range. It is stored as a camera-ray bearing, not a
-    cell. The first time that yellow clears the log threshold, a soft
-    XY is frozen along the bearing. That point is not a waypoint and
-    yellow >= 0.50 is not success.
+  - Elevated cabinet grain does not meet that plane in range. It is
+    stored as a camera-ray bearing, not a cell. The first time that
+    cue clears the log threshold, a soft XY is frozen along the
+    bearing. That point is not a waypoint and a cue fraction >= 0.50
+    is not success. Flat yellow is not the cue.
   - Frontier cells are unknown cells in an 8-neighborhood of a free
     or walked cell, out to the edge of the fan. The next vel aims at
     one of those cells. It does not aim at yellow.
@@ -199,10 +199,20 @@ FEATURE_SAT = 18
 MIN_YELLOW_FRAC = 0.015
 MAP_PX = 14
 
-# Same pixel test find_kitchen uses for the backsplash. A bearing, not a room id.
-YELLOW_RED_MIN = 110
-YELLOW_GREEN_MIN = 100
-YELLOW_BLUE_MAX = 100
+# Photoreal cabinet wood, from kit_cam RGB. A 15 px luminance std plus a
+# dark warm band. The flat yellow backsplash is gone; that HSV test is
+# not this mask. find_kitchen.backsplash_mask calls cabinet_grain_mask.
+# A bearing, not a room id. Arrival is still fraction >= 0.50.
+CABINET_GRAIN_RAD = 7
+CABINET_GRAIN_STD = 15.0
+CABINET_R_LO = 16
+CABINET_R_HI = 80
+CABINET_G_LO = 8
+CABINET_G_HI = 64
+CABINET_B_HI = 36
+CABINET_RB_MIN = 28
+CABINET_SAT_LO = 14
+CABINET_SAT_HI = 80
 
 UNKNOWN = 0
 FREE = 1
@@ -231,9 +241,9 @@ STAND_SCENES: tuple[SceneName, ...] = (
 
 HONESTY = (
     "Partial kit_cam map. Floor cells are a ground-plane paint out to 2.60 m, "
-    "with one-cell holes filled. Kitchen-like yellow is a camera-ray bearing, "
+    "with one-cell holes filled. The cabinet-grain cue is a camera-ray bearing, "
     "not a waypoint and not arrival. A soft XY is frozen along that bearing "
-    "the first time yellow is logged. Yellow >= 0.50 is not success. "
+    "the first time the cue is logged. Cue fraction >= 0.50 is not success. "
     "Frontiers are the 8-connected edge of that paint. Pose is the sim freejoint, "
     "not SLAM. The empty plant holds the claimed left prefix, then a 4 s "
     "forward gap and an 8 s left window when the dense rim is still left, "
@@ -395,15 +405,15 @@ class ExploreMap:
         seen = self.yellow_max_fraction >= MIN_YELLOW_FRAC
         if seen:
             note = (
-                "kitchen-like yellow is in the kit_cam log. "
+                "cabinet-grain cue is in the kit_cam log. "
                 "bearing_rad is the camera ray, not a waypoint. "
                 "ground_cell_ij is set only if that ray met the floor "
                 f"inside {MAX_RANGE_M:.2f} m."
             )
         else:
             note = (
-                f"no kitchen-like yellow at or above {MIN_YELLOW_FRAC:.3f} of a frame. "
-                "This is not a room label."
+                f"no cabinet-grain cue at or above {MIN_YELLOW_FRAC:.3f} of a frame. "
+                "Flat yellow is not this test. This is not a room label."
             )
         return YellowQuery(
             seen=seen,
@@ -629,20 +639,84 @@ class FrameMasks:
     sat: np.ndarray
 
 
-def classify_frame(frame: np.ndarray) -> FrameMasks:
-    """Pixel classes from color only. No body names."""
+def luminance_std(frame: np.ndarray, radius: int = CABINET_GRAIN_RAD) -> np.ndarray:
+    """Local luminance std in a (2*radius+1) window. No body names."""
+    lum = frame[:, :, :3].astype(np.float32).mean(axis=2)
+    pad = np.pad(lum, radius, mode="edge")
+    integral = np.pad(pad, ((1, 0), (1, 0)), mode="constant")
+    integral = np.cumsum(np.cumsum(integral, axis=0), axis=1)
+    squared = np.pad(pad * pad, ((1, 0), (1, 0)), mode="constant")
+    squared = np.cumsum(np.cumsum(squared, axis=0), axis=1)
+    height, width = lum.shape
+    span = radius * 2 + 1
+    area = float(span * span)
+    y0 = np.arange(height)[:, None]
+    x0 = np.arange(width)[None, :]
+    total = (
+        integral[y0 + span, x0 + span]
+        - integral[y0, x0 + span]
+        - integral[y0 + span, x0]
+        + integral[y0, x0]
+    )
+    total_sq = (
+        squared[y0 + span, x0 + span]
+        - squared[y0, x0 + span]
+        - squared[y0 + span, x0]
+        + squared[y0, x0]
+    )
+    variance = np.maximum(total_sq / area - (total / area) ** 2, 0.0)
+    return np.sqrt(variance)
+
+
+def cabinet_grain_mask(frame: np.ndarray) -> np.ndarray:
+    """Dark warm wood with 15 px grain. Flat yellow does not pass.
+
+    Measured on settled kit_cam: the photoreal counter is this band.
+    Bathroom marble, the empty checkerboard, and a yaw that hides the
+    cabinet stay under the 0.015 log bar. The same mask does not fill
+    half the frame at a 0.25 m torso gap.
+    """
     red = frame[:, :, 0].astype(np.int16)
     green = frame[:, :, 1].astype(np.int16)
     blue = frame[:, :, 2].astype(np.int16)
-    sat = np.maximum(np.maximum(red, green), blue) - np.minimum(np.minimum(red, green), blue)
-    yellow = (
-        (red > YELLOW_RED_MIN)
-        & (green > YELLOW_GREEN_MIN)
-        & (blue < YELLOW_BLUE_MAX)
+    span = np.maximum(np.maximum(red, green), blue) - np.minimum(np.minimum(red, green), blue)
+    color = (
+        (red >= CABINET_R_LO)
+        & (red <= CABINET_R_HI)
+        & (green >= CABINET_G_LO)
+        & (green <= CABINET_G_HI)
+        & (blue <= CABINET_B_HI)
+        & (red >= green)
+        & (green + 6 >= blue)
+        & ((red - blue) >= CABINET_RB_MIN)
+        & (span >= CABINET_SAT_LO)
+        & (span <= CABINET_SAT_HI)
+    )
+    return color & (luminance_std(frame) >= CABINET_GRAIN_STD)
+
+
+def legacy_yellow_mask(frame: np.ndarray) -> np.ndarray:
+    """Old flat-backsplash test. Not used to steer. Prefer FAIL on the mesh kitchen."""
+    red = frame[:, :, 0].astype(np.int16)
+    green = frame[:, :, 1].astype(np.int16)
+    blue = frame[:, :, 2].astype(np.int16)
+    return (
+        (red > 110)
+        & (green > 100)
+        & (blue < 100)
         & (red > blue + 40)
         & (green > blue + 30)
         & (np.abs(red - green) < 60)
     )
+
+
+def classify_frame(frame: np.ndarray) -> FrameMasks:
+    """Pixel classes from color and cabinet grain. No body names."""
+    red = frame[:, :, 0].astype(np.int16)
+    green = frame[:, :, 1].astype(np.int16)
+    blue = frame[:, :, 2].astype(np.int16)
+    sat = np.maximum(np.maximum(red, green), blue) - np.minimum(np.minimum(red, green), blue)
+    yellow = cabinet_grain_mask(frame)
     # Empty-plant sky measured near rgb (64, 96, 128). Cyan tile is red-poor
     # and does not pass red >= 40.
     sky = (
@@ -1595,7 +1669,7 @@ def run_soft_goal(hold_s: float, *, record_frames: bool) -> SceneRun:
         mid_time = phase_t0 + hold_s * 0.5
         walk_end = phase_t0 + hold_s
         if command is None:
-            stop_reason = "no kitchen-like yellow; no vel"
+            stop_reason = "no cabinet-grain cue; no vel"
         else:
             while float(session.data.time) < walk_end - 1e-9:
                 now = float(session.data.time)
@@ -1954,18 +2028,18 @@ def _scene_limit(run: SceneRun) -> str:
         )
     if yellow.seen and yellow.ground_cell_ij is None:
         return (
-            f"Prefer FAIL: kitchen-like yellow fraction {yellow.max_fraction:.3f} at bearing "
+            f"Prefer FAIL: cabinet-grain fraction {yellow.max_fraction:.3f} at bearing "
             f"{yellow.bearing_rad:.3f} rad, elevation {yellow.elevation_rad:.3f} rad. "
             "The ray does not meet the floor in range, so there is no yellow cell and no waypoint. "
             f"Vision-free cells {free}, floor-feature cells {feature}. Not arrival and not go-anywhere."
         )
     if yellow.seen:
         return (
-            f"Prefer FAIL: yellow fraction {yellow.max_fraction:.3f} painted a floor cell "
+            f"Prefer FAIL: cabinet-grain fraction {yellow.max_fraction:.3f} painted a floor cell "
             f"{yellow.ground_cell_ij}. That cell is a ground-plane hit, not a room waypoint. Not arrival."
         )
     return (
-        f"Prefer FAIL: no kitchen-like yellow. Other chromatic fraction peaked at "
+        f"Prefer FAIL: no cabinet-grain cue. Other chromatic fraction peaked at "
         f"{run.other_chromatic_max:.3f} and is not labeled as a room. "
         f"Vision-free cells {free}, floor-feature cells {feature}, walked cells {walked}. "
         "Not go-anywhere."
@@ -2036,12 +2110,26 @@ def test_policy_uses_frontiers_not_yellow() -> list[str]:
     return failures
 
 
+def _cabinet_checker(height: int, width: int) -> np.ndarray:
+    """Two dark-wood colors inside the cabinet band, 2 px period."""
+    image = np.zeros((height, width, 3), dtype=np.uint8)
+    ys = np.arange(height)[:, None]
+    xs = np.arange(width)[None, :]
+    on = ((xs // 2 + ys // 2) & 1) == 0
+    image[on] = (80, 60, 12)
+    image[~on] = (36, 8, 8)
+    return image
+
+
 def test_classify_colors() -> list[str]:
     failures: list[str] = []
-    yellow = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
-    yellow[:, :] = (230, 210, 40)
-    masks = classify_frame(yellow)
-    _expect(float(masks.yellow.mean()) > 0.99, "yellow image missed", failures)
+    flat_yellow = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
+    flat_yellow[:, :] = (230, 210, 40)
+    flat_masks = classify_frame(flat_yellow)
+    _expect(float(flat_masks.yellow.mean()) < 0.01, "flat yellow still counts as the cabinet cue", failures)
+    grain = _cabinet_checker(HEIGHT, WIDTH)
+    masks = classify_frame(grain)
+    _expect(float(masks.yellow.mean()) > 0.90, "cabinet grain image missed", failures)
     sky = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
     sky[:, :] = (70, 100, 140)
     sky_masks = classify_frame(sky)
@@ -2082,7 +2170,14 @@ def test_stand_scenes() -> list[str]:
     for scene in STAND_SCENES:
         feature_map, result, _frame = _stand_integrate(scene)
         yellow = feature_map.query_kitchen_like_yellow()
-        _expect(result.free_cells > 20, f"{scene} free cells {result.free_cells}", failures)
+        # Textured room floors are saturated, so they paint as feature cells.
+        # A flat checker paints as free. Either class means the camera saw a floor.
+        painted = result.free_cells + result.feature_cells
+        _expect(
+            painted > 20,
+            f"{scene} painted cells {painted} free {result.free_cells}",
+            failures,
+        )
         if scene == "kitchen":
             _expect(yellow.seen, f"kitchen yellow not seen ({yellow.max_fraction:.4f})", failures)
             _expect(0.02 <= yellow.max_fraction <= 0.12, f"kitchen yellow frac {yellow.max_fraction:.4f}", failures)
@@ -2459,7 +2554,7 @@ def demo(walk_s: float) -> int:
                 "A real land is not this slice. The map is a ground-plane floor fan "
                 "from one camera out to 2.60 m, with one-cell holes filled, frontiers "
                 "on the 8-connected edge of that fan, and a yellow bearing when the "
-                "backsplash is in frame. A soft XY is frozen along that bearing. "
+                "cabinet grain is in frame. A soft XY is frozen along that bearing. "
                 "Yellow >= 0.50 is not success and arrival is not claimed. "
                 "The empty plant holds the claimed left prefix, then a 4 s forward "
                 "gap and an 8 s left window when the dense rim is still left, then "
