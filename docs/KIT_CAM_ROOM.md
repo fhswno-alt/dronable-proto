@@ -9,7 +9,7 @@ The floor is still the plant's plane. `kit_cam` is still the only camera, still 
 | `mujoco/room_kitchen.xml` | `kitchen`, `table`, `chair` | Blue cabinet, wood counter, yellow backsplash, red kettle; brown table; teal chair |
 | `mujoco/room_bathroom.xml` | `bathroom`, `sink`, `toilet` | Cyan tile and a white vanity (not the kitchen yellow); white pedestal sink with a violet faucet; white toilet with a magenta seat |
 | `mujoco/room_living.xml` | `living`, `tv` | Rust sofa (`living`); charcoal television with a pale blue screen |
-| `mujoco/room_bedroom.xml` | `bedroom`, `nightstand` | The bed: charcoal headboard, indigo duvet, pink pillow; gray nightstand with a green lamp |
+| `mujoco/room_bedroom.xml` | `bedroom`, `nightstand` | The bed: purple headboard, indigo duvet band, pink pillows; gray nightstand with a green lamp |
 | `mujoco/room_entrance.xml` | `entrance`, `mat` | Visual doorframe (dark jambs, white trim, teal side walls) and a violet floor mat |
 
 Furniture sits in front of `kit_cam` look (+X), the same idea as the kitchen counter, so a quiet stand sees the named room body.
