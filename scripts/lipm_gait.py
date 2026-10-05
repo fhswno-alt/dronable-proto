@@ -60,11 +60,12 @@ VENDOR_STEP_M = 0.020
 # flex 0.10 / hip 0.16 puts the sole on the floor about 2 cm ahead.
 # A taller clear_m scales the same shape; the servo band may not finish it.
 FLEX_PEAK = 0.62
-# GaitManager swing only, with the 0.22 s hip lead below. The 150 ms
-# move lags the live sine. Commanding 1.00 rad lets the knee land at
-# about 0.68 rad, and both soles stay above 2 cm, while the hip peak
-# stays near 1.8 Nm. The LIPM Bézier still uses FLEX_PEAK.
-GM_FLEX_CMD = 1.00
+# GaitManager swing only, paired with the swing-hip gain below. 1.90 rad
+# keeps the sole up while the hip reaches. The peak target is past the
+# ±2.09 ctrlrange and that one sample is clipped; the rise is not.
+# 1.69 rad, which stays inside the range, puts the left hip on the rail.
+# The LIPM Bézier still uses FLEX_PEAK.
+GM_FLEX_CMD = 1.90
 FLEX_LAND = 0.10
 HIP_RISE = 0.06
 HIP_REACH = 0.24
@@ -152,10 +153,14 @@ class LipmConfig:
     gm_stance_max: float = 0.48
     # Swing hip only. Read the clock this early so the 150 ms move is
     # already underway when the foot leaves the floor. 0.22 s is the
-    # 1.16 s row: mean vx about +2.8 cm/s, airborne foot about 2.0 cm,
-    # hip peak about 1.8 Nm. 0.20 s rails the right hip. 0 keeps the
-    # live sample.
+    # 1.16 s row that stayed off the hip rail. 0.20 s rails the right
+    # hip. 0 keeps the live sample.
     gm_hip_lead_s: float = 0.22
+    # Swing hip only. The 0.22 s lead leaves about 0.26 rad inside the
+    # swing. 2.80 scales that command so the joint reaches about 0.63 rad
+    # and mean vx clears 7 cm/s. 3.20 puts the left hip on ±2.45 Nm.
+    # The stance clip is not scaled.
+    gm_swing_hip_gain: float = 2.80
 
 
 @dataclass
@@ -462,7 +467,9 @@ class LipmWalker:
             scale_x = use_x / VENDOR_STEP_M
             flex = max(0.0, scale_h) * GM_FLEX_CMD
             dhip = scale_x * HIP_LAND
-            if phase != side:
+            if phase == side:
+                dhip *= self.cfg.gm_swing_hip_gain
+            else:
                 dhip = max(-self.cfg.gm_stance_max, min(self.cfg.gm_stance_max, dhip))
                 flex = 0.0
             self._write_leg_delta(side, flex, dhip, shifts[side].yaw)

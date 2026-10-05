@@ -648,12 +648,62 @@ matches that. Airborne travel is 2.0 cm, not 4 cm. Mean vx is
 +2.8 cm/s, not 7 cm/s. A 0.20 s lead puts the right hip on the rail at
 7.89 s while `up_z` is 1. Both soles stay above 2 cm, and the knee
 clears 0.62 rad, because the hip peak fell to about 1.8 Nm and the
-taller knee command fits under the rail. Soft-pass is off. This is
-not a kit walk.
+taller knee command fits under the rail. Soft-pass is off.
 
-The clips are this lead row. Forward 8.400 s stays up (Δx +20.2 cm,
-mean vx +2.6 cm/s, pooled sole p90 2.5 cm, min up_z 0.997, peak torque
-2.13 Nm, sat_rate 0). Close-up 7.600 s stays up through the stop
-(forward Δx +12.5 cm, mean vx +2.3 cm/s, stop Δx +0.5 cm, min up_z
-0.996, peak torque 2.11 Nm). Constrained Baseline, yuv420p,
-`+faststart`.
+Those clips were replaced by the swing-hip gain row below.
+
+## Swing-hip gain on the 0.22 s lead
+
+The 150 ms move, the 5.5 rad/s cap, the 1.16 s period, and the 0.070 rad
+stance clip stay. Plant md5 stays `17dc4ff37491c8e61900fd83b5d31f0c`.
+The swing hip command, and only that command, is multiplied by 2.80.
+The stance clip is not scaled. The swing knee command is 1.90 rad so
+the sole stays up while the hip reaches. The peak of that knee target
+is past the ±2.09 rad ctrlrange and that one sample is clipped; the
+rise is not. 1.69 rad, which stays inside the range, puts the left hip
+on the rail at this gain.
+
+Clock swing-foot travel is still 4.07 cm (`2 · 4.07 cm / 1.16 s = 7.0
+cm/s`). At 24 s, upright, min up_z 0.997, sat_rate 0, no hip-pitch
+sample at ±2.45 Nm (41 swings):
+
+| | |
+| --- | ---: |
+| Knee L / R | 1.18 / 1.18 rad |
+| Sole p90 L / R | 4.51 / 4.85 cm |
+| Mean vx | +7.20 cm/s |
+| Swing hip command / achieved, inside the swing | 0.713 / 0.632 rad |
+| Stance hip command / achieved | 0.070 / 0.369 rad |
+| Clock Δx | 4.07 cm |
+| Swing-foot world Δx | +7.72 cm |
+| Airborne foot Δx | +7.59 cm |
+| Body Δx during the swing | +3.17 cm |
+| Stance slip | −0.64 cm |
+| Retract into the next swing | +0.59 cm |
+| Upright hip peak R / L | 1.79 / 2.18 Nm |
+| Upright knee peak R / L | 1.38 / 1.80 Nm |
+| Upright ankle pitch R / L | 1.29 / 1.32 Nm |
+| Upright ankle roll R / L | 1.66 / 2.09 Nm |
+
+The scaled command inside the swing is 0.71 rad peak to peak and the
+joint reaches 0.63 rad, past the live clock's 0.47 rad. Airborne
+travel is 7.6 cm, past the 4 cm clock, because the hip command was
+scaled past that clock. Mean vx is +7.20 cm/s. The body during one
+swing moves +3.2 cm, which is not the whole airborne foot travel.
+Stance slip is a modest −0.64 cm. The stance command stays on the
+0.070 rad clip; the stance joint at 0.37 rad is coupling, not a raised
+clip.
+
+The next step hits the rail before it adds a usable margin. Gain 3.20
+at the same 1.90 rad knee, on an 8.4 s window, reaches vx +7.48 cm/s
+and then the left hip rails at 2.872 s while `up_z` is 1 (ω −0.83,
+kp·e −3.95, damp +1.50, F −2.45). sat_rate is 0.030. A 0.26 s lead at
+gain 2.80 shrinks the in-swing command to 0.50 rad, rails the left hip
+at 2.848 s while `up_z` is 1 (ω −0.88, kp·e −4.07, damp +1.59, F −2.45),
+and mean vx on that same 8.4 s window is +5.48 cm/s (sat_rate 0.060).
+The 0.22 s / gain 2.80 row on that 8.4 s window is +6.47 cm/s with no
+rail and the same 2.18 Nm left-hip peak. Soft-pass is off. This is
+not a kit walk beyond these bars.
+
+The clips are this gain row. Forward 8.400 s and close-up 7.600 s are
+Constrained Baseline, yuv420p, `+faststart`.
