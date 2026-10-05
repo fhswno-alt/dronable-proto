@@ -13,13 +13,15 @@
     <texture name="room_floor" type="2d" file="assets/rooms/textures/wood_floor.png"/>
     <material name="room_floor" texture="room_floor" texrepeat="3 3" specular="0.04"/>
     <texture name="room_wall" type="2d" file="assets/rooms/textures/white_plaster.png"/>
-    <material name="room_wall" texture="room_wall" texrepeat="2 1.2" specular="0.02" emission="0.20"/>
+    <material name="room_wall" texture="room_wall" texrepeat="2 1.2" specular="0.02" emission="0.28"/>
     <texture name="room_ceiling" type="2d" file="assets/rooms/textures/white_plaster.png"/>
     <material name="room_ceiling" texture="room_ceiling" texrepeat="2.4 2.4" specular="0.02" emission="0.62"/>
     <texture name="room_oak" type="2d" file="assets/rooms/textures/oak_veneer.png"/>
     <material name="room_oak" texture="room_oak" texrepeat="1 1" specular="0.08"/>
     <texture name="room_linen" type="2d" file="assets/rooms/textures/rough_linen.png"/>
     <material name="room_linen" texture="room_linen" texrepeat="1 1" specular="0.04"/>
+    <texture name="room_sheet" type="2d" file="assets/rooms/textures/white_plaster.png"/>
+    <material name="room_sheet" texture="room_sheet" texrepeat="2 2" specular="0.06" emission="0.12"/>
     <texture name="room_boucle" type="2d" file="assets/rooms/textures/wool_boucle.png"/>
     <material name="room_boucle" texture="room_boucle" texrepeat="1 1" specular="0.04"/>
     <texture name="room_night" type="2d" file="assets/rooms/bedroom/nightstand.png"/>
@@ -41,14 +43,20 @@
     <geom name="room_wall_right" type="box" pos="0.86 -1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_ceiling" type="box" pos="0.86 0 2.48" size="1.64 1.88 0.04" material="room_ceiling" contype="0" conaffinity="0"/>
     <!-- Platform bed, long side toward +X, flat headboard at +Y.
-         Poly Haven has no contemporary bed mesh. This is CC0 textures on
-         boxes: oak platform, linen mattress, boucle slab headboard. -->
+         Poly Haven has no contemporary bed mesh. Authored boxes: recessed
+         oak plinth, linen mattress edge, white duvet, two pillows, boucle
+         slab. No posts. The low frozen camera looks at the near side. -->
     <body name="bedroom" pos="1.62 -0.10 0">
-      <site name="bedroom" pos="0 0.2 0.45" size="0.015" group="4" rgba="0.75 0.72 0.66 1"/>
-      <geom name="bedroom_base" type="box" pos="0 0 0.06" size="0.70 0.95 0.06" material="room_oak" contype="0" conaffinity="0"/>
-      <geom name="bedroom_mattress" type="box" pos="0 -0.02 0.28" size="0.64 0.86 0.14" material="room_linen" contype="0" conaffinity="0"/>
-      <geom name="bedroom_headboard" type="box" pos="0 0.98 0.58" size="0.72 0.035 0.46" material="room_boucle" contype="0" conaffinity="0"/>
-      <geom name="bedroom_pillow" type="box" pos="0 0.68 0.50" size="0.32 0.14 0.07" material="room_linen" contype="0" conaffinity="0"/>
+      <site name="bedroom" pos="0 0.1 0.50" size="0.015" group="4" rgba="0.75 0.72 0.66 1"/>
+      <geom name="bedroom_plinth" type="box" pos="0.02 0 0.025" size="0.60 0.86 0.025" material="room_oak" contype="0" conaffinity="0"/>
+      <geom name="bedroom_base" type="box" pos="0 0 0.09" size="0.72 0.98 0.035" material="room_oak" contype="0" conaffinity="0"/>
+      <geom name="bedroom_mattress" type="box" pos="0 -0.02 0.245" size="0.64 0.88 0.12" material="room_linen" contype="0" conaffinity="0"/>
+      <geom name="bedroom_duvet" type="box" pos="0 -0.20 0.425" size="0.68 0.64 0.06" material="room_sheet" contype="0" conaffinity="0"/>
+      <geom name="bedroom_fold" type="box" pos="0 0.34 0.50" size="0.66 0.12 0.03" material="room_sheet" contype="0" conaffinity="0"/>
+      <geom name="bedroom_pillow" type="box" pos="-0.30 0.78 0.485" size="0.26 0.09 0.12" material="room_sheet" contype="0" conaffinity="0"/>
+      <geom name="bedroom_pillow_b" type="box" pos="0.30 0.86 0.485" size="0.26 0.08 0.12" material="room_sheet" contype="0" conaffinity="0"/>
+      <geom name="bedroom_pillow_c" type="box" pos="0 0.52 0.53" size="0.48 0.11 0.06" material="room_sheet" contype="0" conaffinity="0"/>
+      <geom name="bedroom_headboard" type="box" pos="0 1.00 0.64" size="0.74 0.04 0.48" material="room_boucle" contype="0" conaffinity="0"/>
     </body>
     <body name="nightstand" pos="1.78 1.38 0">
       <site name="nightstand" pos="0 0 0.5" size="0.012" group="4" rgba="0.40 0.26 0.14 1"/>

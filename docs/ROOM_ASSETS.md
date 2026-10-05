@@ -86,7 +86,7 @@ The ribbed wooden cabinet, the drawer cabinet, the dining table, the dining chai
 
 `kit_cam` stands at about 0.38 m and looks level along +X. That pose is frozen. Countertops at 0.90 m stay above the lens, so the still cannot match a standing-eye photo of the cooktop. The island and stools sit image-right of the lens axis so the cabinet fronts, sink, and stove are in frame. That low-camera gap is a Prefer FAIL. Moving `kit_cam` would be required to see the counter surface the way the reference photo does.
 
-Poly Haven has no contemporary bed. The other bed meshes are Gothic Bed 01, a rusty hospital frame, and a carved daybed. The bedroom scene does not place them. The bed in frame is an authored platform: oak veneer base, rough-linen mattress and pillow, and a flat wool-boucle headboard with no posts. That is a CC0-texture stand-in, not a scanned modern bed. That photoreal gap is a Prefer FAIL. The nightstand is still Classic Nightstand 01.
+Poly Haven has no contemporary bed. The other bed meshes are Gothic Bed 01, a rusty hospital frame, and a carved daybed. The bedroom scene does not place them. The bed in frame is still authored boxes, not a scan: a recessed oak plinth, a linen mattress edge, a white plaster duvet with a folded cuff, two shams and a front pillow, and a flat wool-boucle headboard with no posts. That photoreal gap is a Prefer FAIL. `kit_cam` stays near 0.38 m and looks level, so the still shows the near side of the stack more than the top of the duvet. The nightstand is still Classic Nightstand 01.
 
 Poly Haven has no bathtub. The tub is from Isa Lousberg's **Tiny Treats — Bubbly Bathroom** set, licensed **CC0**:
 
