@@ -2,17 +2,17 @@
 
 These files are vision scenes for the existing `kit_cam`. Each one includes the frozen walk plant `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml` (md5 `71b2c86d133ebc603f58b99c53e496f3`) and adds static bodies. Sites with the same names are labels on that geometry. They are not a map, and nothing here is passed to a planner.
 
-The plant's checker plane is still in the included file. Each room adds a non-colliding floor texture plane and a textured back wall as extra worldbody geoms. That is not an edit of the plant. `kit_cam` is still the only camera, still on `head_tilt_link` at `0.050 0.019 0.007`, fovy 104.82. Feet stay 145×86. Leg actuators stay ±2.1 Nm. There is no lidar and no second camera. No room adds a joint. The entrance body is a static visual frame (Poly Haven's castle-door mesh, loaded as `entrance_panel`). There is no hinge, no lever, and no latch.
+The plant's checker plane is still in the included file. Each room adds a non-colliding floor texture plane plus a closed shell (back wall, side walls, ceiling) as extra worldbody geoms. The shell uses the CC0 wall and plaster textures already in the repo. That is not an edit of the plant. `kit_cam` is still the only camera, still on `head_tilt_link` at `0.050 0.019 0.007`, fovy 104.82. Feet stay 145×86. Leg actuators stay ±2.1 Nm. There is no lidar and no second camera. No room adds a joint. The entrance body is a static visual frame (Poly Haven's castle-door mesh, loaded as `entrance_panel`, scaled to fit under the ceiling). There is no hinge, no lever, and no latch.
 
 Furniture is CC0 textured meshes under `mujoco/assets/rooms/`. Licenses, authors, and source URLs are in `docs/ROOM_ASSETS.md`. These stills are a visual domain-gap fix for evaluation. They are not go-anywhere.
 
 | Scene | Bodies | What kit_cam is meant to see |
 |-------|--------|------------------------------|
-| `mujoco/room_kitchen.xml` | `kitchen`, `table`, `chair` | Wood counter and tall pantry, stove, kettle; dining table; dining chair. Wood floor, beige wall. No flat yellow backsplash |
-| `mujoco/room_bathroom.xml` | `bathroom`, `sink`, `toilet` | Painted cabinet and ornate mirror on tile; farmhouse sink; round toilet. Marble floor |
-| `mujoco/room_living.xml` | `living`, `tv` | Leather sofa (`living`); CRT television |
-| `mujoco/room_bedroom.xml` | `bedroom`, `nightstand` | Gothic bed; nightstand with an arm lamp. Plaster wall |
-| `mujoco/room_entrance.xml` | `entrance`, `mat` | Static castle-door panel as a visual frame, and a hessian floor mat |
+| `mujoco/room_kitchen.xml` | `kitchen`, `table`, `chair` | Counter, tall pantry, stove, and kettle facing +X. Dining table and chair sit off to image-right so they do not block the counter. Closed beige room, wood floor. No flat yellow backsplash |
+| `mujoco/room_bathroom.xml` | `bathroom`, `sink`, `toilet` | Painted cabinet and ornate mirror; pedestal basin in front; round toilet to image-right. Closed tile room, marble floor |
+| `mujoco/room_living.xml` | `living`, `tv` | Leather sofa (`living`) across the view; CRT television to image-right. Closed beige room |
+| `mujoco/room_bedroom.xml` | `bedroom`, `nightstand` | Gothic bed; nightstand with an arm lamp to image-left. Closed plaster room |
+| `mujoco/room_entrance.xml` | `entrance`, `mat` | Static castle-door panel as a visual frame in a closed beige room, and a hessian floor mat |
 
 Furniture sits in front of `kit_cam` look (+X), so a quiet stand sees the named room body.
 

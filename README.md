@@ -116,7 +116,7 @@ The clip is that claimed left arc with the phrase and the bus command on each fr
 
 ## kit_cam rooms (vision only, not a map)
 
-Each scene includes the frozen walk plant and adds static CC0 furniture meshes in front of `kit_cam` (+X). `kit_cam` is unchanged: one camera, `head_tilt_link`, `0.050 0.019 0.007`. The plant checker plane is still in the included file. Each room adds a floor texture and a wall as extra worldbody geoms. Body names are labels for a later vision step. They are not a navigation map, and these scenes are not handed to a planner. `scripts/steer_walk.py` still loads only the frozen plant by default, so stand / forward / reverse / left / right / left-then-right stay on the empty checkerboard. Licenses are in `docs/ROOM_ASSETS.md`. See `docs/KIT_CAM_ROOM.md`. This is a visual domain-gap fix for evaluation, not go-anywhere.
+Each scene includes the frozen walk plant and adds static CC0 furniture meshes in front of `kit_cam` (+X). `kit_cam` is unchanged: one camera, `head_tilt_link`, `0.050 0.019 0.007`. The plant checker plane is still in the included file. Each room adds a floor texture and a closed shell (walls and a ceiling) as extra worldbody geoms. Body names are labels for a later vision step. They are not a navigation map, and these scenes are not handed to a planner. `scripts/steer_walk.py` still loads only the frozen plant by default, so stand / forward / reverse / left / right / left-then-right stay on the empty checkerboard. Licenses are in `docs/ROOM_ASSETS.md`. See `docs/KIT_CAM_ROOM.md`. This is a visual domain-gap fix for evaluation, not go-anywhere.
 
 | Scene | Named bodies |
 |-------|----------------|

@@ -13,31 +13,39 @@
     <texture name="room_floor" type="2d" file="assets/rooms/textures/wood_floor.png"/>
     <material name="room_floor" texture="room_floor" texrepeat="3 3" specular="0.04"/>
     <texture name="room_wall" type="2d" file="assets/rooms/textures/white_plaster.png"/>
-    <material name="room_wall" texture="room_wall" texrepeat="2 1.2" specular="0.02"/>
+    <material name="room_wall" texture="room_wall" texrepeat="2 1.2" specular="0.02" emission="0.20"/>
+    <texture name="room_ceiling" type="2d" file="assets/rooms/textures/white_plaster.png"/>
+    <material name="room_ceiling" texture="room_ceiling" texrepeat="2.4 2.4" specular="0.02" emission="0.62"/>
     <texture name="room_bed" type="2d" file="assets/rooms/bedroom/bed.png"/>
     <material name="room_bed" texture="room_bed" specular="0.08"/>
-    <mesh name="room_bed" file="assets/rooms/bedroom/bed.obj"/>
+    <mesh name="room_bed" file="assets/rooms/bedroom/bed.obj" scale="0.78 0.78 0.78"/>
     <texture name="room_night" type="2d" file="assets/rooms/bedroom/nightstand.png"/>
     <material name="room_night" texture="room_night" specular="0.16"/>
     <mesh name="room_night" file="assets/rooms/bedroom/nightstand.obj"/>
     <texture name="room_lamp" type="2d" file="assets/rooms/bedroom/lamp.png"/>
     <material name="room_lamp" texture="room_lamp" specular="0.3"/>
-    <mesh name="room_lamp" file="assets/rooms/bedroom/lamp.obj"/>
+    <mesh name="room_lamp" file="assets/rooms/bedroom/lamp.obj" scale="0.75 0.75 0.75"/>
   </asset>
   <worldbody>
-    <light name="room_key" pos="0.2 -0.35 2.2" dir="0.6 0.08 -1" diffuse="0.72 0.68 0.62"/>
-    <light name="room_fill" pos="0.15 1.1 1.55" dir="0.4 -0.4 -1" diffuse="0.30 0.32 0.40"/>
+    <light name="room_key" pos="0.40 -0.15 2.05" dir="0.65 0.02 -1" diffuse="0.78 0.74 0.68"/>
+    <light name="room_fill" pos="0.25 0.35 1.55" dir="0.45 -0.1 -1" diffuse="0.36 0.38 0.44"/>
+    <light name="room_up" pos="1.05 0 1.35" dir="0 0 1" diffuse="0.80 0.78 0.72"/>
+    <light name="room_side_l" pos="1.15 -0.15 1.4" dir="0 1 0.15" diffuse="0.36 0.34 0.32"/>
+    <light name="room_side_r" pos="1.15 0.15 1.4" dir="0 -1 0.15" diffuse="0.36 0.34 0.32"/>
     <geom name="room_floor" type="plane" pos="0 0 0.006" size="3 3 0.02" material="room_floor" contype="0" conaffinity="0"/>
-    <geom name="room_wall" type="box" pos="2.70 0 1.25" size="0.04 2.4 1.25" material="room_wall" contype="0" conaffinity="0"/>
-    <!-- Head of the bed faces the robot (+X is kit_cam look). Static bodies, no joints. -->
-    <body name="bedroom" pos="1.85 0 0">
-      <site name="bedroom" pos="-0.4 0 0.8" size="0.015" group="4" rgba="0.45 0.28 0.18 1"/>
-      <geom name="bedroom_headboard" type="mesh" mesh="room_bed" material="room_bed" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+    <geom name="room_wall" type="box" pos="2.42 0 1.22" size="0.045 1.82 1.22" material="room_wall" contype="0" conaffinity="0"/>
+    <geom name="room_wall_left" type="box" pos="0.86 1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
+    <geom name="room_wall_right" type="box" pos="0.86 -1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
+    <geom name="room_ceiling" type="box" pos="0.86 0 2.48" size="1.64 1.88 0.04" material="room_ceiling" contype="0" conaffinity="0"/>
+    <!-- Bed runs across the view so the headboard stays inside the shell. -->
+    <body name="bedroom" pos="1.62 0.05 0">
+      <site name="bedroom" pos="0 0.15 0.7" size="0.015" group="4" rgba="0.45 0.28 0.18 1"/>
+      <geom name="bedroom_headboard" type="mesh" mesh="room_bed" material="room_bed" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
     </body>
-    <body name="nightstand" pos="1.15 1.15 0">
-      <site name="nightstand" pos="0 0 0.55" size="0.012" group="4" rgba="0.40 0.26 0.14 1"/>
+    <body name="nightstand" pos="1.35 1.15 0">
+      <site name="nightstand" pos="0 0 0.5" size="0.012" group="4" rgba="0.40 0.26 0.14 1"/>
       <geom name="nightstand_top" type="mesh" mesh="room_night" material="room_night" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
-      <geom name="nightstand_lamp" type="mesh" mesh="room_lamp" material="room_lamp" pos="0 0 0.70" quat="0 0 0 1" contype="0" conaffinity="0"/>
+      <geom name="nightstand_lamp" type="mesh" mesh="room_lamp" material="room_lamp" pos="0 0 0.72" quat="0 0 0 1" contype="0" conaffinity="0"/>
     </body>
   </worldbody>
 </mujoco>

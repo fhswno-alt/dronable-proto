@@ -55,14 +55,16 @@ Attribution is not required. The pack README asks for credit anyway: loafbrr.
 
 | Repo file | Pack mesh | Notes |
 |-----------|-----------|--------|
-| `bathroom/toilet_bowl.obj` | Toilet_Round_A | Scaled so the assembled height is about 0.78 m |
-| `bathroom/toilet_tank.obj` | flush box | Same baked frame as the bowl |
-| `bathroom/toilet_seat.obj` | seat and cover | Same baked frame |
-| `bathroom/toilet_handle.obj` | flusher | Same baked frame. Small gray albedo; the pack has no separate flusher atlas |
-| `bathroom/sink.obj` | Sink_C and faucet | Farmhouse basin. Game-art albedo, not a scan |
+| `bathroom/toilet_bowl.obj` | Toilet_Round_A | Shared frame with the other toilet parts. Assembled height about 0.74 m |
+| `bathroom/toilet_tank.obj` | Toilet_Round_A flush box | Same frame as the bowl, so the cistern sits behind the bowl |
+| `bathroom/toilet_seat.obj` | seat and cover | Same frame. Lies on the bowl |
+| `bathroom/toilet_handle.obj` | flusher | Same frame, flush-box albedo. The pack has no separate flusher atlas |
+| `bathroom/sink.obj` | Sink_A plus both faucets | Pedestal basin. Replaces the earlier Sink_C trough, which read as a wooden block from `kit_cam` |
+
+The four toilet files are one round toilet split by material. They were re-exported from the pack glTF in a shared Z-up frame (Y-up to Z-up, then one floor-center for the whole fixture). An earlier export centered each part on its own, so the tank lay flat and the seat stood on edge. The sink file is Sink_A from the same CC0 pack, not a new download and not a paid model.
 
 The glTF did not embed images. UVs were kept and the pack's diffuse PNGs were assigned. These are textured game meshes, not photogrammetry. They are still shaped fixtures, not flat rgba boxes.
 
 ## Scene names
 
-Body and site names stay `kitchen`, `table`, `chair`, `bathroom`, `sink`, `toilet`, `living`, `tv`, `bedroom`, `nightstand`, `entrance`, `mat`. Geometry changed. The floor texture and the back wall are extra worldbody geoms. The plant's checker plane is still in the included file.
+Body and site names stay `kitchen`, `table`, `chair`, `bathroom`, `sink`, `toilet`, `living`, `tv`, `bedroom`, `nightstand`, `entrance`, `mat`. Geometry changed. Each room adds a floor texture, side walls, a back wall, and a ceiling as extra worldbody geoms, using the CC0 textures above. The plant's checker plane is still in the included file. Furniture stays static. The entrance panel is still a visual frame: no hinge, no lever, no latch.
