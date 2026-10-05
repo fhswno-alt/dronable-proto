@@ -819,6 +819,8 @@ def detect_paths(detector: RoomDetector) -> dict[str, object]:
         "score_min": SCORE_MIN,
         "vote_frames": VOTE_FRAMES,
         "vote_margin": VOTE_MARGIN,
+        "object_bonus": OBJECT_BONUS,
+        "object_bonus_cap": OBJECT_BONUS_CAP,
         "objects": [{"name": name, "room": room} for name, room in OBJECTS],
         "path_x_m": list(DETECT_X_M),
         "relook_yaw": list(RELOOK_YAW),
