@@ -504,3 +504,45 @@ Upright peaks on that row: hip pitch 2.33 Nm, knee 1.56 Nm, ankle roll
 A longer commanded step does not produce 7 cm/s, and it does not keep
 the 0.62 rad / 2 cm pose upright. The 1.00 s clips were not re-rendered.
 Soft-pass is off. This is not a kit walk.
+
+## Multi-tick move time
+
+The 0.050 rad starve-cap is off. Hip pitch, knee, and ankle pitch store
+the gait target. The physics loop approaches that target over a kit-style
+move time, at the 0.002 s rate, and not faster than 5.5 rad/s. One 20 ms
+tick covers `0.02 / move_time` of the remaining gap. Plant md5 stays
+`17dc4ff37491c8e61900fd83b5d31f0c`. x stays 0.02 m, so the foot-travel
+ceiling is `8.14 cm / period`. A period of 1.16 s is the fastest that
+ceiling still puts at 7 cm/s.
+
+Knee flex and sole p90 are while `up_z` is at least 0.95. Upright force
+peaks use the same window. The first rail, when there is one, is the
+pre-step split `kp·(ctrl−q) − kv·qvel`.
+
+| Move | Period | Upright 24 s? | Knee L / R | Sole p90 L / R | Mean vx | First rail while upright | Upright hip peak |
+| --- | ---: | --- | ---: | ---: | ---: | --- | ---: |
+| 100 ms | 1.16 s | tips at 5.20 s | 0.49 / 0.49 | 1.90 / 2.00 cm | +0.6 cm/s | R hip 0.592 s, ω −0.06, kp·e +2.35, damp +0.11, F +2.45, up 1.00 | 2.45 Nm |
+| 100 ms | 1.00 s | tips at 2.42 s | 0.46 / 0.46 | 1.48 / 1.56 cm | +1.8 cm/s | R hip 0.574 s, same shape, F +2.45, up 1.00 | 2.45 Nm |
+| 150 ms | 1.16 s | yes, min up_z 0.995 | 0.42 / 0.42 | 1.62 / 2.05 cm | +1.7 cm/s | none, sat_rate 0 | 2.43 Nm |
+| 150 ms | 1.00 s | tips at 11.76 s | 0.39 / 0.39 | 1.27 / 1.58 cm | +0.2 cm/s | R hip 1.864 s, ω +0.23, kp·e −2.04, damp −0.42, F −2.45, up 1.00 | 2.45 Nm |
+| 200 ms | 1.16 s | yes, min up_z 0.995 | 0.37 / 0.37 | 1.29 / 1.90 cm | +0.8 cm/s | none, sat_rate 0 | 2.25 Nm |
+| 200 ms | 1.00 s | yes, min up_z 0.994 | 0.34 / 0.34 | 1.35 / 1.82 cm | +1.1 cm/s | none, sat_rate 0, peak torque 2.13 Nm | 2.13 Nm |
+
+At 100 ms the right hip rails while the body is still upright, with
+speed about zero and the position term on the clip. Shorter periods at
+100 ms do the same, except 0.60 s stays up for 24 s with the hip already
+on the rail, knee 0.37 rad, sole p90 about 1.4 cm, and mean vx +2.4 cm/s.
+
+At 150 ms and period 1.16 s the body stays up for 24 s and the hip does
+not rail. Upright hip peak is 2.43 Nm, knee 1.21 Nm, ankle pitch 1.97 Nm,
+ankle roll 1.44 Nm. The knee stops at 0.42 rad. The right sole p90 is
+2.05 cm and the left is 1.62 cm. Mean vx is +1.7 cm/s. The same move at
+1.00 s rails at 1.86 s and tips at 11.76 s.
+
+At 200 ms and period 1.16 s there is again no rail, and the knee only
+reaches 0.37 rad. Mean vx is +0.8 cm/s.
+
+The shipped move is 150 ms. None of these rows reaches 0.62 rad, both
+soles at about 2 cm, and 7 cm/s together. The 100 ms move is the one
+that spends the ±2.45 Nm rail while upright. Soft-pass is off. This is
+not a kit walk.

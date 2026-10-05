@@ -140,6 +140,7 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 import walk_gait_ainex as wg  # noqa: E402
+import lipm_gait as lipm_gait  # noqa: E402
 from lipm_gait import LipmConfig, LipmWalker  # noqa: E402
 from walk_gait import TELEOP_DEADBAND, TELEOP_RATE_LIMIT  # noqa: E402
 
@@ -1084,6 +1085,11 @@ class SteerSession:
             mj.mj_id2name(self.model, mj.mjtObj.mjOBJ_ACTUATOR, i): i
             for i in range(self.model.nu)
         }
+        self._move_ctrl_idx = [
+            i
+            for name, i in self.act_idx.items()
+            if name.endswith(("knee_pos", "hip_pitch_pos", "ank_pitch_pos"))
+        ]
         self.bid_body = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_BODY, "body_link")
         self.bid_lf = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_BODY, "l_ank_roll_link")
         self.bid_rf = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_BODY, "r_ank_roll_link")
@@ -1182,11 +1188,9 @@ class SteerSession:
             vx = report.applied_vx
             if report.mode == "move" and self._up_z() < 0.90:
                 vx *= 0.55
-            # The tick writes the end-of-interval target. Hip and knee pitch
-            # move at most 0.050 rad from the previous command and from the
-            # measured joint, so a larger gait step spans later ticks. The
-            # physics loop ramps ctrl across this 20 ms. Snapshot before
-            # the write.
+            # The tick writes the gait target. Hip, knee, and ankle pitch
+            # approach it over HIP_KNEE_MOVE_S; this 20 ms tick only covers
+            # part of that move. Snapshot the command before the write.
             ctrl_from = np.array(self.data.ctrl, dtype=np.float64, copy=True)
             if self.bus.fault:
                 self.lipm.hold_stand()
@@ -1486,21 +1490,34 @@ class SteerSession:
     def _lipm_substep(self, ctrl_from: np.ndarray | None = None) -> None:
         """Integrate the position servos. No root wrench and no foot xfrc.
 
-        ``data.ctrl`` on entry is this tick's target. A kit
+        ``data.ctrl`` on entry is the latest gait target. A kit
         ``SERVO_MOVE_TIME_WRITE`` approaches that target over the move
-        time instead of stepping the register. This tick's piece is 20 ms
-        at the physics rate. Hip and knee targets are already inside one
-        torque-budget step, so a longer pose change is several of these
-        ramps. The last substep lands on this tick's target. Plant kp,
-        dampratio, forcerange, and armature are untouched.
+        time instead of stepping the register. Hip, knee, and ankle
+        pitch take ``HIP_KNEE_MOVE_S`` (about 150 ms). This tick moves
+        only ``CTRL_DT / move_time`` of the remaining gap, spread across
+        the physics steps, and not faster than the HX slew. Other
+        joints still finish this tick. Plant kp, dampratio, forcerange,
+        and armature are untouched.
         """
         n = self.steps_per_ctrl
         ctrl_to = np.array(self.data.ctrl, dtype=np.float64, copy=True)
         if ctrl_from is None:
             ctrl_from = ctrl_to
+        move_s = max(float(lipm_gait.HIP_KNEE_MOVE_S), float(CTRL_DT))
+        frac = min(1.0, float(CTRL_DT) / move_s)
+        slew = float(lipm_gait.HX35_SLEW_RAD_S) * float(CTRL_DT)
+        end = ctrl_to.copy()
+        for idx in self._move_ctrl_idx:
+            delta = float(ctrl_to[idx] - ctrl_from[idx])
+            step = delta * frac
+            if step > slew:
+                step = slew
+            elif step < -slew:
+                step = -slew
+            end[idx] = float(ctrl_from[idx]) + step
         for i in range(n):
             alpha = (i + 1) / float(n)
-            self.data.ctrl[:] = ctrl_from + (ctrl_to - ctrl_from) * alpha
+            self.data.ctrl[:] = ctrl_from + (end - ctrl_from) * alpha
             self.data.qfrc_applied[:] = 0.0
             self.data.xfrc_applied[:] = 0.0
             mj.mj_step(self.model, self.data)

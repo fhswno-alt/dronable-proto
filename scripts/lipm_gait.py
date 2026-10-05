@@ -3,11 +3,12 @@
 
 Replaces the open-loop CPG as the schedule. CSF50 numbers are not the clock
 and are not swept here. Joint targets go to the existing 50 Hz position
-servos (CTRL_DT 0.02 s). Knee and hip pitch may move at most 0.050 rad
-in one tick, inside forcerange/kp so a 20 ms ramp can finish with the
-position term under ±2.45 Nm. A farther gait target continues on later
-ticks. Other joints stay inside the linear band
-(|ctrl-q| <= 0.98 * tau / kp). Nothing in this file writes the plant:
+servos (CTRL_DT 0.02 s). Knee, hip pitch, and ankle pitch store the
+gait target. The physics loop approaches that target over
+HIP_KNEE_MOVE_S (150 ms) at the physics rate, across several 20 ms
+ticks, and does not step faster than the HX slew. Other joints stay
+inside the linear band (|ctrl-q| <= 0.98 * tau / kp). Nothing in
+this file writes the plant:
 no forcerange, kp, damping, or armature edits, and no free-joint wrench.
 The actuator forcerange still clips force.
 
@@ -16,8 +17,8 @@ The swing is a joint-space Bézier measured on this plant: knee flexion for
 about 2 cm of level-sole clearance, hip pitch for a landing at most 2 cm
 ahead. The ankle target is the hip and knee commands actually sent this
 tick (the flat-foot sum), plus a measured-normal trim, so the box does not
-ride a corner. Knee and hip pitch step by at most HIP_KNEE_TICK_RAD.
-Other commands stay inside |ctrl-q| <= 0.98 * tau / kp.
+ride a corner. Knee, hip pitch, and ankle pitch use the multi-tick
+move. Other commands stay inside |ctrl-q| <= 0.98 * tau / kp.
 """
 from __future__ import annotations
 
@@ -39,18 +40,17 @@ SAT_FRAC = 0.98
 # Hiwonder no-load speed, https://www.hiwonder.com/products/hx-35h
 # HX-35H (knee / leg) 0.18 s/60° at 11.1 V ≈ 5.8 rad/s.
 # HX-35HM (hip) 0.19 s/60° ≈ 5.5 rad/s.
-# Command tick is 50 Hz, so that rate is 0.110 rad per tick. A step that
-# large does not settle in 20 ms under ±2.45 Nm at kp 45: the position
-# term spends the whole rail at forcerange/kp = 2.45/45 ≈ 0.054 rad when
-# damping is about zero. Hip and knee commands therefore move at most
-# 0.050 rad per tick (kp·error = 2.25 Nm). A gait target past that
-# continues on later ticks. The published slew stays here as the ceiling
-# this budget is under. Do not exceed ~5.8 rad/s, and do not raise it
-# back over the torque budget.
+# Command tick is 50 Hz. A hard step of the whole gait target in one
+# 20 ms tick rails kp·error while speed is still ~0. Clamping each tick
+# to 0.050 rad (forcerange/kp) keeps the force near 2.0 Nm and the knee
+# never reaches the mid-swing pose. Kit SERVO_MOVE_TIME is longer than
+# one tick. Hip, knee, and ankle pitch therefore take HIP_KNEE_MOVE_S
+# to approach the latest target, at the physics rate, and never faster
+# than the HX slew below. Do not exceed ~5.8 rad/s.
 HX35_SLEW_RAD_S = 5.5
-HIP_KNEE_TICK_RAD = 0.050
-if HIP_KNEE_TICK_RAD > HX35_SLEW_RAD_S * CTRL_DT + 1e-9:
-    raise RuntimeError("hip/knee tick step exceeds the HX slew")
+# Middle of the 100–200 ms kit-style move. One 20 ms tick covers
+# CTRL_DT/HIP_KNEE_MOVE_S of the remaining gap.
+HIP_KNEE_MOVE_S = 0.150
 # Hiwonder GaitManager look: step height about 2 cm, step length at most 2 cm.
 # These are foothold clips, not CommandBus caps and not a torque change.
 VENDOR_CLEAR_M = 0.020
@@ -300,38 +300,24 @@ class LipmWalker:
         return float(self.data.qpos[self.model.jnt_qposadr[jid]])
 
     def write_clipped(self, jn: str, q_des: float) -> None:
-        """Position target. Knee and hip pitch stay inside the torque budget.
+        """Position target. Hip, knee, and ankle pitch keep the gait goal.
 
-        Those two share kp 45. One tick may change the command by at most
-        HIP_KNEE_TICK_RAD, and the stored target stays within that same
-        distance of the measured joint. A 0.07 rad gait step therefore
-        takes more than one 20 ms tick. The physics loop still ramps ctrl
-        from the previous command to this target over that tick. Other
-        joints stay inside |ctrl-q| <= 0.98 * tau / kp. The plant
-        forcerange is unchanged and still clips force at ±2.45 Nm.
+        Those three are approached over HIP_KNEE_MOVE_S by the physics
+        loop, so this function stores the goal rather than a one-tick
+        step. Ankle pitch is included so the flat-foot sum moves with
+        the hip and knee. Other joints stay inside
+        |ctrl-q| <= 0.98 * tau / kp and finish inside the 20 ms tick.
+        The plant forcerange is unchanged and still clips force at
+        ±2.45 Nm.
         """
         act = f"{jn}_pos"
         idx = self.act_idx.get(act)
         if idx is None:
             return
-        q = self.q(jn)
-        if jn.endswith(("knee", "hip_pitch")):
-            prev = float(self.data.ctrl[idx])
-            step = HIP_KNEE_TICK_RAD
-            budget_lo = q - step
-            budget_hi = q + step
-            lo = max(budget_lo, prev - step)
-            hi = min(budget_hi, prev + step)
-            if lo > hi:
-                # Previous command is outside the budget. Step it back
-                # toward the joint. One step lands inside, or closer.
-                if prev > q:
-                    anchor = max(budget_lo, prev - step)
-                else:
-                    anchor = min(budget_hi, prev + step)
-                lo = hi = anchor
-            cmd = min(hi, max(lo, q_des))
+        if jn.endswith(("knee", "hip_pitch", "ank_pitch")):
+            cmd = q_des
         else:
+            q = self.q(jn)
             band = self.e_sat.get(act, 0.0)
             cmd = min(q + band, max(q - band, q_des))
         lo_lim = float(self.model.actuator_ctrlrange[idx, 0])
@@ -482,7 +468,7 @@ class LipmWalker:
         self._write_unused()
 
     def _write_leg_delta(self, side: Side, flex: float, dhip: float, yaw: float) -> None:
-        """Stand pose plus a Bézier flex and a forward hip. Torque-budget step on pitch.
+        """Stand pose plus a Bézier flex and a forward hip. Multi-tick move on pitch.
 
         Plant axes (md5 17dc4ff3…), verified against a pelvis-fixed step:
         pitch is mirrored (left hip/knee ``0 1 0``, right ``0 -1 0``);
