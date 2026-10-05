@@ -28,7 +28,12 @@ From the stand pose the blob is already centered (`|bias| ≤ 0.08`, measured bi
 - centered: `vel(+0.028, 0)`
 - off center: `vel(+0.028, yaw)` with `yaw = clamp(−bias / 0.35 × 0.25, ±0.25)`
 
-The trim is not a heading setpoint. Full yaw cap is used only when `|bias|` reaches 0.35. `vx = 0` yaw does not change heading on this plant, so a correction is a walking turn at the soft forward speed.
+While the torso-to-kitchen gap is under 0.40 m and yellow is still at least 0.015, the same half-cap command uses shorter slices and a stronger trim. The gait stays in move. There is no stand between slices.
+
+- slice length: 0.20 s
+- yaw: `clamp(−bias / 0.20 × 0.25, ±0.25)` so the bus yaw cap is reached at `|bias| = 0.20`
+
+The trim is not a heading setpoint. Farther out, full yaw cap is used only when `|bias|` reaches 0.35. `vx = 0` yaw does not change heading on this plant, so a correction is a walking turn at the soft forward speed.
 
 The `up_z` Prefer FAIL bar stays **0.90**. It is not lowered. A full-cap slice run on the same bar stopped at end x +0.394 m when `up_z` hit 0.894. Shorter slices with a stand between them were tried and did not get past that distance:
 
@@ -42,9 +47,11 @@ Half the forward cap, with no stand between slices, is the duty that stayed upri
 
 The world-x budget on this draft is **1.10 m**. That is still a stop, not a counter pose. The `up_z` bar, the half-cap command, and both arrival bars are unchanged.
 
-Without a reacquire, the same half-cap walk stopped at end x +0.938 m when the yellow fraction fell to 0.004 with the kitchen body still in frame (remaining 0.377 m, min up_z 0.981). `vx = 0` yaw does not change heading on this plant, so a yaw-only reacquire is not used. This draft instead keeps half-cap `vel(+0.028, yaw trim)` toward the last bias for at most two tries of 2.0 s. The normal approach resumes only if yellow returns to at least 0.015 and the score is usable (`forward`, `yaw_left`, or `yaw_right`). A blob that stays lost, a kitchen that leaves the frame, `up_z` under 0.90, or the end of that budget is Prefer FAIL and sends no further `vel`.
+Without a reacquire, the same half-cap walk stopped at end x +0.938 m when the yellow fraction fell to 0.004 with the kitchen body still in frame (remaining 0.377 m, min up_z 0.981). `vx = 0` yaw does not change heading on this plant, so a yaw-only reacquire is not used. A dim yellow with the kitchen still in frame keeps half-cap `vel(+0.028, yaw trim)` toward the last bias. Each try is 2.0 s. The normal approach resumes only if yellow returns to at least 0.015 and the score is usable (`forward`, `yaw_left`, or `yaw_right`). While the gap is 0.40 m or more, two tries are allowed. Inside 0.40 m, four tries are allowed. A blob that stays lost, a kitchen that leaves the frame, `up_z` under 0.90, or the end of that budget is Prefer FAIL and sends no further `vel`.
 
-Measured phrase, "go to the kitchen", room scene, after stand:
+On main, two walk-yaw tries resumed once and then lost the blob again: end x +1.024 m, Δx +1.022 m, remaining 0.291 m, min up_z 0.980, settled yellow 0.000, arrival false. This draft tries to keep yellow usable across that last part of the gap. The 0.25 m bar is not lowered. A stop inside 0.25 m with yellow still under 0.50 is Prefer FAIL `close`, not arrival.
+
+Baseline on main, before the close-range protect, "go to the kitchen", room scene, after stand:
 
 | | |
 |--|--|
@@ -81,7 +88,7 @@ No further `vel` is sent when:
 - the phrase is bathroom, or any other room
 - the loaded scene is the empty walk plant
 - the kitchen body is outside the frame (including turned away)
-- the backsplash fraction is below 0.015 and the soft walk-yaw reacquire does not keep it usable (two tries of `vel(+0.028, yaw trim)`, then stop)
+- the backsplash fraction is below 0.015 and the soft walk-yaw reacquire does not keep it usable (two tries of `vel(+0.028, yaw trim)` while the gap is 0.40 m or more, four tries inside that gap, then stop)
 - the yellow is split across the left and right of the frame
 - the centroid does not sit on the kitchen body
 - `up_z` drops below 0.90

@@ -19,16 +19,19 @@ adds a yaw trim scaled by the bias. Full-cap slices and short slices with
 stand pauses between them are not this path: the first crossed up_z 0.90
 near +0.39 m, and the pauses never got past ~0.1 m. The up_z bar stays
 0.90. The 1.2 s hop stays in --self-test at the full forward cap. The
-world-x budget is 1.10 m, a stop, not a goal pose. If the yellow fraction
-falls below 0.015 while the kitchen body is still in frame, up to two
-soft walk-yaw tries (vel(+0.028, trim toward the last bias), 2 s each)
-may run. vx=0 yaw does not change heading on this plant, so it is not
-the reacquire. Normal half-cap steering resumes only if yellow returns
-to at least 0.015 and the score is usable. Otherwise that is a Prefer
-FAIL and no further vel. Arrival is claimed only when the backsplash
-fills at least half the frame and the torso is within 0.25 m of the
-kitchen geom. Otherwise the summary reports end x and the remaining
-gap and does not say arrived.
+world-x budget is 1.10 m, a stop, not a goal pose. Inside 0.40 m of the
+kitchen, while yellow is still at least 0.015, slices shorten to 0.20 s
+and the trim reaches the yaw cap at a smaller bias. The gait stays in
+move; there is no stand between those slices. If the yellow fraction
+falls below 0.015 while the kitchen body is still in frame, soft walk-yaw
+tries (vel(+0.028, trim toward the last bias), 2 s each) may run: two
+while farther than 0.40 m, four while inside that gap. vx=0 yaw does not
+change heading on this plant, so it is not the reacquire. Normal steering
+resumes only if yellow returns to at least 0.015 and the score is usable.
+Otherwise that is a Prefer FAIL and no further vel. Arrival is claimed
+only when the backsplash fills at least half the frame and the torso is
+within 0.25 m of the kitchen geom. Otherwise the summary reports end x
+and the remaining gap and does not say arrived.
 
 The visible signal under this lighting is the yellow backsplash. The wood
 counter's lit face does not separate from the blue cabinet, and the red
@@ -94,9 +97,14 @@ SOFT_VX = steer_walk.VX_FWD_CAP * 0.5
 # stalled walk cannot run forever. 280 * 0.40 s is longer than the 1.10 m
 # budget at that speed, so the distance stop fires first.
 MAX_FORWARD_BURSTS = 280
-MAX_YAW_CORRECTIONS = 80
+# Same yaw-time budget as the old 80 slices of 0.40 s. Close-range slices
+# are 0.20 s, so the count is higher or the cap would stop the walk early.
+MAX_YAW_CORRECTIONS = 160
 # |bias| at which the trim uses the full yaw cap. Inside CENTER_BIAS, yaw is 0.
 YAW_BIAS_FULL = 0.35
+# Inside CLOSE_REMAINING_M, with yellow still usable, full yaw cap arrives
+# at this smaller bias. Still clamped to the bus yaw cap.
+CLOSE_YAW_BIAS_FULL = 0.20
 # World-x progress stop. The kitchen near face is at x = 1.315 m, so 1.10 m
 # of progress from the stand leaves a gap above the 0.25 m arrival bar.
 # This is a burst budget, not a waypoint at the counter. The up_z bar is
@@ -114,10 +122,15 @@ PERCEPT_S = 0.40
 BUDGET_STOP = "burst budget reached; stop"
 # Dim backsplash, kitchen body still in frame. Half-cap walk-yaw toward the
 # last bias. vx=0 yaw does not change heading here, so it is not used.
-# Not a search: two tries, 2 s each, then stop if yellow is still not usable.
+# Two tries while the gap is 0.40 m or more. Four only inside that gap.
 REACQUIRE_S = 2.0
 REACQUIRE_SLICE_S = 0.40
 MAX_REACQUIRE = 2
+MAX_REACQUIRE_CLOSE = 4
+# Last ~0.04–0.15 m before the 0.25 m gap bar. Protect a usable blob here.
+# Shorter slices re-score without a stand pause. vx stays at half cap.
+CLOSE_REMAINING_M = 0.40
+CLOSE_SLICE_S = 0.20
 # Stand kit_cam measures yellow fraction ~0.039 and bias ~-0.014.
 # Empty floor and a yaw that hides the kitchen measure 0.
 MIN_YELLOW_FRAC = 0.015
@@ -599,16 +612,17 @@ def command_for(decision: DecisionName) -> tuple[float, float] | None:
     return None
 
 
-def trim_yaw(bias: float) -> float:
+def trim_yaw(bias: float, yaw_bias_full: float = YAW_BIAS_FULL) -> float:
     """Yaw rate for one approach slice. Sign faces the blob. Magnitude follows it.
 
-    Full cap only when |bias| reaches YAW_BIAS_FULL. A smaller bias gets a
+    Full cap only when |bias| reaches yaw_bias_full. A smaller bias gets a
     smaller rate, still above the bus deadband once the blob is outside the
-    center band. This is not a heading setpoint and not a path.
+    center band. The result stays inside the bus yaw cap. This is not a
+    heading setpoint and not a path.
     """
-    if abs(bias) <= CENTER_BIAS:
+    if abs(bias) <= CENTER_BIAS or yaw_bias_full <= 0.0:
         return 0.0
-    yaw = -bias / YAW_BIAS_FULL * steer_walk.YAW_RATE_CAP
+    yaw = -bias / yaw_bias_full * steer_walk.YAW_RATE_CAP
     if yaw > steer_walk.YAW_RATE_CAP:
         return steer_walk.YAW_RATE_CAP
     if yaw < -steer_walk.YAW_RATE_CAP:
@@ -645,17 +659,51 @@ def yellow_usable(score: KitchenScore) -> bool:
     )
 
 
+def in_close_range(remaining_m: float) -> bool:
+    """Torso-to-kitchen gap inside 0.40 m. The 0.40 m edge is still the far law."""
+    return math.isfinite(remaining_m) and remaining_m < CLOSE_REMAINING_M
+
+
+def reacquire_limit(remaining_m: float) -> int:
+    """Two walk-yaw tries while far. Four only while the gap is under 0.40 m."""
+    if in_close_range(remaining_m):
+        return MAX_REACQUIRE_CLOSE
+    return MAX_REACQUIRE
+
+
+def blob_protect(remaining_m: float, score: KitchenScore) -> bool:
+    """Shorter slices and a stronger trim while yellow is still usable and close."""
+    return in_close_range(remaining_m) and yellow_usable(score)
+
+
+def yaw_bias_full_for(remaining_m: float, score: KitchenScore) -> float:
+    if blob_protect(remaining_m, score):
+        return CLOSE_YAW_BIAS_FULL
+    return YAW_BIAS_FULL
+
+
+def slice_seconds(remaining_m: float, score: KitchenScore) -> float:
+    """Close-range slices are 0.20 s with the gait left in move. Far slices stay 0.40 s."""
+    if blob_protect(remaining_m, score):
+        return CLOSE_SLICE_S
+    return BURST_FORWARD_S
+
+
 def _remember_bias(score: KitchenScore, last_bias: float) -> float:
     if score.centroid_u is not None:
         return score.bias
     return last_bias
 
 
-def correction_command(score: KitchenScore) -> tuple[float, float] | None:
-    """Approach slice: forward cap, plus a bias trim when the blob is off center."""
+def correction_command(
+    score: KitchenScore,
+    *,
+    yaw_bias_full: float = YAW_BIAS_FULL,
+) -> tuple[float, float] | None:
+    """Approach slice: half-cap forward, plus a bias trim when the blob is off center."""
     if score.decision == "fail":
         return None
-    return (SOFT_VX, trim_yaw(score.bias))
+    return (SOFT_VX, trim_yaw(score.bias, yaw_bias_full))
 
 
 BurstAction = Literal["forward", "yaw_left", "yaw_right", "stop"]
@@ -1005,6 +1053,7 @@ def _reacquire(
 def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
     """Half-cap slices while the backsplash stays valid, with a yaw trim if it drifts.
 
+    Inside 0.40 m, a usable yellow gets 0.20 s slices and a stronger trim.
     A dim yellow with the kitchen still in frame gets a short half-cap walk-yaw.
     The gait stays in move across a forward slice. Stop is the budget, a failed
     reacquire, or another Prefer FAIL. up_z under 0.90 stops. That bar is not lowered.
@@ -1041,10 +1090,11 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
             remaining_m=remaining,
         )
         if choice.action == "stop":
+            limit = reacquire_limit(remaining)
             if (
                 choice.kind == "blob"
                 and can_reacquire(score)
-                and reacquires < MAX_REACQUIRE
+                and reacquires < limit
             ):
                 reacquires += 1
                 score, fail = _reacquire(session, cam, sent, score, last_bias, x0)
@@ -1054,23 +1104,24 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
                     stop_kind = _abort_kind(fail)
                     break
                 continue
-            if choice.kind == "blob" and can_reacquire(score) and reacquires >= MAX_REACQUIRE:
+            if choice.kind == "blob" and can_reacquire(score) and reacquires >= limit:
                 note = REACQUIRE_LOST
             else:
                 note = choice.line
             stop_kind = choice.kind
             break
-        command = correction_command(score)
+        command = correction_command(
+            score, yaw_bias_full=yaw_bias_full_for(remaining, score),
+        )
         if command is None:
             note = "Prefer FAIL: no bus command for this score"
             stop_kind = "blob"
             break
         if abs(command[1]) > 1e-9:
             yaw_corrections += 1
-            hold_s = BURST_YAW_S
         else:
             forward_bursts += 1
-            hold_s = BURST_FORWARD_S
+        hold_s = slice_seconds(remaining, score)
         abort = _hold_vel(
             session, cam, command[0], command[1], hold_s, sent,
             stop_when_centered=False,
@@ -1080,10 +1131,12 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
         score = score_frame(session.model, session.data, cam.grab(session.data))
         last_bias = _remember_bias(score, last_bias)
         moved = float(session.data.qpos[0]) - x0
+        remaining, _near = _gap(session.model, session.data)
         if mid_image is None and moved >= (PROGRESS_STOP_M * 0.5):
             mid_image = cam.grab(session.data)
             mid_score = score
-        if abort and can_reacquire(score) and reacquires < MAX_REACQUIRE:
+        limit = reacquire_limit(remaining)
+        if abort and can_reacquire(score) and reacquires < limit:
             reacquires += 1
             score, fail = _reacquire(session, cam, sent, score, last_bias, x0)
             last_bias = _remember_bias(score, last_bias)
@@ -1093,7 +1146,7 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
                 break
             continue
         if abort:
-            if can_reacquire(score) and reacquires >= MAX_REACQUIRE:
+            if can_reacquire(score) and reacquires >= limit:
                 note = REACQUIRE_LOST
             else:
                 note = abort
@@ -1357,6 +1410,25 @@ def test_approach_policy() -> list[str]:
     )
     _expect(yellow_usable(centered), "centered yellow is usable", failures)
     _expect(not yellow_usable(dim), "dim yellow is not usable", failures)
+    _expect(reacquire_limit(0.50) == MAX_REACQUIRE, "far reacquire stays at 2", failures)
+    _expect(reacquire_limit(0.40) == MAX_REACQUIRE, "0.40 m is still the far law", failures)
+    _expect(reacquire_limit(0.39) == MAX_REACQUIRE_CLOSE, "close reacquire is 4", failures)
+    _expect(blob_protect(0.30, centered), "usable yellow inside 0.40 m is protected", failures)
+    _expect(not blob_protect(0.50, centered), "far yellow is not the close law", failures)
+    _expect(not blob_protect(0.30, dim), "dim yellow is a reacquire, not a protect", failures)
+    _expect(slice_seconds(0.30, centered) == CLOSE_SLICE_S, "close slices are 0.20 s", failures)
+    _expect(slice_seconds(0.50, centered) == BURST_FORWARD_S, "far slices stay 0.40 s", failures)
+    side = _fake_score("yaw_left", 0.05, -0.16)
+    far_cmd = correction_command(side)
+    near_cmd = correction_command(side, yaw_bias_full=yaw_bias_full_for(0.30, side))
+    _expect(far_cmd is not None and near_cmd is not None, "side commands", failures)
+    if far_cmd is not None and near_cmd is not None:
+        _expect(abs(near_cmd[0] - SOFT_VX) < 1e-9, f"close vx stays half cap {near_cmd}", failures)
+        _expect(abs(near_cmd[1]) <= steer_walk.YAW_RATE_CAP + 1e-9, f"close yaw cap {near_cmd}", failures)
+        _expect(abs(near_cmd[1]) > abs(far_cmd[1]), f"close trim is stronger {near_cmd} vs {far_cmd}", failures)
+    full_close = trim_yaw(-CLOSE_YAW_BIAS_FULL, CLOSE_YAW_BIAS_FULL)
+    _expect(abs(full_close - steer_walk.YAW_RATE_CAP) < 1e-9, f"close full trim {full_close}", failures)
+    _expect(abs(trim_yaw(-0.20)) < steer_walk.YAW_RATE_CAP, "far trim is not full at bias 0.20", failures)
     # Half the frame but still far: not arrival, keep steering.
     far_fill = approach_choice(
         full, dx_m=0.20, up_z=0.97, yaw_corrections=0,
@@ -1693,8 +1765,6 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
             f"arrival flag {approach.arrival} does not match the bars "
             f"(yellow {approach.final.yellow_frac:.3f}, remaining {approach.remaining_m:.3f} m)"
         )
-    if approach.arrival:
-        problems.append("arrival was claimed; this draft does not expect the bars to pass")
     if approach.stop_kind == "budget" and not (1.00 <= approach.dx_m <= 1.25):
         problems.append(f"budget stop dx {approach.dx_m:.3f} m is outside 1.00–1.25")
     if approach.stop_kind == "budget" and approach.min_up_z < UP_Z_ABORT:
@@ -1717,6 +1787,11 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
         "progress_stop_m": PROGRESS_STOP_M,
         "arrival_yellow_frac": ARRIVAL_YELLOW_FRAC,
         "arrival_remaining_m": ARRIVAL_REMAINING_M,
+        "close_remaining_m": CLOSE_REMAINING_M,
+        "close_slice_s": CLOSE_SLICE_S,
+        "close_yaw_bias_full": CLOSE_YAW_BIAS_FULL,
+        "max_reacquire": MAX_REACQUIRE,
+        "max_reacquire_close": MAX_REACQUIRE_CLOSE,
         "arrival": approach.arrival,
         "stop_kind": approach.stop_kind,
         "note": approach.note,
