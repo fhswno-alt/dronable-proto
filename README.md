@@ -130,6 +130,17 @@ Each scene includes the frozen walk plant and adds static furniture in front of 
 
 The living, bedroom, and entrance scenes are vision stills only. They do not add a go-to. "Go to the living room", "go to the bedroom", and "go to the entrance" stay refused. Prefer FAIL until an AI finder for that room lands. The entrance body is a visual frame: no hinge, no lever, no latch.
 
+## Explore / map (partial, Prefer FAIL)
+
+`scripts/explore_map.py` is not a room finder. It resends `vel(+0.028, yaw)` at 10 Hz on the same `CommandBus` and paints a 0.10 m grid from `kit_cam` only. Floor rays become free cells. A saturated floor hit (the entrance mat) becomes a feature cell. The yellow backsplash does not meet the floor plane in range, so it is a camera-ray bearing, not a waypoint. The next command aims at a frontier cell on the edge of that paint. It does not aim at yellow. `vx = 0` yaw is not sent. Voice still refuses "explore" and "go anywhere". The rooms stay separate XML files. See `docs/EXPLORE_MAP.md`.
+
+On the 12 s demo the plant md5 was unchanged. No tip, no fault, min up_z 0.993–0.994. Settled Δx was **+0.156 m** (empty plant), **+0.185 m** (kitchen), **+0.190 m** (bathroom). Settled Δyaw was about **−12 deg** on each, after a stop-pose near **−19 deg**. The command was `yaw +0.25` then `yaw −0.25`; the body did not follow the left command. The empty plant painted 260 → 430 free cells and no yellow. The kitchen logged yellow fraction **0.079** at bearing **+0.313 rad** with no floor cell. The bathroom logged no yellow. That is not go-anywhere.
+
+```bash
+MUJOCO_GL=osmesa python scripts/explore_map.py --self-test
+MUJOCO_GL=osmesa python scripts/explore_map.py --demo
+```
+
 ```bash
 MUJOCO_GL=osmesa python scripts/render_kit_cam_room.py
 MUJOCO_GL=osmesa python scripts/render_kit_cam_room.py --all
@@ -152,6 +163,7 @@ Gait params & teleop stubs: top of `scripts/walk_gait.py` (wired to Controls/AI 
 - `previews/kit_cam_room_bedroom.png` — bedroom vision still (not a go-to)
 - `previews/kit_cam_room_entrance.png` — entrance vision still (visual frame only, not a go-to)
 - `previews/find_kitchen_before.png` / `find_kitchen_mid.png` / `find_kitchen_after.png` / `find_kitchen_prefer_fail.png` — kit_cam before the bursts, between them, after the stop, and an empty-plant Prefer FAIL
+- `previews/explore_map_summary.json` and `previews/explore_map_*_sheet.png` — partial kit_cam map while walking (not go-anywhere)
 - `previews/voice_commands_demo.mp4` plus stand / walk / turn / resume / stop stills — voice phrase → bus command on the claimed left arc
 
 ## Model summary
