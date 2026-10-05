@@ -16,13 +16,17 @@ waypoints and they are not given to the map query.
 
 The last-mile walks at half the forward cap (0.028 m/s), because a
 full-cap finder burst crossed up_z 0.90. Yaw comes from the logged
-camera ray or the frontier nearest that ray, inside ±0.25. vx=0 yaw
-does not change heading on this plant and is not sent. The up_z bar
-stays 0.90. The 1.2 s hop stays in --self-test at the full forward cap.
-The world-x budget is 1.10 m, a stop, not a goal pose. Arrival is
-claimed only when the backsplash fills at least half the frame and the
-torso is within 0.25 m of the kitchen geom. Otherwise the summary
-reports end x and the remaining gap and does not say arrived.
+camera ray or the frontier nearest that ray, inside ±0.25. Inside the
+last 0.40 m the slice is 0.20 s and the yaw follows that camera ray,
+not a side frontier. While yellow is still up but fading, an off-center
+blob is recentered with the same trim as the open walk (full yaw cap
+only at |bias| 0.35). vx=0 yaw does not change heading on this plant
+and is not sent. The up_z bar stays 0.90. The 1.2 s hop stays in
+--self-test at the full forward cap. The world-x budget is 1.10 m, a
+stop, not a goal pose. Arrival is claimed only when the backsplash
+fills at least half the frame and the torso is within 0.25 m of the
+kitchen geom. Otherwise the summary reports end x and the remaining
+gap and does not say arrived.
 
 The visible signal under this lighting is the yellow backsplash. The wood
 counter's lit face does not separate from the blue cabinet, and the red
@@ -47,7 +51,7 @@ import math
 import os
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -107,6 +111,15 @@ UP_Z_ABORT = 0.90
 # 0.25 m is contact range for this torso, not a room crossing.
 ARRIVAL_YELLOW_FRAC = 0.50
 ARRIVAL_REMAINING_M = 0.25
+# Last 0.40 m before the gap bar. A side frontier inside the 1.20 rad
+# cone was saturating yaw at ±0.25 and walking the backsplash off the
+# frame. Shorter slices, and yaw toward the logged yellow bearing.
+# An earlier recenter runs only while yellow is fading and the live
+# blob is outside the fade band. Full cap still needs |bias| 0.35.
+# The closed protect-blob law (yaw cap at |bias| 0.20, extra reacquire
+# tries) stopped farther out and is not used here.
+PROTECT_REMAINING_M = 0.40
+PROTECT_SLICE_S = 0.20
 PERCEPT_S = 0.40
 BUDGET_STOP = "burst budget reached; stop"
 # Dim backsplash, kitchen body still in frame. Half-cap walk-yaw toward the
@@ -170,6 +183,8 @@ HONESTY = (
     "and not an arrival unless the backsplash fills at least half the frame "
     "and the torso is within 0.25 m of the kitchen geom. "
     "query_kitchen_like_yellow() and frontier_cells() pick the half-cap vel. "
+    "Inside 0.40 m the yaw follows the logged yellow bearing, not a side frontier. "
+    "A fading off-center blob is recentered earlier with the open-walk trim. "
     "A live blob is the arrival fraction, not the command. "
     "No yellow in the map log sends no vel. "
     "The kitchen geom distance is only the arrival bar and the reported gap."
@@ -271,6 +286,9 @@ class Approach:
     map_bearing_rad: float | None = None
     map_frontier_queries: int = 0
     map_command_source: str = "none"
+    protect_slices: int = 0
+    yellow_enter_protect: float | None = None
+    protect_trace: list[dict[str, float | str]] = field(default_factory=list)
 
 
 def _md5(path: Path) -> str:
@@ -673,6 +691,59 @@ def center_bias_for(yellow_frac: float, peak_yellow: float) -> float:
     if yellow_fading(yellow_frac, peak_yellow):
         return FADE_CENTER_BIAS
     return CENTER_BIAS
+
+
+def _wrap_angle(angle: float) -> float:
+    return (angle + math.pi) % (2.0 * math.pi) - math.pi
+
+
+def yaw_toward_bearing(bearing_rad: float, yaw: float) -> float:
+    """Half-cap walk-yaw gain toward a logged camera ray. Not a waypoint.
+
+    Same error scale as the map ray aim: a 0.50 rad miss is the yaw cap.
+    Below the bus deadband the command is straight. This is not the
+    protect-blob gain, which reached the cap at a pixel bias of 0.20.
+    """
+    err = _wrap_angle(bearing_rad - yaw)
+    rate = err / explore_map.YAW_FULL_ERR_RAD * steer_walk.YAW_RATE_CAP
+    if rate > steer_walk.YAW_RATE_CAP:
+        return steer_walk.YAW_RATE_CAP
+    if rate < -steer_walk.YAW_RATE_CAP:
+        return -steer_walk.YAW_RATE_CAP
+    if abs(rate) < steer_walk.DEADBAND_YAW:
+        return 0.0
+    return rate
+
+
+def close_protect_yaw(
+    feature_map: explore_map.ExploreMap,
+    pose: explore_map.RobotPose,
+    score: KitchenScore,
+    peak_yellow: float,
+    remaining_m: float,
+) -> tuple[float, str] | None:
+    """Replacement yaw, or None to keep the frontier command.
+
+    Always calls query_kitchen_like_yellow() and frontier_cells(). The
+    frontier list is not the aim. A fading blob outside the fade band
+    is recentered on the live bias. Inside 0.40 m the aim is the logged
+    yellow bearing. A centered fade outside that gap keeps the map yaw.
+    """
+    yellow = feature_map.query_kitchen_like_yellow()
+    feature_map.frontier_cells(pose.x, pose.y)
+    fading = yellow_fading(score.yellow_frac, peak_yellow)
+    band = center_bias_for(score.yellow_frac, peak_yellow)
+    if fading and score.centroid_u is not None and abs(score.bias) > band:
+        return (
+            trim_yaw(score.bias, band),
+            "fade recenter toward the live backsplash; side frontier not used",
+        )
+    if remaining_m < PROTECT_REMAINING_M and yellow.seen and yellow.bearing_rad is not None:
+        return (
+            yaw_toward_bearing(yellow.bearing_rad, pose.yaw),
+            "map-guided yaw toward the last yellow bearing",
+        )
+    return None
 
 
 def _remember_bias(score: KitchenScore, last_bias: float) -> float:
@@ -1125,8 +1196,11 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
     The stand frame is painted into the map. If query_kitchen_like_yellow()
     is false, this is Prefer FAIL and no vel is sent. If yellow was logged,
     each slice calls that query and frontier_cells() and sends the result.
-    A lost live blob does not replace that command. Arrival still needs the
-    live yellow fraction and the torso gap. up_z under 0.90 stops.
+    While yellow is fading and off center, the yaw recenters on the live
+    blob. Inside 0.40 m the slice is 0.20 s and the yaw follows the logged
+    yellow bearing instead of a side frontier. A lost live blob does not
+    by itself stop the walk. Arrival still needs the live yellow fraction
+    and the torso gap. up_z under 0.90 stops.
     """
     feature_map = explore_map.ExploreMap.empty()
     _hold_stand(session, STAND_S)
@@ -1141,6 +1215,10 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
     yaw_corrections = 0
     reacquires = 0
     fade_recenters = 0
+    protect_slices = 0
+    yellow_enter_protect: float | None = None
+    protect_trace: list[dict[str, float | str]] = []
+    peak_yellow = score.yellow_frac
     map_queries = 1
     note = MAP_NO_YELLOW if not yellow.seen else yellow.note
     stop_kind: BurstKind = "no_yellow"
@@ -1172,12 +1250,41 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
             note = MAP_NO_YELLOW
             stop_kind = "no_yellow"
             break
+        peak_yellow = max(peak_yellow, score.yellow_frac)
+        if yellow_enter_protect is None and remaining < PROTECT_REMAINING_M:
+            yellow_enter_protect = score.yellow_frac
+        aim = "frontier"
+        slice_s = BURST_FORWARD_S
+        fading = yellow_fading(score.yellow_frac, peak_yellow)
+        if fading or remaining < PROTECT_REMAINING_M:
+            protected = close_protect_yaw(
+                feature_map, pose, score, peak_yellow, remaining,
+            )
+            map_queries += 1
+            if protected is not None:
+                command = explore_map.VelocityCommand(
+                    SOFT_VX, protected[0], protected[1], None,
+                )
+                if protected[1].startswith("fade recenter"):
+                    aim = "fade"
+                    fade_recenters += 1
+                else:
+                    aim = "bearing"
+        if remaining < PROTECT_REMAINING_M:
+            slice_s = PROTECT_SLICE_S
+            protect_slices += 1
         if abs(command.yaw_rate) > 1e-9:
             yaw_corrections += 1
         else:
             forward_bursts += 1
+        protect_trace.append({
+            "remaining_m": round(remaining, 4),
+            "yellow_frac": round(score.yellow_frac, 4),
+            "yaw_rate": round(command.yaw_rate, 4),
+            "aim": aim,
+        })
         abort = _hold_vel(
-            session, cam, command.vx, command.yaw_rate, BURST_FORWARD_S, sent,
+            session, cam, command.vx, command.yaw_rate, slice_s, sent,
             stop_when_centered=False,
             progress_x0=x0,
             progress_cap_m=PROGRESS_STOP_M,
@@ -1208,6 +1315,7 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
         session, cam, before, mid_image, stand_score, mid_score, sent, note,
         stop_kind, x0, forward_bursts, yaw_corrections, stop_kind == "arrival",
         reacquires, fade_recenters, yellow, map_queries,
+        protect_slices, yellow_enter_protect, protect_trace,
     )
 
 
@@ -1229,6 +1337,9 @@ def _approach_result(
     fade_recenters: int,
     yellow: explore_map.YellowQuery,
     map_queries: int,
+    protect_slices: int = 0,
+    yellow_enter_protect: float | None = None,
+    protect_trace: list[dict[str, float | str]] | None = None,
 ) -> Approach:
     session.bus.stop(float(session.data.time))
     _hold_stand(session, SETTLE_S)
@@ -1249,6 +1360,23 @@ def _approach_result(
             "not arrival"
         )
         stop_kind = "close"
+    elif stop_kind == "close":
+        entered = (
+            f"{yellow_enter_protect:.3f}"
+            if yellow_enter_protect is not None
+            else "n/a"
+        )
+        note = (
+            "Prefer FAIL: torso is within "
+            f"{ARRIVAL_REMAINING_M:.2f} m of the kitchen geom "
+            f"but settled yellow is {final.yellow_frac:.3f}, not "
+            f"{ARRIVAL_YELLOW_FRAC:.2f}. "
+            f"Inside {PROTECT_REMAINING_M:.2f} m, {protect_slices} slices "
+            f"of {PROTECT_SLICE_S:.2f} s followed the logged yellow bearing, "
+            "unless a fading blob was off center and the yaw recentered. "
+            f"Yellow entering that gap was {entered}. "
+            f"Fade recenters {fade_recenters}. Not arrival."
+        )
     elif stop_kind == "budget":
         note = (
             f"burst budget; dx {end_x - x0:+.3f} m; "
@@ -1285,6 +1413,9 @@ def _approach_result(
         map_bearing_rad=yellow.bearing_rad,
         map_frontier_queries=map_queries,
         map_command_source="map" if yellow.seen else "none",
+        protect_slices=protect_slices,
+        yellow_enter_protect=yellow_enter_protect,
+        protect_trace=protect_trace or [],
     )
 
 
@@ -1501,6 +1632,74 @@ def test_approach_policy() -> list[str]:
     _expect(not arrival_bars(0.20, 0.10), "close but small blob was called arrival", failures)
     _expect(arrival_bars(0.50, 0.25), "both bars at the threshold did not pass", failures)
     _expect(arrival_bars(0.62, 0.20), "clear arrival bars did not pass", failures)
+    return failures
+
+
+def test_close_protect() -> list[str]:
+    """Last 0.40 m aims at the yellow ray. Fade recenter is not the cap-at-0.20 law."""
+    failures: list[str] = []
+    feature_map = explore_map.ExploreMap.empty()
+    feature_map.yellow_max_fraction = 0.14
+    feature_map.yellow_bearing_rad = -0.18
+    pose = explore_map.RobotPose(t=0.0, x=1.0, y=0.0, yaw=0.0)
+    centered = KitchenScore(
+        decision="forward",
+        reason="test",
+        line="test",
+        needs_map=False,
+        bias=-0.03,
+        yellow_frac=0.08,
+        centroid_u=310.0,
+        centroid_v=40.0,
+        kitchen_in_frame=True,
+    )
+    kept = close_protect_yaw(feature_map, pose, centered, 0.14, 0.70)
+    _expect(kept is None, f"centered fade outside 0.40 m kept the frontier yaw {kept}", failures)
+    off = KitchenScore(
+        decision="yaw_left",
+        reason="test",
+        line="test",
+        needs_map=False,
+        bias=-0.20,
+        yellow_frac=0.08,
+        centroid_u=256.0,
+        centroid_v=40.0,
+        kitchen_in_frame=True,
+    )
+    recentered = close_protect_yaw(feature_map, pose, off, 0.14, 0.70)
+    _expect(recentered is not None, "off-center fade did not recenter", failures)
+    if recentered is not None:
+        _expect(recentered[0] > 0.02, f"left bias should yaw left {recentered}", failures)
+        _expect(
+            abs(recentered[0] - steer_walk.YAW_RATE_CAP) > 0.05,
+            f"bias 0.20 reached the yaw cap {recentered}; that was the closed protect-blob law",
+            failures,
+        )
+        _expect(recentered[1].startswith("fade recenter"), f"fade aim {recentered[1]}", failures)
+    lost = KitchenScore(
+        decision="fail",
+        reason="no backsplash pixels",
+        line=NO_PIXELS_LINE,
+        needs_map=False,
+        bias=0.0,
+        yellow_frac=0.0,
+        centroid_u=None,
+        centroid_v=None,
+        kitchen_in_frame=True,
+    )
+    aimed = close_protect_yaw(feature_map, pose, lost, 0.14, 0.30)
+    _expect(aimed is not None, "close gap with a logged ray produced no yaw", failures)
+    if aimed is not None:
+        _expect(aimed[0] < 0.0, f"bearing -0.18 should yaw right {aimed}", failures)
+        _expect(abs(aimed[0]) < 0.20, f"ray yaw saturated {aimed}", failures)
+        _expect("yellow bearing" in aimed[1], f"bearing aim {aimed[1]}", failures)
+    empty = explore_map.ExploreMap.empty()
+    none_yaw = close_protect_yaw(empty, pose, lost, 0.0, 0.30)
+    _expect(none_yaw is None, f"empty map produced a protect yaw {none_yaw}", failures)
+    _expect(PROTECT_REMAINING_M == 0.40, "protect gap moved", failures)
+    _expect(PROTECT_SLICE_S == 0.20 and PROTECT_SLICE_S < BURST_FORWARD_S, "protect slice", failures)
+    straight = yaw_toward_bearing(-0.18, 0.0)
+    _expect(straight < 0.0 and abs(straight) < steer_walk.YAW_RATE_CAP, f"bearing yaw {straight}", failures)
     return failures
 
 
@@ -1759,6 +1958,7 @@ def self_test() -> int:
     failures.extend(test_pixels())
     failures.extend(test_phrases())
     failures.extend(test_approach_policy())
+    failures.extend(test_close_protect())
     if failures:
         for msg in failures:
             print(f"FAIL {msg}")
@@ -1905,6 +2105,11 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
         "yaw_corrections": approach.yaw_corrections,
         "reacquires": approach.reacquires,
         "fade_recenters": approach.fade_recenters,
+        "protect_remaining_m": PROTECT_REMAINING_M,
+        "protect_slice_s": PROTECT_SLICE_S,
+        "protect_slices": approach.protect_slices,
+        "yellow_enter_protect": approach.yellow_enter_protect,
+        "protect_trace": approach.protect_trace,
         "map_yellow_seen": approach.map_yellow_seen,
         "map_yellow_fraction": approach.map_yellow_fraction,
         "map_bearing_rad": approach.map_bearing_rad,
@@ -1951,6 +2156,8 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
         f"yaw_corrections {approach.yaw_corrections} "
         f"reacquires {approach.reacquires} "
         f"fade_recenters {approach.fade_recenters} "
+        f"protect_slices {approach.protect_slices} "
+        f"yellow_enter {approach.yellow_enter_protect} "
         f"end mode {approach.end_mode} min_up_z {approach.min_up_z:.3f} "
         f"dx {approach.dx_m:+.3f} m end x {approach.end_x_m:+.3f} m "
         f"remaining {approach.remaining_m:.3f} m "
