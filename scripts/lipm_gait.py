@@ -60,13 +60,11 @@ VENDOR_STEP_M = 0.020
 # flex 0.10 / hip 0.16 puts the sole on the floor about 2 cm ahead.
 # A taller clear_m scales the same shape; the servo band may not finish it.
 FLEX_PEAK = 0.62
-# GaitManager swing only. The 150 ms move lags a 0.62 rad sine and the
-# knee stops near 0.42 rad. A 0.75 rad command is the largest that
-# stayed off the ±2.45 Nm hip rail for 24 s at period 1.16 s: the knee
-# then reaches about 0.51 rad and both soles clear 2 cm. 0.78 rad and
-# a faster knee move put the upright hip on the rail. The LIPM Bézier
-# still uses FLEX_PEAK.
-GM_FLEX_CMD = 0.75
+# GaitManager swing only, with the 0.22 s hip lead below. The 150 ms
+# move lags the live sine. Commanding 1.00 rad lets the knee land at
+# about 0.68 rad, and both soles stay above 2 cm, while the hip peak
+# stays near 1.8 Nm. The LIPM Bézier still uses FLEX_PEAK.
+GM_FLEX_CMD = 1.00
 FLEX_LAND = 0.10
 HIP_RISE = 0.06
 HIP_REACH = 0.24
@@ -147,10 +145,17 @@ class LipmConfig:
     gm_z_hold: bool = False
     # Fraction of single support that holds the step height before descent.
     gm_hold_u: float = 0.55
-    # Stance hip from the published x. 0.070 rad is the largest extension
-    # that stayed upright for 24 s on this plant. A larger value is the
-    # unclipped vendor x and it is allowed to tip so the number is visible.
+    # Stance hip from the published x. On the 150 ms / 1.16 s row, 0.070
+    # rad stays off the hip rail and 0.075 rad puts the right hip on
+    # ±2.45 Nm while up_z is still 1. The default 0.48 leaves the clip
+    # open so an unclipped run can show the tip.
     gm_stance_max: float = 0.48
+    # Swing hip only. Read the clock this early so the 150 ms move is
+    # already underway when the foot leaves the floor. 0.22 s is the
+    # 1.16 s row: mean vx about +2.8 cm/s, airborne foot about 2.0 cm,
+    # hip peak about 1.8 Nm. 0.20 s rails the right hip. 0 keeps the
+    # live sample.
+    gm_hip_lead_s: float = 0.22
 
 
 @dataclass
@@ -445,6 +450,8 @@ class LipmWalker:
             # that peak: left thigh forward, right thigh back. HIP_RISE is
             # the LIPM Bézier offset and is not added on this clock.
             use_x = shift.x_abs
+            if phase == side and self.cfg.gm_hip_lead_s > 0.0:
+                use_x = self._swing_hip_x(side, shift.x_abs)
             if (
                 self.cfg.gm_drag_gate
                 and phase == side
@@ -473,6 +480,21 @@ class LipmWalker:
         self.z_cmd = self.z_bez
         self._write_gm_arms(x_amp)
         self._write_unused()
+
+    def _swing_hip_x(self, side: Side, live_x: float) -> float:
+        """Swing-hip x read ahead of the live clock. The knee target is not moved.
+
+        advance() has already stepped the clock, so the sample just used is
+        one tick behind. The lead is skipped on the cycle wrap.
+        """
+        clock = self.gm_clock
+        if clock.time <= float(CTRL_DT) + 1e-9:
+            return live_x
+        t = clock.time - float(CTRL_DT) + float(self.cfg.gm_hip_lead_s)
+        if t >= clock.period:
+            t = clock.period - 1e-4
+        left, right, _, _ = clock._raw(t)
+        return left[0] if side == "L" else right[0]
 
     def _write_leg_delta(self, side: Side, flex: float, dhip: float, yaw: float) -> None:
         """Stand pose plus a Bézier flex and a forward hip. Multi-tick move on pitch.

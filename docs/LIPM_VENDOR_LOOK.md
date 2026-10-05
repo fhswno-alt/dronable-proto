@@ -607,9 +607,47 @@ not a backward skate. The stance hip stays on the 0.070 rad cap, and
 the body barely moves during the swing. Mean vx stays +1.7 cm/s.
 Soft-pass is off. This is not a kit walk.
 
-The clips are this 1.16 s row. Forward 8.400 s stays up (Δx +12.6 cm,
-mean vx +1.7 cm/s, pooled sole p90 2.5 cm, min up_z 0.996, peak torque
-2.43 Nm, sat_rate 0.003). Close-up 7.600 s stays up through the stop
-(forward Δx +8.0 cm, mean vx +1.5 cm/s, stop Δx +0.1 cm, min up_z
-0.996, peak torque 2.41 Nm). Constrained Baseline, yuv420p,
-`+faststart`.
+The clips below were this row before the hip lead. They are replaced
+by the lead row once that gait is rendered.
+
+## Stance clip and swing-hip lead
+
+The 150 ms move, the 5.5 rad/s cap, and the 1.16 s period stay. Plant
+md5 stays `17dc4ff37491c8e61900fd83b5d31f0c`.
+
+Raising the stance-hip clip rails the right hip while `up_z` is still
+1, before the body moves. At 0.075 rad the right hip hits the rail at
+0.622 s (ω −0.06, kp·e +2.35, damp +0.10, F +2.45). Mean vx is
++1.74 cm/s against +1.67 cm/s at 0.070 rad. Stance hip achieved is
+0.086 rad. At 0.110 rad the same rail is immediate and the body tips
+at 7.96 s. The 0.070 rad clip stays.
+
+The swing hip is read 0.22 s ahead of the live clock, and the swing
+knee command is 1.00 rad. The 150 ms move is unchanged. At 24 s,
+upright, min up_z 0.997, sat_rate 0, no sample at ±2.45 Nm:
+
+| | |
+| --- | ---: |
+| Knee L / R | 0.68 / 0.68 rad |
+| Sole p90 L / R | 2.18 / 2.65 cm |
+| Mean vx | +2.79 cm/s |
+| Swing hip command / achieved, inside the swing | 0.255 / 0.242 rad |
+| Stance hip command / achieved | 0.070 / 0.134 rad |
+| Clock Δx | 4.07 cm |
+| Swing-foot world Δx | +1.96 cm |
+| Airborne foot Δx | +1.96 cm |
+| Body Δx during the swing | +0.94 cm |
+| Stance slip | +0.32 cm |
+| Upright hip peak | 1.76 / 1.61 Nm |
+| Upright knee peak | 1.12 / 1.43 Nm |
+| Upright ankle pitch | 1.15 / 1.97 Nm |
+| Upright ankle roll | 1.80 / 2.13 Nm |
+
+The lead does not make the joint track the live 0.47 rad clock. Inside
+the swing the led command is 0.26 rad peak to peak and the joint
+matches that. Airborne travel is 2.0 cm, not 4 cm. Mean vx is
++2.8 cm/s, not 7 cm/s. A 0.20 s lead puts the right hip on the rail at
+7.89 s while `up_z` is 1. Both soles stay above 2 cm, and the knee
+clears 0.62 rad, because the hip peak fell to about 1.8 Nm and the
+taller knee command fits under the rail. Soft-pass is off. This is
+not a kit walk.
