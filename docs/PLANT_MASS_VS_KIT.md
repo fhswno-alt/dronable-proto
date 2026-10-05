@@ -260,7 +260,7 @@ N·m. A cell past ±2.45 N·m is marked.
 
 ## Kit-walk armature upper bound
 
-`move(1)` is the fastest preset. It does not carry its own step height. The 300 ms row below uses the height the walking service is loaded with, and the same single-support knee stack as the table above: `|τ_static| + (I_link + J) A (2π / T)²`, `T = 0.300 s`, viscous term left out. `J` is solved so that peak equals the limit. Both plant md5s stay `71b2c86d133ebc603f58b99c53e496f3` and `17dc4ff37491c8e61900fd83b5d31f0c`.
+The real-kit file is [`walking_param.yaml`](https://github.com/Hiwonder/ainex/blob/e8fe2a816797cf83054135160df5a82ec3596a69/src/ainex_driver/ainex_kinematics/config/walking_param.yaml) (blob `106db7619f167821b32fb1c3fa490f197c6a90f2`). Its `period_time` is **400 ms**. `move(1)` is a faster override of that period, **300 ms**, and it keeps this file's crouch and swing height. The bound is the same single-support knee stack as the table above: `|τ_static| + (I_link + J) A (2π / T)²`, viscous term left out. `J` is solved so that peak equals the limit. Both plant md5s stay `71b2c86d133ebc603f58b99c53e496f3` and `17dc4ff37491c8e61900fd83b5d31f0c`.
 
 ### What move(1) sets
 
@@ -275,15 +275,23 @@ Checkout [`Hiwonder/ainex`](https://github.com/Hiwonder/ainex) **`e8fe2a816797cf
 
 | Field | yaml | Line |
 |---|---|---|
+| `trajectory_step_s` | 0.008 s | 1 |
+| `servo_control_cycle` | 0.02 s | 2 |
 | `init_x_offset` | 0.0 m | 3 |
 | `init_y_offset` | −0.005 m | 4 |
 | `init_z_offset` | 0.025 m | 5 |
 | `hip_pitch_offset` | 15 deg | 9 |
-| `z_move_amplitude` | 0.02 m | 16 |
-| `x_move_amplitude` | 0.00 m | 14 |
 | `period_time` | 400 ms | 10 |
+| `dsp_ratio` | 0.2 | 12 |
+| `x_move_amplitude` | 0.00 m | 14 |
+| `z_move_amplitude` | 0.02 m | 16 |
+| `y_swap_amplitude` | 0.02 m | 18 |
 
-`move(1)` replaces the period, the double-support ratio, and `y_swap_amplitude`. It leaves `z_move_amplitude` and `init_z_offset` at these values. The docstring on `get_gait_param` (lines 54–55) says body height defaults to 0.015 m. That sentence matches `body_height_range` (line 28), not this file. The controller loads 0.025 m.
+`move(1)` writes period 300 ms, double-support ratio 0.2, and `y_swap_amplitude` 0.02 m. Against this file the ratio and the sway are already those values, so the override that changes the gait is the period, 400 ms to 300 ms. It leaves `z_move_amplitude` and `init_z_offset` alone. The docstring on `get_gait_param` (lines 54–55) says body height defaults to 0.015 m. That sentence matches `body_height_range` (line 28), not this file. The controller loads 0.025 m.
+
+`walking_param_sim.yaml` in the same directory (blob `dad8cc46244ea1b02a07c6ff57dbda2cc3ed2500`) is the sim file. Its `period_time` is **1500** (line 10), `dsp_ratio` is 0.3 (line 12), and `z_move_amplitude` is 0.015 (line 16). The bound below does not use it.
+
+`trajectory_step_s` and `servo_control_cycle` are the module's integration step and the servo period. The peak below is the continuous sinusoid at the gait period. Those clocks are not used as `T`.
 
 A different 300 ms path is the app callback `speed == 4` (`ainex_controller.py` lines 423–444). It sets `z_move_amplitude` to **0.015 m** and, when x is nonzero, forces `|x|` to 0.01 m or 0.012 m. That is not `move(1)`.
 
@@ -298,7 +306,7 @@ z_move_amplitude_shift_ = z_move_amplitude_ / 2;
 
 (lines 383–384). The .so follows that order. After the term that multiplies by the constant 0.04, it true-divides the next walking-param value, stores the quotient, and multiplies by one half for the shift. In the OP3 function that pair is the z amplitude, and the 0.04 term is the line just above it. `wSin` is `mag * sin(2π t / period − phase) + shift` (OP3 lines 244–246), phase `π/2`, and `z_move_period_time_ = period * ssp_ratio / 2` (line 345). Over the swing window the sine runs from −1 to +1 and back to −1. With `mag = H/2` and `shift = H/4` the endpoints are `−H/4` and the peak is `3H/4`, so the swing foot rises by **H** above the stance foot. The script checks that: commanded 0.020 m, endpoint −0.005 m, peak 0.015 m, rise **0.020 m**. The same check at 0.015 m returns a rise of 0.015 m. The internal half is the sine coefficient. It is not a 1 cm step.
 
-The sole rise used for `move(1)` on a freshly loaded yaml is therefore **2.0 cm**. The 0.5 cm and 1.0 cm rows are the same equation at those rises. They are not a second preset. The 1.5 cm row is the app `speed == 4` command.
+The sole rise for this yaml, at 400 ms and at the 300 ms `move(1)` override, is **2.0 cm**. The script checks both periods: commanded 0.020 m, endpoint −0.005 m, peak 0.015 m, rise 0.020 m. The 0.5 cm and 1.0 cm rows are the same equation at those rises. They are not a second preset. The 1.5 cm row is the app `speed == 4` command.
 
 ### Stance and the bound
 
@@ -306,16 +314,18 @@ The stand is that yaml run through the same IK as the OP3 section: AiNex lengths
 
 The lift search stays on the flexed side of that knee. Extending through straight is a second root that also raises the sole; a gait step does not take it. Achieved rise matches the target within 10⁻⁴ m.
 
-`α = A (2π / 0.300)²`. `J_max = (τ_limit − τ_ss) / α − I_link`. Limits are the thaw running rail **2.45 N·m** and the HX-35H static maximum. The product page lists that maximum as **35 kg·cm** at 11.1 V. `1 kgf·cm = 0.0980665 N·m`, so `35 × 0.0980665 = 3.4323 N·m`. The stall column uses **3.43 N·m**.
+`α = A (2π / T)²` with `T` the gait period. `J_max = (τ_limit − τ_ss) / α − I_link`. Limits are the thaw running rail **2.45 N·m** and the HX-35H static maximum. The product page lists that maximum as **35 kg·cm** at 11.1 V. `1 kgf·cm = 0.0980665 N·m`, so `35 × 0.0980665 = 3.4323 N·m`. The stall columns use **3.43 N·m**. Knee amplitude does not depend on the period. The 400 ms columns are the real-kit `period_time`. The 300 ms columns are `move(1)`.
 
-| Sole rise | What it is | Knee amplitude | `J` max at 2.45 N·m | `J` max at 3.43 N·m |
-|---|---|---|---|---|
-| 0.5 cm | same solve, not a preset | 0.246 rad | 0.01944 | 0.02852 |
-| 1.0 cm | same solve, not a preset | 0.350 rad | 0.01310 | 0.01948 |
-| 1.5 cm | app `speed == 4` | 0.441 rad | 0.01001 | 0.01508 |
-| 2.0 cm | yaml `z_move_amplitude`, `move(1)` default | 0.523 rad | **0.00814** | **0.01241** |
+| Sole rise | What it is | Knee amplitude | 400 ms `J` at 2.45 | 400 ms `J` at 3.43 | 300 ms `J` at 2.45 | 300 ms `J` at 3.43 |
+|---|---|---|---|---|---|---|
+| 0.5 cm | same solve, not a preset | 0.246 rad | 0.03608 | 0.05221 | 0.01944 | 0.02852 |
+| 1.0 cm | same solve, not a preset | 0.350 rad | 0.02480 | 0.03615 | 0.01310 | 0.01948 |
+| 1.5 cm | app `speed == 4` | 0.441 rad | 0.01930 | 0.02832 | 0.01001 | 0.01508 |
+| 2.0 cm | yaml `z_move_amplitude` | 0.523 rad | **0.01597** | **0.02357** | **0.00814** | **0.01241** |
 
-On the `move(1)` default the 300 ms single-support knee stays inside ±2.45 N·m only for armature **≤ 0.00814 kg·m²**, and inside the 3.43 N·m stall figure only for armature **≤ 0.01241 kg·m²**. With link inertia alone (armature 0) that 2 cm peak is 0.585 N·m, so the static pose is not what spends the rail. The converter value 0.01 is above the running-rail ceiling at 2.0 cm and below the stall ceiling. At the 1.5 cm app command the running-rail ceiling is 0.01001, so 0.01 sits on that rail.
+On the real-kit preset (400 ms, 2.0 cm rise, this crouch) the single-support knee stays inside ±2.45 N·m for armature **≤ 0.01597 kg·m²**, and inside the 3.43 N·m stall figure for armature **≤ 0.02357 kg·m²**. Link inertia alone at that period peaks at 0.390 N·m. The converter value 0.01 is under both 400 ms ceilings.
+
+`move(1)` is 300 ms. `gait_manager.py` lines 21 and 207–208 select `dsp_ratio[0]`, whose first entry is 300. On the same crouch and the same 2.0 cm rise the ceilings drop to **0.00814 kg·m²** at ±2.45 N·m and **0.01241 kg·m²** at 3.43 N·m. Link inertia alone peaks at 0.585 N·m. The converter value 0.01 is above the 300 ms running-rail ceiling and below the stall ceiling. At the 1.5 cm app command the 300 ms running-rail ceiling is 0.01001, so 0.01 sits on that rail.
 
 The three poses already in the knee table, at their published 2 cm amplitudes and the same 300 ms single-support formula:
 
@@ -335,4 +345,4 @@ Armature `0.01` is an uncited add, about 1.4× the reflected link inertia at the
 
 The OP3 yaml start, scaled to these leg lengths, holds the right knee at **0.336 N·m** in double support and **0.793 N·m** in single support. That is the stand, before the 2 cm lift. The 300 ms single-support stack with the full knee inertia of that lift is **2.567 N·m**, past ±2.45 N·m. The stand by itself is not. At armature 0.01 the same stack clears from 400 ms up, so the Controls step-time floor is >=400 ms. Armature 0.045, the Menagerie XM430 fit, leaves the 400 ms single-support peak at **4.700 N·m**. The HX-35H reflected inertia is still unpublished, and this pass does not change 0.01.
 
-For the kit `move(1)` default (300 ms, yaml swing whose peak sole rise is 2.0 cm, body height 0.025 m), the same single-support stack stays under ±2.45 N·m only up to armature **0.00814 kg·m²**, and under the 3.43 N·m stall figure only up to **0.01241 kg·m²**.
+The real-kit `walking_param.yaml` preset is 400 ms with a 2.0 cm sole rise and `init_z_offset` 0.025 m. That single-support stack stays under ±2.45 N·m up to armature **0.01597 kg·m²**, and under the 3.43 N·m stall figure up to **0.02357 kg·m²**. `move(1)` replaces the period with 300 ms and keeps the crouch and the rise, which tightens those ceilings to **0.00814** and **0.01241 kg·m²**.

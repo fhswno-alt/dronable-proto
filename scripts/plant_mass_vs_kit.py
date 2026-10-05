@@ -688,11 +688,16 @@ RAIL_NM = 2.45
 STALL_NM = 3.43
 KGF_CM_TO_NM = 0.0980665
 HX35H_STATIC_KGF_CM = 35.0
-# move(1) reads dsp_ratio[0] and the live walking param. walking_param.yaml is what
-# ainex_controller loads. Heights below are sole rises for the same knee solve;
-# 0.020 m is the yaml z_move_amplitude, 0.015 m is the separate app speed==4 command.
-KIT_PERIOD_S = 0.300
+# walking_param.yaml period_time is 400 ms. move(1) replaces it with dsp_ratio[0],
+# whose period is 300 ms. Both use the yaml crouch and z_move_amplitude.
+KIT_YAML_PERIOD_S = 0.400
+KIT_MOVE1_PERIOD_S = 0.300
+KIT_PERIOD_S = KIT_MOVE1_PERIOD_S
 KIT_DSP = 0.2
+KIT_TRAJECTORY_STEP_S = 0.008
+KIT_SERVO_CYCLE_S = 0.02
+# walking_param_sim.yaml is not the real-kit preset.
+KIT_SIM_PERIOD_S = 1.500
 KIT_Y_SWAP_M = 0.02
 KIT_Z_MOVE_M = 0.02
 KIT_Z_OFFSET_M = 0.025
@@ -1382,14 +1387,15 @@ def kit_walk_armature_bound(
     dynamics: dict[str, dict[str, object]],
     torques: dict[str, dict[str, dict[str, float]]],
 ) -> dict[str, object]:
-    """Max knee armature at 300 ms, single support, for the move(1) stand.
+    """Max knee armature at the yaml period and at move(1), single support.
 
     The stance is the walking-yaml IK (z offset, hip-pitch offset, x and y),
-    sinusoids at zero. Each row is the hip-held sole rise used by the knee
-    section. The yaml command and the app speed-4 command are two of those rows.
+    sinusoids at zero. The lift is the hip-held sole rise. The yaml period is
+    400 ms. move(1) replaces that period with 300 ms and keeps the same lift.
     """
-    rise = swing_peak_rise(KIT_Z_MOVE_M, KIT_PERIOD_S, KIT_DSP)
-    rise_015 = swing_peak_rise(0.015, KIT_PERIOD_S, KIT_DSP)
+    rise = swing_peak_rise(KIT_Z_MOVE_M, KIT_YAML_PERIOD_S, KIT_DSP)
+    rise_move1 = swing_peak_rise(KIT_Z_MOVE_M, KIT_MOVE1_PERIOD_S, KIT_DSP)
+    rise_015 = swing_peak_rise(0.015, KIT_MOVE1_PERIOD_S, KIT_DSP)
     pose = op3_pose(
         model,
         lengths,
@@ -1411,22 +1417,31 @@ def kit_walk_armature_bound(
         if abs(float(lift["height_err_m"])) > 1e-4:
             raise SystemExit(f"kit lift {height} residual {lift['height_err_m']}")
         amplitude = abs(float(lift["d_knee_rad"]))
-        alpha = amplitude * (2.0 * math.pi / KIT_PERIOD_S) ** 2
-        rail_j = armature_ceiling(RAIL_NM, static_ss, amplitude, link_i, KIT_PERIOD_S)
-        stall_j = armature_ceiling(STALL_NM, static_ss, amplitude, link_i, KIT_PERIOD_S)
+        by_period: dict[str, dict[str, float]] = {}
+        for period in (KIT_MOVE1_PERIOD_S, KIT_YAML_PERIOD_S):
+            alpha = amplitude * (2.0 * math.pi / period) ** 2
+            by_period[f"{period:.3f}"] = {
+                "period_s": period,
+                "alpha_rad_s2": alpha,
+                "j_max_rail": armature_ceiling(RAIL_NM, static_ss, amplitude, link_i, period),
+                "j_max_stall": armature_ceiling(STALL_NM, static_ss, amplitude, link_i, period),
+                "tau_at_j0_nm": static_ss + link_i * alpha,
+            }
+        move1 = by_period[f"{KIT_MOVE1_PERIOD_S:.3f}"]
         rows.append(
             {
                 "lift_m": height,
                 "achieved_m": float(lift["height_m"]),
                 "amplitude_rad": amplitude,
-                "alpha_rad_s2": alpha,
+                "alpha_rad_s2": move1["alpha_rad_s2"],
                 "I_link": link_i,
                 "static_ss_nm": static_ss,
                 "rail_nm": RAIL_NM,
                 "stall_nm": STALL_NM,
-                "j_max_rail": rail_j,
-                "j_max_stall": stall_j,
-                "tau_at_j0_nm": static_ss + link_i * alpha,
+                "j_max_rail": move1["j_max_rail"],
+                "j_max_stall": move1["j_max_stall"],
+                "tau_at_j0_nm": move1["tau_at_j0_nm"],
+                "periods": by_period,
                 "is_yaml_z_move": abs(height - KIT_Z_MOVE_M) < 1e-12,
                 "is_app_speed4_z": abs(height - 0.015) < 1e-12,
             }
@@ -1447,6 +1462,11 @@ def kit_walk_armature_bound(
             }
         )
     return {
+        "yaml_period_s": KIT_YAML_PERIOD_S,
+        "move1_period_s": KIT_MOVE1_PERIOD_S,
+        "trajectory_step_s": KIT_TRAJECTORY_STEP_S,
+        "servo_control_cycle_s": KIT_SERVO_CYCLE_S,
+        "sim_period_s": KIT_SIM_PERIOD_S,
         "period_s": KIT_PERIOD_S,
         "dsp_ratio": KIT_DSP,
         "y_swap_m": KIT_Y_SWAP_M,
@@ -1461,6 +1481,7 @@ def kit_walk_armature_bound(
         "stall_nm": STALL_NM,
         "rail_nm": RAIL_NM,
         "swing_rise_yaml": rise,
+        "swing_rise_move1": rise_move1,
         "swing_rise_0_015": rise_015,
         "snapshot": snapshot,
         "static_ds_nm": static_ds,
