@@ -1,0 +1,74 @@
+{
+  "plant": "mujoco/ainex_hiwonder/ainex_controls_m2_145.xml",
+  "plant_md5": "71b2c86d133ebc603f58b99c53e496f3",
+  "kit_cam_pos": [
+    0.05,
+    0.019,
+    0.007
+  ],
+  "kit_cam_fovy": 104.82,
+  "scene": "mujoco/room_kitchen.xml",
+  "phrase": "go to the kitchen",
+  "vx_fwd_cap": 0.056,
+  "vx_back_cap": 0.032,
+  "yaw_rate_cap": 0.25,
+  "resend_hz": 10.0,
+  "stand": {
+    "initial": {
+      "decision": "forward",
+      "reason": "backsplash is in the center of the frame",
+      "line": "backsplash is in the center of the frame",
+      "needs_map": false,
+      "bias": -0.014410995868117027,
+      "yellow_frac": 0.038603515625,
+      "centroid_u": 315.38848132220255,
+      "centroid_v": 142.02032211822245,
+      "kitchen_in_frame": true
+    },
+    "final": {
+      "decision": "forward",
+      "reason": "backsplash is in the center of the frame",
+      "line": "backsplash is in the center of the frame",
+      "needs_map": false,
+      "bias": -0.07478878298526795,
+      "yellow_frac": 0.04021484375,
+      "centroid_u": 296.06758944471426,
+      "centroid_v": 143.73652258377854,
+      "kitchen_in_frame": true
+    },
+    "note": "brief forward on a centered backsplash, then stop",
+    "min_up_z": 0.980716533560937,
+    "end_mode": "stand",
+    "fault": false,
+    "n_resends": 12,
+    "commands": [
+      {
+        "t0": 0.6000000000000004,
+        "t1": 1.7000000000000013,
+        "vx": 0.056,
+        "yaw_rate": 0.0,
+        "resends": 12
+      }
+    ]
+  },
+  "end_x_m": 0.03553805480210348,
+  "end_y_m": -0.022910730769465194,
+  "end_yaw_rad": -0.0024801077608748606,
+  "prefer_fail_empty_plant": {
+    "decision": "fail",
+    "reason": "no kitchen body in this scene",
+    "line": "Prefer FAIL: empty floor plant; kit_cam has no kitchen; no motion",
+    "needs_map": true,
+    "bias": 0.0,
+    "yellow_frac": 0.0,
+    "centroid_u": null,
+    "centroid_v": null,
+    "kitchen_in_frame": false
+  },
+  "stills": {
+    "before": "previews/find_kitchen_before.png",
+    "after": "previews/find_kitchen_after.png",
+    "prefer_fail": "previews/find_kitchen_prefer_fail.png"
+  },
+  "honesty": "Vision-reactive steer from one kit_cam frame. Not SLAM, not a map, not a waypoint planner, and not an arrival guarantee. The yellow backsplash blob picks the command. Projecting the named kitchen, table, and chair bodies only checks that the blob sits on the kitchen. A miss, a split blob, or an empty floor sends no vel."
+}

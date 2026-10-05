@@ -749,8 +749,12 @@ def _md5(path: Path) -> str:
     return hashlib.md5(path.read_bytes()).hexdigest()
 
 
-def _kit_cam_problems(model: mj.MjModel) -> list[str]:
-    """Hardware kit_cam on head_tilt_link. Site is not a body and not a contact."""
+def _kit_cam_problems(model: mj.MjModel, *, extra_sites: bool = False) -> list[str]:
+    """Hardware kit_cam on head_tilt_link. Site is not a body and not a contact.
+
+    extra_sites is for a vision include that adds named furniture sites.
+    kit_cam_site itself still has to match the frozen mount.
+    """
     problems: list[str] = []
     if model.ncam != 1:
         problems.append(f"expected 1 kit_cam, found {model.ncam}")
@@ -771,7 +775,7 @@ def _kit_cam_problems(model: mj.MjModel) -> list[str]:
     expected = np.array(KIT_CAM_AXES, dtype=np.float64).T
     if float(np.max(np.abs(mat - expected))) > 1e-5:
         problems.append("kit_cam xyaxes != 0 -1 0 0 0 1")
-    if model.nsite != 1:
+    if not extra_sites and model.nsite != 1:
         problems.append(f"expected 1 kit_cam_site, found {model.nsite} sites")
     sid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, "kit_cam_site")
     if sid < 0:
@@ -786,8 +790,17 @@ def _kit_cam_problems(model: mj.MjModel) -> list[str]:
     return problems
 
 
-def plant_problems(model: mj.MjModel, xml_path: Path = PLANT_XML) -> list[str]:
-    """Read-only freeze checks. Empty list means the loaded plant matches Hardware."""
+def plant_problems(
+    model: mj.MjModel,
+    xml_path: Path = PLANT_XML,
+    *,
+    extra_sites: bool = False,
+) -> list[str]:
+    """Read-only freeze checks. Empty list means the loaded plant matches Hardware.
+
+    extra_sites allows furniture sites on a vision include. The md5 is still
+    the frozen walk plant. Door and lever bodies still fail this check.
+    """
     problems: list[str] = []
     if xml_path.resolve() != PLANT_XML.resolve():
         problems.append(f"plant path {xml_path} is not the frozen M145 walk body")
@@ -799,7 +812,7 @@ def plant_problems(model: mj.MjModel, xml_path: Path = PLANT_XML) -> list[str]:
         low = name.lower()
         if "door" in low or "lever" in low:
             problems.append(f"door/lever body present: {name}")
-    problems.extend(_kit_cam_problems(model))
+    problems.extend(_kit_cam_problems(model, extra_sites=extra_sites))
     expected_kp = {
         "l_hip_yaw_pos": 40.0, "l_hip_roll_pos": 40.0, "l_hip_pitch_pos": 45.0,
         "l_knee_pos": 45.0, "l_ank_pitch_pos": 35.0, "l_ank_roll_pos": 35.0,
@@ -854,20 +867,39 @@ class PoseSample:
 
 
 class SteerSession:
-    """One frozen-plant sim. Commands go through `bus`; `step` is one 50 Hz tick."""
+    """One frozen-plant sim. Commands go through `bus`; `step` is one 50 Hz tick.
 
-    def __init__(self, *, video: bool) -> None:
+    The default load is the empty walk plant. `scene_xml` may be a vision
+    include of that same file (the kitchen room). It does not change the
+    plant, the caps, or the gait. `initial_yaw` is the freejoint heading,
+    not a camera-mount edit.
+    """
+
+    def __init__(
+        self,
+        *,
+        video: bool,
+        scene_xml: Path | None = None,
+        initial_yaw: float = 0.0,
+    ) -> None:
         problems = []
         if not PLANT_XML.is_file():
             problems.append(f"missing {PLANT_XML}")
         else:
             # Hash before load so a missing file is a clean refusal.
             pass
+        if scene_xml is not None and not scene_xml.is_file():
+            problems.append(f"missing scene {scene_xml}")
         if problems:
             raise SystemExit("refused: " + "; ".join(problems))
-        self.model = mj.MjModel.from_xml_path(str(PLANT_XML))
+        self.scene_xml = scene_xml
+        self._initial_yaw = float(initial_yaw)
+        load_path = PLANT_XML if scene_xml is None else scene_xml
+        self.model = mj.MjModel.from_xml_path(str(load_path))
         self.data = mj.MjData(self.model)
-        problems = plant_problems(self.model, PLANT_XML)
+        problems = plant_problems(
+            self.model, PLANT_XML, extra_sites=scene_xml is not None,
+        )
         if problems:
             raise SystemExit("refused: " + "; ".join(problems))
         self._force_checksum = float(np.sum(np.abs(self.model.actuator_forcerange)))
@@ -936,7 +968,8 @@ class SteerSession:
         self.data.qpos[:] = 0.0
         self.data.qvel[:] = 0.0
         self.data.qpos[2] = wg.COM_Z
-        self.data.qpos[3:7] = [1.0, 0.0, 0.0, 0.0]
+        half = 0.5 * self._initial_yaw
+        self.data.qpos[3:7] = [math.cos(half), 0.0, 0.0, math.sin(half)]
         for jn, val in self.q_stand.items():
             jid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, jn)
             if jid >= 0:
