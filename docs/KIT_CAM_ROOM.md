@@ -8,11 +8,11 @@ Furniture is CC0 textured meshes under `mujoco/assets/rooms/`. Licenses, authors
 
 | Scene | Bodies | What kit_cam is meant to see |
 |-------|--------|------------------------------|
-| `mujoco/room_kitchen.xml` | `kitchen`, `table`, `chair` | Counter, tall pantry, upright stove, and kettle facing +X. Dining table and chair sit off to image-right so they do not block the counter. Closed beige room, wood floor. No flat yellow backsplash |
-| `mujoco/room_bathroom.xml` | `bathroom`, `sink`, `toilet`, `bathtub` | Vanity and mirror on the left, basin on the vanity, toilet in the center, stylized tub on the right. Closed tile room, marble floor |
-| `mujoco/room_living.xml` | `living`, `tv` | Leather sofa (`living`) with the cushions toward +X; CRT television to image-right. Closed beige room |
-| `mujoco/room_bedroom.xml` | `bedroom`, `nightstand` | Gothic bed seen along its long side, headboard toward image-left; nightstand with an arm lamp. Closed plaster room |
-| `mujoco/room_entrance.xml` | `entrance`, `mat`, `shoes` | Smaller static panel in wood trim, hessian mat, rubber boots. No hinge, no lever, no latch |
+| `mujoco/room_kitchen.xml` | `kitchen`, `table`, `chair` | Counter, drawer-cabinet pantry, stove front, and kettle facing +X, in one run that does not overlap. Dining table and chair sit off to image-right. Closed beige room, wood floor. No flat yellow backsplash |
+| `mujoco/room_bathroom.xml` | `bathroom`, `sink`, `toilet`, `bathtub` | Vanity and mirror on the left, basin on the vanity, toilet beside the vanity, stylized tub along the right. Closed tile room, marble floor |
+| `mujoco/room_living.xml` | `living`, `tv`, `coffee` | Leather sofa (`living`) against the back wall, cushions toward +X; low coffee table in front; CRT screen to image-right. Closed beige room |
+| `mujoco/room_bedroom.xml` | `bedroom`, `nightstand` | Gothic bed against the back wall, long side toward +X, headboard and nightstand with a lamp toward image-left. Closed plaster room |
+| `mujoco/room_entrance.xml` | `entrance`, `mat`, `shoes`, `console` | Static panel in wood trim against the back wall, hessian mat, rubber boots, and a console to image-left. No hinge, no lever, no latch |
 
 Furniture sits in front of `kit_cam` look (+X), so a quiet stand sees the named room body.
 

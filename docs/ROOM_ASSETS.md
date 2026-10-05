@@ -23,6 +23,7 @@ The entrance panel file is named `panel.obj` so the loaded MuJoCo name does not 
 | `kitchen/table.obj` | Dining Table | Aron Łyczek | https://polyhaven.com/a/dining_table |
 | `kitchen/chair.obj` | Dining Chair 02 | James Ray Cock | https://polyhaven.com/a/dining_chair_02 |
 | `living/sofa.obj` | Sofa 03 | Fran Calvente | https://polyhaven.com/a/sofa_03 |
+| `living/coffee.obj` | Gothic Coffee Table | Ulan Cabanilla | https://polyhaven.com/a/gothic_coffee_table |
 | `living/tv.obj` | Television 01 | Gabriel Radić | https://polyhaven.com/a/Television_01 |
 | `bedroom/bed.obj` | Gothic Bed 01 | Kirill Sannikov | https://polyhaven.com/a/GothicBed_01 |
 | `bedroom/nightstand.obj` | Classic Nightstand 01 | Kirill Sannikov | https://polyhaven.com/a/ClassicNightstand_01 |
@@ -30,6 +31,7 @@ The entrance panel file is named `panel.obj` so the loaded MuJoCo name does not 
 | `bathroom/vanity.obj` | Painted Wooden Cabinet | Kirill Sannikov | https://polyhaven.com/a/painted_wooden_cabinet |
 | `bathroom/mirror.obj` | Ornate Mirror 01 | James Ray Cock | https://polyhaven.com/a/ornate_mirror_01 |
 | `entrance/panel.obj` | Large Castle Door (static frame only) | Tina | https://polyhaven.com/a/large_castle_door |
+| `entrance/console.obj` | Classic Console 01 | Kirill Sannikov | https://polyhaven.com/a/ClassicConsole_01 |
 
 Each OBJ has a matching PNG albedo next to it.
 
@@ -80,8 +82,8 @@ Only the bath shell and the water surface are in the repo, with the set's gradie
 |-----------|------------------|--------|------|
 | `entrance/boots.obj` | Rubber Boots | L | https://polyhaven.com/a/rubber_boots |
 
-There is no CC0 coat in this set. The shoes cue is the boots. The entrance panel is the same castle-door mesh, scaled down and set in static wood trim. Still no hinge, no lever, and no latch.
+There is no CC0 coat in this set. The shoes cue is the boots, and the hall table is Classic Console 01. Poly Haven has no flat interior door; the leaf is still the castle-door mesh, scaled down and set in static wood trim. Still no hinge, no lever, and no latch.
 
 ## Scene names
 
-Body and site names stay `kitchen`, `table`, `chair`, `bathroom`, `sink`, `toilet`, `living`, `tv`, `bedroom`, `nightstand`, `entrance`, `mat`. This pass adds `bathtub` and `shoes`. Each room adds a floor texture, side walls, a back wall, and a ceiling as extra worldbody geoms, using the CC0 textures above. The plant's checker plane is still in the included file. Furniture stays static. The entrance panel is still a visual frame: no hinge, no lever, no latch.
+Body and site names stay `kitchen`, `table`, `chair`, `bathroom`, `sink`, `toilet`, `living`, `tv`, `bedroom`, `nightstand`, `entrance`, `mat`. Later passes add `bathtub`, `shoes`, `coffee`, and `console`. Each room adds a floor texture, side walls, a back wall, and a ceiling as extra worldbody geoms, using the CC0 textures above. The plant's checker plane is still in the included file. Furniture stays static. The entrance panel is still a visual frame: no hinge, no lever, no latch.

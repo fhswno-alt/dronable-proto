@@ -21,7 +21,7 @@
     <material name="room_ceiling" texture="room_ceiling" texrepeat="2 2" specular="0.02" emission="0.62"/>
     <texture name="room_vanity" type="2d" file="assets/rooms/bathroom/vanity.png"/>
     <material name="room_vanity" texture="room_vanity" specular="0.16"/>
-    <mesh name="room_vanity" file="assets/rooms/bathroom/vanity.obj" scale="0.58 0.58 0.58"/>
+    <mesh name="room_vanity" file="assets/rooms/bathroom/vanity.obj" scale="0.66 0.66 0.66"/>
     <texture name="room_mirror" type="2d" file="assets/rooms/bathroom/mirror.png"/>
     <material name="room_mirror" texture="room_mirror" specular="0.45"/>
     <mesh name="room_mirror" file="assets/rooms/bathroom/mirror.obj"/>
@@ -56,25 +56,25 @@
     <geom name="room_wall_left" type="box" pos="0.86 1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_wall_right" type="box" pos="0.86 -1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_ceiling" type="box" pos="0.86 0 2.48" size="1.64 1.88 0.04" material="room_ceiling" contype="0" conaffinity="0"/>
-    <!-- Vanity left, toilet center, tub along the right. Static bodies. -->
+    <!-- Back-wall row: vanity left, toilet beside it, tub in the right corner. -->
     <body name="bathroom" pos="1.78 0.72 0">
       <site name="bathroom" pos="0.0 0 1.05" size="0.015" group="4" rgba="0.75 0.78 0.80 1"/>
-      <geom name="bathroom_tile" type="box" pos="0.48 0 1.05" size="0.02 0.42 0.75" material="room_tile" contype="0" conaffinity="0"/>
+      <geom name="bathroom_tile" type="box" pos="0.28 0 1.05" size="0.02 0.48 0.75" material="room_tile" contype="0" conaffinity="0"/>
       <geom name="bathroom_vanity" type="mesh" mesh="room_vanity" material="room_vanity" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
-      <geom name="bathroom_mirror" type="mesh" mesh="room_mirror" material="room_mirror" pos="0.42 0 1.22" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+      <geom name="bathroom_mirror" type="mesh" mesh="room_mirror" material="room_mirror" pos="0.22 0 1.28" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
     </body>
-    <body name="sink" pos="1.62 0.72 0.66">
+    <body name="sink" pos="1.62 0.72 0.76">
       <site name="sink" pos="0 0 0.2" size="0.012" group="4" rgba="0.70 0.72 0.74 1"/>
       <geom name="sink_basin" type="mesh" mesh="room_sink" material="room_sink" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
     </body>
-    <body name="toilet" pos="1.42 0.05 0">
+    <body name="toilet" pos="1.64 -0.08 0">
       <site name="toilet" pos="0 0 0.40" size="0.012" group="4" rgba="0.85 0.86 0.88 1"/>
       <geom name="toilet_bowl" type="mesh" mesh="room_bowl" material="room_bowl" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
       <geom name="toilet_tank" type="mesh" mesh="room_tank" material="room_tank" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
       <geom name="toilet_seat" type="mesh" mesh="room_seat" material="room_seat" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
       <geom name="toilet_handle" type="mesh" mesh="room_handle" material="room_handle" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
     </body>
-    <body name="bathtub" pos="1.40 -0.95 0">
+    <body name="bathtub" pos="1.55 -1.12 0">
       <site name="bathtub" pos="0 0 0.32" size="0.012" group="4" rgba="0.75 0.82 0.88 1"/>
       <geom name="bathtub_shell" type="mesh" mesh="room_tub" material="room_tub" contype="0" conaffinity="0"/>
       <geom name="bathtub_water" type="mesh" mesh="room_tub_water" material="room_tub" contype="0" conaffinity="0"/>

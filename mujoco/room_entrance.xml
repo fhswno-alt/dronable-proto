@@ -28,7 +28,10 @@
     <mesh name="room_boots" file="assets/rooms/entrance/boots.obj"/>
     <texture name="room_mat" type="2d" file="assets/rooms/textures/hessian_mat.png"/>
     <material name="room_mat" texture="room_mat" specular="0.02"/>
-    <mesh name="room_mat" file="assets/rooms/entrance/mat.obj"/>
+    <mesh name="room_mat" file="assets/rooms/entrance/mat.obj" scale="1.55 1.50 1"/>
+    <texture name="room_console" type="2d" file="assets/rooms/entrance/console.png"/>
+    <material name="room_console" texture="room_console" specular="0.14"/>
+    <mesh name="room_console" file="assets/rooms/entrance/console.obj" scale="0.72 0.72 0.72"/>
   </asset>
   <worldbody>
     <light name="room_key" pos="0.40 -0.1 2.05" dir="0.6 0.02 -1" diffuse="0.82 0.78 0.70"/>
@@ -41,21 +44,27 @@
     <geom name="room_wall_left" type="box" pos="0.86 1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_wall_right" type="box" pos="0.86 -1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_ceiling" type="box" pos="0.86 0 2.48" size="1.64 1.88 0.04" material="room_ceiling" contype="0" conaffinity="0"/>
-    <!-- Flat frame faces the robot. Static trim, no mechanism. -->
-    <body name="entrance" pos="1.95 0 0">
+    <!-- Leaf set against the back wall in static trim. Mat at the threshold.
+         Console and boots to image-left. No mechanism. -->
+    <body name="entrance" pos="2.28 0 0">
       <site name="entrance" pos="0 0 0.95" size="0.015" group="4" rgba="0.55 0.40 0.28 1"/>
       <geom name="entrance_panel" type="mesh" mesh="room_panel" material="room_panel" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
-      <geom name="entrance_jamb_left" type="box" pos="0.02 0.64 0.82" size="0.07 0.045 0.82" material="room_trim" contype="0" conaffinity="0"/>
-      <geom name="entrance_jamb_right" type="box" pos="0.02 -0.64 0.82" size="0.07 0.045 0.82" material="room_trim" contype="0" conaffinity="0"/>
-      <geom name="entrance_lintel" type="box" pos="0.02 0 1.66" size="0.07 0.68 0.055" material="room_trim" contype="0" conaffinity="0"/>
+      <geom name="entrance_jamb_left" type="box" pos="0.06 0.60 0.82" size="0.055 0.04 0.82" material="room_trim" contype="0" conaffinity="0"/>
+      <geom name="entrance_jamb_right" type="box" pos="0.06 -0.60 0.82" size="0.055 0.04 0.82" material="room_trim" contype="0" conaffinity="0"/>
+      <geom name="entrance_lintel" type="box" pos="0.06 0 1.66" size="0.055 0.64 0.045" material="room_trim" contype="0" conaffinity="0"/>
+      <geom name="entrance_sill" type="box" pos="0.06 0 0.035" size="0.055 0.56 0.03" material="room_trim" contype="0" conaffinity="0"/>
     </body>
-    <body name="mat" pos="1.05 0 0">
+    <body name="mat" pos="1.48 0.02 0">
       <site name="mat" pos="0 0 0.02" size="0.012" group="4" rgba="0.55 0.42 0.28 1"/>
       <geom name="mat_rug" type="mesh" mesh="room_mat" material="room_mat" contype="0" conaffinity="0"/>
     </body>
-    <body name="shoes" pos="1.15 0.48 0">
+    <body name="shoes" pos="1.48 0.42 0">
       <site name="shoes" pos="0 0 0.18" size="0.012" group="4" rgba="0.15 0.28 0.18 1"/>
       <geom name="shoes_pair" type="mesh" mesh="room_boots" material="room_boots" contype="0" conaffinity="0"/>
+    </body>
+    <body name="console" pos="1.78 1.16 0">
+      <site name="console" pos="0 0 0.5" size="0.012" group="4" rgba="0.45 0.32 0.18 1"/>
+      <geom name="console_top" type="mesh" mesh="room_console" material="room_console" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
     </body>
   </worldbody>
 </mujoco>

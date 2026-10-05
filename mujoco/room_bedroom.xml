@@ -18,7 +18,7 @@
     <material name="room_ceiling" texture="room_ceiling" texrepeat="2.4 2.4" specular="0.02" emission="0.62"/>
     <texture name="room_bed" type="2d" file="assets/rooms/bedroom/bed.png"/>
     <material name="room_bed" texture="room_bed" specular="0.08"/>
-    <mesh name="room_bed" file="assets/rooms/bedroom/bed.obj" scale="0.70 0.70 0.70"/>
+    <mesh name="room_bed" file="assets/rooms/bedroom/bed.obj" scale="0.82 0.82 0.82"/>
     <texture name="room_night" type="2d" file="assets/rooms/bedroom/nightstand.png"/>
     <material name="room_night" texture="room_night" specular="0.16"/>
     <mesh name="room_night" file="assets/rooms/bedroom/nightstand.obj"/>
@@ -37,15 +37,16 @@
     <geom name="room_wall_left" type="box" pos="0.86 1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_wall_right" type="box" pos="0.86 -1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_ceiling" type="box" pos="0.86 0 2.48" size="1.64 1.88 0.04" material="room_ceiling" contype="0" conaffinity="0"/>
-    <!-- Long side faces the robot so the headboard reads as a bed. -->
-    <body name="bedroom" pos="1.68 0.00 0">
-      <site name="bedroom" pos="-0.1 0.2 0.55" size="0.015" group="4" rgba="0.45 0.28 0.18 1"/>
+    <!-- Long side toward +X, headboard at +Y, back edge near the wall.
+         Nightstand sits against that headboard. -->
+    <body name="bedroom" pos="1.72 -0.12 0">
+      <site name="bedroom" pos="-0.15 0.35 0.55" size="0.015" group="4" rgba="0.45 0.28 0.18 1"/>
       <geom name="bedroom_headboard" type="mesh" mesh="room_bed" material="room_bed" contype="0" conaffinity="0"/>
     </body>
-    <body name="nightstand" pos="1.48 1.05 0">
+    <body name="nightstand" pos="1.55 0.95 0">
       <site name="nightstand" pos="0 0 0.5" size="0.012" group="4" rgba="0.40 0.26 0.14 1"/>
       <geom name="nightstand_top" type="mesh" mesh="room_night" material="room_night" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
-      <geom name="nightstand_lamp" type="mesh" mesh="room_lamp" material="room_lamp" pos="0 0 0.72" quat="0 0 0 1" contype="0" conaffinity="0"/>
+      <geom name="nightstand_lamp" type="mesh" mesh="room_lamp" material="room_lamp" pos="0 0 0.72" quat="1 0 0 0" contype="0" conaffinity="0"/>
     </body>
   </worldbody>
 </mujoco>

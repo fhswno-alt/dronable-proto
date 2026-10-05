@@ -122,9 +122,9 @@ Each scene includes the frozen walk plant and adds static CC0 furniture meshes i
 |-------|----------------|
 | `mujoco/room_kitchen.xml` | `kitchen`, `table`, `chair` |
 | `mujoco/room_bathroom.xml` | `bathroom`, `sink`, `toilet`, `bathtub` |
-| `mujoco/room_living.xml` | `living` (sofa), `tv` |
+| `mujoco/room_living.xml` | `living` (sofa), `tv`, `coffee` |
 | `mujoco/room_bedroom.xml` | `bedroom` (bed), `nightstand` |
-| `mujoco/room_entrance.xml` | `entrance` (visual frame only; no hinge, no lever, no latch), `mat`, `shoes` |
+| `mujoco/room_entrance.xml` | `entrance` (visual frame only; no hinge, no lever, no latch), `mat`, `shoes`, `console` |
 
 "Go to the kitchen" is a Prefer FAIL finder in `scripts/find_kitchen.py`. It runs only when `room_kitchen.xml` is loaded. It still looks for kitchen-like yellow. The mesh kitchen has no flat yellow backsplash, so that cue is gone. Thresholds were not retuned and the bars were not lowered. Until an AI retargets the finder, the mesh scene logs no yellow and sends no vel. The stand frame is painted into the explore map. If `query_kitchen_like_yellow()` is false, it sends no vel. If yellow was logged, each slice calls that query and `frontier_cells()` and sends half-cap `vel(+0.028, yaw)` toward the frontier nearest the logged camera ray. The live blob is the arrival fraction, not the command. The `up_z` 0.90 stop and the 1.10 m world-x budget are unchanged. `vx = 0` yaw is not used. The previous box-scene run logged yellow (max fraction **0.148**) and stopped Prefer FAIL `close`: end x **+1.076 m** (Δx **+1.074 m**), min up_z **0.979**, remaining **0.239 m**, settled yellow **0.000**. The gap is inside 0.25 m and the frame is not half backsplash, so it is not arrival. Those numbers were not re-run on the mesh kitchen. The 1.2 s hop remains a self-test at the full cap (end x +0.036 m). The empty plant still sends no velocity. See `docs/FIND_KITCHEN.md`.
 
