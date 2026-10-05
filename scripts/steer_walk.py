@@ -74,8 +74,9 @@ Gait: scripts/walk_gait_ainex.py gait_targets. Forward uses a shorter cadence
 than Gate D CSF50 (that basin crawled at ~1 cm/s): T=0.55 s, hip amp 0.24 rad,
 DS=0.1375 s, stance-slip damper 25 N/(m/s) instead of CSF50's 115. Lateral
 COM shift is 0.16 rad (was 0.275) so the torso does not waddle as hard.
-Forward swing adds LOOK_KNEE_LIFT at mid-swing and scales the contralateral
-shoulder pitch by LOOK_ARM_SCALE, inside the existing ±0.7 Nm arm clip.
+Forward swing adds LOOK_KNEE_LIFT at mid-swing. While yaw is near zero the
+contralateral shoulder is slewed up to LOOK_ARM_SCALE_STRAIGHT; a yaw command
+slews it back to LOOK_ARM_SCALE. Both stay inside the existing ±0.7 Nm clip.
 Reverse keeps the un-lifted knee: a shorter DS or more swing dorsiflex
 dropped the retreat under up_z 0.90. CP swing and mild stance VIK stay on.
 Feet, friction, kp, and ±2.1 Nm are unchanged; the legs still pin at 2.1 Nm.
@@ -214,15 +215,17 @@ LOOK_COM_SHIFT = 0.16
 # Added at mid-swing on top of KNEE_SWING, forward only. Ankle pitch moves
 # with the knee so the sole stays roughly flat while the leg shortens.
 LOOK_KNEE_LIFT = 0.38
-# gait_targets already swings the opposite shoulder. 1.0 is a few degrees
-# and reads as frozen. 3.4 is about ±0.11 rad of shoulder travel and still
-# looks nearly still from the side camera, but it stays upright.
-# 6.0 (peak-to-peak ~0.38 rad, still inside ±0.7 Nm) tips a cold left turn
-# (min up_z 0.42, then -1). Using 6.0 only while yaw is zero and 3.4 during
-# a yaw command pushes the post-straight right arc past 90 deg or tips
-# nav-multi. Do not raise this without re-running cold left, nav-right,
-# and nav-multi.
+# gait_targets already swings the opposite shoulder. 1.0 is a few degrees.
+# 3.4 is about ±0.11 rad and still looks frozen from the side, but a cold
+# left turn at 6.0 tips (min up_z 0.42, then -1). Straight walking slews
+# up to 11.0 (measured shoulder peak-to-peak about 0.67 rad, torque still
+# clipped at ±0.7 Nm) and a yaw command slews back to 3.4. 11.0 keeps
+# nav-left near +61 deg and the chained right arc near -90 deg. 11.4 tips
+# nav-multi. 9.0 tips the left arc. Do not nudge this without re-running
+# smoke, nav-left, nav-right, and nav-multi.
 LOOK_ARM_SCALE = 3.4
+LOOK_ARM_SCALE_STRAIGHT = 11.0
+LOOK_ARM_SLEW = 8.0  # scale units per second
 # Airborne hip yaw at full yaw stick (rad). +joint toes the foot right.
 LOOK_TOE_LEFT = 0.10
 LOOK_TOE_RIGHT = 0.12
@@ -1006,6 +1009,7 @@ class SteerSession:
         }
         self.q_stand = wg.gait_targets(0.0, False, 0.0)
         self.gait_t = 0.0
+        self._arm_scale = LOOK_ARM_SCALE
         self._gait_live = False
         self._blend = 0.0
         self._q_live: dict[str, float] | None = None
@@ -1150,7 +1154,27 @@ class SteerSession:
             qdes[name] = qdes.get(name, 0.0) + scale * yaw_cmd
         if direction > 0 and amp > 0.02:
             style_forward_step(qdes, self.gait_t, yaw_rate)
+            self._slew_arm_scale(qdes, yaw_rate)
+        else:
+            self._arm_scale = LOOK_ARM_SCALE
         return qdes
+
+    def _slew_arm_scale(self, qdes: dict[str, float], yaw_rate: float) -> None:
+        """Larger contralateral swing while going straight. Yaw keeps 3.4.
+
+        style_forward_step already applied LOOK_ARM_SCALE. Undo that, then
+        slew. A step from 11 to 3.4 at the yaw edge is what pushed the
+        post-straight right arc over. The slew is not a torque-limit change.
+        """
+        raw_l = qdes.get("l_sho_pitch", 0.0) / LOOK_ARM_SCALE
+        raw_r = qdes.get("r_sho_pitch", 0.0) / LOOK_ARM_SCALE
+        target = LOOK_ARM_SCALE_STRAIGHT if abs(yaw_rate) < 1e-3 else LOOK_ARM_SCALE
+        step = LOOK_ARM_SLEW * CTRL_DT
+        self._arm_scale += max(-step, min(step, target - self._arm_scale))
+        qdes["l_sho_pitch"] = raw_l * self._arm_scale
+        qdes["r_sho_pitch"] = raw_r * self._arm_scale
+        qdes["l_el_pitch"] = 0.32 + 0.10 * abs(qdes["l_sho_pitch"])
+        qdes["r_el_pitch"] = 0.32 + 0.10 * abs(qdes["r_sho_pitch"])
 
     def _reverse_phase_stands(self) -> bool:
         """Reverse phases where an immediate blend already ends in stand.
@@ -1678,7 +1702,8 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
         f"({TURN_STEP_ASYM_ESTABLISHED:.2f} after {ESTABLISHED_GAIT_S:.0f} s) "
         f"and {LOOK_RIGHT_STEP_ASYM:.2f} on a right command. "
         f"Forward swing adds {LOOK_KNEE_LIFT:.2f} rad of knee flexion at mid-swing "
-        f"and scales contralateral shoulder pitch by {LOOK_ARM_SCALE:.1f}. "
+        f"and scales contralateral shoulder pitch by {LOOK_ARM_SCALE_STRAIGHT:.1f} "
+        f"while going straight, slewed back to {LOOK_ARM_SCALE:.1f} while yaw is commanded. "
         f"Lateral COM shift is {LOOK_COM_SHIFT:.2f} rad. "
         "Reverse does not take the knee lift or the arm scale. "
         f"Measured motion Δx={dx_fwd:+.3f} m, mean body vx={mean_vx:+.3f} m/s "
@@ -1801,7 +1826,7 @@ def run_demo(
     print(
         "[steer] gait=forward T=0.55 hip=0.24 ds=0.1375 plant_kd=25 "
         f"com_shift={LOOK_COM_SHIFT:.2f} knee_lift={LOOK_KNEE_LIFT:.2f} "
-        f"arm_scale={LOOK_ARM_SCALE:.1f} "
+        f"arm_scale={LOOK_ARM_SCALE_STRAIGHT:.1f}/{LOOK_ARM_SCALE:.1f} "
         f"toe_L={LOOK_TOE_LEFT:.2f} toe_R={LOOK_TOE_RIGHT:.2f} "
         f"amp=|vx|/{GAIT_AMP_VX:.3f} "
         "assist=OFF ankle_cop=ON cp_swing=ON stance_vik=ON residual=OFF door=OFF"
@@ -2020,6 +2045,11 @@ def test_bus() -> list[str]:
     _expect(q_step["l_hip_yaw"] < -0.02, "left swing foot is not toed left", failures)
     _expect(abs(q_step["r_hip_yaw"]) < 1e-9, "stance foot yawed during a left command", failures)
     _expect(abs(q_step["l_sho_pitch"]) > abs(q_plain["l_sho_pitch"]) * 2.0, "arm swing stayed frozen", failures)
+    _expect(
+        LOOK_ARM_SCALE_STRAIGHT > LOOK_ARM_SCALE and LOOK_ARM_SLEW > 0.0,
+        "straight arm scale is not above the yaw scale",
+        failures,
+    )
     q_right = dict(q_plain)
     style_forward_step(q_right, gait_t, -YAW_RATE_CAP)
     _expect(q_right["l_hip_yaw"] > 0.02, "left swing foot is not toed right", failures)
