@@ -546,3 +546,11 @@ The shipped move is 150 ms. None of these rows reaches 0.62 rad, both
 soles at about 2 cm, and 7 cm/s together. The 100 ms move is the one
 that spends the ±2.45 Nm rail while upright. Soft-pass is off. This is
 not a kit walk.
+
+The clips are the 1.00 s row with this 150 ms move. Forward 8.400 s
+stays up (Δx −0.1 cm, mean vx −0.3 cm/s, pooled sole p90 1.4 cm,
+min up_z 0.953, peak torque 2.45 Nm, sat_rate 0.08). A run past the
+clip tips at 11.76 s. Close-up 7.600 s stays up through the stop
+(forward Δx +12.1 cm, mean vx +2.2 cm/s, stop Δx −1.7 cm, min up_z
+0.993, peak torque 2.34 Nm). Constrained Baseline, yuv420p,
+`+faststart`.
