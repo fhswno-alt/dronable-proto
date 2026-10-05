@@ -51,7 +51,14 @@ Clamps (what we actually apply — not the raw request):
                 left command drops that bias and uses a slightly longer
                 outside step. Cold-start turns finish before that gate.
                 vx and yaw_rate are applied together; the nav clips walk,
-                arc, walk, then stop.
+                arc, walk, then stop. The multi clip chains both claimed
+                holds without stopping between them: forward, left arc
+                (12.5 s, the nav-left window), forward, right arc (11 s,
+                the nav-right window), forward, then stop. Right-then-left
+                and a second arc of the same sign at these lengths do not
+                steer; those orders are Prefer FAIL and are not the clip.
+                A left hold of 14 s that starts at 15 s tips on the resume
+                and is not used.
   Deadband and slew reuse TELEOP_DEADBAND (0.08) and TELEOP_RATE_LIMIT (1.5)
   from scripts/walk_gait.py. Those constants are joint-space (rad, rad/s).
   Velocity uses the same fraction of each cap:
@@ -96,6 +103,7 @@ Run:
   MUJOCO_GL=osmesa python scripts/steer_walk.py
   MUJOCO_GL=osmesa python scripts/steer_walk.py --clip nav-left
   MUJOCO_GL=osmesa python scripts/steer_walk.py --clip nav-right
+  MUJOCO_GL=osmesa python scripts/steer_walk.py --clip nav-multi
   MUJOCO_GL=osmesa python scripts/steer_walk.py --no-video
   MUJOCO_GL=glfw  python scripts/steer_walk.py --view
   python scripts/steer_walk.py --self-test
@@ -515,6 +523,56 @@ NAV_RIGHT_SCRIPT: tuple[DemoSegment, ...] = (
     DemoSegment(33.0, "vel", VX_FWD_CAP, 0.0, "resume"),
     DemoSegment(35.5, "stop", 0.0, 0.0, "stop"),
 )
+# Claimed yaw holds, measured on the single-arc clips above.
+# Right: 16→27 s = 11.0 s, about −77.3°. Left: 16→28.5 s = 12.5 s, about +75.7°.
+# Approach 15 s and resume 6 s are the same lengths as those clips.
+# A left arc that starts at 15 s and holds yaw for 14 s tips on the resume.
+CLAIMED_RIGHT_ARC_S = 11.0
+CLAIMED_LEFT_ARC_S = 12.5
+CLAIMED_APPROACH_S = 15.0
+CLAIMED_RESUME_S = 6.0
+CLAIMED_STOP_HOLD_S = 2.5
+# Continuous furniture path. Same caps, same phase lengths, no stop until
+# the intentional stand at the end. Left arc first, then the right arc.
+# Measured on this plant, and not used as the clip:
+#   right then right (second hold 11 s) tips.
+#   left then left (second hold 12.5 s) does not yaw, then tips.
+#   right then left stays upright but the left hold does not yaw left.
+NAV_MULTI_SCRIPT: tuple[DemoSegment, ...] = (
+    DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+    DemoSegment(1.0 + CLAIMED_APPROACH_S, "vel", VX_FWD_CAP, 0.0, "forward"),
+    DemoSegment(
+        1.0 + CLAIMED_APPROACH_S + CLAIMED_LEFT_ARC_S,
+        "vel", VX_FWD_CAP, YAW_RATE_CAP, "arc-left",
+    ),
+    DemoSegment(
+        1.0 + CLAIMED_APPROACH_S + CLAIMED_LEFT_ARC_S + CLAIMED_RESUME_S,
+        "vel", VX_FWD_CAP, 0.0, "mid",
+    ),
+    DemoSegment(
+        1.0 + CLAIMED_APPROACH_S + CLAIMED_LEFT_ARC_S + CLAIMED_RESUME_S + CLAIMED_RIGHT_ARC_S,
+        "vel", VX_FWD_CAP, -YAW_RATE_CAP, "arc-right",
+    ),
+    DemoSegment(
+        1.0
+        + CLAIMED_APPROACH_S
+        + CLAIMED_LEFT_ARC_S
+        + CLAIMED_RESUME_S
+        + CLAIMED_RIGHT_ARC_S
+        + CLAIMED_RESUME_S,
+        "vel", VX_FWD_CAP, 0.0, "resume",
+    ),
+    DemoSegment(
+        1.0
+        + CLAIMED_APPROACH_S
+        + CLAIMED_LEFT_ARC_S
+        + CLAIMED_RESUME_S
+        + CLAIMED_RIGHT_ARC_S
+        + CLAIMED_RESUME_S
+        + CLAIMED_STOP_HOLD_S,
+        "stop", 0.0, 0.0, "stop",
+    ),
+)
 CLIP_SCRIPTS: dict[str, tuple[DemoSegment, ...]] = {
     "forward": DEMO_SCRIPT,
     "stop": STOP_SCRIPT,
@@ -523,6 +581,7 @@ CLIP_SCRIPTS: dict[str, tuple[DemoSegment, ...]] = {
     "turn-right": RIGHT_TURN_SCRIPT,
     "nav-left": NAV_LEFT_SCRIPT,
     "nav-right": NAV_RIGHT_SCRIPT,
+    "nav-multi": NAV_MULTI_SCRIPT,
 }
 
 
@@ -790,6 +849,8 @@ class PoseSample:
     applied_yaw_rate: float
     mode: ModeName
     body_vx: float
+    leg_tau: float
+    cop_out: float
 
 
 class SteerSession:
@@ -902,7 +963,7 @@ class SteerSession:
         self._update_bias(now)
         margin = self._support_margin()
         up_z = self._up_z()
-        self._track_torques()
+        leg_tau = self._track_torques()
         self._track_cop_excursion()
         reason = self._fault_reason(now, up_z, margin)
         if reason is not None and not self.bus.fault:
@@ -925,6 +986,8 @@ class SteerSession:
                 applied_yaw_rate=report.applied_yaw_rate,
                 mode=report.mode,
                 body_vx=body_vx,
+                leg_tau=leg_tau,
+                cop_out=self.cop_excursion,
             )
         )
         self.min_margin = min(self.min_margin, margin)
@@ -1201,14 +1264,20 @@ class SteerSession:
         self.cop_excursion = frame_max
         self.max_cop_excursion = max(self.max_cop_excursion, frame_max)
 
-    def _track_torques(self) -> None:
+    def _track_torques(self) -> float:
+        """Peak |τ| this tick. Returns the leg peak; arm peak stays on the session."""
+        leg = 0.0
+        arm = 0.0
         for i in range(self.model.nu):
             name = mj.mj_id2name(self.model, mj.mjtObj.mjOBJ_ACTUATOR, i) or ""
             tau = abs(float(self.data.actuator_force[i]))
             if any(tok in name for tok in ("hip_", "knee", "ank_")):
-                self.max_leg_tau = max(self.max_leg_tau, tau)
+                leg = max(leg, tau)
             elif name.startswith(("l_sho", "r_sho", "l_el", "r_el", "l_gripper", "r_gripper", "head_")):
-                self.max_arm_tau = max(self.max_arm_tau, tau)
+                arm = max(arm, tau)
+        self.max_leg_tau = max(self.max_leg_tau, leg)
+        self.max_arm_tau = max(self.max_arm_tau, arm)
+        return leg
 
     def _safety_ceiling(self) -> float:
         """Fraction of the commanded velocity the plant may use this tick.
@@ -1286,6 +1355,111 @@ def _segment_window(
     return [s for s in samples if t0 - 1e-9 <= s.t < t1 - 1e-9]
 
 
+def _wrap_pi(delta: float) -> float:
+    return (delta + math.pi) % (2.0 * math.pi) - math.pi
+
+
+@dataclass(frozen=True)
+class SegmentStat:
+    """One scripted window. dx_heading_m is travel along the heading at t0."""
+
+    label: str
+    t0_s: float
+    t1_s: float
+    dx_m: float
+    dy_m: float
+    dx_heading_m: float
+    dyaw_rad: float
+    mean_body_vx_m_s: float
+    mean_yaw_rate_rad_s: float
+    peak_leg_tau_nm: float
+    min_up_z: float
+    min_margin_m: float
+    max_cop_outside_m: float
+    tip: bool
+
+
+def segment_stats(
+    session: SteerSession, script: tuple[DemoSegment, ...],
+) -> tuple[SegmentStat, ...]:
+    t0 = 0.0
+    rows: list[SegmentStat] = []
+    for seg in script:
+        window = _segment_window(session.samples, t0, seg.t_end)
+        if len(window) >= 2:
+            dx = window[-1].x - window[0].x
+            dy = window[-1].y - window[0].y
+            dyaw = _wrap_pi(window[-1].yaw - window[0].yaw)
+            dt = window[-1].t - window[0].t
+            mean_yaw = dyaw / dt if dt > 1e-6 else 0.0
+            mean_vx = float(np.mean([s.body_vx for s in window]))
+            heading = _heading_travel(window)
+            min_up = min(s.up_z for s in window)
+            min_margin = min(s.margin for s in window)
+            peak_tau = max(s.leg_tau for s in window)
+            cop_out = max(s.cop_out for s in window)
+        else:
+            dx = dy = dyaw = mean_yaw = mean_vx = heading = 0.0
+            min_up = 1.0
+            min_margin = 0.0
+            peak_tau = 0.0
+            cop_out = 0.0
+        rows.append(
+            SegmentStat(
+                label=seg.label,
+                t0_s=t0,
+                t1_s=seg.t_end,
+                dx_m=float(dx),
+                dy_m=float(dy),
+                dx_heading_m=float(heading),
+                dyaw_rad=float(dyaw),
+                mean_body_vx_m_s=float(mean_vx),
+                mean_yaw_rate_rad_s=float(mean_yaw),
+                peak_leg_tau_nm=float(peak_tau),
+                min_up_z=float(min_up),
+                min_margin_m=float(min_margin),
+                max_cop_outside_m=float(cop_out),
+                tip=bool(min_up < 0.85),
+            )
+        )
+        t0 = seg.t_end
+    return tuple(rows)
+
+
+def _multi_honesty(stats: tuple[SegmentStat, ...]) -> str:
+    parts: list[str] = []
+    for row in stats:
+        if row.label == "stand":
+            continue
+        parts.append(
+            f"{row.label} Δx={row.dx_heading_m:+.3f} m "
+            f"(world {row.dx_m:+.3f},{row.dy_m:+.3f}) "
+            f"Δyaw={math.degrees(row.dyaw_rad):+.2f} deg "
+            f"mean vx={row.mean_body_vx_m_s:+.3f} m/s "
+            f"mean yaw={row.mean_yaw_rate_rad_s:+.3f} rad/s "
+            f"peak τ={row.peak_leg_tau_nm:.2f} Nm "
+            f"min up_z={row.min_up_z:.3f}"
+        )
+    text = " Multi-arc (claimed holds, no stop between arcs): " + "; ".join(parts) + "."
+    tipped = [row.label for row in stats if row.tip and row.label != "stand"]
+    if tipped:
+        text += (
+            " Prefer FAIL: "
+            + ", ".join(tipped)
+            + " tipped (up_z < 0.85). That segment is not claimed."
+        )
+    else:
+        text += (
+            f" Yaw holds stay at the claimed windows "
+            f"(left {CLAIMED_LEFT_ARC_S:.1f} s, then right {CLAIMED_RIGHT_ARC_S:.1f} s). "
+            "Prefer FAIL, not this clip: a second right hold of 11 s tips; "
+            "a second left hold of 12.5 s does not yaw and then tips; "
+            "right-then-left stays upright but the left hold does not yaw left. "
+            "The 14 s left that starts at 15 s is not this path."
+        )
+    return text
+
+
 @dataclass
 class RunSummary:
     plant: str
@@ -1326,6 +1500,7 @@ class RunSummary:
     dx_resume_m: float
     mean_body_vx_turn: float
     mean_body_vx_resume: float
+    segment_stats: tuple[SegmentStat, ...]
     honesty: str
 
 
@@ -1347,7 +1522,7 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
     straight = bounds.get("forward")
     straight_w = _segment_window(session.samples, straight[0], straight[1]) if straight is not None else []
     dyaw_fwd = (straight_w[-1].yaw - straight_w[0].yaw) if len(straight_w) >= 2 else 0.0
-    dyaw_fwd = (dyaw_fwd + math.pi) % (2.0 * math.pi) - math.pi
+    dyaw_fwd = _wrap_pi(dyaw_fwd)
     if straight_w:
         yaw_lo = min(s.yaw for s in straight_w)
         yaw_hi = max(s.yaw for s in straight_w)
@@ -1356,8 +1531,7 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
         yaw_hi = 0.0
     dyaw = (turn[-1].yaw - turn[0].yaw) if len(turn) >= 2 else 0.0
     dx_turn = (turn[-1].x - turn[0].x) if len(turn) >= 2 else 0.0
-    # Wrap yaw delta to [-pi, pi]
-    dyaw = (dyaw + math.pi) % (2.0 * math.pi) - math.pi
+    dyaw = _wrap_pi(dyaw)
     if len(turn) >= 2 and (turn[-1].t - turn[0].t) > 1e-6:
         mean_yaw_rate = dyaw / (turn[-1].t - turn[0].t)
     else:
@@ -1372,10 +1546,11 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
     mean_vx_resume = float(np.mean([s.body_vx for s in resume])) if resume else 0.0
     dyaw_end = 0.0
     if session.samples:
-        dyaw_end = session.samples[-1].yaw - session.samples[0].yaw
-        dyaw_end = (dyaw_end + math.pi) % (2.0 * math.pi) - math.pi
+        dyaw_end = _wrap_pi(session.samples[-1].yaw - session.samples[0].yaw)
     tip = bool(session.min_up_z < 0.85 or (session.bus.fault and "tip" in session.bus.fault_reason))
     cop_in_box = bool(session.max_cop_excursion <= 0.001)
+    stats = segment_stats(session, script)
+    multi = any(seg.label.startswith("arc-") for seg in script)
     tail = session.samples[-1] if session.samples else None
     honesty = (
         "applied_vx is the clamped command, not odometry. "
@@ -1398,9 +1573,15 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
         f"{math.degrees(dyaw_fwd):+.2f} deg; yaw during that window "
         f"{math.degrees(yaw_lo):+.1f} to {math.degrees(yaw_hi):+.1f} deg. "
         f"Heading at the end of the clip is {math.degrees(dyaw_end):+.2f} deg from the start. "
-        f"Turn-window Δyaw={math.degrees(dyaw):+.2f} deg "
-        f"(mean yaw rate {mean_yaw_rate:+.3f} rad/s, cap ±{YAW_RATE_CAP:.2f}). "
-        f"tip={tip}; CoP in box={cop_in_box} "
+        + (
+            "Per-segment Δyaw is listed below; this clip has no single turn label. "
+            if multi
+            else (
+                f"Turn-window Δyaw={math.degrees(dyaw):+.2f} deg "
+                f"(mean yaw rate {mean_yaw_rate:+.3f} rad/s, cap ±{YAW_RATE_CAP:.2f}). "
+            )
+        )
+        + f"tip={tip}; CoP in box={cop_in_box} "
         f"(outside {session.max_cop_excursion:.4f} m); "
         f"peak leg torque={session.max_leg_tau:.2f} Nm (limit {LEG_TAU}). "
         "Stance-slip damper is 25 N/(m/s) while walking forward, down from the "
@@ -1410,7 +1591,7 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
         "at most one step first if that phase would pitch. "
         "Foot box, friction, kp, and ±2.1 Nm are unchanged."
     )
-    if resume:
+    if resume and not multi:
         honesty += (
             f" Nav: approach Δx={dx_fwd:+.3f} m (mean body vx {mean_vx:+.3f} m/s), "
             f"turn Δyaw={math.degrees(dyaw):+.1f} deg "
@@ -1418,6 +1599,8 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
             f"resume along heading {dx_resume:+.3f} m "
             f"(mean body vx {mean_vx_resume:+.3f} m/s)."
         )
+    if multi:
+        honesty += _multi_honesty(stats)
     if session.bus.fault:
         honesty += f" FAULT: {session.bus.fault_reason}."
     return RunSummary(
@@ -1459,6 +1642,7 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
         dx_resume_m=float(dx_resume),
         mean_body_vx_turn=float(mean_vx_turn),
         mean_body_vx_resume=float(mean_vx_resume),
+        segment_stats=stats,
         honesty=honesty,
     )
 
@@ -1530,6 +1714,15 @@ def run_demo(
     session.assert_plant_unchanged()
     summary = summarize(session, script)
     print("[steer] " + summary.honesty)
+    for row in summary.segment_stats:
+        print(
+            f"[steer] seg {row.label} t={row.t0_s:.2f}..{row.t1_s:.2f} "
+            f"Δx={row.dx_heading_m:+.3f} Δyaw={math.degrees(row.dyaw_rad):+.2f} "
+            f"vx={row.mean_body_vx_m_s:+.3f} yaw={row.mean_yaw_rate_rad_s:+.3f} "
+            f"τ={row.peak_leg_tau_nm:.2f} up={row.min_up_z:.3f} "
+            f"margin={row.min_margin_m:+.3f} cop={row.max_cop_outside_m:.4f} "
+            f"tip={row.tip}"
+        )
     if log_path is not None:
         _write_log(log_path, session, summary, refusals)
     if summary_path is not None:
@@ -2019,6 +2212,87 @@ def test_nav() -> list[str]:
     return failures
 
 
+def _arc_holds_both(session: SteerSession, t0: float, t1: float, sign: float) -> bool:
+    """The arc window must be holding forward vx and yaw of the commanded sign."""
+    lo = t0 + 1.0
+    hi = t1 - 0.2
+    held = [
+        s for s in session.samples
+        if lo <= s.t < hi and s.mode == "move"
+        and s.applied_vx > 0.5 * VX_FWD_CAP
+        and s.applied_yaw_rate * sign > 0.5 * YAW_RATE_CAP
+    ]
+    return len(held) > 10
+
+
+def test_nav_multi() -> list[str]:
+    """Forward, claimed left arc, forward, claimed right arc, forward, stop.
+
+    Yaw holds are the single-arc windows (left 12.5 s, right 11.0 s).
+    Right-then-left and a second same-sign arc at these lengths are
+    Prefer FAIL and are not run. The 14 s left that starts at 15 s is not run.
+    """
+    failures: list[str] = []
+    _expect(VX_FWD_CAP == 0.056 and VX_BACK_CAP == 0.032, "velocity caps moved", failures)
+    _expect(YAW_RATE_CAP == 0.25, "yaw cap moved", failures)
+    _expect(_md5(PLANT_XML) == PLANT_MD5, "plant md5 changed", failures)
+    bounds = script_bounds(NAV_MULTI_SCRIPT)
+    right_s = bounds["arc-right"][1] - bounds["arc-right"][0]
+    left_s = bounds["arc-left"][1] - bounds["arc-left"][0]
+    _expect(abs(right_s - CLAIMED_RIGHT_ARC_S) < 1e-9, f"right hold {right_s:.3f} s", failures)
+    _expect(abs(left_s - CLAIMED_LEFT_ARC_S) < 1e-9, f"left hold {left_s:.3f} s", failures)
+    _expect(left_s < 13.0, f"left hold {left_s:.3f} s is outside the claimed 12.5 s window", failures)
+    approach_s = bounds["forward"][1] - bounds["forward"][0]
+    mid_s = bounds["mid"][1] - bounds["mid"][0]
+    resume_s = bounds["resume"][1] - bounds["resume"][0]
+    _expect(abs(approach_s - CLAIMED_APPROACH_S) < 1e-9, f"approach {approach_s:.3f} s", failures)
+    _expect(abs(mid_s - CLAIMED_RESUME_S) < 1e-9, f"mid {mid_s:.3f} s", failures)
+    _expect(abs(resume_s - CLAIMED_RESUME_S) < 1e-9, f"resume {resume_s:.3f} s", failures)
+    _expect(abs(bounds["arc-left"][0] - 16.0) < 1e-9, "left arc left the claimed 16 s start", failures)
+    _expect(
+        bounds["arc-left"][1] <= bounds["arc-right"][0] + 1e-9,
+        "multi clip is not left then right",
+        failures,
+    )
+    session, summary = _run_script(NAV_MULTI_SCRIPT)
+    print("[steer] nav-multi " + summary.honesty)
+    _expect(not summary.fault, f"nav-multi fault: {summary.fault_reason}", failures)
+    _expect(not summary.tip, f"nav-multi tip up_z={summary.min_up_z:.3f}", failures)
+    _expect(summary.min_up_z >= 0.90, f"nav-multi min up_z={summary.min_up_z:.3f}", failures)
+    _expect(summary.cop_in_box, "nav-multi CoP left the box", failures)
+    _expect(summary.max_leg_tau_nm <= LEG_TAU + 1e-3, "nav-multi torque above freeze", failures)
+    _expect(summary.plant_md5 == PLANT_MD5, "nav-multi summary md5", failures)
+    by_label = {row.label: row for row in summary.segment_stats}
+    deg = math.degrees
+    for name, sign in (("arc-right", -1.0), ("arc-left", 1.0)):
+        row = by_label[name]
+        lo = 0.785 * sign
+        hi = 1.571 * sign
+        inside = (lo < row.dyaw_rad < hi) if sign > 0 else (hi < row.dyaw_rad < lo)
+        _expect(inside, f"nav-multi {name} Δyaw={deg(row.dyaw_rad):+.1f} deg", failures)
+        _expect(row.mean_body_vx_m_s > 0.02, f"nav-multi {name} was not walking", failures)
+        _expect(abs(row.mean_yaw_rate_rad_s) > 0.02, f"nav-multi {name} yaw rate", failures)
+        _expect(not row.tip, f"nav-multi {name} tipped", failures)
+        _expect(row.min_up_z >= 0.90, f"nav-multi {name} min up_z={row.min_up_z:.3f}", failures)
+        _expect(row.peak_leg_tau_nm <= LEG_TAU + 1e-3, f"nav-multi {name} torque", failures)
+        _expect(row.max_cop_outside_m <= 0.001, f"nav-multi {name} CoP left the box", failures)
+        _expect(
+            _arc_holds_both(session, row.t0_s, row.t1_s, sign),
+            f"nav-multi {name} vx and yaw were not simultaneous",
+            failures,
+        )
+    for name in ("forward", "mid", "resume"):
+        row = by_label[name]
+        _expect(row.dx_heading_m > 0.15, f"nav-multi {name} Δx={row.dx_heading_m:.3f}", failures)
+        _expect(row.mean_body_vx_m_s > 0.02, f"nav-multi {name} speed", failures)
+        _expect(not row.tip, f"nav-multi {name} tipped", failures)
+    tail = session.samples[-1]
+    _expect(tail.mode == "stand" and abs(tail.applied_vx) < 1e-6, f"nav-multi ended {tail.mode}", failures)
+    _expect(abs(tail.applied_yaw_rate) < 1e-6, "nav-multi yaw still applied", failures)
+    _expect(tail.margin > 0.02, f"nav-multi end margin {tail.margin:+.3f}", failures)
+    return failures
+
+
 def self_test() -> int:
     failures: list[str] = []
     failures.extend(test_bus())
@@ -2031,6 +2305,7 @@ def self_test() -> int:
         return 1
     failures.extend(test_smoke_sim())
     failures.extend(test_nav())
+    failures.extend(test_nav_multi())
     if failures:
         for msg in failures:
             print(f"FAIL {msg}")
@@ -2064,6 +2339,7 @@ def main() -> None:
         "turn-right": "steer_walk_turn_right",
         "nav-left": "steer_walk_nav_left",
         "nav-right": "steer_walk_nav_right",
+        "nav-multi": "steer_walk_nav_multi",
     }[args.clip]
     duration = script[-1].t_end if args.duration is None else float(args.duration)
     out = None if args.no_video else Path(args.out or (PREVIEWS / f"{stem}.mp4"))
