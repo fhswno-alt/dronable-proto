@@ -824,5 +824,10 @@ stays under 1 cm. Raising the knee command to the ctrlrange limit,
 1.35 rad, still leaves the sole near 1 cm and rails the right hip pitch
 at 1.260 s. Soft-pass is off. This is not a kit walk.
 
-The clips are the 300 ms row. Constrained Baseline, yuv420p,
-`+faststart`.
+The clips are the 300 ms row. Forward 8.400 s stays up (Δx +6.9 cm,
+mean vx +0.84 cm/s, pooled sole p90 0.7 cm, min up_z 0.992, peak
+torque 2.45 Nm, sat_rate 0.003). Close-up 7.600 s stays up through
+the stop (forward Δx +4.8 cm, mean vx +0.84 cm/s, stop Δx −2.5 cm,
+pooled sole p90 0.7 cm, min up_z 0.991, peak torque 2.41 Nm, sat_rate
+0.005). The forward peak is the left knee on ±2.45 Nm. Constrained
+Baseline, yuv420p, `+faststart`.
