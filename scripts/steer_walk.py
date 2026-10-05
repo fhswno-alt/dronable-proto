@@ -141,6 +141,7 @@ if str(_SCRIPTS) not in sys.path:
 
 import walk_gait_ainex as wg  # noqa: E402
 import lipm_gait as lipm_gait  # noqa: E402
+import op3_walk  # noqa: E402
 from lipm_gait import LipmConfig, LipmWalker  # noqa: E402
 from walk_gait import TELEOP_DEADBAND, TELEOP_RATE_LIMIT  # noqa: E402
 
@@ -1135,7 +1136,14 @@ class SteerSession:
         self.cop_excursion = 0.0
         self.fault_announced = False
         self.sim_dt = float(self.model.opt.timestep)
-        self.steps_per_ctrl = max(1, int(round(CTRL_DT / self.sim_dt)))
+        # The command bus and the Bézier loop stay at 50 Hz. The OP3
+        # walking module is built for an 8 ms cycle (4 physics steps).
+        # 20 ms is not an integer multiple of 8 ms, so this path does not
+        # pretend a 50 Hz tick is that cycle.
+        self.ctrl_dt = CTRL_DT
+        if lipm is not None and lipm.schedule == "gait_manager":
+            self.ctrl_dt = op3_walk.OP3_CTRL_S
+        self.steps_per_ctrl = max(1, int(round(self.ctrl_dt / self.sim_dt)))
         self.lipm_cfg = lipm
         self.lipm = (
             None
@@ -1182,7 +1190,7 @@ class SteerSession:
 
     def step(self) -> TickReport:
         now = float(self.data.time)
-        report = self.bus.tick(now, CTRL_DT)
+        report = self.bus.tick(now, self.ctrl_dt)
         if self.lipm is None:
             ceiling = self._safety_ceiling()
             if ceiling < 0.999 and report.mode == "move":
@@ -1513,9 +1521,10 @@ class SteerSession:
         ctrl_to = np.array(self.data.ctrl, dtype=np.float64, copy=True)
         if ctrl_from is None:
             ctrl_from = ctrl_to
-        move_s = max(float(lipm_gait.HIP_KNEE_MOVE_S), float(CTRL_DT))
-        frac = min(1.0, float(CTRL_DT) / move_s)
-        slew = float(lipm_gait.HX35_SLEW_RAD_S) * float(CTRL_DT)
+        dt = float(self.ctrl_dt)
+        move_s = max(float(lipm_gait.HIP_KNEE_MOVE_S), dt)
+        frac = min(1.0, dt / move_s)
+        slew = float(lipm_gait.HX35_SLEW_RAD_S) * dt
         end = ctrl_to.copy()
         for idx in self._move_ctrl_idx:
             delta = float(ctrl_to[idx] - ctrl_from[idx])
@@ -1972,7 +1981,7 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
         if session.lipm.cfg.schedule == "gait_manager":
             lead = (
                 "ROBOTIS OP3 walking module with AiNex leg lengths, "
-                "Hiwonder move presets, into the same 50 Hz position servos. "
+                "Hiwonder move presets, stepped at the OP3 8 ms cycle. "
                 "Not the joint-space preset copy. No root wrench. "
                 f"Row {session.lipm.cfg.name}, period {session.lipm.cfg.gm_period_s:.3f} s, "
                 f"dsp {session.lipm.cfg.gm_dsp:.2f}, x {session.lipm.cfg.gm_x_m:.3f} m, "
@@ -2115,7 +2124,8 @@ def run_demo(
         f"stance_push={'ON' if USE_STANCE_PUSH else 'OFF'} "
         "stance_residual=OFF door=OFF"
     )
-    n_ctrl = int(duration * wg.CTRL_HZ)
+    n_ctrl = int(round(duration / session.ctrl_dt))
+    frame_stride = max(1, int(round(0.04 / session.ctrl_dt)))
     last_print = -1.0
     last_mode: ModeName | None = None
     frames: list[np.ndarray] = []
@@ -2135,7 +2145,7 @@ def run_demo(
             print(f"t={now:.2f} {seg.label} {report.line()}")
             last_print = now
             last_mode = report.mode
-        if session.renderer is not None and (len(session.samples) % 2 == 0):
+        if session.renderer is not None and (len(session.samples) % frame_stride == 0):
             plant_tag = "plant thaw ±2.45" if lipm is not None else "M145 frozen"
             lines = [
                 f"{overlay_title}  {seg.label}  {plant_tag}  no door",

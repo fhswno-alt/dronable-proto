@@ -386,7 +386,8 @@ class LipmWalker:
 
         y_swap moves both feet sideways in the hip frame, so the pelvis
         sits over the stance foot. It is not a hip-roll lean of dy/0.22.
-        The body drop is ``gm_crouch_m`` on the IK z offset.
+        The body drop is ``gm_crouch_m`` on the IK z offset. The walker
+        advances one OP3 control cycle (8 ms), not the 50 Hz bus tick.
         """
         walker = self.op3
         if walker is None:
@@ -401,7 +402,7 @@ class LipmWalker:
         if abs(self.cmd_vx) > 1e-4:
             x_amp = math.copysign(min(self.cfg.gm_x_m, 0.020), self.cmd_vx)
         walker.set_command(x_amp, 0.0, 0.0)
-        joints, info = walker.step(CTRL_DT)
+        joints, info = walker.step(op3_walk.OP3_CTRL_S)
         phase = info.phase
         if phase == "L":
             swing: Side = "L"

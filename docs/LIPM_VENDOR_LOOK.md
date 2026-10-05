@@ -906,3 +906,106 @@ the stop, peak 2.45 Nm while walking and 1.90 Nm after the stop).
 The picture is an upright shuffle: the feet barely leave the floor and
 the body drifts a few centimetres. Constrained Baseline, yuv420p,
 `+faststart`.
+
+## Standing load, 8 ms cycle, hip-roll feed-forward
+
+Three checks before another gait retune. Plant md5
+`17dc4ff37491c8e61900fd83b5d31f0c`. Mass 2.3475 kg, weight 23.03 N,
+11.51 N on each foot if the stand is even. Soft-pass is off. No kp,
+forcerange, dampratio, armature, or XML edit.
+
+The pose is the OP3 initial pose with every walking amplitude at zero
+(x, y, z move, y_swap, z_swap, turn). The cartesian crouch stays
+`init_z_offset` 0.015 m. Hold is 2.0 s.
+
+At `init_y_offset` 0 the soles stack. Hip yaw is at ±2.90 cm and the
+sole half-width is 3.80 cm, so each patch crosses the midline. At 2.0 s
+the floor normal is 23.20 N on the left and 0.00 N on the right.
+up_z is 0.992. Knee torque is +1.25 / +2.09 Nm, hip roll +2.42 / +1.46 Nm,
+ankle roll −2.15 / −2.40 Nm. Foot centers are +2.88 / −3.63 cm and the
+COM is +0.97 cm. That is a Prefer FAIL of the hip-width offset.
+
+The controller offset is `2 * (sole_half_y − hip_yaw_y) = 0.018 m`.
+OP3 adds ±y_offset/2 in the hip frame, so each sole center lands on
+±3.80 cm and the inboard edges meet on the midline. At 2.0 s the
+normals are 11.51 / 11.52 N. Knee torque is −0.31 / +0.31 Nm (joint
+±0.814 rad). Hip roll is +0.05 / −0.05 Nm. Ankle roll is +0.03 / −0.03 Nm.
+up_z is 1.000. COM y is 0. The standing crouch is far from ±2.45 Nm,
+so the body stays at the 0.015 m drop.
+
+The plant timestep is 0.002 s. The OP3 `WalkingModule` cycle is 8 ms.
+The other command bus in this repo is 20 ms, and 20 is not an integer
+multiple of 8, so a 20 ms tick cannot be labeled as that cycle. The
+gait-manager path now steps the walker and the position targets every
+0.008 s (4 physics steps). The Bézier loop stays at 0.020 s. The 150 ms
+hip/knee/ankle move is still a fraction of wall time, `dt / 0.150`.
+
+Hip-roll kp stays 40. A static hold at the y_swap pose (command 0.020 m,
+sampled lateral offset +0.015 m, both feet down) has hip-roll torque
++0.08 / +0.03 Nm and a lag of −0.002 / −0.001 rad. COM is 1.26 cm off
+the mid-foot line. Adding the expected 1.29 Nm as `1.29/40 = 0.03225 rad`
+on the hip-roll target does not recover ~0.7 cm:
+
+| Offset | Hip-roll force | Joint lag (achieved − command) | COM off mid-foot |
+| --- | --- | --- | --- |
+| 0 | +0.08 / +0.03 Nm | −0.002 / −0.001 rad | 1.26 cm |
+| 0.032 rad with the sway | −0.00 / −0.17 Nm | +0.000 / +0.004 rad | 1.38 cm |
+| 0.032 rad opposing, one sign per hip | +1.25 / −1.16 Nm | −0.031 / +0.029 rad | 1.27 cm |
+
+The opposing offset is the 1.29 Nm case. The joint sags back by F/kp
+and the COM stays on 1.27 cm. The sway-direction offset moves the COM
+0.12 cm. The feed-forward is not left in the controller. kp stays a
+plant question only after this measurement.
+
+## Weight shift before the first swing
+
+Hardware and MFG locked the plant. Armature is not a fix: no armature
+peel, the HX-35H rotor and gear ratio are unpublished, and an OP3
+Menagerie armature of 0.045 would make the 300 ms knee worse. The
+Prefer FAIL step-time floor is **400 ms and slower**. 300 ms stays in
+the published table and is not the success bar.
+
+The OP3 sine `A sin(2π t / T)` peaks at T/4, inside single support.
+At `l_ssp_start` (dsp·T/4) it has only reached `sin(π·dsp/2)` of the
+amplitude (0.62 cm on a 2 cm swap). The foot-lift z is still the OP3
+sample. The lateral channel is warped so the peak is at each
+single-support start, then falls through the swing and is 0 at the
+half-period. x and z are unchanged. The stand pose is still the
+zero-amplitude pose above.
+
+8.4 s, walk starts at 0.40 s, soft-pass off. "First swing" here is the
+first tick after the walk starts with a sole above 5 mm or a normal
+under 5 N. On these rows that tick is an unload with both soles still
+on the floor. A both-feet-above-5 N tick does happen first.
+
+| Period | Mean vx | Δx | min up_z | Sole p90 L / R | Max sole | Hip roll R / L | Knee R / L | First unload |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 400 ms | +8.06 cm/s | +64.2 cm | 0.995 | 0.28 / 0.22 cm | 0.62 cm | 2.44 / 2.08 Nm | 1.28 / 1.18 Nm | 0.496 s, Fn 2.16 / 25.03 N, COM 0.91 cm off mid-foot, 3.01 cm from the right sole center |
+| 500 ms | +7.76 cm/s | +61.9 cm | 0.991 | 0.74 / 0.71 cm | 1.23 cm | 2.28 / 2.26 Nm | 1.10 / 1.41 Nm | 0.496 s, Fn 4.63 / 23.07 N, COM 0.91 cm off mid-foot, 2.95 cm from the right sole center |
+| 600 ms | +3.36 cm/s | +25.6 cm | 0.936 | 1.01 / 1.52 cm | 2.04 cm | 1.96 / 1.88 Nm | 1.64 / 1.54 Nm | 0.496 s, Fn 4.82 / 17.67 N, COM 0.99 cm off mid-foot, 2.82 cm from the right sole center |
+
+400 ms peaks at 2.44 Nm and does not cross 2.449 Nm. 500 and 600 ms
+stay under the hip-roll rail. sat_rate on the swing samples is 0.001,
+0.000, 0.000. Stance slip on the 400 and 500 ms rows is 0.61 and
+0.59 cm/s.
+
+The body does advance. On 400 and 500 ms the sole stays under 2 cm
+(max 0.62 and 1.23 cm). The 600 ms row does touch 2.04 cm, with
+min up_z 0.936. The COM at the first unload is inside the stance sole
+(half-width 3.80 cm) and about 3 cm from that sole's center, after a
+double-support tick with both feet above 5 N. Knee torque on that tick
+is under 1 Nm. This is still a low shuffle on ±2.45 Nm, not a kit walk.
+
+300 ms is below the floor. It is upright (min up_z 0.998, Δx +55.2 cm,
+mean vx +6.93 cm/s) and the soles stay at 0.40 cm. It rails the right
+hip roll at 0.472 s while up_z is 1: ω −0.09, kp·e +2.28, damp +0.15,
+F +2.45. That rail is not a reason to edit armature.
+
+The clips are the 400 ms row. Constrained Baseline, yuv420p,
+`+faststart`. Forward 8.400 s stays up (Δx +63.1 cm from 0.50 s,
+mean body vx +8.1 cm/s, min up_z 0.995, peak torque 2.44 Nm, yaw drift
++7.4 deg). Close-up 7.600 s stays up through the stop (forward Δx
++42.5 cm, mean vx +7.8 cm/s, stop Δx +0.5 cm, min up_z 0.995 while
+walking and 0.999 after the stop, peak 2.44 Nm while walking and
+0.98 Nm after the stop). The feet stay close to the floor.
+

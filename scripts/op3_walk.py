@@ -10,11 +10,15 @@ same field names (``x_swap_amplitude_``, ``dsp_ratio_``, ``pelvis_swing_``,
 
 Limb lengths are read from the loaded plant (thigh, calf, sole drop). They
 are not the OP3's 110 mm / 110 mm / 30.5 mm links. ``init_z_offset`` is the
-cartesian body drop. ``hit_pitch_offset_`` stays 0: Hiwonder's 15 deg is
-their offset from a different init pose (knee about 1.19 rad), and this IK
+cartesian body drop. ``init_y_offset`` is read from the same plant: the sole
+is wider than the hip-yaw spacing, and a zero offset stacks the feet so one
+sole takes the whole weight. ``hit_pitch_offset_`` stays 0: Hiwonder's 15 deg
+is their offset from a different init pose (knee about 1.19 rad), and this IK
 already places the feet 0.015 m closer to the hip.
 
-Balance is off. No gyro feedback, no gain schedule, no plant edit.
+The OP3 module steps at 8 ms (``control_cycle_msec_``). This port uses that
+period. The plant timestep stays 0.002 s. Balance is off. No gyro feedback,
+no gain schedule, no plant edit.
 """
 from __future__ import annotations
 
@@ -29,8 +33,16 @@ STEP_FB_RATIO = 0.028
 Z_SWAP_M = 0.006
 PELVIS_DEG = 5.0
 ARM_SWING_GAIN = math.radians(30.0)
+# WalkingModule::control_cycle_msec_. Four plant steps of 0.002 s.
+OP3_CTRL_S = 0.008
+# Frozen hip-roll position gain on this plant. Not written. The 1.29 Nm
+# feed-forward (1.29/40 rad) was measured and does not move the COM; it is
+# not applied. See the vendor note.
+HIP_ROLL_KP = 40.0
 # Published move(1..4): period s, dsp, y_swap m. x amp and step height are
 # the same on every gear: 0.02 m and 0.02 m. Body drop is 0.015 m.
+# Prefer FAIL floor for this draft is 400 ms and slower. 300 ms stays in
+# the published table and is not the success bar. Armature is not a peel.
 KIT_PRESETS: tuple[tuple[float, float, float], ...] = (
     (0.300, 0.20, 0.020),
     (0.400, 0.20, 0.020),
@@ -101,6 +113,24 @@ def _axis_sum(model: mj.MjModel, joint: str) -> float:
         raise RuntimeError(f"missing joint {joint}")
     axis = np.asarray(model.jnt_axis[jid], dtype=np.float64)
     return float(axis[0] + axis[1] + axis[2])
+
+
+def y_offset_from_model(model: mj.MjModel) -> float:
+    """``init_y_offset`` that puts each sole's inboard edge on the midline.
+
+    Hip yaw sits at ±hip_y. The sole half-width is larger, so ``y_offset``
+    of 0 places both contact patches across the center and the solver parks
+    the whole weight on one foot. OP3 applies ±y_offset/2 in the hip frame,
+    which is a full ``y_offset`` of extra stance width.
+    """
+    r_hip = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "r_hip_yaw_link")
+    l_hip = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "l_hip_yaw_link")
+    foot = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "r_foot_contact")
+    if min(r_hip, l_hip, foot) < 0:
+        raise RuntimeError("plant is missing hip yaw or the foot sole")
+    hip_y = 0.5 * (float(model.body_pos[l_hip][1]) - float(model.body_pos[r_hip][1]))
+    half_y = float(model.geom_size[foot][1])
+    return 2.0 * (half_y - hip_y)
 
 
 def lengths_from_model(model: mj.MjModel) -> LegLengths:
@@ -261,7 +291,9 @@ class Op3Walker:
         directions = {name: _axis_sum(model, name) for name in _LEG_R + _LEG_L}
         directions["r_sho_pitch"] = _axis_sum(model, "r_sho_pitch")
         directions["l_sho_pitch"] = _axis_sum(model, "l_sho_pitch")
-        return cls(lengths_from_model(model), directions, **kwargs)
+        walker = cls(lengths_from_model(model), directions, **kwargs)
+        walker.y_offset = y_offset_from_model(model)
+        return walker
 
     def update_time(self) -> None:
         period = self.period_cmd
@@ -359,7 +391,7 @@ class Op3Walker:
         """
         t = self.time
         swap_x = wsin(t, self.x_swap_period, math.pi, self._x_swap, 0.0)
-        swap_y = wsin(t, self.y_swap_period, 0.0, self._y_swap, 0.0)
+        swap_y = self._swap_y_before_swing(t)
         swap_z = wsin(t, self.z_swap_period, 1.5 * math.pi, self._z_swap, self._z_swap_shift)
         if t <= self.l_ssp_start:
             left = self._leg_move(self.l_ssp_start, self.l_ssp_start, self.l_ssp_start, 1.0, False)
@@ -427,6 +459,35 @@ class Op3Walker:
         ], dtype=np.float64)
         return er, el, pel_r, pel_l, swap_y
 
+    def _swap_y_before_swing(self, t: float) -> float:
+        """Lateral shift that is already at its peak when the foot lifts.
+
+        The OP3 sine is ``A sin(2π t / T)``. It is 0 at t = 0 and peaks at
+        t = T/4, which is inside single support. The swing z has already
+        started at ``l_ssp_start`` (dsp·T/4), when the sine is only
+        sin(π·dsp/2) of the way there. This keeps that sine's ends: 0 at
+        the half-period boundaries, and the peak at each single-support
+        start, then falls through the swing so the next double support can
+        cross. x and z are still the OP3 samples.
+        """
+        mag = self._y_swap
+        if abs(mag) < 1e-12 or self.period <= 1e-9:
+            return 0.0
+        half = self.period / 2.0
+        local = t % self.period
+        sign = 1.0
+        if local >= half:
+            local -= half
+            sign = -1.0
+        rise = self.l_ssp_start
+        if rise <= 1e-9 or rise >= half - 1e-9:
+            phase = math.pi * local / half
+        elif local <= rise:
+            phase = (math.pi / 2.0) * (local / rise)
+        else:
+            phase = math.pi / 2.0 + (math.pi / 2.0) * ((local - rise) / (half - rise))
+        return sign * mag * math.sin(phase)
+
     def _z_at(self, t_z: float, phase_t: float) -> float:
         z_phase = math.pi / 2.0 + 2.0 * math.pi / max(self.z_move_period, 1e-6) * phase_t
         return wsin(t_z, self.z_move_period, z_phase, self._z_move, self._z_move_shift)
@@ -493,18 +554,46 @@ class Op3Walker:
         return out, info
 
     def stand_joints(self) -> dict[str, float]:
-        """x = 0 pose at the cartesian body drop. Does not advance the clock."""
-        saved = (self.x_cmd, self.y_cmd, self.angle_cmd, self.time, self.previous_x, self.ctrl_running)
+        """Offset-only pose. Every walking amplitude is zero.
+
+        x/y/z move, y_swap, z_swap, and the turn are amplitudes. The
+        cartesian crouch and the hip-width offset stay. Does not advance
+        the clock, and restores the walking commands afterward.
+        """
+        saved = (
+            self.x_cmd,
+            self.y_cmd,
+            self.angle_cmd,
+            self.z_move_cmd,
+            self.y_swap_cmd,
+            self.z_swap_cmd,
+            self.time,
+            self.previous_x,
+            self.ctrl_running,
+        )
         self.x_cmd = 0.0
         self.y_cmd = 0.0
         self.angle_cmd = 0.0
+        self.z_move_cmd = 0.0
+        self.y_swap_cmd = 0.0
+        self.z_swap_cmd = 0.0
         self.time = 0.0
         self.previous_x = 0.0
         self.ctrl_running = False
         self.update_time()
         self.update_movement()
         joints, info = self.joints_now()
-        self.x_cmd, self.y_cmd, self.angle_cmd, self.time, self.previous_x, self.ctrl_running = saved
+        (
+            self.x_cmd,
+            self.y_cmd,
+            self.angle_cmd,
+            self.z_move_cmd,
+            self.y_swap_cmd,
+            self.z_swap_cmd,
+            self.time,
+            self.previous_x,
+            self.ctrl_running,
+        ) = saved
         self.update_time()
         self.update_movement()
         if joints is None or not info.ik_ok:
