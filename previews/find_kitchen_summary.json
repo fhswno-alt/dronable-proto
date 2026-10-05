@@ -21,17 +21,18 @@
   "arrival_remaining_m": 0.25,
   "arrival": false,
   "stop_kind": "blob",
-  "note": "Prefer FAIL: kit_cam pixels do not show the backsplash; no motion",
+  "note": "Prefer FAIL: backsplash is centered but below the visible bar; yaw-only cannot recover it; no further vel",
   "forward_bursts": 110,
   "yaw_corrections": 38,
+  "reacquires": 1,
   "x0_m": 0.001981544135897496,
-  "end_x_m": 0.9383524255666542,
-  "end_y_m": 0.014371551574410297,
-  "end_yaw_rad": 0.08327424538408476,
-  "dx_m": 0.9363708814307568,
-  "remaining_m": 0.3766524638170805,
+  "end_x_m": 1.0314235852693134,
+  "end_y_m": -0.008419563187484345,
+  "end_yaw_rad": 0.12359884428282339,
+  "dx_m": 1.029442041133416,
+  "remaining_m": 0.2834689815115571,
   "near_face_x_m": 1.3150000000000002,
-  "min_up_z": 0.9814734070969803,
+  "min_up_z": 0.9303664279532263,
   "initial": {
     "decision": "forward",
     "reason": "backsplash is in the center of the frame",
@@ -56,13 +57,13 @@
   },
   "final": {
     "decision": "fail",
-    "reason": "backsplash fraction below the visible bar",
+    "reason": "no backsplash pixels",
     "line": "Prefer FAIL: kit_cam pixels do not show the backsplash; no motion",
     "needs_map": false,
-    "bias": -0.8887871908809892,
-    "yellow_frac": 0.0042122395833333335,
-    "centroid_u": 35.58809891808346,
-    "centroid_v": 14.034003091190108,
+    "bias": 0.0,
+    "yellow_frac": 0.0,
+    "centroid_u": null,
+    "centroid_v": null,
     "kitchen_in_frame": true
   },
   "commands": [
@@ -477,6 +478,27 @@
       "t1": 59.700000000026996,
       "vx": 0.028,
       "yaw_rate": 0.13314325052270096,
+      "resends": 4
+    },
+    {
+      "t0": 59.80000000002712,
+      "t1": 60.500000000027974,
+      "vx": 0.0,
+      "yaw_rate": 0.25,
+      "resends": 8
+    },
+    {
+      "t0": 60.600000000028096,
+      "t1": 60.90000000002846,
+      "vx": 0.0,
+      "yaw_rate": 0.20603837299323613,
+      "resends": 4
+    },
+    {
+      "t0": 61.000000000028585,
+      "t1": 61.30000000002895,
+      "vx": 0.0,
+      "yaw_rate": 0.25,
       "resends": 4
     }
   ],
