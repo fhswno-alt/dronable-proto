@@ -16,15 +16,17 @@ The entrance panel file is named `panel.obj` so the loaded MuJoCo name does not 
 
 | Repo file | Poly Haven asset | Author | Page |
 |-----------|------------------|--------|------|
-| `kitchen/upper.obj` | Modern Wooden Cabinet (base cabinets, two copies) | Patrik Pangerl | https://polyhaven.com/a/modern_wooden_cabinet |
-| `kitchen/cabinet.obj` | Drawer Cabinet | Ulan Cabanilla | https://polyhaven.com/a/drawer_cabinet |
+| `kitchen/upper.obj` | Modern Wooden Cabinet (not placed) | Patrik Pangerl | https://polyhaven.com/a/modern_wooden_cabinet |
+| `kitchen/cabinet.obj` | Drawer Cabinet (not placed) | Ulan Cabanilla | https://polyhaven.com/a/drawer_cabinet |
 | `kitchen/stove.obj` | Electric Stove (cooktop and oven) | Kuutti Siitonen | https://polyhaven.com/a/electric_stove |
-| `kitchen/kettle.obj` | Vintage Electric Kettle | SV Garip | https://polyhaven.com/a/vintage_electric_kettle |
-| `kitchen/microwave.obj` | Vintage Microwave | Adam Nekola | https://polyhaven.com/a/vintage_microwave |
-| `kitchen/pot.obj` | Pot Enamel 01 | Kuutti Siitonen | https://polyhaven.com/a/pot_enamel_01 |
+| `kitchen/kettle.obj` | Vintage Electric Kettle (not placed) | SV Garip | https://polyhaven.com/a/vintage_electric_kettle |
+| `kitchen/microwave.obj` | Vintage Microwave (not placed) | Adam Nekola | https://polyhaven.com/a/vintage_microwave |
+| `kitchen/pot.obj` | Pot Enamel 01 (not placed) | Kuutti Siitonen | https://polyhaven.com/a/pot_enamel_01 |
 | `kitchen/basin.obj` | loafbrr Sink_A basin and faucets | loafbrr | see below |
-| `kitchen/table.obj` | Dining Table | Aron Łyczek | https://polyhaven.com/a/dining_table |
-| `kitchen/chair.obj` | Dining Chair 02 | James Ray Cock | https://polyhaven.com/a/dining_chair_02 |
+| `kitchen/stool.obj` | Metal Stool 02 (island seating, two copies) | Ulan Cabanilla | https://polyhaven.com/a/metal_stool_02 |
+| `kitchen/pendant.obj` | Modern Ceiling Lamp 01 (two copies) | James Ray Cock | https://polyhaven.com/a/modern_ceiling_lamp_01 |
+| `kitchen/table.obj` | Dining Table (not placed) | Aron Łyczek | https://polyhaven.com/a/dining_table |
+| `kitchen/chair.obj` | Dining Chair 02 (not placed) | James Ray Cock | https://polyhaven.com/a/dining_chair_02 |
 | `living/sofa.obj` | Sofa 03 | Fran Calvente | https://polyhaven.com/a/sofa_03 |
 | `living/coffee.obj` | Gothic Coffee Table | Ulan Cabanilla | https://polyhaven.com/a/gothic_coffee_table |
 | `living/tv.obj` | Television 01 | Gabriel Radić | https://polyhaven.com/a/Television_01 |
@@ -48,6 +50,7 @@ Each OBJ has a matching PNG albedo next to it.
 | `textures/white_plaster.png` | White Plaster 02 | Rob Tuytel | https://polyhaven.com/a/white_plaster_02 |
 | `textures/hessian_mat.png` | Hessian 380 | colormass (photography), Rico Cilliers (processing) | https://polyhaven.com/a/hessian_380 |
 | `textures/marble.png` | Marble 01 | Rob Tuytel | https://polyhaven.com/a/marble_01 |
+| `textures/oak_veneer.png` | Oak Veneer 01 | Jenelle van Heerden | https://polyhaven.com/a/oak_veneer_01 |
 
 ## Bathroom fixtures (loafbrr, CC0)
 
@@ -73,9 +76,11 @@ The four toilet files are one round toilet split by material. They were re-expor
 
 The glTF did not embed images. UVs were kept and the pack's diffuse PNGs were assigned. These are textured game meshes, not photogrammetry. They are still shaped fixtures, not flat rgba boxes.
 
-Poly Haven has no kitchen sink. `kitchen/basin.obj` is the same CC0 Sink_A mesh, with the pedestal faces removed so the bowl and faucets sit on the counter. It is a bathroom basin, not an undermount kitchen sink. That style gap is a Prefer FAIL for a photoreal kitchen sink. The faucet is what makes the counter read as a sink from `kit_cam`.
+Poly Haven has no kitchen sink. `kitchen/basin.obj` is the same CC0 Sink_A mesh, with the pedestal faces removed so the bowl and faucets sit on the counter. It is a bathroom basin, not a slim undermount. That style gap is a Prefer FAIL for a photoreal kitchen sink. The faucet is what makes the counter read as a sink from `kit_cam`.
 
-The drawer cabinet file is still in the repo. The kitchen scene does not place it. From `kit_cam` it read as a wire baker's rack, not as base cabinets. The run is two copies of the modern wooden cabinet, the basin, and the electric stove.
+Poly Haven also has no flat-panel kitchen cabinet, no kitchen island, no flush induction hob, and no stacked double oven. The kit_cam run is authored boxes, not a scanned cabinet: white plaster for the slab fronts, the counter, the backsplash, and the island; oak veneer for the upper panels. There are no handles. The counters are plaster, not veined stone (`marble_01` is beige). Those are Prefer FAIL gaps against a photoreal modern kitchen. The freestanding electric stove is the appliance column. It is a white coil-top range with one oven, not a black built-in double oven and not a flush cooktop. Island seating is Metal Stool 02 (round wood seat, metal pedestal), not an upholstered bar stool. The pendants are Modern Ceiling Lamp 01, a disc shade, not a glass globe.
+
+The ribbed wooden cabinet, the drawer cabinet, the dining table, the dining chair, the vintage microwave, the kettle, and the enamel pot stay in the repo and are not placed. From `kit_cam` those reads were gothic props or a wire rack, not the flat white run.
 
 Poly Haven has no bathtub. The tub is from Isa Lousberg's **Tiny Treats — Bubbly Bathroom** set, licensed **CC0**:
 

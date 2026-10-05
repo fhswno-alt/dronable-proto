@@ -8,7 +8,7 @@ Furniture is CC0 textured meshes under `mujoco/assets/rooms/`. Licenses, authors
 
 | Scene | Bodies | What kit_cam is meant to see |
 |-------|--------|------------------------------|
-| `mujoco/room_kitchen.xml` | `kitchen`, `table`, `chair` | Two base cabinets, a drop-in basin with faucets, a stove and oven, a microwave, a kettle, and a pot. The run faces +X. The basin is a CC0 bathroom bowl, not a photoreal kitchen sink. Table and chair stay off the run. Closed beige room, wood floor. No flat yellow backsplash |
+| `mujoco/room_kitchen.xml` | `kitchen`, `table`, `chair` | White slab base run and oak uppers on the back wall, island parallel to it with two stools under the near overhang, freestanding stove at the image-left end, basin and faucet on the counter, two disc pendants. Faces +X. Cabinets and the island are CC0 textures on boxes, not scanned flat-panel cabinets. The stove is not a stacked black double oven. The basin is a CC0 bathroom bowl. Closed white room, wood floor. No flat yellow backsplash |
 | `mujoco/room_bathroom.xml` | `bathroom`, `sink`, `toilet`, `bathtub` | Vanity, basin, and mirror against the back-left wall, toilet beside them, stylized tub in the back-right corner. Closed tile room, marble floor |
 | `mujoco/room_living.xml` | `living`, `tv`, `coffee` | Larger leather sofa (`living`) against the back wall, cushions toward +X; coffee table in front; CRT beside the sofa at the same depth, screen toward +X. Closed beige room |
 | `mujoco/room_bedroom.xml` | `bedroom`, `nightstand` | Larger gothic bed against the back wall, long side toward +X. Headboard toward image-left, nightstand and a smaller lamp beside the head, not in the mattress. Closed plaster room |

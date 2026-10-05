@@ -11,69 +11,79 @@
   <include file="ainex_hiwonder/ainex_controls_m2_145.xml"/>
   <asset>
     <texture name="room_floor" type="2d" file="assets/rooms/textures/wood_floor.png"/>
-    <material name="room_floor" texture="room_floor" texrepeat="3 3" specular="0.04"/>
-    <texture name="room_wall" type="2d" file="assets/rooms/textures/beige_wall.png"/>
-    <material name="room_wall" texture="room_wall" texrepeat="2.2 1.3" specular="0.02" emission="0.18"/>
+    <material name="room_floor" texture="room_floor" texrepeat="3 3" specular="0.05" emission="0.10"/>
     <texture name="room_ceiling" type="2d" file="assets/rooms/textures/white_plaster.png"/>
-    <material name="room_ceiling" texture="room_ceiling" texrepeat="2 2" specular="0.02" emission="0.62"/>
-    <texture name="room_counter" type="2d" file="assets/rooms/kitchen/upper.png"/>
-    <material name="room_counter" texture="room_counter" specular="0.18"/>
-    <!-- Two base cabinets at stove height. Length is the OBJ X axis. -->
-    <mesh name="room_counter" file="assets/rooms/kitchen/upper.obj" scale="0.50 1 1.265"/>
+    <material name="room_wall" texture="room_ceiling" texrepeat="2.2 1.3" specular="0.02" emission="0.32"/>
+    <material name="room_ceiling" texture="room_ceiling" texrepeat="2 2" specular="0.02" emission="0.78"/>
+    <material name="room_white" texture="room_ceiling" texrepeat="1 1" specular="0.12" emission="0.16"/>
+    <material name="room_stone" texture="room_ceiling" texrepeat="1 1" specular="0.55" emission="0.14"/>
+    <material name="room_recess" rgba="0.62 0.63 0.62 1" specular="0.02"/>
+    <texture name="room_oak" type="2d" file="assets/rooms/textures/oak_veneer.png"/>
+    <material name="room_oak" texture="room_oak" texrepeat="1 1" specular="0.10" emission="0.08"/>
     <texture name="room_stove" type="2d" file="assets/rooms/kitchen/stove.png"/>
     <material name="room_stove" texture="room_stove" specular="0.28"/>
-    <mesh name="room_stove" file="assets/rooms/kitchen/stove.obj"/>
-    <texture name="room_kettle" type="2d" file="assets/rooms/kitchen/kettle.png"/>
-    <material name="room_kettle" texture="room_kettle" specular="0.35"/>
-    <mesh name="room_kettle" file="assets/rooms/kitchen/kettle.obj"/>
+    <mesh name="room_stove" file="assets/rooms/kitchen/stove.obj" scale="1 1 1.048"/>
     <texture name="room_basin" type="2d" file="assets/rooms/kitchen/basin.png"/>
     <material name="room_basin" texture="room_basin" specular="0.35"/>
-    <mesh name="room_basin" file="assets/rooms/kitchen/basin.obj" scale="1.45 1.45 1.45"/>
-    <texture name="room_micro" type="2d" file="assets/rooms/kitchen/microwave.png"/>
-    <material name="room_micro" texture="room_micro" specular="0.3"/>
-    <mesh name="room_micro" file="assets/rooms/kitchen/microwave.obj" scale="0.48 0.48 0.48"/>
-    <texture name="room_pot" type="2d" file="assets/rooms/kitchen/pot.png"/>
-    <material name="room_pot" texture="room_pot" specular="0.4"/>
-    <mesh name="room_pot" file="assets/rooms/kitchen/pot.obj" scale="0.90 0.90 0.90"/>
-    <texture name="room_table" type="2d" file="assets/rooms/kitchen/table.png"/>
-    <material name="room_table" texture="room_table" specular="0.12"/>
-    <mesh name="room_table" file="assets/rooms/kitchen/table.obj" scale="0.32 0.32 0.32"/>
-    <texture name="room_chair" type="2d" file="assets/rooms/kitchen/chair.png"/>
-    <material name="room_chair" texture="room_chair" specular="0.12"/>
-    <mesh name="room_chair" file="assets/rooms/kitchen/chair.obj" scale="0.82 0.82 0.82"/>
+    <mesh name="room_basin" file="assets/rooms/kitchen/basin.obj" scale="1.35 1.35 1.35"/>
+    <texture name="room_stool" type="2d" file="assets/rooms/kitchen/stool.png"/>
+    <material name="room_stool" texture="room_stool" specular="0.25"/>
+    <mesh name="room_stool" file="assets/rooms/kitchen/stool.obj" scale="1.25 1.25 1.25"/>
+    <texture name="room_pendant" type="2d" file="assets/rooms/kitchen/pendant.png"/>
+    <material name="room_pendant" texture="room_pendant" specular="0.35" emission="0.20"/>
+    <mesh name="room_pendant" file="assets/rooms/kitchen/pendant.obj" scale="0.72 0.72 0.72"/>
   </asset>
   <worldbody>
-    <light name="room_key" pos="0.55 -0.15 2.05" dir="0.7 0.02 -1" diffuse="0.85 0.80 0.72"/>
-    <light name="room_fill" pos="0.35 0.4 1.6" dir="0.55 -0.1 -1" diffuse="0.40 0.42 0.46"/>
-    <light name="room_up" pos="1.05 0 1.35" dir="0 0 1" diffuse="0.85 0.82 0.74"/>
-    <light name="room_side_l" pos="1.15 -0.15 1.4" dir="0 1 0.15" diffuse="0.40 0.38 0.34"/>
-    <light name="room_side_r" pos="1.15 0.15 1.4" dir="0 -1 0.15" diffuse="0.40 0.38 0.34"/>
+    <light name="room_key" pos="0.35 0.0 2.25" dir="0.62 0.0 -1" diffuse="1.05 1.02 0.96"/>
+    <light name="room_fill" pos="0.25 0.55 1.85" dir="0.55 -0.12 -1" diffuse="0.62 0.62 0.60"/>
+    <light name="room_up" pos="1.15 0 1.15" dir="0 0 1" diffuse="0.72 0.72 0.68"/>
+    <light name="room_side_l" pos="1.25 -0.2 1.55" dir="0 1 0.25" diffuse="0.48 0.48 0.46"/>
+    <light name="room_side_r" pos="1.25 0.2 1.55" dir="0 -1 0.25" diffuse="0.48 0.48 0.46"/>
+    <light name="room_island" pos="1.05 -0.05 2.15" dir="0 0 -1" diffuse="0.85 0.84 0.80"/>
     <geom name="room_floor" type="plane" pos="0 0 0.006" size="3 3 0.02" material="room_floor" contype="0" conaffinity="0"/>
     <!-- Closed shell. Side walls start behind the camera so the wide FOV stays indoors. -->
     <geom name="room_wall" type="box" pos="2.42 0 1.22" size="0.045 1.82 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_wall_left" type="box" pos="0.86 1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_wall_right" type="box" pos="0.86 -1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_ceiling" type="box" pos="0.86 0 2.48" size="1.64 1.88 0.04" material="room_ceiling" contype="0" conaffinity="0"/>
-    <!-- Base cabinets, drop-in basin, stove/oven, microwave, and pot.
-         Stove yaw 180 faces the oven toward +X. Cabinet yaw 270 faces the doors
-         toward +X. The wire pantry is not in this layout. -->
-    <body name="kitchen" pos="1.80 0.00 0">
-      <site name="kitchen" pos="0.0 0.1 0.95" size="0.015" group="4" rgba="0.75 0.62 0.35 1"/>
-      <geom name="kitchen_cabinet" type="mesh" mesh="room_counter" material="room_counter" pos="0 0.92 0" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
-      <geom name="kitchen_base" type="mesh" mesh="room_counter" material="room_counter" pos="0 -0.32 0" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
-      <geom name="kitchen_sink" type="mesh" mesh="room_basin" material="room_basin" pos="0.02 -0.32 0.86" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
-      <geom name="kitchen_stove" type="mesh" mesh="room_stove" material="room_stove" pos="0.01 -1.28 0" quat="0 0 0 1" contype="0" conaffinity="0"/>
-      <geom name="kitchen_kettle" type="mesh" mesh="room_kettle" material="room_kettle" pos="0.02 1.20 0.88" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
-      <geom name="kitchen_microwave" type="mesh" mesh="room_micro" material="room_micro" pos="-0.04 0.62 0.86" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
-      <geom name="kitchen_pot" type="mesh" mesh="room_pot" material="room_pot" pos="0.0 -1.28 0.88" quat="1 0 0 0" contype="0" conaffinity="0"/>
+    <!--
+      Single-wall run along the back wall, island parallel to it.
+      White slab panels and counters are CC0 plaster on boxes. Light-oak
+      uppers use CC0 veneer. There is no CC0 flat-panel cabinet mesh,
+      induction hob, or stacked double oven. The freestanding stove is
+      the appliance column. Stove yaw 180 faces the oven toward +X.
+    -->
+    <body name="kitchen" pos="0 0 0">
+      <site name="kitchen" pos="2.00 -0.35 1.05" size="0.015" group="4" rgba="0.75 0.62 0.35 1"/>
+      <geom name="kitchen_kick" type="box" pos="2.10 -0.355 0.05" size="0.24 1.195 0.05" material="room_recess" contype="0" conaffinity="0"/>
+      <geom name="kitchen_cabinet" type="box" pos="2.07 -0.355 0.48" size="0.27 1.195 0.38" material="room_recess" contype="0" conaffinity="0"/>
+      <geom name="kitchen_panel_a" type="box" pos="1.772 -1.258 0.48" size="0.028 0.292 0.36" material="room_white" contype="0" conaffinity="0"/>
+      <geom name="kitchen_panel_b" type="box" pos="1.772 -0.656 0.48" size="0.028 0.292 0.36" material="room_white" contype="0" conaffinity="0"/>
+      <geom name="kitchen_panel_c" type="box" pos="1.772 -0.054 0.48" size="0.028 0.292 0.36" material="room_white" contype="0" conaffinity="0"/>
+      <geom name="kitchen_panel_d" type="box" pos="1.772 0.548 0.48" size="0.028 0.292 0.36" material="room_white" contype="0" conaffinity="0"/>
+      <geom name="kitchen_counter" type="box" pos="2.02 -0.355 0.885" size="0.34 1.195 0.025" material="room_stone" contype="0" conaffinity="0"/>
+      <geom name="kitchen_splash" type="box" pos="2.358 -0.355 1.16" size="0.012 1.195 0.26" material="room_white" contype="0" conaffinity="0"/>
+      <geom name="kitchen_end" type="box" pos="2.04 -1.66 0.455" size="0.30 0.10 0.455" material="room_white" contype="0" conaffinity="0"/>
+      <geom name="kitchen_pier" type="box" pos="2.05 1.66 1.10" size="0.26 0.10 1.10" material="room_white" contype="0" conaffinity="0"/>
+      <geom name="kitchen_upper_a" type="box" pos="2.18 -1.258 1.78" size="0.16 0.292 0.36" material="room_oak" contype="0" conaffinity="0"/>
+      <geom name="kitchen_upper_b" type="box" pos="2.18 -0.656 1.78" size="0.16 0.292 0.36" material="room_oak" contype="0" conaffinity="0"/>
+      <geom name="kitchen_upper_c" type="box" pos="2.18 -0.054 1.78" size="0.16 0.292 0.36" material="room_oak" contype="0" conaffinity="0"/>
+      <geom name="kitchen_upper_d" type="box" pos="2.18 0.548 1.78" size="0.16 0.292 0.36" material="room_oak" contype="0" conaffinity="0"/>
+      <geom name="kitchen_stove" type="mesh" mesh="room_stove" material="room_stove" pos="2.05 1.22 0" quat="0 0 0 1" contype="0" conaffinity="0"/>
+      <geom name="kitchen_sink" type="mesh" mesh="room_basin" material="room_basin" pos="2.02 -0.35 0.91" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+      <geom name="kitchen_pendant_a" type="mesh" mesh="room_pendant" material="room_pendant" pos="1.28 -0.32 1.72" contype="0" conaffinity="0"/>
+      <geom name="kitchen_pendant_b" type="mesh" mesh="room_pendant" material="room_pendant" pos="1.28 0.18 1.72" contype="0" conaffinity="0"/>
     </body>
-    <body name="table" pos="1.18 -1.28 0">
-      <site name="table" pos="0 0 0.18" size="0.012" group="4" rgba="0.45 0.28 0.14 1"/>
-      <geom name="table_top" type="mesh" mesh="room_table" material="room_table" contype="0" conaffinity="0"/>
+    <!-- Island parallel to the run. Top overhangs toward the camera for seating. -->
+    <body name="table" pos="1.28 -0.12 0">
+      <site name="table" pos="0 0 0.90" size="0.012" group="4" rgba="0.75 0.75 0.72 1"/>
+      <geom name="table_base" type="box" pos="0 0 0.43" size="0.28 0.58 0.43" material="room_white" contype="0" conaffinity="0"/>
+      <geom name="table_top" type="box" pos="-0.14 0 0.888" size="0.42 0.74 0.028" material="room_stone" contype="0" conaffinity="0"/>
     </body>
-    <body name="chair" pos="0.92 -1.05 0">
-      <site name="chair" pos="0 0 0.42" size="0.012" group="4" rgba="0.35 0.22 0.12 1"/>
-      <geom name="chair_seat" type="mesh" mesh="room_chair" material="room_chair" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+    <body name="chair" pos="0.68 -0.12 0">
+      <site name="chair" pos="0 0 0.50" size="0.012" group="4" rgba="0.45 0.45 0.42 1"/>
+      <geom name="chair_seat" type="mesh" mesh="room_stool" material="room_stool" pos="0 -0.30 0" contype="0" conaffinity="0"/>
+      <geom name="chair_stool_b" type="mesh" mesh="room_stool" material="room_stool" pos="0 0.30 0" contype="0" conaffinity="0"/>
     </body>
   </worldbody>
 </mujoco>
