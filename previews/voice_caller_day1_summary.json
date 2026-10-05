@@ -14,6 +14,10 @@
     "walk forward",
     "turn right",
     "walk forward",
+    "stop",
+    "walk forward",
+    "turn left",
+    "walk forward",
     "stop"
   ],
   "fault": false,
@@ -38,13 +42,22 @@
   "min_up_z_right": 0.9586916658467006,
   "end_mode_right": "stand",
   "end_margin_right": 0.06341748070169567,
+  "dx_approach_left_m": 0.598029205326821,
+  "dyaw_arc_left_deg": 75.74603966754128,
+  "mean_yaw_rate_left": 0.10593091246358648,
+  "dx_resume_left_m": 0.31672178880181834,
+  "min_up_z_left": 0.9541741213512263,
+  "end_mode_left": "stand",
+  "end_margin_left": 0.06312996233928636,
   "stills": [
     "previews/voice_caller_kit_cam_backup.png",
     "previews/voice_caller_kit_cam_forward.png",
     "previews/voice_caller_kit_cam_stop.png",
     "previews/voice_caller_kit_cam_nav_right.png",
-    "previews/voice_caller_kit_cam_nav_right_stop.png"
+    "previews/voice_caller_kit_cam_nav_right_stop.png",
+    "previews/voice_caller_kit_cam_nav_left.png",
+    "previews/voice_caller_kit_cam_nav_left_stop.png"
   ],
   "mp4": "previews/voice_caller_kit_cam.mp4",
-  "honesty": "kit_cam for back up, for walk forward then stop, and for the right nav, then the stop. These are three separate steers. Camera pos 0.050 0.019 0.007. The camera was not moved. The frame is still largely the inside of the head. Empty floor shows through the opening. Back up command is -0.032 m/s. Mean applied_vx in the reverse window is -0.032 m/s. Mean body vx in that window is -0.048 m/s. Reverse \u0394x=-0.283 m. min up_z during back up is 0.903. End mode after back up is stand. Controls' merged reverse clip moved about -0.97 m, mean body speed about -0.053 m/s, upright, no tip. This clip does not claim faster than that clip. Forward command into the gait is +0.056 m/s. Mean applied_vx in the forward window is +0.056 m/s. Mean body vx in that window is +0.040 m/s. Forward \u0394x=+1.471 m. min up_z while the forward command was applied is 0.967. Forward end mode is stand. The forward stop frame is level. Forward end support margin is +0.064 m. The command 0.056 is not the odometry. Controls' clip at that cap moved about +2.16 m, mean body speed about +0.039 m/s, then stood, end margin +0.063 m. This clip does not claim faster or farther than that. 0.080 yaws and tips near 1.2 m. This caller does not send 0.080. Right nav walks forward from t=1 to t=16, then holds vel(+0.056, -0.25) until t=27, then forward only until t=33, then stop by t=35.5. Approach \u0394x=+0.598 m. Heading while still walking is -77.3 deg. Realized yaw rate in that window is -0.123 rad/s. The command \u00b10.25 is not the heading rate. Resume along the new heading is +0.320 m. min up_z during the right nav is 0.959. Right-nav end mode is stand. Right-nav end support margin is +0.063 m. Controls' ceiling is approach about +0.60 m, heading about -77 deg, resume about +0.32 m, end stand, margin about +0.063 m. This clip does not claim more than that. Cold-start from stand is about +62 deg left and -83 deg right. Those are not this arc. Left on the same approach is about +76 deg, yaw from t=16 to t=28.5, not from 15 s and not for 14 s. That earlier window tips on the resume and is not claimed. This clip does not render the left arc. Not a spin. Go to the kitchen or the bathroom stays refused: the camera can see, but there is no room and no map. The floor is empty. This gait is not a room crossing. Not autonomous navigation."
+  "honesty": "kit_cam for back up, for walk forward then stop, for the right nav, and for the left nav. These are four separate steers. Camera pos 0.050 0.019 0.007. The camera was not moved. The frame is still largely the inside of the head. Empty floor shows through the opening. Back up command is -0.032 m/s. Mean applied_vx in the reverse window is -0.032 m/s. Mean body vx in that window is -0.048 m/s. Reverse \u0394x=-0.283 m. min up_z during back up is 0.903. End mode after back up is stand. Controls' merged reverse clip moved about -0.97 m, mean body speed about -0.053 m/s, upright, no tip. This clip does not claim faster than that clip. Forward command into the gait is +0.056 m/s. Mean applied_vx in the forward window is +0.056 m/s. Mean body vx in that window is +0.040 m/s. Forward \u0394x=+1.471 m. min up_z while the forward command was applied is 0.967. Forward end mode is stand. The forward stop frame is level. Forward end support margin is +0.064 m. The command 0.056 is not the odometry. Controls' clip at that cap moved about +2.16 m, mean body speed about +0.039 m/s, then stood, end margin +0.063 m. This clip does not claim faster or farther than that. 0.080 yaws and tips near 1.2 m. This caller does not send 0.080. Right nav walks forward from t=1 to t=16, then holds vel(+0.056, -0.25) until t=27, then forward only until t=33, then stop by t=35.5. Approach \u0394x=+0.598 m. Heading while still walking is -77.3 deg. Realized yaw rate in that window is -0.123 rad/s. The command \u00b10.25 is not the heading rate. Resume along the new heading is +0.320 m. min up_z during the right nav is 0.959. Right-nav end mode is stand. Right-nav end support margin is +0.063 m. Controls' ceiling is approach about +0.60 m, heading about -77 deg, resume about +0.32 m, end stand, margin about +0.063 m. This clip does not claim more than that. Cold-start from stand is about +62 deg left and -83 deg right. Those are not this arc. Left nav walks forward from t=1 to t=16, then holds vel(+0.056, +0.25) until t=28.5, then forward only until t=34.5, then stop by t=37. Yaw does not start at 15 s and is not held for 14 s. Approach \u0394x=+0.598 m. Heading while still walking is +75.7 deg. Realized yaw rate in that window is +0.106 rad/s. The command \u00b10.25 is not the heading rate. Resume along the new heading is +0.317 m. min up_z during the left nav is 0.954. Left-nav end mode is stand. Left-nav end support margin is +0.063 m. Controls' ceiling is approach about +0.60 m, heading about +76 deg, resume about +0.32 m, end stand, margin about +0.063 m. This clip does not claim more than that. A left yaw at 15 s held for 14 s tips on the resume and is not claimed. Not a spin. Go to the kitchen or the bathroom stays refused: the camera can see, but there is no room and no map. The floor is empty. This gait is not a room crossing. Not autonomous navigation."
 }
