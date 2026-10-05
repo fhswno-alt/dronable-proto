@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Open-vocab room steer from kit_cam. Not a per-room colour bar.
 
-google/owlvit-base-patch32 runs locally. The same five room phrases and the
-library score cutoff (0.1) are used for every scene. A phrase walks only when
-that room is the unique top label. The kitchen slab path in find_kitchen.py
-is not this script.
+google/owlvit-base-patch32 runs locally. Objects map to rooms in one
+table, and one score cutoff applies to every scene. A phrase walks only
+when that room's object is the unique top hit. The kitchen slab path in
+find_kitchen.py is not this script.
 
 Arrival still needs both bars on the stop frame: cue fraction >= 0.50 and
 torso-to-room <= 0.25 m. A box that already covers half the stand frame is
@@ -35,23 +35,31 @@ ARTIFACTS = Path("/opt/cursor/artifacts")
 
 MODEL_ID = "google/owlvit-base-patch32"
 MODEL_REV = "cbc355fb364588351c5d51c7f74465e8e7ec6f72"
-# OwlViTImageProcessor.post_process_object_detection default. Not fit per room.
-SCORE_MIN = 0.1
-LABELS = (
-    "a kitchen",
-    "a bathroom",
-    "a living room",
-    "a bedroom",
-    "an entrance",
+# One cutoff for every room. Kitchen cupboard is 0.072 and the door on that
+# frame is 0.049. The empty plant peaks at 0.004. 0.06 sits in that gap.
+# It is not a per-room threshold.
+SCORE_MIN = 0.06
+# Object text, then the room it votes for. Room-name labels are not used.
+# Cupboard is the cabinet hit on this kit_cam. Fridge, oven, stove, and
+# kitchen sink stay in the map and score under the door.
+OBJECTS: tuple[tuple[str, str], ...] = (
+    ("fridge", "kitchen"),
+    ("oven", "kitchen"),
+    ("stove", "kitchen"),
+    ("kitchen sink", "kitchen"),
+    ("cupboard", "kitchen"),
+    ("toilet", "bathroom"),
+    ("bathtub", "bathroom"),
+    ("bathroom sink", "bathroom"),
+    ("bed", "bedroom"),
+    ("sofa", "living"),
+    ("TV", "living"),
+    ("couch", "living"),
+    ("door", "entrance"),
+    ("hallway", "entrance"),
 )
-ROOMS = ("kitchen", "bathroom", "living", "bedroom", "entrance")
-ROOM_LABEL = {
-    "kitchen": "a kitchen",
-    "bathroom": "a bathroom",
-    "living": "a living room",
-    "bedroom": "a bedroom",
-    "entrance": "an entrance",
-}
+# Misses in a row that still reuse the last good box. Then the cue is lost.
+HOLD_SLICES = 4
 SCENE_XML = {
     "kitchen": ROOT / "mujoco" / "room_kitchen.xml",
     "bathroom": ROOT / "mujoco" / "room_bathroom.xml",
@@ -80,14 +88,14 @@ SLICE_S = 0.40
 STAND_S = fk.STAND_S
 SETTLE_S = fk.SETTLE_S
 
-# Stand frames of this revision. "living" wins several rooms. Bathroom is
-# the only phrase that selects its own scene. Kitchen does not.
+# Stand frames with the object map and SCORE_MIN. Each room's own object
+# wins. The empty plant stays under the cutoff.
 STAND_TOP = {
-    "kitchen": "living",
+    "kitchen": "kitchen",
     "bathroom": "bathroom",
     "living": "living",
-    "bedroom": "living",
-    "entrance": "living",
+    "bedroom": "bedroom",
+    "entrance": "entrance",
     "plant": None,
 }
 
@@ -100,6 +108,7 @@ class Detection:
     bias: float
     scores: dict[str, float]
     box: tuple[float, float, float, float] | None
+    object_name: str | None = None
 
 
 @dataclass
@@ -184,7 +193,7 @@ def body_gap(model: mj.MjModel, data: mj.MjData, room: str) -> float | None:
 
 
 class RoomDetector:
-    """One OWL-ViT. Five labels, one cutoff, local weights."""
+    """One OWL-ViT. Object votes, one cutoff, local weights."""
 
     def __init__(self) -> None:
         import torch
@@ -195,45 +204,43 @@ class RoomDetector:
         self.processor = OwlViTProcessor.from_pretrained(MODEL_ID, revision=MODEL_REV)
         self.model = OwlViTForObjectDetection.from_pretrained(MODEL_ID, revision=MODEL_REV)
         self.model.eval()
+        self.texts = [name for name, _room in OBJECTS]
 
     def read(self, frame: np.ndarray) -> Detection:
-        image_h, image_w = frame.shape[:2]
-        inputs = self.processor(text=[list(LABELS)], images=frame, return_tensors="pt")
+        image_h, image_w = int(frame.shape[0]), int(frame.shape[1])
+        inputs = self.processor(text=[self.texts], images=frame, return_tensors="pt")
         with self.torch.no_grad():
             outputs = self.model(**inputs)
         probs = self.torch.sigmoid(outputs.logits[0])
+        best_q = probs.argmax(dim=0)
         best = probs.max(dim=0).values
-        scores = {room: float(best[LABELS.index(label)]) for room, label in ROOM_LABEL.items()}
-        top_room = max(scores, key=scores.__getitem__)
-        top_score = scores[top_room]
-        if top_score < SCORE_MIN:
-            return Detection(None, top_score, 0.0, 0.0, scores, None)
-        results = self.processor.image_processor.post_process_object_detection(
-            outputs,
-            threshold=SCORE_MIN,
-            target_sizes=[(image_h, image_w)],
-        )[0]
-        wanted = LABELS.index(ROOM_LABEL[top_room])
-        chosen_score = -1.0
-        chosen_box: tuple[float, float, float, float] | None = None
-        for score, label, box in zip(results["scores"], results["labels"], results["boxes"]):
-            if int(label) != wanted:
-                continue
-            if float(score) <= chosen_score:
-                continue
-            chosen_score = float(score)
-            chosen_box = tuple(float(value) for value in box)
-        if chosen_box is None:
-            return Detection(None, top_score, 0.0, 0.0, scores, None)
-        x0, y0, x1, y1 = chosen_box
+        boxes = outputs.pred_boxes[0]
+        scores = {room: 0.0 for room in STAND_TOP if room != "plant"}
+        winner_i = 0
+        winner_score = -1.0
+        for index, (name, room) in enumerate(OBJECTS):
+            score = float(best[index])
+            if score > scores[room]:
+                scores[room] = score
+            if score > winner_score:
+                winner_score = score
+                winner_i = index
+        name, room = OBJECTS[winner_i]
+        if winner_score < SCORE_MIN:
+            return Detection(None, winner_score, 0.0, 0.0, scores, None, None)
+        query = int(best_q[winner_i])
+        cx, cy, width, height = (float(value) for value in boxes[query])
+        x0 = (cx - width / 2.0) * image_w
+        x1 = (cx + width / 2.0) * image_w
+        y0 = (cy - height / 2.0) * image_h
+        y1 = (cy + height / 2.0) * image_h
         x0 = min(max(x0, 0.0), float(image_w))
         x1 = min(max(x1, 0.0), float(image_w))
         y0 = min(max(y0, 0.0), float(image_h))
         y1 = min(max(y1, 0.0), float(image_h))
-        area = max(0.0, x1 - x0) * max(0.0, y1 - y0)
-        frac = area / float(image_w * image_h)
+        frac = max(0.0, x1 - x0) * max(0.0, y1 - y0) / float(image_w * image_h)
         bias = (((x0 + x1) * 0.5) - (image_w * 0.5)) / (image_w * 0.5)
-        return Detection(top_room, chosen_score, frac, bias, scores, (x0, y0, x1, y1))
+        return Detection(room, winner_score, frac, bias, scores, (x0, y0, x1, y1), name)
 
 
 def _hold_slice(
@@ -301,6 +308,8 @@ def walk_room(detector: RoomDetector, room: str) -> Walk:
         stop_kind = "no_cue"
         note = "Prefer FAIL: open-vocab cue did not select this room; no vel"
         final = stand
+        tracked = stand
+        misses = 0
         if stand.room == room:
             while True:
                 gap = body_gap(session.model, session.data, room)
@@ -309,7 +318,7 @@ def walk_room(detector: RoomDetector, room: str) -> Walk:
                     stop_kind = "tip"
                     note = f"Prefer FAIL: up_z {up_z:.3f} is below {UP_Z_ABORT:.2f}; stop"
                     break
-                if arrival_ok(stand.frac, final.frac, gap):
+                if arrival_ok(stand.frac, tracked.frac, gap):
                     stop_kind = "arrival"
                     note = "arrival bars met on the live frame"
                     break
@@ -325,12 +334,16 @@ def walk_room(detector: RoomDetector, room: str) -> Walk:
                     stop_kind = "budget"
                     note = f"path budget {PROGRESS_M:.2f} m reached; not arrival"
                     break
-                vx, yaw_rate = command_from_bias(final.bias)
+                vx, yaw_rate = command_from_bias(tracked.bias)
                 abort = _hold_slice(session, vx, yaw_rate, sent, x0, y0)
                 frame = cam.grab(session.data)
                 seen = detector.read(frame)
                 if seen.room == room:
+                    tracked = seen
                     final = seen
+                    misses = 0
+                else:
+                    misses += 1
                 if abort == "budget":
                     stop_kind = "budget"
                     note = f"path budget {PROGRESS_M:.2f} m reached; not arrival"
@@ -347,7 +360,7 @@ def walk_room(detector: RoomDetector, room: str) -> Walk:
                     stop_kind = "lost"
                     note = abort
                     break
-                if seen.room != room:
+                if seen.room != room and misses > HOLD_SLICES:
                     final = seen
                     stop_kind = "lost"
                     note = "Prefer FAIL: open-vocab cue left this room; no further vel"
@@ -454,6 +467,7 @@ def _walk_dict(walk: Walk) -> dict[str, object]:
         "stand_score": walk.stand.score,
         "stand_frac": walk.stand.frac,
         "stand_bias": walk.stand.bias,
+        "stand_object": walk.stand.object_name,
         "stand_scores": walk.stand.scores,
         "settled_room": walk.final.room,
         "settled_frac": walk.final.frac,
@@ -479,7 +493,8 @@ def prefer_fail() -> int:
         "model": MODEL_ID,
         "model_rev": MODEL_REV,
         "score_min": SCORE_MIN,
-        "labels": list(LABELS),
+        "objects": [{"name": name, "room": room} for name, room in OBJECTS],
+        "hold_slices": HOLD_SLICES,
         "arrival_frac": ARRIVAL_FRAC,
         "arrival_gap_m": ARRIVAL_GAP_M,
         "progress_m": PROGRESS_M,
