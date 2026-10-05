@@ -607,8 +607,7 @@ not a backward skate. The stance hip stays on the 0.070 rad cap, and
 the body barely moves during the swing. Mean vx stays +1.7 cm/s.
 Soft-pass is off. This is not a kit walk.
 
-The clips below were this row before the hip lead. They are replaced
-by the lead row once that gait is rendered.
+Those clips were replaced by the hip-lead row below.
 
 ## Stance clip and swing-hip lead
 
@@ -651,3 +650,10 @@ matches that. Airborne travel is 2.0 cm, not 4 cm. Mean vx is
 clears 0.62 rad, because the hip peak fell to about 1.8 Nm and the
 taller knee command fits under the rail. Soft-pass is off. This is
 not a kit walk.
+
+The clips are this lead row. Forward 8.400 s stays up (Δx +20.2 cm,
+mean vx +2.6 cm/s, pooled sole p90 2.5 cm, min up_z 0.997, peak torque
+2.13 Nm, sat_rate 0). Close-up 7.600 s stays up through the stop
+(forward Δx +12.5 cm, mean vx +2.3 cm/s, stop Δx +0.5 cm, min up_z
+0.996, peak torque 2.11 Nm). Constrained Baseline, yuv420p,
+`+faststart`.
