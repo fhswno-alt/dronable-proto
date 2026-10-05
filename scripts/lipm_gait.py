@@ -60,12 +60,12 @@ VENDOR_STEP_M = 0.020
 # flex 0.10 / hip 0.16 puts the sole on the floor about 2 cm ahead.
 # A taller clear_m scales the same shape; the servo band may not finish it.
 FLEX_PEAK = 0.62
-# GaitManager swing only, paired with the swing-hip gain below. 1.90 rad
-# keeps the sole up while the hip reaches. The peak target is past the
-# ±2.09 ctrlrange and that one sample is clipped; the rise is not.
-# 1.69 rad, which stays inside the range, puts the left hip on the rail.
-# The LIPM Bézier still uses FLEX_PEAK.
-GM_FLEX_CMD = 1.90
+# GaitManager swing only. 1.05 rad keeps the knee target inside the
+# ±2.09 ctrlrange (stand knee 0.40, peak command 1.45). Sole p90 lands
+# near 2 cm. 1.90 rad was past the range: the peak sample clipped and
+# the rise did not, and the sole sat near 4.5 cm. The LIPM Bézier still
+# uses FLEX_PEAK.
+GM_FLEX_CMD = 1.05
 FLEX_LAND = 0.10
 HIP_RISE = 0.06
 HIP_REACH = 0.24
@@ -156,11 +156,10 @@ class LipmConfig:
     # 1.16 s row that stayed off the hip rail. 0.20 s rails the right
     # hip. 0 keeps the live sample.
     gm_hip_lead_s: float = 0.22
-    # Swing hip only. The 0.22 s lead leaves about 0.26 rad inside the
-    # swing. 2.80 scales that command so the joint reaches about 0.63 rad
-    # and mean vx clears 7 cm/s. 3.20 puts the left hip on ±2.45 Nm.
-    # The stance clip is not scaled.
-    gm_swing_hip_gain: float = 2.80
+    # Swing hip only. With the knee at 1.05 rad, 1.75 keeps both soles
+    # near 2 cm and the hip pitch off ±2.45 Nm. 2.80 with that knee rails
+    # the hip. The stance clip is not scaled.
+    gm_swing_hip_gain: float = 1.75
 
 
 @dataclass

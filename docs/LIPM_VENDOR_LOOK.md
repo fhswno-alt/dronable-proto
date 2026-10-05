@@ -705,10 +705,61 @@ The 0.22 s / gain 2.80 row on that 8.4 s window is +6.47 cm/s with no
 rail and the same 2.18 Nm left-hip peak. Soft-pass is off. This is
 not a kit walk beyond these bars.
 
-The clips are this gain row. Forward 8.400 s stays up (Δx +51.7 cm,
-mean vx +6.5 cm/s, pooled sole p90 4.8 cm, min up_z 0.997, peak torque
-2.10 Nm, sat_rate 0). Close-up 7.600 s stays up through the stop
-(forward Δx +33.0 cm, mean vx +5.9 cm/s, stop Δx +0.9 cm, pooled sole
-p90 4.7 cm, min up_z 0.993, sat_rate 0). The close-up peak is 2.42 Nm
-on the right knee at the stop (t = 6.22 s, up_z 0.999), not a hip-pitch
-rail. Constrained Baseline, yuv420p, `+faststart`.
+Those clips were replaced by the sole-lift row below.
+
+## Sole lift toward 2 cm, then cadence
+
+The 150 ms move, the 5.5 rad/s cap, the 1.16 s period, and the 0.070 rad
+stance clip stay for this row. Plant md5 stays
+`17dc4ff37491c8e61900fd83b5d31f0c`. The swing knee command is 1.05 rad.
+Stand knee is 0.40 rad, so the peak target is 1.45 rad, inside the
+±2.09 ctrlrange. No knee sample is clipped. The swing-hip gain is 1.75.
+Gain 2.80 with a knee near this height rails the hip: at flex 1.15 and
+gain 2.80, on an 8.4 s window, sole p90 is 2.27 / 2.65 cm and vx is
++8.18 cm/s, and the left hip is on ±2.45 Nm.
+
+24 s, min up_z 0.997, no hip-pitch sample at ±2.45 Nm:
+
+| | |
+| --- | ---: |
+| Period | 1.16 s |
+| Knee command peak | 1.45 rad |
+| Knee achieved L / R | 0.71 / 0.71 rad |
+| Sole p90 L / R | 2.08 / 2.01 cm |
+| Mean vx | +5.02 cm/s |
+| Swing hip command / achieved | 0.446 / 0.403 rad |
+| Stance hip command / achieved | 0.070 / 0.233 rad |
+| Airborne foot Δx | +5.25 cm |
+| Body Δx during the swing | +2.27 cm |
+| Stance slip | −0.26 cm |
+| Upright hip pitch peak R / L | 1.74 / 1.95 Nm |
+| Upright knee peak R / L | 0.99 / 1.88 Nm |
+| Upright ankle pitch R / L | 1.01 / 1.63 Nm |
+| Upright ankle roll R / L | 1.50 / 2.36 Nm |
+| sat_rate | 0.005 |
+
+sat_rate 0.005 is five swing samples on the left hip roll (2.41 to
+2.45 Nm), one of them on the roll rail. Hip pitch stays at 1.95 Nm.
+Mean vx is +5.02 cm/s. The sole is at the kit height and the knee
+command is inside the ctrlrange. Soft-pass is off.
+
+Shortening the period from here does not reach a kit step. With the
+0.22 s lead left in place, on 8.4 s windows:
+
+| Period | Mean vx | min up_z | Sole p90 L / R | Hip pitch peak | Note |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 1.00 s | +4.11 cm/s | 0.987 | 1.89 / 1.74 cm | 2.16 Nm | sole under 2 cm |
+| 0.60 s | +1.11 cm/s | 0.996 | 0.67 / 0.87 cm | 1.93 Nm | sole collapses |
+| 0.40 s | −2.43 cm/s | 0.992 | 0.51 / 0.12 cm | rail | left hip pitch at 0.528 s, ω −0.32, kp·e +1.89, damp +0.58, F +2.45, up_z 1 |
+
+Scaling the lead with the period (0.114 s at 0.60 s) reaches vx
++6.50 cm/s with sat_rate 0 and hip pitch peak 1.48 Nm, and the sole
+p90 falls to 0.87 / 0.99 cm. A faster knee-only move (80 ms, hip still
+150 ms) at 1.00 s rails the hip pitch. Holding the clock height through
+half of single support drops min up_z to 0.673 at 1.16 s. Leading the
+knee as well as the hip, at 0.60 s, either rails the hip pitch or
+leaves the sole near 1 cm. Kit cadence, 300–600 ms, still fails.
+Soft-pass is off.
+
+The clips are this 1.16 s sole row. Constrained Baseline, yuv420p,
+`+faststart`.
