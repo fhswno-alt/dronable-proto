@@ -23,7 +23,9 @@ A named-body projection of `kitchen`, `table`, and `chair` checks that the yello
 
 The bus is `CommandBus` in `scripts/steer_walk.py`: `stand`, `stop`, and `vel(vx, yaw_rate)` only. Resend is 10 Hz. 200 ms of silence stands. The bus caps stay +0.056 / −0.032 m/s and yaw ±0.25. The phrase sends half the forward cap. The bus clamps again. Full-cap finder bursts crossed `up_z` 0.90 near +0.39 m, so this last mile stays at `vel(+0.028, yaw)`.
 
-The stand frame is integrated into an `ExploreMap`. The next command is `last_mile_from_map()`, which calls `query_kitchen_like_yellow()` and `frontier_cells()`. If yellow was not logged, the phrase sends no vel. If it was, yaw aims at the frontier nearest that camera ray, or at the ray when no frontier sits in the cone. That aim is not a waypoint and not a counter cell. The live yellow fraction is only the arrival bar. A lost blob does not replace the map command.
+The stand frame is integrated into an `ExploreMap`. The next command is `last_mile_from_map()`, which calls `query_kitchen_like_yellow()` and `frontier_cells()`. If yellow was not logged, the phrase sends no vel. If it was, yaw aims at the frontier nearest that camera ray, or at the ray when no frontier sits in the cone. That aim is not a waypoint and not a counter cell. The live yellow fraction is the arrival bar. A lost blob does not by itself stop the walk.
+
+Inside a torso gap under 0.50 m, if that live blob is falling or off center, the phrase pauses the map aim and sends the claimed half-cap walk-yaw `vel(+0.028, yaw toward the blob)` for at most two tries of 2.0 s. When the blob is centered and the fraction has risen, the map approach resumes. A centered fade has no yaw side, so it does not get a turn. `vx = 0` yaw does not change heading on this plant, so stand and `vel(0, yaw)` are not used to recenter.
 
 `vx = 0` yaw does not change heading on this plant, so it is not sent.
 
@@ -72,14 +74,29 @@ This phrase queries the map. Measured "go to the kitchen", room scene, after sta
 | Commands | 48 forward slices and 109 yaw slices, every one `vx = +0.028`, yaw inside ±0.25. `vx = 0` was not sent. |
 | Arrival | **false** |
 
-0.239 m meets the gap bar alone. Settled yellow is 0, not 0.50. Both bars are required. That is the Prefer FAIL.
+0.239 m meets the gap bar alone. Settled yellow is 0, not 0.50. Both bars are required. That is the Prefer FAIL on main before the half-cap walk-yaw recenter.
+
+The recenter is not a stop, and it is not the closed bearing-aim draft. Full-cap finder bursts have crossed `up_z` 0.90, so the turn stays on the claimed half-cap window. Measured "go to the kitchen" with that recenter, room scene, after stand:
+
+| | |
+|--|--|
+| Stop | Prefer FAIL, `stop_kind` close. The torso gap is inside 0.25 m and settled yellow is not 0.50. Not arrival. |
+| Map | Yellow was logged (max fraction **0.147**). `map_command_source` is `map`. **329** queries. |
+| Recenter | Yellow entering the 0.50 m gap was **0.094**. **2** half-cap walk-yaw recenters, `vel(+0.028, yaw)`. Both saw the fraction rise while the blob was centered. Neither reached 0.50. Stand and `vx = 0` were not sent. |
+| End x | **+1.091 m** (Δx **+1.089 m**) |
+| min up_z | **0.980** (bar 0.90, not crossed) |
+| Remaining | **0.224 m** |
+| Final blob | yellow fraction **0.000** on the settled frame. |
+| Arrival | **false** |
+
+0.224 m is inside the gap bar, 0.015 m closer than the 0.239 m map-query stop. Settled yellow is still 0, not 0.50. The walk-yaw recenter did not keep the backsplash up to the yellow bar. That is the Prefer FAIL.
 
 ## What would count as arrival
 
 Both bars, on the settled stop frame:
 
 1. Yellow fraction ≥ 0.50. Half the frame is "most of the frame". Stand is 0.039 and this stop is 0.000, so the counter does not fill the frame.
-2. Torso-to-kitchen horizontal gap ≤ 0.25 m. That is contact range for this torso, not a room crossing. This stop is 0.239 m, inside that bar, and still not arrival without the yellow bar.
+2. Torso-to-kitchen horizontal gap ≤ 0.25 m. That is contact range for this torso, not a room crossing. This stop is 0.224 m, inside that bar, and still not arrival without the yellow bar.
 
 Either bar alone is not arrival. A stop inside 0.25 m with the backsplash still small would be Prefer FAIL (`close`), not arrival. The gap is read from the kitchen geom boxes so the summary can state the remaining distance. It does not choose left versus right and it is not a waypoint.
 

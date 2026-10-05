@@ -16,9 +16,12 @@ waypoints and they are not given to the map query.
 
 The last-mile walks at half the forward cap (0.028 m/s), because a
 full-cap finder burst crossed up_z 0.90. Yaw comes from the logged
-camera ray or the frontier nearest that ray, inside ±0.25. vx=0 yaw
-does not change heading on this plant and is not sent. The up_z bar
-stays 0.90. The 1.2 s hop stays in --self-test at the full forward cap.
+camera ray or the frontier nearest that ray, inside ±0.25. Inside
+0.50 m, a falling or off-center backsplash is recentered with that
+same half-cap walk-yaw, vel(+0.028, yaw toward the live blob), and
+then the map approach resumes. vx=0 yaw does not change heading on
+this plant, so stand and vel(0, yaw) are not used to turn. The up_z
+bar stays 0.90. The 1.2 s hop stays in --self-test at the full forward cap.
 The world-x budget is 1.10 m, a stop, not a goal pose. Arrival is
 claimed only when the backsplash fills at least half the frame and the
 torso is within 0.25 m of the kitchen geom. Otherwise the summary
@@ -107,6 +110,12 @@ UP_Z_ABORT = 0.90
 # 0.25 m is contact range for this torso, not a room crossing.
 ARRIVAL_YELLOW_FRAC = 0.50
 ARRIVAL_REMAINING_M = 0.25
+# Inside this gap, a falling or off-center blob gets a bounded half-cap
+# walk-yaw, then the map approach resumes. vx stays +0.028. Stand and
+# vel(0, yaw) do not change heading on this plant and are not sent.
+WALK_RECENTER_REMAINING_M = 0.50
+WALK_RECENTER_S = 2.0
+MAX_WALK_RECENTER = 2
 PERCEPT_S = 0.40
 BUDGET_STOP = "burst budget reached; stop"
 # Dim backsplash, kitchen body still in frame. Half-cap walk-yaw toward the
@@ -170,6 +179,9 @@ HONESTY = (
     "and not an arrival unless the backsplash fills at least half the frame "
     "and the torso is within 0.25 m of the kitchen geom. "
     "query_kitchen_like_yellow() and frontier_cells() pick the half-cap vel. "
+    "Inside 0.50 m a falling or off-center blob is recentered with "
+    "vel(+0.028, yaw toward that blob), then the map approach resumes. "
+    "Stand and vx=0 yaw are not used to turn. "
     "A live blob is the arrival fraction, not the command. "
     "No yellow in the map log sends no vel. "
     "The kitchen geom distance is only the arrival bar and the reported gap."
@@ -271,6 +283,9 @@ class Approach:
     map_bearing_rad: float | None = None
     map_frontier_queries: int = 0
     map_command_source: str = "none"
+    walk_recenters: int = 0
+    walk_recenter_recovered: int = 0
+    yellow_enter_hold: float | None = None
 
 
 def _md5(path: Path) -> str:
@@ -673,6 +688,46 @@ def center_bias_for(yellow_frac: float, peak_yellow: float) -> float:
     if yellow_fading(yellow_frac, peak_yellow):
         return FADE_CENTER_BIAS
     return CENTER_BIAS
+
+
+def walk_recenter_command(bias: float, *, fading: bool) -> tuple[float, float] | None:
+    """Claimed half-cap walk-yaw toward the live blob.
+
+    vx is +0.028. Yaw is the open-walk trim, inside ±0.25. None means
+    there is no side to turn toward. Stand and vel(0, yaw) are not
+    returned: on this plant they do not change heading.
+    """
+    band = FADE_CENTER_BIAS if fading else CENTER_BIAS
+    yaw = trim_yaw(bias, band)
+    if abs(yaw) < steer_walk.DEADBAND_YAW:
+        return None
+    if yaw > steer_walk.YAW_RATE_CAP:
+        return (SOFT_VX, steer_walk.YAW_RATE_CAP)
+    if yaw < -steer_walk.YAW_RATE_CAP:
+        return (SOFT_VX, -steer_walk.YAW_RATE_CAP)
+    return (SOFT_VX, yaw)
+
+
+def should_walk_recenter(
+    score: KitchenScore,
+    peak_yellow: float,
+    remaining_m: float,
+) -> bool:
+    """True when the gap is inside 0.50 m and the live blob needs a walk-yaw.
+
+    Falling but already centered has no yaw side, so this stays false.
+    A lost blob with no centroid stays false. The caller must not turn
+    those into vel(0, yaw).
+    """
+    if remaining_m >= WALK_RECENTER_REMAINING_M:
+        return False
+    if score.centroid_u is None:
+        return False
+    fading = yellow_fading(score.yellow_frac, peak_yellow)
+    off_center = abs(score.bias) > CENTER_BIAS
+    if not fading and not off_center:
+        return False
+    return walk_recenter_command(score.bias, fading=fading) is not None
 
 
 def _remember_bias(score: KitchenScore, last_bias: float) -> float:
@@ -1119,14 +1174,111 @@ def _last_mile_stop(
     return None
 
 
+def _walk_recenter(
+    session: steer_walk.SteerSession,
+    cam: KitCam,
+    feature_map: explore_map.ExploreMap,
+    score: KitchenScore,
+    sent: list[SentVel],
+    x0: float,
+    peak_yellow: float,
+) -> tuple[
+    KitchenScore,
+    explore_map.YellowQuery,
+    np.ndarray,
+    ApproachChoice | None,
+    bool,
+    int,
+    int,
+    int,
+]:
+    """Half-cap walk-yaw until the blob is centered and the fraction rises.
+
+    Every command is vel(+0.028, yaw). The map is queried and not used as
+    the aim. When the budget ends, or the blob has no side left, the
+    caller resumes the map approach. This does not stand and does not
+    send vx=0.
+    """
+    start_frac = score.yellow_frac
+    deadline = float(session.data.time) + WALK_RECENTER_S
+    frame = cam.grab(session.data)
+    yellow = feature_map.query_kitchen_like_yellow()
+    queries = 1
+    feature_map.frontier_cells(float(session.data.qpos[0]), float(session.data.qpos[1]))
+    recovered = False
+    stop: ApproachChoice | None = None
+    yaw_slices = 0
+    forward_slices = 0
+    while float(session.data.time) < deadline - 1e-9:
+        dx = float(session.data.qpos[0]) - x0
+        up_z = session.samples[-1].up_z if session.samples else 1.0
+        remaining, _near = _gap(session.model, session.data)
+        choice = _last_mile_stop(
+            score,
+            dx_m=dx,
+            up_z=up_z,
+            forward_bursts=0,
+            remaining_m=remaining,
+        )
+        if choice is not None:
+            stop = choice
+            break
+        fading = yellow_fading(score.yellow_frac, peak_yellow)
+        if score.centroid_u is None:
+            break
+        command = walk_recenter_command(score.bias, fading=fading)
+        if command is None:
+            recovered = score.yellow_frac > start_frac and abs(score.bias) <= CENTER_BIAS
+            break
+        if command[0] <= 1e-9:
+            stop = ApproachChoice(
+                "stop",
+                "blob",
+                "refused: walk recenter tried vx=0 yaw",
+            )
+            break
+        slice_s = min(BURST_FORWARD_S, deadline - float(session.data.time))
+        if slice_s <= 1e-6:
+            break
+        hold_abort = _hold_vel(
+            session, cam, command[0], command[1], slice_s, sent,
+            stop_when_centered=False,
+            progress_x0=x0,
+            progress_cap_m=PROGRESS_STOP_M,
+            ignore_blob=True,
+        )
+        if abs(command[1]) > 1e-9:
+            yaw_slices += 1
+        else:
+            forward_slices += 1
+        frame, yellow, _frontiers = _integrate_view(feature_map, session, cam)
+        queries += 1
+        score = score_frame(session.model, session.data, frame)
+        peak_yellow = max(peak_yellow, score.yellow_frac)
+        if (
+            score.centroid_u is not None
+            and abs(score.bias) <= CENTER_BIAS
+            and score.yellow_frac > start_frac
+        ):
+            recovered = True
+            break
+        if hold_abort:
+            kind: BurstKind = "budget" if hold_abort == BUDGET_STOP else _abort_kind(hold_abort)
+            stop = ApproachChoice("stop", kind, hold_abort)
+            break
+    return score, yellow, frame, stop, recovered, queries, yaw_slices, forward_slices
+
+
 def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
     """Half-cap slices from the explore-map query.
 
     The stand frame is painted into the map. If query_kitchen_like_yellow()
     is false, this is Prefer FAIL and no vel is sent. If yellow was logged,
     each slice calls that query and frontier_cells() and sends the result.
-    A lost live blob does not replace that command. Arrival still needs the
-    live yellow fraction and the torso gap. up_z under 0.90 stops.
+    Inside 0.50 m, a falling or off-center blob gets a half-cap walk-yaw
+    recenter, then this loop resumes. A lost live blob does not by itself
+    stop the walk. Arrival still needs the live yellow fraction and the
+    torso gap. up_z under 0.90 stops.
     """
     feature_map = explore_map.ExploreMap.empty()
     _hold_stand(session, STAND_S)
@@ -1141,6 +1293,10 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
     yaw_corrections = 0
     reacquires = 0
     fade_recenters = 0
+    walk_recenters = 0
+    walk_recenter_recovered = 0
+    yellow_enter_hold: float | None = None
+    peak_yellow = score.yellow_frac
     map_queries = 1
     note = MAP_NO_YELLOW if not yellow.seen else yellow.note
     stop_kind: BurstKind = "no_yellow"
@@ -1165,6 +1321,33 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
             note = choice.line
             stop_kind = choice.kind
             break
+        peak_yellow = max(peak_yellow, score.yellow_frac)
+        if yellow_enter_hold is None and remaining < WALK_RECENTER_REMAINING_M:
+            yellow_enter_hold = score.yellow_frac
+        if walk_recenters < MAX_WALK_RECENTER and should_walk_recenter(
+            score, peak_yellow, remaining,
+        ):
+            walk_recenters += 1
+            (
+                score, yellow, _frame, stop, recovered, added, yaw_slices, forward_slices,
+            ) = _walk_recenter(
+                session, cam, feature_map, score, sent, x0, peak_yellow,
+            )
+            map_queries += added
+            yaw_corrections += yaw_slices
+            forward_bursts += forward_slices
+            peak_yellow = max(peak_yellow, score.yellow_frac)
+            if recovered:
+                walk_recenter_recovered += 1
+            moved = float(session.data.qpos[0]) - x0
+            if mid_image is None and moved >= (PROGRESS_STOP_M * 0.5):
+                mid_image = _frame
+                mid_score = score
+            if stop is not None:
+                note = stop.line
+                stop_kind = stop.kind
+                break
+            continue
         pose = _robot_pose(session)
         command = explore_map.last_mile_from_map(feature_map, pose.x, pose.y, pose.yaw)
         map_queries += 1
@@ -1208,6 +1391,7 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
         session, cam, before, mid_image, stand_score, mid_score, sent, note,
         stop_kind, x0, forward_bursts, yaw_corrections, stop_kind == "arrival",
         reacquires, fade_recenters, yellow, map_queries,
+        walk_recenters, walk_recenter_recovered, yellow_enter_hold,
     )
 
 
@@ -1229,6 +1413,9 @@ def _approach_result(
     fade_recenters: int,
     yellow: explore_map.YellowQuery,
     map_queries: int,
+    walk_recenters: int = 0,
+    walk_recenter_recovered: int = 0,
+    yellow_enter_hold: float | None = None,
 ) -> Approach:
     session.bus.stop(float(session.data.time))
     _hold_stand(session, SETTLE_S)
@@ -1249,6 +1436,24 @@ def _approach_result(
             "not arrival"
         )
         stop_kind = "close"
+    elif stop_kind == "close":
+        entered = (
+            f"{yellow_enter_hold:.3f}"
+            if yellow_enter_hold is not None
+            else "n/a"
+        )
+        note = (
+            "Prefer FAIL: torso is within "
+            f"{ARRIVAL_REMAINING_M:.2f} m of the kitchen geom "
+            f"but settled yellow is {final.yellow_frac:.3f}, not "
+            f"{ARRIVAL_YELLOW_FRAC:.2f}. "
+            f"Inside {WALK_RECENTER_REMAINING_M:.2f} m, {walk_recenters} "
+            "half-cap walk-yaw recenters used vel(+0.028, yaw toward the "
+            "live blob). Stand and vx=0 yaw were not sent. "
+            f"{walk_recenter_recovered} of those recenters saw the fraction "
+            "rise while the blob was centered. None of them reached 0.50. "
+            f"Yellow entering that gap was {entered}. Not arrival."
+        )
     elif stop_kind == "budget":
         note = (
             f"burst budget; dx {end_x - x0:+.3f} m; "
@@ -1285,6 +1490,9 @@ def _approach_result(
         map_bearing_rad=yellow.bearing_rad,
         map_frontier_queries=map_queries,
         map_command_source="map" if yellow.seen else "none",
+        walk_recenters=walk_recenters,
+        walk_recenter_recovered=walk_recenter_recovered,
+        yellow_enter_hold=yellow_enter_hold,
     )
 
 
@@ -1501,6 +1709,50 @@ def test_approach_policy() -> list[str]:
     _expect(not arrival_bars(0.20, 0.10), "close but small blob was called arrival", failures)
     _expect(arrival_bars(0.50, 0.25), "both bars at the threshold did not pass", failures)
     _expect(arrival_bars(0.62, 0.20), "clear arrival bars did not pass", failures)
+    return failures
+
+
+def test_walk_recenter() -> list[str]:
+    """Inside 0.50 m, recenter is half-cap walk-yaw. Never stand and never vx=0."""
+    failures: list[str] = []
+    centered = _fake_score("forward", 0.08, -0.02)
+    _expect(
+        not should_walk_recenter(centered, 0.14, 0.40),
+        "centered fade inside 0.50 m must not invent a yaw",
+        failures,
+    )
+    _expect(
+        walk_recenter_command(-0.02, fading=True) is None,
+        "centered fade produced a yaw",
+        failures,
+    )
+    off = _fake_score("yaw_left", 0.08, -0.22)
+    _expect(should_walk_recenter(off, 0.14, 0.40), "off-center fade should recenter", failures)
+    _expect(
+        not should_walk_recenter(off, 0.14, 0.60),
+        "off-center fade outside 0.50 m should stay on the map",
+        failures,
+    )
+    command = walk_recenter_command(-0.22, fading=True)
+    _expect(command is not None, "off-center fade produced no command", failures)
+    if command is not None:
+        _expect(abs(command[0] - SOFT_VX) < 1e-9, f"recenter vx {command}", failures)
+        _expect(command[0] > 1e-9, "recenter used vx=0", failures)
+        _expect(command[1] > 0.02, f"left bias should yaw left {command}", failures)
+        _expect(abs(command[1]) <= steer_walk.YAW_RATE_CAP + 1e-9, f"yaw cap {command}", failures)
+        _expect(
+            abs(command[1] - steer_walk.YAW_RATE_CAP) > 0.05,
+            f"bias 0.22 reached the yaw cap {command}",
+            failures,
+        )
+    lost = _fake_score("fail", 0.0, 0.0)
+    _expect(
+        not should_walk_recenter(lost, 0.14, 0.30),
+        "a lost blob must not become a vx=0 yaw",
+        failures,
+    )
+    straight = walk_recenter_command(0.0, fading=False)
+    _expect(straight is None, f"centered blob produced {straight}", failures)
     return failures
 
 
@@ -1759,6 +2011,7 @@ def self_test() -> int:
     failures.extend(test_pixels())
     failures.extend(test_phrases())
     failures.extend(test_approach_policy())
+    failures.extend(test_walk_recenter())
     if failures:
         for msg in failures:
             print(f"FAIL {msg}")
@@ -1905,6 +2158,10 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
         "yaw_corrections": approach.yaw_corrections,
         "reacquires": approach.reacquires,
         "fade_recenters": approach.fade_recenters,
+        "walk_recenter_remaining_m": WALK_RECENTER_REMAINING_M,
+        "walk_recenters": approach.walk_recenters,
+        "walk_recenter_recovered": approach.walk_recenter_recovered,
+        "yellow_enter_hold": approach.yellow_enter_hold,
         "map_yellow_seen": approach.map_yellow_seen,
         "map_yellow_fraction": approach.map_yellow_fraction,
         "map_bearing_rad": approach.map_bearing_rad,
@@ -1951,6 +2208,9 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
         f"yaw_corrections {approach.yaw_corrections} "
         f"reacquires {approach.reacquires} "
         f"fade_recenters {approach.fade_recenters} "
+        f"walk_recenters {approach.walk_recenters} "
+        f"recovered {approach.walk_recenter_recovered} "
+        f"yellow_enter_hold {approach.yellow_enter_hold} "
         f"end mode {approach.end_mode} min_up_z {approach.min_up_z:.3f} "
         f"dx {approach.dx_m:+.3f} m end x {approach.end_x_m:+.3f} m "
         f"remaining {approach.remaining_m:.3f} m "
