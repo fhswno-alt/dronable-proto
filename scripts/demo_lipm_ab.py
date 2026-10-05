@@ -138,11 +138,12 @@ def main() -> None:
         "soft_pass": False,
         "bar": (
             "Vendor GaitManager look: sole about 2 cm, step at most 2 cm, "
-            "push, no skate, upright. 4 cm is not the bar."
+            "period 300–600 ms, forward Δx, no skate, upright, arms not frozen. "
+            "A shuffle or an in-place march is a Prefer FAIL. 5 cm is not the bar."
         ),
         "hx_running_nm": 2.45,
-        "freeze_nm": 2.1,
-        "toe_moment_nm": 2.36,
+        "leg_forcerange_nm": 2.45,
+        "toe_moment_nm": 2.24,
         "window_s": duration,
         "vx": sw.VX_FWD_CAP,
         "rows": rows,
@@ -159,6 +160,7 @@ def main() -> None:
             f"sat={float(row['sat_rate']):.3f} "
             f"up={float(row['min_up_z']):.3f} "
             f"dx={float(row['dx_m']):+.4f} "
+            f"unload={float(row.get('rear_unload_frac', -1)):.2f} "
             f"fault={row['fault']}"
         )
 

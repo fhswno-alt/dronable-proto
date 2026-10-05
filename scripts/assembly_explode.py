@@ -35,7 +35,7 @@ PLANT_XML = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145.xml"
 PRICE_SHEET = ROOT / "docs" / "MFG_FIRST_BUILD_PRICE_SHEET.md"
 OUT_DIR = ROOT / "docs" / "previews" / "assembly"
 
-EXPECTED_MD5 = "71b2c86d133ebc603f58b99c53e496f3"
+EXPECTED_MD5 = "17dc4ff37491c8e61900fd83b5d31f0c"
 
 WIDTH = 1280
 HEIGHT = 720

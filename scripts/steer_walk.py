@@ -5,9 +5,9 @@ Velocity only. No waypoints, goals, maps, door commands, or joint targets.
 
 Plant (Hardware freeze, plus the approved kit_cam copy):
   mujoco/ainex_hiwonder/ainex_controls_m2_145.xml
-  Foot contact box 145×86 mm (half-size 0.0725 × 0.043 m, friction 1.6).
+  Foot contact box 135×76 mm (half-size 0.0675 × 0.038 m, friction 1.6).
   Toe spheres are visual (contype 0) and do not hold weight.
-  Legs ±2.1 Nm (hip/knee kp 40–45, ankle kp 35). Arms/head ±0.7 Nm.
+  Legs ±2.45 Nm (hip/knee kp 40–45, ankle kp 35). Arms/head ±0.7 Nm.
   kit_cam is a child of head_tilt_link: pos 0.050 0.019 0.007, xyaxes
   0 -1 0 0 0 1, fovy 104.82, plus a zero-mass non-contact site. No door
   geometry. This file does not load gate_f / OptC / door plants. The demo
@@ -148,7 +148,9 @@ PLANT_XML = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145.xml"
 # Walk plant after kit_cam moved to 0.050 0.019 0.007. Feet, friction,
 # forcerange, kp, and mass are the same as the e3feef97… insert. Pre-camera
 # freeze was fc94709c84f5598d4474ecfc4bb41fdc.
-PLANT_MD5 = "71b2c86d133ebc603f58b99c53e496f3"
+# Plant thaw from cursor/plant-thaw-legs-foot-6f10 (PR #43): legs ±2.45 Nm,
+# foot contact 135×76 mm. Was 71b2c86d… at ±2.1 and 145×86.
+PLANT_MD5 = "17dc4ff37491c8e61900fd83b5d31f0c"
 KIT_CAM_POS = (0.050, 0.019, 0.007)
 KIT_CAM_FOVY = 104.82
 # xyaxes "0 -1 0 0 0 1" → camera-frame columns (x, y, z). Look is −Z = +X.
@@ -160,10 +162,10 @@ KIT_CAM_AXES = (
 PREVIEWS = ROOT / "previews"
 
 # Frozen contact box (half-size, m) and servo ranges. Checked, never written.
-FOOT_HALF_X = 0.0725
-FOOT_HALF_Y = 0.0430
+FOOT_HALF_X = 0.0675
+FOOT_HALF_Y = 0.0380
 FOOT_FRICTION = 1.6
-LEG_TAU = 2.1
+LEG_TAU = 2.45
 ARM_TAU = 0.7
 SAT_FRAC = 0.98
 
@@ -1007,7 +1009,7 @@ def plant_problems(
             continue
         size = model.geom_size[gid]
         if abs(float(size[0]) - FOOT_HALF_X) > 1e-6 or abs(float(size[1]) - FOOT_HALF_Y) > 1e-6:
-            problems.append(f"{gname} size {size[:2].tolist()} != 145×86 half-size")
+            problems.append(f"{gname} size {size[:2].tolist()} != 135×76 half-size")
         if abs(float(model.geom_friction[gid, 0]) - FOOT_FRICTION) > 1e-6:
             problems.append(f"{gname} friction {model.geom_friction[gid, 0]} != {FOOT_FRICTION}")
     for gname in ("l_toe_viz", "r_toe_viz"):
@@ -1929,16 +1931,22 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
             f"swing contact {float(sc['swing_contact_frac']):.3f}, "
             f"stance slip {float(sc['stance_slip_m_s']):.4f} m/s, "
             f"sat_rate {float(sc['sat_rate']):.3f}, "
-            f"lifts {int(sc['n_lifts'])}, missed gates {int(sc['n_missed_gates'])}. "
+            f"lifts {int(sc['n_lifts'])}, missed gates {int(sc['n_missed_gates'])}, "
+            f"rear_unload_frac {float(sc['rear_unload_frac']):.2f}, "
+            f"rear_share_min {float(sc['rear_share_min']):.2f}, "
+            f"CoP margin before lift {float(sc['cop_before_lift_median_m']):.3f} m, "
+            f"CoP x before lift {float(sc['cop_x_before_lift_m']):.3f} m. "
             f"Measured Δx={dx_fwd:+.3f} m, mean body vx={mean_vx:+.3f} m/s "
             f"(not the command). "
             f"Turn-window Δyaw={math.degrees(dyaw):+.2f} deg "
             f"(mean yaw rate {mean_yaw_rate:+.3f} rad/s). "
             f"tip={tip}; min_up_z={session.min_up_z:.3f}; "
             f"peak leg torque={session.max_leg_tau:.2f} Nm (limit {LEG_TAU}). "
-            "Foot box, friction, kp, and ±2.1 Nm are unchanged. "
-            "Vendor bar is about 2 cm of sole plus a push. "
-            "Clearance without forward progress is a Prefer FAIL."
+            "Plant is the #43 thaw only: legs ±2.45 Nm, foot box 135×76 mm, "
+            f"md5 {PLANT_MD5}. No further plant edit. "
+            "Vendor look is about 2 cm, a 300–600 ms step, forward progress, "
+            "no skate, upright, arms not frozen. "
+            "An upright in-place march is a Prefer FAIL."
         )
         if session.bus.fault:
             honesty += f" FAULT: {session.bus.fault_reason}."

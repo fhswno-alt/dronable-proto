@@ -26,7 +26,7 @@ import numpy as np
 
 CTRL_DT = 0.02
 G = 9.81
-LEG_TAU = 2.1
+LEG_TAU = 2.45
 # Position-servo saturation boundary. Commanding past this does not add torque.
 SAT_FRAC = 0.98
 # Hiwonder GaitManager look: step height about 2 cm, step length at most 2 cm.
@@ -55,6 +55,25 @@ REACH_S = 0.74
 SHIFT_HIP_L = 0.15
 SHIFT_HIP_R = 0.20
 SHIFT_ANK = 0.15
+# Rear-knee yield once the lean is on the forward foot. Two 14.5 cm soles
+# a couple of centimetres apart both contain the COM. The exclusive toe of
+# the front foot needs ~2.36 Nm and is not the target. Shortening the rear
+# leg drops its normal force; the front heel/mid already covers the COM
+# at a fraction of ±2.1 Nm. Not a hip extension.
+YIELD_LAT = 0.80
+YIELD_KNEE = 0.42
+YIELD_RATE = 1.40
+# Open-loop hip during the yield retracts the pelvis. The hold below only
+# adds hip when the rear sole has already slid backward.
+YIELD_HIP_MAX = 0.28
+# Swing hip is the measured along-track error to a 2 cm lead, not a fixed
+# pose. 0.24 rad from a side-by-side start lands about 2 cm up; a rear foot
+# that yield pulled back needs more, and it is still capped.
+HIP_PLACE_MAX = 0.48
+COP_PITCH_SIGN = 1.0
+# Single-support CoP this far behind the COM projection. x_ddot = (g/h)*(x-p),
+# so a few millimetres of heel offset is the forward acceleration. Not the toe.
+HEEL_LEAD_M = 0.006
 
 Side = Literal["L", "R"]
 PhaseName = Literal["stand", "shift", "swing"]
@@ -72,7 +91,7 @@ class LipmConfig:
     t_shift_max: float = 1.50
     ik_kp: float = 8.0
     shift_k: float = 2.2
-    cop_k: float = 0.9
+    cop_k: float = 1.6
     arm_amp: float = 0.22
     unload_n: float = 5.0
     inside_margin_m: float = 0.008
@@ -87,6 +106,8 @@ class LiftRecord:
     com_inside: bool
     clear_cmd_m: float
     z_budget_m: float
+    cop_x_m: float = 0.0
+    rear_share: float = 1.0
 
 
 @dataclass
@@ -100,6 +121,7 @@ class LipmTrace:
     contact_r: list[int] = field(default_factory=list)
     phase: list[str] = field(default_factory=list)
     swing: list[str] = field(default_factory=list)
+    stance: list[str] = field(default_factory=list)
     up_z: list[float] = field(default_factory=list)
     sat: list[int] = field(default_factory=list)
     slip_l: list[float] = field(default_factory=list)
@@ -160,9 +182,16 @@ class LipmWalker:
         self.cmd_vx = 0.0
         self.cmd_yaw = 0.0
         self.swing_q0: dict[str, float] = {}
+        self.swing_held = False
         self.stance_q0: dict[str, float] = {}
         self.hold_sagittal: dict[Side, dict[str, float]] = {}
         self.sag_lean = 0.0
+        self.yield_flex = 0.0
+        self.yield_hip = 0.0
+        self.yield_along = 0.0
+        self.liftoff_along = 0.0
+        self.reach_hip = 0.0
+        self.x0 = float(data.qpos[0])
         self._same_misses = 0
         self.lifts: list[LiftRecord] = []
         self.trace = LipmTrace()
@@ -263,6 +292,17 @@ class LipmWalker:
             "L": self._sagittal_q("L"),
             "R": self._sagittal_q("R"),
         }
+        self.yield_flex = 0.0
+        self.yield_hip = 0.0
+        self.yield_along = 0.0
+
+    def _retry_shift(self) -> None:
+        """More time on the same landing pose. Do not recapture the yield."""
+        self.phase = "shift"
+        self.phase_t = 0.0
+        self.swing_s = 0.0
+        self.hold_l = np.asarray(self.data.geom_xpos[self.gid["L"]], dtype=np.float64).copy()
+        self.hold_r = np.asarray(self.data.geom_xpos[self.gid["R"]], dtype=np.float64).copy()
 
     def _tick_shift(self) -> None:
         com = self._com_xy()
@@ -281,14 +321,18 @@ class LipmWalker:
         self._write_shift()
         self._write_sagittal_hold()
         self._apply_forward_lean()
+        self._yield_rear()
         if self.phase_t < self.cfg.t_shift_min:
             return
         swing = self.other(self.stance)
         fn = self.foot_normal(swing)
+        fn_stance = self.foot_normal(self.stance)
         inside = self.com_inside_foot(self.stance, self.cfg.inside_margin_m)
         margin = self.cop_margin(self.stance)
+        share = fn / max(fn + fn_stance, 1e-6)
+        cop_x = self._cop_x(self.stance)
         if inside and fn <= self.cfg.unload_n and margin >= 0.0:
-            self._begin_swing()
+            self._begin_swing(share, cop_x)
             return
         if self.phase_t >= self.cfg.t_shift_max:
             self.missed_gates += 1
@@ -301,22 +345,32 @@ class LipmWalker:
                     com_inside=inside,
                     clear_cmd_m=0.0,
                     z_budget_m=0.0,
+                    cop_x_m=cop_x,
+                    rear_share=share,
                 )
             )
             # The return lean is twice as far as the first one. One miss
             # keeps this stance and gives the load time to finish moving.
             # A second miss swaps, so a wrong-way lean cannot run forever.
+            # Retry keeps the landing pose. Recapturing would stack the yield.
             self._same_misses += 1
             if self._same_misses >= 2:
                 self.stance = self.other(self.stance)
                 self._same_misses = 0
-            self._begin_shift()
+                self._begin_shift()
+            else:
+                self._retry_shift()
 
-    def _begin_swing(self) -> None:
+    def _begin_swing(self, rear_share: float | None = None, cop_x: float | None = None) -> None:
         swing = self.other(self.stance)
         fn = self.foot_normal(swing)
+        fn_stance = self.foot_normal(self.stance)
         margin = self.cop_margin(self.stance)
         inside = self.com_inside_foot(self.stance, self.cfg.inside_margin_m)
+        if rear_share is None:
+            rear_share = fn / max(fn + fn_stance, 1e-6)
+        if cop_x is None:
+            cop_x = self._cop_x(self.stance)
         self.p0 = np.asarray(self.data.geom_xpos[self.gid[swing]], dtype=np.float64).copy()
         self.hold_l = np.asarray(self.data.geom_xpos[self.gid["L"]], dtype=np.float64).copy()
         self.hold_r = np.asarray(self.data.geom_xpos[self.gid["R"]], dtype=np.float64).copy()
@@ -332,6 +386,8 @@ class LipmWalker:
                 com_inside=inside,
                 clear_cmd_m=self.cfg.clear_m,
                 z_budget_m=0.0,
+                cop_x_m=float(cop_x),
+                rear_share=float(rear_share),
             )
         )
         self.phase = "swing"
@@ -340,6 +396,12 @@ class LipmWalker:
         self.z_limited = False
         self._same_misses = 0
         self.sag_lean = 0.0
+        self.yield_flex = 0.0
+        self.yield_hip = 0.0
+        self.swing_held = False
+        self.reach_hip = 0.0
+        fwd = self._fwd_axis()
+        self.liftoff_along = float(np.dot(self._foot_xy(swing) - self._foot_xy(self.stance), fwd))
 
     def _sagittal_q(self, side: Side) -> dict[str, float]:
         pref = self.pref(side)
@@ -559,6 +621,60 @@ class LipmWalker:
         """
         self.sag_lean = 0.0
 
+    def _torso_up(self) -> float:
+        return float(self.data.xmat[self.bid_body].reshape(3, 3)[2, 2])
+
+    def _yield_rear(self) -> None:
+        """Shorten the trailing leg once the lean and the COM are on the front foot.
+
+        The overlap does not put the COM on the toe. It leaves the rear
+        position servo still holding part of the weight, so the 5 N gate
+        never opens and the same foot swings again. Flexing only the rear
+        knee, with the hip left on the landing pose and the ankle the
+        flat-foot sum, lets that normal force fall. The stance leg is what
+        holds the pelvis up.
+        """
+        rear = self.other(self.stance)
+        q0 = self.hold_sagittal.get(rear)
+        if not q0:
+            return
+        leaned = abs(self.lat) >= YIELD_LAT
+        inside = self.com_inside_foot(self.stance, self.cfg.inside_margin_m)
+        up = self._torso_up()
+        if leaned and inside and up >= 0.94:
+            self.yield_flex = min(YIELD_KNEE, self.yield_flex + YIELD_RATE * CTRL_DT)
+        elif up < 0.93:
+            self.yield_flex = max(0.0, self.yield_flex - YIELD_RATE * CTRL_DT)
+        if self.yield_flex <= 1e-4:
+            return
+        pref = self.pref(rear)
+        knee_sign = 1.0 if rear == "L" else -1.0
+        hip_sign = -1.0 if rear == "L" else 1.0
+        along = float(np.dot(
+            self._foot_xy(rear) - self._foot_xy(self.stance), self._fwd_axis(),
+        ))
+        if self.yield_flex < 0.04:
+            self.yield_along = along
+            self.yield_hip = 0.0
+        else:
+            slipped = self.yield_along - along
+            self.yield_hip = min(YIELD_HIP_MAX, max(0.0, 12.0 * slipped))
+        knee = q0.get("knee", 0.0) + knee_sign * self.yield_flex
+        hip = q0.get("hip", 0.0) + hip_sign * self.yield_hip
+        self.write_clipped(pref + "hip_pitch", hip)
+        self.write_clipped(pref + "knee", knee)
+        hip_i = self.act_idx[pref + "hip_pitch_pos"]
+        knee_i = self.act_idx[pref + "knee_pos"]
+        ank = float(self.data.ctrl[hip_i] + self.data.ctrl[knee_i])
+        sole_up = self.data.xmat[self.bid[rear]].reshape(3, 3)[:, 2]
+        sign = 1.0 if rear == "L" else -1.0
+        ank += sign * float(sole_up[0])
+        self.write_clipped(pref + "ank_pitch", ank)
+        # The lean rolls the rear box onto a corner. Geom center can sit
+        # almost 2 cm up while the lowest corner, and the normal force, stay
+        # on the floor. Level this sole before the gate reads that force.
+        self._level_swing_roll(rear)
+
     def _level_swing_roll(self, swing: Side) -> None:
         """Cancel the lean roll on the swing sole.
 
@@ -653,22 +769,34 @@ class LipmWalker:
             self.write_clipped(jn, self.q(jn) + float(up[1]))
 
     def _cop_trim(self, side: Side) -> None:
-        """Stance ankle pitch keeps the contact CoP off the toe and heel."""
+        """Stance CoP a few millimetres behind the COM, inside the box.
+
+        x_ddot = (g/h)*(x − p). CoP behind the COM accelerates the body
+        forward. CoP on the toe needs about 2.36 Nm at full weight and is
+        not commanded. The target is clipped off both the heel edge and the
+        toe, and it is never ahead of the COM.
+        """
         local = self._cop_local(side)
         if local is None:
             return
+        com_l = self._com_local_xy(side)
         center = np.asarray(self.model.geom_pos[self.gid[side], :2], dtype=np.float64)
-        # Target sits on the foot center. The toe is 10.25 cm ahead of the
-        # ankle and needs ~2.36 Nm at full weight, past ±2.1, so the target
-        # is not the toe.
-        err_x = float(local[0] - center[0])
+        half = np.asarray(self.model.geom_size[self.gid[side], :2], dtype=np.float64)
+        lo = float(center[0] - half[0] + 0.012)
+        hi = float(min(center[0] + half[0] - 0.025, float(com_l[0]) - 0.001))
+        if hi < lo:
+            hi = lo
+        target_x = min(hi, max(lo, float(com_l[0]) - HEEL_LEAD_M))
+        err_x = float(local[0] - target_x)
         err_y = float(local[1] - center[1])
         sign = 1.0 if side == "L" else -1.0
         jn = self.pref(side) + "ank_pitch"
         pitch_i = self.act_idx[jn + "_pos"]
-        # CoP ahead of center → dorsiflex (positive on L, negative on R).
-        # Add onto the command already written, then clip to the torque band.
-        self.write_clipped(jn, float(self.data.ctrl[pitch_i]) + sign * self.cfg.cop_k * err_x)
+        # CoP ahead of the target → dorsiflex (positive on L, negative on R).
+        self.write_clipped(
+            jn,
+            float(self.data.ctrl[pitch_i]) + COP_PITCH_SIGN * sign * self.cfg.cop_k * err_x,
+        )
         jroll = self.pref(side) + "ank_roll"
         roll_i = self.act_idx[jroll + "_pos"]
         self.write_clipped(jroll, float(self.data.ctrl[roll_i]) + self.cfg.cop_k * 0.35 * err_y)
@@ -704,6 +832,18 @@ class LipmWalker:
 
     def _hold(self, side: Side) -> np.ndarray:
         return self.hold_l if side == "L" else self.hold_r
+
+    def _com_local_xy(self, side: Side) -> np.ndarray:
+        com = np.asarray(self.data.subtree_com[self.bid_body], dtype=np.float64)
+        rot = self.data.xmat[self.bid[side]].reshape(3, 3)
+        local = rot.T @ (com - np.asarray(self.data.xpos[self.bid[side]], dtype=np.float64))
+        return local[:2]
+
+    def _cop_x(self, side: Side) -> float:
+        local = self._cop_local(side)
+        if local is None:
+            return float("nan")
+        return float(local[0])
 
     def _com_xy(self) -> np.ndarray:
         return np.asarray(self.data.subtree_com[self.bid_body, :2], dtype=np.float64)
@@ -745,11 +885,16 @@ class LipmWalker:
         return False
 
     def foot_normal(self, side: Side) -> float:
+        """Floor normal only. Overlapping 135 mm soles collide with each other
+        on a 2 cm step; that foot-foot force is not weight on the rear foot.
+        """
         gid = self.gid[side]
+        floor = self.gid_floor
         total = 0.0
         for i in range(self.data.ncon):
             c = self.data.contact[i]
-            if int(c.geom1) != gid and int(c.geom2) != gid:
+            g1, g2 = int(c.geom1), int(c.geom2)
+            if not ((g1 == gid and g2 == floor) or (g2 == gid and g1 == floor)):
                 continue
             force = np.zeros(6, dtype=np.float64)
             mj.mj_contactForce(self.model, self.data, i, force)
@@ -759,11 +904,13 @@ class LipmWalker:
     def _cop_local(self, side: Side) -> np.ndarray | None:
         gid = self.gid[side]
         bid = self.bid[side]
+        floor = self.gid_floor
         num = np.zeros(3, dtype=np.float64)
         den = 0.0
         for i in range(self.data.ncon):
             c = self.data.contact[i]
-            if int(c.geom1) != gid and int(c.geom2) != gid:
+            g1, g2 = int(c.geom1), int(c.geom2)
+            if not ((g1 == gid and g2 == floor) or (g2 == gid and g1 == floor)):
                 continue
             force = np.zeros(6, dtype=np.float64)
             mj.mj_contactForce(self.model, self.data, i, force)
@@ -852,6 +999,7 @@ class LipmWalker:
         self.trace.contact_r.append(1 if self.foot_contact("R") else 0)
         self.trace.phase.append(self.phase)
         self.trace.swing.append(swing)
+        self.trace.stance.append(self.stance)
         self.trace.up_z.append(float(up_z))
         self.trace.sat.append(1 if self.sagittal_saturated() else 0)
         self.trace.slip_l.append(sl)
@@ -924,6 +1072,20 @@ def score_lipm(walker: LipmWalker) -> dict[str, float | int | bool | str]:
     opened = [rec for rec in walker.lifts if rec.clear_cmd_m > 0.0]
     missed = [rec for rec in walker.lifts if rec.clear_cmd_m <= 0.0]
     margins = [rec.cop_margin_m for rec in opened]
+    cop_xs = [rec.cop_x_m for rec in opened if math.isfinite(rec.cop_x_m)]
+    lift_shares = [rec.rear_share for rec in opened]
+    shares: list[float] = []
+    for i, phase in enumerate(tr.phase):
+        if phase != "shift":
+            continue
+        if tr.stance[i] == "L":
+            rear, front = tr.fn_r[i], tr.fn_l[i]
+        else:
+            rear, front = tr.fn_l[i], tr.fn_r[i]
+        total = rear + front
+        if total > 1.0:
+            shares.append(rear / total)
+    rear_share_min = min(shares) if shares else 1.0
     n_tick = max(1, len(tr.t))
     n_move = sum(1 for phase in tr.phase if phase != "stand")
     return {
@@ -942,6 +1104,11 @@ def score_lipm(walker: LipmWalker) -> dict[str, float | int | bool | str]:
         "sat_rate_all": float(sum(tr.sat) / n_tick),
         "cop_before_lift_median_m": _median(margins),
         "cop_before_lift_min_m": min(margins) if margins else -1.0,
+        "cop_x_before_lift_m": _median(cop_xs),
+        "rear_share_min": rear_share_min,
+        "rear_unload_frac": 1.0 - rear_share_min,
+        "rear_share_at_lift": _median(lift_shares),
+        "dx_m": float(walker.data.qpos[0] - walker.x0),
         "lifts_com_inside_frac": (
             sum(1 for rec in opened if rec.com_inside) / len(opened) if opened else 0.0
         ),
