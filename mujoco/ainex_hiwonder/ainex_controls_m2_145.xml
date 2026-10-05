@@ -2,11 +2,11 @@
 <!--
   ainex_controls.xml — Controls overlay on Hardware kit-matched AiNex mesh model.
   Source meshes/kinematics: ainex.xml (Hiwonder URDF+25 STL, NOT OEM STEP).
-  Controls changes ONLY: HX torque clips (±2.1 leg / ±0.7 arm-head), PD kp,
+  Controls changes ONLY: HX torque clips (±2.45 Nm leg running @ 11.1 V, not 3.43 stall / ±0.7 arm-head), PD kp,
   mesh collision off + foot contact boxes, L=orange / R=green shin-foot rgba.
   Path A spend frozen — sim only. Do not claim manufacturer PASS.
 -->
-<!-- Foot contact: M2 short 145x86 mm (half-size 0.0725 0.0430 0.008 mm units; mesh-derived / not OEM). -->
+<!-- Foot contact: mesh AABB 135x76 mm (half-size 0.0675 0.0380 0.008 m; mesh-derived / not OEM). -->
 <mujoco model="ainex_controls">
   <visual>
     <global offwidth="960" offheight="720" />
@@ -52,29 +52,29 @@
       <geom pos="0 0 0" quat="1 0 0 0" type="mesh" rgba="0.18 0.18 0.2 1" mesh="body_link" contype="0" conaffinity="0" group="1" name="body_link_mesh" />
       <body name="r_hip_yaw_link" pos="0 -0.029 0">
         <inertial pos="-3.08089e-05 0.00125727 -0.00137107" quat="0.685451 0.035864 -0.0116524 0.727142" mass="0.032" diaginertia="2.27792e-05 1.75538e-05 8.97703e-06" />
-        <joint name="r_hip_yaw" range="-2.09 2.09" actuatorfrcrange="-2.1 2.1" damping="0.08" axis="0 0 -1" armature="0.01" />
+        <joint name="r_hip_yaw" range="-2.09 2.09" actuatorfrcrange="-2.45 2.45" damping="0.08" axis="0 0 -1" armature="0.01" />
         <geom quat="1 0 0 0" type="mesh" rgba="0.12 0.12 0.14 1" mesh="r_hip_yaw_link" contype="0" conaffinity="0" group="1" name="r_hip_yaw_link_mesh" />
         <body name="r_hip_roll_link" pos="-0.01955 0 -0.0255">
           <inertial pos="0.0013624 -0.000566876 -0.0134187" quat="0.498207 0.491474 0.501276 0.508887" mass="0.12" diaginertia="7.31184e-05 6.05065e-05 2.91551e-05" />
-          <joint name="r_hip_roll" range="-2.09 2.09" actuatorfrcrange="-2.1 2.1" damping="0.08" axis="-1 0 0" armature="0.01" />
+          <joint name="r_hip_roll" range="-2.09 2.09" actuatorfrcrange="-2.45 2.45" damping="0.08" axis="-1 0 0" armature="0.01" />
           <geom quat="1 0 0 0" type="mesh" rgba="0.12 0.12 0.14 1" mesh="r_hip_roll_link" contype="0" conaffinity="0" group="1" name="r_hip_roll_link_mesh" />
           <body name="r_hip_pitch_link" pos="0.0190366 -0.02 0">
             <inertial pos="0.0135944 0.0193812 -0.0727054" quat="0.738938 0.0427036 0.0407745 0.671181" mass="0.1065" diaginertia="0.000112942 0.000111046 4.06518e-05" />
-            <joint name="r_hip_pitch" range="-2.09 2.09" actuatorfrcrange="-2.1 2.1" damping="0.08" axis="0 -1 0" armature="0.01" />
+            <joint name="r_hip_pitch" range="-2.09 2.09" actuatorfrcrange="-2.45 2.45" damping="0.08" axis="0 -1 0" armature="0.01" />
             <geom type="mesh" rgba="0.15 0.75 0.35 1" mesh="r_hip_pitch_link" contype="0" conaffinity="0" group="1" name="r_hip_pitch_link_mesh" />
             <body name="r_knee_link" pos="-0.000372039 5e-05 -0.0968862">
               <inertial pos="0.00334266 0.0196474 -0.0425049" quat="0.999535 -0.000104839 -0.0304235 0.0019934" mass="0.045" diaginertia="6.75039e-05 5.49998e-05 2.05563e-05" />
-              <joint name="r_knee" range="-2.09 2.09" actuatorfrcrange="-2.1 2.1" damping="0.08" axis="0 -1 0" armature="0.01" />
+              <joint name="r_knee" range="-2.09 2.09" actuatorfrcrange="-2.45 2.45" damping="0.08" axis="0 -1 0" armature="0.01" />
               <geom quat="1 0 0 0" type="mesh" rgba="0.15 0.75 0.35 1" mesh="r_knee_link" contype="0" conaffinity="0" group="1" name="r_knee_link_mesh" />
               <body name="r_ank_pitch_link" pos="0.00103699 0 -0.0890766">
                 <inertial pos="-0.017544 0.0195632 0.0134182" quat="0.489309 0.496862 0.510389 0.503197" mass="0.12" diaginertia="7.36835e-05 6.10769e-05 2.91596e-05" />
-                <joint name="r_ank_pitch" range="-2.09 2.09" actuatorfrcrange="-2.1 2.1" damping="0.08" axis="0 1 0" armature="0.01" />
+                <joint name="r_ank_pitch" range="-2.09 2.09" actuatorfrcrange="-2.45 2.45" damping="0.08" axis="0 1 0" armature="0.01" />
                 <geom quat="1 0 0 0" type="mesh" rgba="0.15 0.75 0.35 1" mesh="r_ank_pitch_link" contype="0" conaffinity="0" group="1" name="r_ank_pitch_link_mesh" />
                 <body name="r_ank_roll_link" pos="-0.0190366 0.02 0">
                   <inertial pos="0.0285085 -0.0128729 -0.017671" quat="0.0257514 0.696659 0.0389182 0.715883" mass="0.0675" diaginertia="0.000126012 9.21991e-05 4.20891e-05" />
-                  <joint name="r_ank_roll" range="-2.09 2.09" actuatorfrcrange="-2.1 2.1" damping="0.08" axis="1 0 0" armature="0.01" />
+                  <joint name="r_ank_roll" range="-2.09 2.09" actuatorfrcrange="-2.45 2.45" damping="0.08" axis="1 0 0" armature="0.01" />
                   <geom pos="0 0 0" quat="1 0 0 0" type="mesh" rgba="0.15 0.75 0.35 1" mesh="r_ank_roll_link" contype="0" conaffinity="0" group="1" name="r_ank_roll_link_mesh" />
-                <geom name="r_foot_contact" type="box" size="0.0725 0.0430 0.008" pos="0.030 0.0 -0.018" rgba="0.15 0.75 0.35 1" friction="1.6 0.1 0.01" contype="1" conaffinity="1" condim="3" group="0" /><geom name="r_toe_viz" type="sphere" size="0.012" pos="0.075 0.0 -0.012" rgba="0.15 0.75 0.35 1" contype="0" conaffinity="0" group="1" /></body>
+                <geom name="r_foot_contact" type="box" size="0.0675 0.0380 0.008" pos="0.030 0.0 -0.018" rgba="0.15 0.75 0.35 1" friction="1.6 0.1 0.01" contype="1" conaffinity="1" condim="3" group="0" /><geom name="r_toe_viz" type="sphere" size="0.012" pos="0.075 0.0 -0.012" rgba="0.15 0.75 0.35 1" contype="0" conaffinity="0" group="1" /></body>
               </body>
             </body>
           </body>
@@ -82,29 +82,29 @@
       </body>
       <body name="l_hip_yaw_link" pos="0 0.029 0">
         <inertial pos="-3.11406e-05 -0.00125722 -0.0013713" quat="0.727661 -0.0116933 0.0358264 0.684901" mass="0.032" diaginertia="2.27801e-05 1.75528e-05 8.97707e-06" />
-        <joint name="l_hip_yaw" range="-2.09 2.09" actuatorfrcrange="-2.1 2.1" damping="0.08" axis="0 0 -1" armature="0.01" />
+        <joint name="l_hip_yaw" range="-2.09 2.09" actuatorfrcrange="-2.45 2.45" damping="0.08" axis="0 0 -1" armature="0.01" />
         <geom quat="1 0 0 0" type="mesh" rgba="0.12 0.12 0.14 1" mesh="l_hip_yaw_link" contype="0" conaffinity="0" group="1" name="l_hip_yaw_link_mesh" />
         <body name="l_hip_roll_link" pos="-0.01955 0 -0.0255">
           <inertial pos="0.00136239 0.000566861 -0.0134187" quat="0.508887 0.501276 0.491474 0.498207" mass="0.12" diaginertia="7.31184e-05 6.05065e-05 2.91551e-05" />
-          <joint name="l_hip_roll" range="-2.09 2.09" actuatorfrcrange="-2.1 2.1" damping="0.08" axis="-1 0 0" armature="0.01" />
+          <joint name="l_hip_roll" range="-2.09 2.09" actuatorfrcrange="-2.45 2.45" damping="0.08" axis="-1 0 0" armature="0.01" />
           <geom quat="1 0 0 0" type="mesh" rgba="0.12 0.12 0.14 1" mesh="l_hip_roll_link" contype="0" conaffinity="0" group="1" name="l_hip_roll_link_mesh" />
           <body name="l_hip_pitch_link" pos="0.019037 0.02 0">
             <inertial pos="0.0135944 -0.0193812 -0.0727051" quat="0.671181 0.0407745 0.0427036 0.738938" mass="0.1065" diaginertia="0.000112942 0.000111046 4.06518e-05" />
-            <joint name="l_hip_pitch" range="-2.09 2.09" actuatorfrcrange="-2.1 2.1" damping="0.08" axis="0 1 0" armature="0.01" />
+            <joint name="l_hip_pitch" range="-2.09 2.09" actuatorfrcrange="-2.45 2.45" damping="0.08" axis="0 1 0" armature="0.01" />
             <geom type="mesh" rgba="0.95 0.45 0.08 1" mesh="l_hip_pitch_link" contype="0" conaffinity="0" group="1" name="l_hip_pitch_link_mesh" />
             <body name="l_knee_link" pos="-0.00037204 -5e-05 -0.096886">
               <inertial pos="0.00334256 -0.0196465 -0.0425053" quat="0.999536 8.38714e-05 -0.0304235 -0.00159474" mass="0.045" diaginertia="6.75038e-05 5.49999e-05 2.05563e-05" />
-              <joint name="l_knee" range="-2.09 2.09" actuatorfrcrange="-2.1 2.1" damping="0.08" axis="0 1 0" armature="0.01" />
+              <joint name="l_knee" range="-2.09 2.09" actuatorfrcrange="-2.45 2.45" damping="0.08" axis="0 1 0" armature="0.01" />
               <geom type="mesh" rgba="0.95 0.45 0.08 1" mesh="l_knee_link" contype="0" conaffinity="0" group="1" name="l_knee_link_mesh" />
               <body name="l_ank_pitch_link" pos="0.001037 0 -0.089077">
                 <inertial pos="-0.017544 -0.0195632 0.0134182" quat="0.503197 0.510389 0.496862 0.489309" mass="0.12" diaginertia="7.36835e-05 6.10769e-05 2.91596e-05" />
-                <joint name="l_ank_pitch" range="-2.09 2.09" actuatorfrcrange="-2.1 2.1" damping="0.08" axis="0 -1 0" armature="0.01" />
+                <joint name="l_ank_pitch" range="-2.09 2.09" actuatorfrcrange="-2.45 2.45" damping="0.08" axis="0 -1 0" armature="0.01" />
                 <geom quat="1 0 0 0" type="mesh" rgba="0.95 0.45 0.08 1" mesh="l_ank_pitch_link" contype="0" conaffinity="0" group="1" name="l_ank_pitch_link_mesh" />
                 <body name="l_ank_roll_link" pos="-0.019037 -0.02 0">
                   <inertial pos="0.028508 0.012873 -0.017671" quat="-0.0257514 0.696659 -0.0389182 0.715883" mass="0.0675" diaginertia="0.000126012 9.21991e-05 4.20891e-05" />
-                  <joint name="l_ank_roll" range="-2.09 2.09" actuatorfrcrange="-2.1 2.1" damping="0.08" axis="1 0 0" armature="0.01" />
+                  <joint name="l_ank_roll" range="-2.09 2.09" actuatorfrcrange="-2.45 2.45" damping="0.08" axis="1 0 0" armature="0.01" />
                   <geom pos="0 0 0" quat="1 0 0 0" type="mesh" rgba="0.95 0.45 0.08 1" mesh="l_ank_roll_link" contype="0" conaffinity="0" group="1" name="l_ank_roll_link_mesh" />
-                <geom name="l_foot_contact" type="box" size="0.0725 0.0430 0.008" pos="0.030 0.0 -0.018" rgba="0.95 0.45 0.08 1" friction="1.6 0.1 0.01" contype="1" conaffinity="1" condim="3" group="0" /><geom name="l_toe_viz" type="sphere" size="0.012" pos="0.075 0.0 -0.012" rgba="0.95 0.45 0.08 1" contype="0" conaffinity="0" group="1" /></body>
+                <geom name="l_foot_contact" type="box" size="0.0675 0.0380 0.008" pos="0.030 0.0 -0.018" rgba="0.95 0.45 0.08 1" friction="1.6 0.1 0.01" contype="1" conaffinity="1" condim="3" group="0" /><geom name="l_toe_viz" type="sphere" size="0.012" pos="0.075 0.0 -0.012" rgba="0.95 0.45 0.08 1" contype="0" conaffinity="0" group="1" /></body>
               </body>
             </body>
           </body>
@@ -175,18 +175,18 @@
     </body>
   </worldbody>
   <actuator>
-    <position name="l_hip_yaw_pos" joint="l_hip_yaw" kp="40" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.1 2.1" />
-    <position name="l_hip_roll_pos" joint="l_hip_roll" kp="40" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.1 2.1" />
-    <position name="l_hip_pitch_pos" joint="l_hip_pitch" kp="45" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.1 2.1" />
-    <position name="l_knee_pos" joint="l_knee" kp="45" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.1 2.1" />
-    <position name="l_ank_pitch_pos" joint="l_ank_pitch" kp="35" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.1 2.1" />
-    <position name="l_ank_roll_pos" joint="l_ank_roll" kp="35" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.1 2.1" />
-    <position name="r_hip_yaw_pos" joint="r_hip_yaw" kp="40" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.1 2.1" />
-    <position name="r_hip_roll_pos" joint="r_hip_roll" kp="40" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.1 2.1" />
-    <position name="r_hip_pitch_pos" joint="r_hip_pitch" kp="45" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.1 2.1" />
-    <position name="r_knee_pos" joint="r_knee" kp="45" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.1 2.1" />
-    <position name="r_ank_pitch_pos" joint="r_ank_pitch" kp="35" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.1 2.1" />
-    <position name="r_ank_roll_pos" joint="r_ank_roll" kp="35" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.1 2.1" />
+    <position name="l_hip_yaw_pos" joint="l_hip_yaw" kp="40" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.45 2.45" />
+    <position name="l_hip_roll_pos" joint="l_hip_roll" kp="40" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.45 2.45" />
+    <position name="l_hip_pitch_pos" joint="l_hip_pitch" kp="45" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.45 2.45" />
+    <position name="l_knee_pos" joint="l_knee" kp="45" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.45 2.45" />
+    <position name="l_ank_pitch_pos" joint="l_ank_pitch" kp="35" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.45 2.45" />
+    <position name="l_ank_roll_pos" joint="l_ank_roll" kp="35" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.45 2.45" />
+    <position name="r_hip_yaw_pos" joint="r_hip_yaw" kp="40" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.45 2.45" />
+    <position name="r_hip_roll_pos" joint="r_hip_roll" kp="40" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.45 2.45" />
+    <position name="r_hip_pitch_pos" joint="r_hip_pitch" kp="45" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.45 2.45" />
+    <position name="r_knee_pos" joint="r_knee" kp="45" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.45 2.45" />
+    <position name="r_ank_pitch_pos" joint="r_ank_pitch" kp="35" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.45 2.45" />
+    <position name="r_ank_roll_pos" joint="r_ank_roll" kp="35" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-2.45 2.45" />
     <position name="l_sho_pitch_pos" joint="l_sho_pitch" kp="20" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-0.7 0.7" />
     <position name="l_sho_roll_pos" joint="l_sho_roll" kp="20" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-0.7 0.7" />
     <position name="l_el_pitch_pos" joint="l_el_pitch" kp="20" dampratio="1" ctrlrange="-2.09 2.09" forcerange="-0.7 0.7" />
