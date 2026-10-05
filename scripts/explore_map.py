@@ -15,20 +15,31 @@ yaw does not change heading either, so this script never sends it.
 
 The plant file is not edited. kit_cam stays on head_tilt_link at
 0.050 0.019 0.007. Scenes are vision only (room_kitchen.xml and the
-other room includes on main). Body names are not read. Nothing here
-is a waypoint, an arrival, or a map of pre-placed rooms.
+other room includes on main). Body names are not a heading. The
+kitchen geom distance is only the reported gap. Nothing here is a
+waypoint, an arrival, or a map of pre-placed rooms.
 
 What the map actually is:
   - World-frame cells (0.10 m) painted when a kit_cam ray meets the
-    floor plane inside 0.30–1.80 m. Low-saturation hits are free.
+    floor plane inside 0.30–2.60 m. Low-saturation hits are free.
     Saturated floor hits (a mat, for example) are feature cells.
+    Unknown cells with three or four free neighbors are filled once
+    per view, so the fan is not a dotted rim.
   - Elevated color, including the kitchen backsplash, does not meet
     that plane in range. It is stored as a camera-ray bearing, not a
-    cell. query_kitchen_like_yellow() reports that bearing.
-  - Frontier cells are unknown cells next to a free or walked cell.
-    The next vel aims at one of those cells. It does not aim at yellow.
+    cell. The first time that yellow clears the log threshold, a soft
+    XY is frozen along the bearing. That point is not a waypoint and
+    yellow >= 0.50 is not success.
+  - Frontier cells are unknown cells in an 8-neighborhood of a free
+    or walked cell, out to the edge of the fan. The next vel aims at
+    one of those cells. It does not aim at yellow.
   - The walked trail uses the sim freejoint. That is odometry in this
     sim, not visual SLAM.
+  - On the empty plant the claimed left-then-right chain is followed
+    by one more claimed forward window (15 s, yaw 0). A second yaw
+    hold is not claimable on this plant. Furnished scenes stay on the
+    8 s right window. A separate kitchen probe walks half-cap toward
+    the frozen soft XY and does not claim arrival.
 
 Prefer FAIL: a longer floor fan, plus a bearing if yellow was in
 frame, is not a house map and not an arrival. The last-mile finder
@@ -107,6 +118,23 @@ DEMO_WALK_S = (
 # for 8 s stayed at about 0.919 / 0.934 and the heading followed right.
 # This is not a new cap and not the claimed 11 s window.
 FURNISHED_RIGHT_S = 8.0
+# After the claimed left-then-right chain, one more forward window.
+# Same vel(+0.056, 0) and the same 15 s length as the approach.
+# A second left hold does not yaw and then tips. A second right hold tips.
+# This extend is straight only.
+EMPTY_FORWARD_EXTEND_S = steer_walk.CLAIMED_APPROACH_S
+# First yellow log places a soft XY this far along the camera bearing.
+# Not a measured depth and not an arrival pose.
+SOFT_GOAL_RANGE_M = 1.50
+SOFT_GOAL_HOLD_S = 20.0
+SOFT_GOAL_REACHED_M = 0.40
+# Main find-kitchen Prefer FAIL, for the report only. Bars are not lowered.
+MAIN_REMAINING_M = 0.2393530240858005
+MAIN_YELLOW = 0.0
+MAIN_UP_Z = 0.9788405911048443
+MAIN_FREE_CELLS = {"plant": 766, "kitchen": 366, "bathroom": 531}
+MAIN_FRONTIER_CELLS = {"plant": 11, "kitchen": 26, "bathroom": 28}
+MAIN_WALKED_CELLS = {"plant": 41, "kitchen": 7, "bathroom": 10}
 
 CELL_M = 0.10
 X_MIN = -0.80
@@ -114,9 +142,16 @@ X_MAX = 2.60
 Y_MIN = -1.80
 Y_MAX = 1.80
 MIN_RANGE_M = 0.30
-MAX_RANGE_M = 1.80
+# Finder paint and frontier ring stay on main. find_kitchen.py calls
+# integrate() and frontier_cells() with these. Do not widen them.
+FINDER_MAX_RANGE_M = 1.80
+FINDER_FRONTIER_MAX_M = 1.60
+# Explore demo only. Floor-plane hits out to the grid edge.
+MAX_RANGE_M = 2.60
 FRONTIER_MIN_M = 0.40
-FRONTIER_MAX_M = 1.60
+# Include the outer rim of the longer fan. The finder ring stays 1.60 m.
+FRONTIER_MAX_M = 2.70
+HOLE_FILL_PASSES = 2
 FORWARD_CONE_RAD = 1.20
 YAW_FULL_ERR_RAD = 0.50
 BLOCK_ERR_RAD = 0.40
@@ -157,11 +192,15 @@ STAND_SCENES: tuple[SceneName, ...] = (
 )
 
 HONESTY = (
-    "Partial kit_cam map. Floor cells are a ground-plane paint. "
-    "Kitchen-like yellow is a camera-ray bearing, not a waypoint and not arrival. "
-    "Frontiers are the edge of that paint. Pose is the sim freejoint, not SLAM. "
-    "Explore holds the claimed vel(+0.056, ±0.25) windows "
-    "(left 12.5 s, then right 11 s). vx=0 yaw is not used. Not go-anywhere."
+    "Partial kit_cam map. Floor cells are a ground-plane paint out to 2.60 m, "
+    "with one-cell holes filled. Kitchen-like yellow is a camera-ray bearing, "
+    "not a waypoint and not arrival. A soft XY is frozen along that bearing "
+    "the first time yellow is logged. Yellow >= 0.50 is not success. "
+    "Frontiers are the 8-connected edge of that paint. Pose is the sim freejoint, "
+    "not SLAM. Explore holds the claimed vel(+0.056, ±0.25) windows "
+    "(left 12.5 s, then right 11 s) and, on the empty plant, one more "
+    "vel(+0.056, 0) for 15 s. A second yaw hold is not claimable. "
+    "vx=0 yaw is not used. Not go-anywhere."
 )
 
 
@@ -253,6 +292,7 @@ class IntegrateResult:
     feature_cells: int
     traversed_cells: int
     frontier_cells: int
+    frontier_gap_rad: float | None
     blocked: bool
     new_free: int
     new_feature: int
@@ -273,6 +313,7 @@ class ExploreMap:
     other_chromatic_max: float
     last_blocked: bool
     hold_ij: tuple[int, int] | None
+    soft_goal_xy: tuple[float, float] | None
 
     @classmethod
     def empty(cls) -> ExploreMap:
@@ -290,6 +331,7 @@ class ExploreMap:
             other_chromatic_max=0.0,
             last_blocked=False,
             hold_ij=None,
+            soft_goal_xy=None,
         )
 
     def cell_index(self, x: float, y: float) -> tuple[int, int] | None:
@@ -331,19 +373,26 @@ class ExploreMap:
             note=note,
         )
 
-    def frontier_cells(self, x: float, y: float) -> tuple[FrontierCell, ...]:
-        """Unknown cells beside free or walked cells, inside the explore ring."""
+    def frontier_cells(self, x: float, y: float, *, dense: bool = False) -> tuple[FrontierCell, ...]:
+        """Unknown cells beside free or walked cells.
+
+        The default is the finder ring from main: 4-connected, 0.40–1.60 m.
+        find_kitchen.py and last_mile_from_map() use that default.
+        dense=True is the explore rim only: 8-connected, out to 2.70 m.
+        """
         known_free = (self.state == FREE) | self.traversed
+        max_m = FRONTIER_MAX_M if dense else FINDER_FRONTIER_MAX_M
+        neighbor = _has_free_neighbor if dense else _has_orthogonal_neighbor
         cells: list[FrontierCell] = []
         for i in range(self.nx):
             for j in range(self.ny):
                 if int(self.state[i, j]) != UNKNOWN or bool(self.traversed[i, j]):
                     continue
-                if not _has_free_neighbor(known_free, i, j):
+                if not neighbor(known_free, i, j):
                     continue
                 cx, cy = self.cell_center(i, j)
                 distance = math.hypot(cx - x, cy - y)
-                if distance < FRONTIER_MIN_M or distance > FRONTIER_MAX_M:
+                if distance < FRONTIER_MIN_M or distance > max_m:
                     continue
                 cells.append(
                     FrontierCell(
@@ -357,11 +406,11 @@ class ExploreMap:
                 )
         return tuple(cells)
 
-    def counts(self, x: float, y: float) -> tuple[int, int, int, int]:
+    def counts(self, x: float, y: float, *, dense: bool = False) -> tuple[int, int, int, int]:
         free = int(np.count_nonzero(self.state == FREE))
         feature = int(np.count_nonzero(self.state == FEATURE))
         walked = int(np.count_nonzero(self.traversed))
-        return free, feature, walked, len(self.frontier_cells(x, y))
+        return free, feature, walked, len(self.frontier_cells(x, y, dense=dense))
 
     def integrate(
         self,
@@ -370,7 +419,15 @@ class ExploreMap:
         cam_pos: np.ndarray,
         cam_mat: np.ndarray,
         fovy_deg: float,
+        *,
+        explore_fan: bool = False,
     ) -> IntegrateResult:
+        """Paint one view.
+
+        explore_fan=False is the finder paint from main: floor rays to 1.80 m,
+        no hole fill, frontier ring 1.60 m. find_kitchen.py calls this default.
+        explore_fan=True is the explore demo only.
+        """
         if frame.shape != (HEIGHT, WIDTH, 3):
             raise RuntimeError(f"kit_cam frame shape {frame.shape}")
         masks = classify_frame(frame)
@@ -379,13 +436,31 @@ class ExploreMap:
         other_frac = float(masks.other.mean())
         low_sat_frac = float(masks.low_sat.mean())
         self.other_chromatic_max = max(self.other_chromatic_max, other_frac)
-        self._remember_yellow(frame, masks.yellow, cam_pos, cam_mat, fovy_deg)
+        max_range = MAX_RANGE_M if explore_fan else FINDER_MAX_RANGE_M
+        self._remember_yellow(
+            pose,
+            masks.yellow,
+            cam_pos,
+            cam_mat,
+            fovy_deg,
+            max_range=max_range,
+            record_soft_goal=explore_fan,
+        )
         self.mark_traversed(pose.x, pose.y)
         free_before = int(np.count_nonzero(self.state == FREE))
         feature_before = int(np.count_nonzero(self.state == FEATURE))
-        self._paint_rays(masks, cam_pos, cam_mat, fovy_deg)
-        self.last_blocked = _lower_center_blocked(masks, cam_pos, cam_mat, fovy_deg)
-        free, feature, walked, frontiers = self.counts(pose.x, pose.y)
+        self._paint_rays(
+            masks,
+            cam_pos,
+            cam_mat,
+            fovy_deg,
+            max_range=max_range,
+            fill_holes=explore_fan,
+        )
+        self.last_blocked = _lower_center_blocked(
+            masks, cam_pos, cam_mat, fovy_deg, max_range=max_range,
+        )
+        free, feature, walked, frontiers = self.counts(pose.x, pose.y, dense=explore_fan)
         return IntegrateResult(
             yellow_frac=yellow_frac,
             sky_frac=sky_frac,
@@ -395,6 +470,9 @@ class ExploreMap:
             feature_cells=feature,
             traversed_cells=walked,
             frontier_cells=frontiers,
+            frontier_gap_rad=_frontier_gap(
+                self.frontier_cells(pose.x, pose.y, dense=explore_fan)
+            ),
             blocked=self.last_blocked,
             new_free=free - free_before,
             new_feature=feature - feature_before,
@@ -402,11 +480,14 @@ class ExploreMap:
 
     def _remember_yellow(
         self,
-        frame: np.ndarray,
+        pose: RobotPose,
         yellow: np.ndarray,
         cam_pos: np.ndarray,
         cam_mat: np.ndarray,
         fovy_deg: float,
+        *,
+        max_range: float,
+        record_soft_goal: bool,
     ) -> None:
         frac = float(yellow.mean())
         if frac <= self.yellow_max_fraction or frac <= 0.0:
@@ -418,7 +499,7 @@ class ExploreMap:
         bearing = math.atan2(float(direction[1]), float(direction[0]))
         horizontal = math.hypot(float(direction[0]), float(direction[1]))
         elevation = math.atan2(float(direction[2]), horizontal)
-        ground = _ground_point(cam_pos, direction)
+        ground = _ground_point(cam_pos, direction, max_range=max_range)
         cell: tuple[int, int] | None = None
         if ground is not None:
             cell = self.cell_index(ground[0], ground[1])
@@ -426,7 +507,15 @@ class ExploreMap:
         self.yellow_bearing_rad = bearing
         self.yellow_elevation_rad = elevation
         self.yellow_ground_ij = cell
-        del frame
+        if record_soft_goal and self.soft_goal_xy is None and frac >= MIN_YELLOW_FRAC:
+            if cell is not None:
+                self.soft_goal_xy = self.cell_center(cell[0], cell[1])
+            else:
+                self.soft_goal_xy = (
+                    pose.x + math.cos(bearing) * SOFT_GOAL_RANGE_M,
+                    pose.y + math.sin(bearing) * SOFT_GOAL_RANGE_M,
+                )
+        del pose
 
     def _paint_rays(
         self,
@@ -434,9 +523,12 @@ class ExploreMap:
         cam_pos: np.ndarray,
         cam_mat: np.ndarray,
         fovy_deg: float,
+        *,
+        max_range: float,
+        fill_holes: bool,
     ) -> None:
         u, v, directions = _strided_directions(fovy_deg, cam_mat, RAY_STRIDE)
-        hit = _ground_points(cam_pos, directions)
+        hit = _ground_points(cam_pos, directions, max_range=max_range)
         sat = masks.sat[v, u]
         yellow = masks.yellow[v, u]
         sky = masks.sky[v, u]
@@ -454,6 +546,37 @@ class ExploreMap:
             if ij is None:
                 continue
             self.state[ij[0], ij[1]] = FEATURE
+        if fill_holes:
+            self._fill_floor_holes()
+
+    def _fill_floor_holes(self) -> None:
+        """Fill unknown cells that already have three or four free neighbors.
+
+        A frontier rim cell has one free neighbor and stays unknown.
+        Two passes close a one-cell gap. They do not grow the fan outward.
+        """
+        orthogonal = ((1, 0), (-1, 0), (0, 1), (0, -1))
+        for _pass in range(HOLE_FILL_PASSES):
+            mark: list[tuple[int, int]] = []
+            for i in range(self.nx):
+                for j in range(self.ny):
+                    if int(self.state[i, j]) != UNKNOWN:
+                        continue
+                    free_neighbors = 0
+                    for di, dj in orthogonal:
+                        ni = i + di
+                        nj = j + dj
+                        if ni < 0 or nj < 0 or ni >= self.nx or nj >= self.ny:
+                            continue
+                        if int(self.state[ni, nj]) == FREE:
+                            free_neighbors += 1
+                    if free_neighbors >= 3:
+                        mark.append((i, j))
+            if not mark:
+                break
+            for i, j in mark:
+                self.state[i, j] = FREE
+            del _pass
 
 
 @dataclass(frozen=True)
@@ -545,22 +668,32 @@ def _strided_directions(
     return u.astype(np.int32), v.astype(np.int32), world
 
 
-def _ground_point(cam_pos: np.ndarray, direction: np.ndarray) -> np.ndarray | None:
+def _ground_point(
+    cam_pos: np.ndarray,
+    direction: np.ndarray,
+    *,
+    max_range: float = FINDER_MAX_RANGE_M,
+) -> np.ndarray | None:
     dz = float(direction[2])
     if dz >= -1e-3:
         return None
     t = -float(cam_pos[2]) / dz
-    if t < MIN_RANGE_M or t > MAX_RANGE_M:
+    if t < MIN_RANGE_M or t > max_range:
         return None
     return cam_pos + t * direction
 
 
-def _ground_points(cam_pos: np.ndarray, directions: np.ndarray) -> np.ndarray:
+def _ground_points(
+    cam_pos: np.ndarray,
+    directions: np.ndarray,
+    *,
+    max_range: float = FINDER_MAX_RANGE_M,
+) -> np.ndarray:
     dz = directions[:, 2]
     t = np.full(dz.shape, np.nan, dtype=np.float64)
     looking_down = dz < -1e-3
     t[looking_down] = -float(cam_pos[2]) / dz[looking_down]
-    ok = (t >= MIN_RANGE_M) & (t <= MAX_RANGE_M)
+    ok = (t >= MIN_RANGE_M) & (t <= max_range)
     points = np.full((directions.shape[0], 2), np.nan, dtype=np.float64)
     points[ok, 0] = cam_pos[0] + t[ok] * directions[ok, 0]
     points[ok, 1] = cam_pos[1] + t[ok] * directions[ok, 1]
@@ -572,10 +705,12 @@ def _lower_center_blocked(
     cam_pos: np.ndarray,
     cam_mat: np.ndarray,
     fovy_deg: float,
+    *,
+    max_range: float = FINDER_MAX_RANGE_M,
 ) -> bool:
     """Saturated floor hits in the lower center, inside 0.80 m."""
     u, v, directions = _strided_directions(fovy_deg, cam_mat, RAY_STRIDE)
-    hit = _ground_points(cam_pos, directions)
+    hit = _ground_points(cam_pos, directions, max_range=max_range)
     in_window = (v >= int(HEIGHT * 0.70)) & (u >= int(WIDTH * 0.30)) & (u < int(WIDTH * 0.70))
     near = np.isfinite(hit[:, 0])
     # Range is already capped; recompute distance from the camera's ground point.
@@ -588,7 +723,8 @@ def _lower_center_blocked(
     return (blocked / float(near.sum())) > 0.25
 
 
-def _has_free_neighbor(known_free: np.ndarray, i: int, j: int) -> bool:
+def _has_orthogonal_neighbor(known_free: np.ndarray, i: int, j: int) -> bool:
+    """4-connected. This is the finder frontier ring from main."""
     for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
         ni = i + di
         nj = j + dj
@@ -597,6 +733,38 @@ def _has_free_neighbor(known_free: np.ndarray, i: int, j: int) -> bool:
         if bool(known_free[ni, nj]):
             return True
     return False
+
+
+def _has_free_neighbor(known_free: np.ndarray, i: int, j: int) -> bool:
+    """8-connected. Diagonal free cells still expose a frontier."""
+    for di in (-1, 0, 1):
+        for dj in (-1, 0, 1):
+            if di == 0 and dj == 0:
+                continue
+            ni = i + di
+            nj = j + dj
+            if ni < 0 or nj < 0 or ni >= known_free.shape[0] or nj >= known_free.shape[1]:
+                continue
+            if bool(known_free[ni, nj]):
+                return True
+    return False
+
+
+def _frontier_gap(cells: tuple[FrontierCell, ...]) -> float | None:
+    """Median step between frontier bearings, along the rim.
+
+    The closing wrap around the back of the robot is not included.
+    A smaller gap is a denser rim.
+    """
+    if len(cells) < 2:
+        return None
+    angles = sorted(cell.bearing_rad for cell in cells)
+    gaps = [angles[index + 1] - angles[index] for index in range(len(angles) - 1)]
+    gaps.sort()
+    mid = len(gaps) // 2
+    if len(gaps) % 2 == 1:
+        return gaps[mid]
+    return 0.5 * (gaps[mid - 1] + gaps[mid])
 
 
 def choose_velocity(feature_map: ExploreMap, x: float, y: float, yaw: float) -> VelocityCommand:
@@ -693,6 +861,15 @@ def explore_schedule(walk_s: float, scene: str = "plant") -> tuple[ExplorePhase,
         duration = min(phase.duration_s, remaining)
         chosen.append(ExplorePhase(phase.name, duration, phase.vx, phase.yaw_rate))
         remaining -= duration
+    if remaining > 1e-9:
+        chosen.append(
+            ExplorePhase(
+                "extend",
+                min(EMPTY_FORWARD_EXTEND_S, remaining),
+                EXPLORE_VX,
+                0.0,
+            )
+        )
     return tuple(chosen)
 
 
@@ -704,10 +881,12 @@ def last_mile_from_map(
 ) -> VelocityCommand | None:
     """Finder query. None means the map has no kitchen-like yellow yet.
 
-    Always calls query_kitchen_like_yellow() and frontier_cells().
-    The aim is the frontier nearest the logged camera ray when one sits
-    inside the forward cone of that ray. Otherwise the aim is the ray.
-    vx stays at the finder half cap. A pure yaw is not returned.
+    Always calls query_kitchen_like_yellow() and frontier_cells()
+    on the main ring (4-connected, 1.60 m). The soft-XY probe is not
+    this function. The aim is the frontier nearest the logged camera
+    ray when one sits inside the forward cone of that ray. Otherwise
+    the aim is the ray. vx stays at the finder half cap. A pure yaw
+    is not returned.
     """
     yellow = feature_map.query_kitchen_like_yellow()
     frontiers = feature_map.frontier_cells(x, y)
@@ -745,6 +924,39 @@ def last_mile_from_map(
     if not _within_caps(FINDER_HALF_VX, yaw_rate):
         raise RuntimeError(f"last-mile command outside caps vx={FINDER_HALF_VX} yaw={yaw_rate}")
     return VelocityCommand(FINDER_HALF_VX, yaw_rate, reason, chosen_ij)
+
+
+def soft_goal_velocity(
+    feature_map: ExploreMap,
+    x: float,
+    y: float,
+    yaw: float,
+) -> VelocityCommand | None:
+    """Explore-demo probe only. Not the find-kitchen path.
+
+    None when yellow was never logged. The live yellow fraction is not
+    read. Yellow >= 0.50 is not success. A pure yaw is not returned.
+    find_kitchen.py does not call this.
+    """
+    goal = feature_map.soft_goal_xy
+    if goal is None:
+        return None
+    err = _wrap(math.atan2(goal[1] - y, goal[0] - x) - yaw)
+    yaw_rate = _clamp(
+        err / YAW_FULL_ERR_RAD * steer_walk.YAW_RATE_CAP,
+        -steer_walk.YAW_RATE_CAP,
+        steer_walk.YAW_RATE_CAP,
+    )
+    if abs(yaw_rate) < steer_walk.DEADBAND_YAW:
+        yaw_rate = 0.0
+    if not _within_caps(FINDER_HALF_VX, yaw_rate):
+        raise RuntimeError(f"soft-goal command outside caps yaw={yaw_rate}")
+    return VelocityCommand(
+        FINDER_HALF_VX,
+        yaw_rate,
+        "soft map XY; half-cap walk-yaw; not arrival",
+        None,
+    )
 
 
 def yaw_tracked(commanded_yaw: float, dyaw_deg: float) -> bool | None:
@@ -801,6 +1013,53 @@ class KitCam:
 
     def close(self) -> None:
         self.renderer.close()
+
+
+# Same bars as find_kitchen. Not lowered. Not a stop. Not a claim.
+ARRIVAL_YELLOW_FRAC = 0.50
+ARRIVAL_REMAINING_M = 0.25
+
+
+def _arrival_bars_met(yellow_frac: float, remaining_m: float | None) -> bool:
+    """True only when both arrival bars would pass. This slice never claims them."""
+    if remaining_m is None:
+        return False
+    return yellow_frac >= ARRIVAL_YELLOW_FRAC and remaining_m <= ARRIVAL_REMAINING_M
+
+
+def kitchen_gap(model: mj.MjModel, data: mj.MjData) -> tuple[float, float] | None:
+    """Torso-to-kitchen gap and the kitchen geom near-face x.
+
+    The same measurement find_kitchen reports. It does not pick a heading
+    and it does not decide arrival.
+    """
+    body_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "body_link")
+    kitchen_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "kitchen")
+    if body_id < 0 or kitchen_id < 0:
+        return None
+    point_x = float(data.xpos[body_id][0])
+    point_y = float(data.xpos[body_id][1])
+    nearest = float("inf")
+    near_face_x = float("inf")
+    for geom_id in range(model.ngeom):
+        if int(model.geom_bodyid[geom_id]) != kitchen_id:
+            continue
+        half_x = float(model.geom_size[geom_id][0])
+        half_y = float(model.geom_size[geom_id][1])
+        rotation = np.asarray(data.geom_xmat[geom_id], dtype=np.float64).reshape(3, 3)
+        origin = np.asarray(data.geom_xpos[geom_id], dtype=np.float64)
+        delta = np.array([point_x - float(origin[0]), point_y - float(origin[1]), 0.0])
+        local = rotation.T @ delta
+        outside_x = max(abs(float(local[0])) - half_x, 0.0)
+        outside_y = max(abs(float(local[1])) - half_y, 0.0)
+        nearest = min(nearest, math.hypot(outside_x, outside_y))
+        for sx in (-1.0, 1.0):
+            for sy in (-1.0, 1.0):
+                corner = origin + rotation @ np.array([sx * half_x, sy * half_y, 0.0])
+                near_face_x = min(near_face_x, float(corner[0]))
+    if nearest == float("inf"):
+        return None
+    return nearest, near_face_x
 
 
 def _pose(session: steer_walk.SteerSession) -> RobotPose:
@@ -862,6 +1121,10 @@ class SceneRun:
     frames: list[np.ndarray]
     other_chromatic_max: float
     phases: list[PhaseRecord]
+    remaining_m: float | None
+    near_face_x_m: float | None
+    soft_goal_xy: tuple[float, float] | None
+    arrival_bars_met: bool
 
     def delta_x(self) -> float:
         return self.end.x - self.start.x
@@ -892,7 +1155,9 @@ def run_explore(
         _hold_stand(session, STAND_S, sent)
         start = _pose(session)
         frame, cam_pos, cam_mat, fovy = cam.grab(session.model, session.data)
-        before = feature_map.integrate(start, frame, cam_pos, cam_mat, fovy)
+        before = feature_map.integrate(
+            start, frame, cam_pos, cam_mat, fovy, explore_fan=True,
+        )
         kit_before = frame
         map_before = render_map(feature_map, start, [(start.x, start.y)])
         if record_frames:
@@ -968,7 +1233,9 @@ def run_explore(
                 break
             if (now - last_look) >= (PERCEPT_S - 1e-9):
                 frame, cam_pos, cam_mat, fovy = cam.grab(session.model, session.data)
-                feature_map.integrate(pose, frame, cam_pos, cam_mat, fovy)
+                feature_map.integrate(
+                    pose, frame, cam_pos, cam_mat, fovy, explore_fan=True,
+                )
                 last_look = now
                 if pose.t >= mid_time and kit_mid is kit_before:
                     kit_mid = frame.copy()
@@ -983,6 +1250,8 @@ def run_explore(
                 _close_phase(_pose(session))
         if stop_reason == "claimed walk-yaw schedule" and scene != "plant":
             stop_reason = "furnished right-first window"
+        elif any(phase.name == "extend" for phase in phases) and stop_reason == "claimed walk-yaw schedule":
+            stop_reason = "claimed left-then-right plus empty-floor forward"
         elif abs(walk_s - DEMO_WALK_S) > 1e-6 and stop_reason == "claimed walk-yaw schedule":
             stop_reason = "walk budget"
         stop_pose = _pose(session)
@@ -996,7 +1265,9 @@ def run_explore(
             session.step()
         end = _pose(session)
         frame, cam_pos, cam_mat, fovy = cam.grab(session.model, session.data)
-        after = feature_map.integrate(end, frame, cam_pos, cam_mat, fovy)
+        after = feature_map.integrate(
+            end, frame, cam_pos, cam_mat, fovy, explore_fan=True,
+        )
         if record_frames:
             frames.append(frame.copy())
         kit_after = frame
@@ -1005,8 +1276,163 @@ def run_explore(
             kit_mid = frame.copy()
             map_mid = map_after
         session.assert_plant_unchanged()
+        gap = kitchen_gap(session.model, session.data)
+        yellow_now = feature_map.query_kitchen_like_yellow()
+        remaining = None if gap is None else gap[0]
+        near_face = None if gap is None else gap[1]
+        bars = _arrival_bars_met(float(after.yellow_frac), remaining)
         return SceneRun(
             scene=scene,
+            stop_reason=stop_reason,
+            start=start,
+            stop_pose=stop_pose,
+            end=end,
+            min_up_z=float(session.min_up_z),
+            fault=bool(session.bus.fault),
+            fault_reason=session.bus.fault_reason,
+            end_mode=session.bus.mode,
+            yellow=yellow_now,
+            before=before,
+            after=after,
+            sent=sent,
+            trail=trail,
+            kit_before=kit_before,
+            kit_mid=kit_mid,
+            kit_after=kit_after,
+            map_before=map_before,
+            map_mid=map_mid,
+            map_after=map_after,
+            frames=frames,
+            other_chromatic_max=feature_map.other_chromatic_max,
+            phases=phases,
+            remaining_m=remaining,
+            near_face_x_m=near_face,
+            soft_goal_xy=feature_map.soft_goal_xy,
+            arrival_bars_met=bars,
+        )
+    finally:
+        cam.close()
+
+
+def run_soft_goal(hold_s: float, *, record_frames: bool) -> SceneRun:
+    """Half-cap walk toward the frozen soft XY in the kitchen.
+
+    The command does not read the live yellow fraction. Reaching the
+    guessed point is not arrival. A tip or a plant fault stops the walk.
+    """
+    session = steer_walk.SteerSession(video=False, scene_xml=SCENES["kitchen"])
+    cam = KitCam(session.model)
+    feature_map = ExploreMap.empty()
+    sent: list[SentCommand] = []
+    frames: list[np.ndarray] = []
+    try:
+        _hold_stand(session, STAND_S, sent)
+        start = _pose(session)
+        frame, cam_pos, cam_mat, fovy = cam.grab(session.model, session.data)
+        before = feature_map.integrate(
+            start, frame, cam_pos, cam_mat, fovy, explore_fan=True,
+        )
+        kit_before = frame
+        map_before = render_map(feature_map, start, [(start.x, start.y)])
+        if record_frames:
+            frames.append(frame.copy())
+        trail: list[tuple[float, float]] = [(start.x, start.y)]
+        phases: list[PhaseRecord] = []
+        command = soft_goal_velocity(feature_map, start.x, start.y, start.yaw)
+        stop_reason = "soft map XY hold"
+        phase_origin = start
+        phase_t0 = float(session.data.time)
+        last_send = -1.0
+        last_look = float(session.data.time)
+        last_frame = -1.0
+        kit_mid = frame
+        map_mid = map_before
+        mid_time = phase_t0 + hold_s * 0.5
+        walk_end = phase_t0 + hold_s
+        if command is None:
+            stop_reason = "no kitchen-like yellow; no vel"
+        else:
+            while float(session.data.time) < walk_end - 1e-9:
+                now = float(session.data.time)
+                pose = _pose(session)
+                goal = feature_map.soft_goal_xy
+                if goal is not None and math.hypot(goal[0] - pose.x, goal[1] - pose.y) <= SOFT_GOAL_REACHED_M:
+                    stop_reason = "soft map XY reached; not arrival"
+                    break
+                if (now - last_send) >= (steer_walk.VEL_RESEND_S - 1e-9):
+                    _send_vel(session, command, sent)
+                    last_send = now
+                report = session.step()
+                pose = _pose(session)
+                feature_map.mark_traversed(pose.x, pose.y)
+                if math.hypot(pose.x - trail[-1][0], pose.y - trail[-1][1]) >= 0.02:
+                    trail.append((pose.x, pose.y))
+                up_z = session.samples[-1].up_z if session.samples else 1.0
+                if report.mode == "fault" or session.bus.fault:
+                    stop_reason = f"fault: {session.bus.fault_reason or report.mode}"
+                    break
+                if up_z < UP_Z_ABORT:
+                    stop_reason = f"up_z {up_z:.3f} below {UP_Z_ABORT:.2f}"
+                    break
+                if (now - last_look) >= (PERCEPT_S - 1e-9):
+                    frame, cam_pos, cam_mat, fovy = cam.grab(session.model, session.data)
+                    feature_map.integrate(
+                    pose, frame, cam_pos, cam_mat, fovy, explore_fan=True,
+                )
+                    refreshed = soft_goal_velocity(feature_map, pose.x, pose.y, pose.yaw)
+                    if refreshed is not None:
+                        command = refreshed
+                    last_look = now
+                    if pose.t >= mid_time and kit_mid is kit_before:
+                        kit_mid = frame.copy()
+                        map_mid = render_map(feature_map, pose, trail)
+                if record_frames and (now - last_frame) >= (FRAME_EVERY_S - 1e-9):
+                    if (now - last_look) > 1e-6:
+                        frame, cam_pos, cam_mat, fovy = cam.grab(session.model, session.data)
+                    frames.append(frame.copy())
+                    last_frame = now
+            end_phase = _pose(session)
+            vels = [item for item in sent if item.name == "vel"]
+            last_yaw = vels[-1].yaw_rate if vels else 0.0
+            last_vx = vels[-1].vx if vels else FINDER_HALF_VX
+            dyaw = math.degrees(_wrap(end_phase.yaw - phase_origin.yaw))
+            phases.append(
+                PhaseRecord(
+                    name="soft-goal",
+                    commanded_vx=last_vx,
+                    commanded_yaw=last_yaw,
+                    duration_s=float(end_phase.t - phase_t0),
+                    dx_m=end_phase.x - phase_origin.x,
+                    dy_m=end_phase.y - phase_origin.y,
+                    dyaw_deg=dyaw,
+                    tracked=yaw_tracked(last_yaw, dyaw),
+                )
+            )
+        stop_pose = _pose(session)
+        now = float(session.data.time)
+        refusal = session.bus.stop(now)
+        if refusal:
+            raise RuntimeError(refusal)
+        sent.append(SentCommand(now, "stop", 0.0, 0.0))
+        settle_end = now + SETTLE_S
+        while float(session.data.time) < settle_end - 1e-9:
+            session.step()
+        end = _pose(session)
+        frame, cam_pos, cam_mat, fovy = cam.grab(session.model, session.data)
+        after = feature_map.integrate(
+            end, frame, cam_pos, cam_mat, fovy, explore_fan=True,
+        )
+        if record_frames:
+            frames.append(frame.copy())
+        if kit_mid is kit_before:
+            kit_mid = frame.copy()
+            map_mid = render_map(feature_map, end, trail)
+        session.assert_plant_unchanged()
+        gap = kitchen_gap(session.model, session.data)
+        remaining = None if gap is None else gap[0]
+        near_face = None if gap is None else gap[1]
+        return SceneRun(
+            scene="kitchen-soft",
             stop_reason=stop_reason,
             start=start,
             stop_pose=stop_pose,
@@ -1022,13 +1448,17 @@ def run_explore(
             trail=trail,
             kit_before=kit_before,
             kit_mid=kit_mid,
-            kit_after=kit_after,
+            kit_after=frame,
             map_before=map_before,
             map_mid=map_mid,
-            map_after=map_after,
+            map_after=render_map(feature_map, end, trail),
             frames=frames,
             other_chromatic_max=feature_map.other_chromatic_max,
             phases=phases,
+            remaining_m=remaining,
+            near_face_x_m=near_face,
+            soft_goal_xy=feature_map.soft_goal_xy,
+            arrival_bars_met=_arrival_bars_met(float(after.yellow_frac), remaining),
         )
     finally:
         cam.close()
@@ -1045,7 +1475,10 @@ def render_map(
     height = feature_map.nx * MAP_PX
     image = Image.new("RGB", (width, height), (24, 26, 30))
     draw = ImageDraw.Draw(image)
-    frontiers = {(cell.i, cell.j) for cell in feature_map.frontier_cells(pose.x, pose.y)}
+    frontiers = {
+        (cell.i, cell.j)
+        for cell in feature_map.frontier_cells(pose.x, pose.y, dense=True)
+    }
     for i in range(feature_map.nx):
         for j in range(feature_map.ny):
             kind = int(feature_map.state[i, j])
@@ -1075,8 +1508,12 @@ def render_map(
             fill=(240, 210, 40),
             width=3,
         )
+    if feature_map.soft_goal_xy is not None:
+        gx, gy = feature_map.soft_goal_xy
+        px, py = _world_px(feature_map, gx, gy)
+        draw.ellipse((px - 4, py - 4, px + 4, py + 4), outline=(240, 210, 40))
     draw.text((6, 6), "free gray  walked green  feature orange  frontier cyan", fill=(230, 230, 230))
-    draw.text((6, 18), "yellow line = camera ray, not a goal", fill=(240, 210, 40))
+    draw.text((6, 18), "yellow line = camera ray; dot = soft XY, not arrival", fill=(240, 210, 40))
     return np.asarray(image, dtype=np.uint8)
 
 
@@ -1178,6 +1615,18 @@ def _run_payload(run: SceneRun) -> dict[str, object]:
         "prefer_fail": True,
         "go_anywhere": False,
         "arrival_claimed": False,
+        "arrival_bars_met": run.arrival_bars_met,
+        "remaining_m": run.remaining_m,
+        "near_face_x_m": run.near_face_x_m,
+        "soft_goal_xy": list(run.soft_goal_xy) if run.soft_goal_xy is not None else None,
+        "vs_main_find_kitchen": {
+            "remaining_m": MAIN_REMAINING_M,
+            "yellow": MAIN_YELLOW,
+            "min_up_z": MAIN_UP_Z,
+        },
+        "vs_main_explore_free_cells": MAIN_FREE_CELLS.get(run.scene),
+        "vs_main_explore_frontier_cells": MAIN_FRONTIER_CELLS.get(run.scene),
+        "vs_main_explore_walked_cells": MAIN_WALKED_CELLS.get(run.scene),
         "dx_m": run.delta_x(),
         "dy_m": run.delta_y(),
         "dyaw_rad": run.delta_yaw(),
@@ -1219,10 +1668,37 @@ def _scene_limit(run: SceneRun) -> str:
     free = run.after.free_cells
     feature = run.after.feature_cells
     walked = run.after.traversed_cells
-    if run.scene == "plant" and not yellow.seen:
+    frontiers = run.after.frontier_cells
+    if run.fault or run.min_up_z < UP_Z_ABORT:
+        if run.min_up_z < 0.85 or "tip" in run.fault_reason:
+            kind = "tip"
+        elif run.fault:
+            kind = "plant fault"
+        else:
+            kind = "up_z"
         return (
-            f"Prefer FAIL: empty floor. Vision-free cells {free}, floor-feature cells {feature}, "
-            f"walked cells {walked}. No kitchen-like yellow. Frontiers are the edge of that floor paint, "
+            f"Prefer FAIL: {kind}. min_up_z {run.min_up_z:.3f}. "
+            f"Vision-free cells {free}, frontiers {frontiers}. "
+            "Not arrival and not go-anywhere."
+        )
+    if run.scene == "kitchen-soft":
+        gap = "n/a" if run.remaining_m is None else f"{run.remaining_m:.3f} m"
+        end_yellow = run.after.yellow_frac
+        return (
+            f"Prefer FAIL: soft map XY. remaining {gap} vs main {MAIN_REMAINING_M:.3f} m, "
+            f"end yellow {end_yellow:.3f} vs main {MAIN_YELLOW:.3f}, "
+            f"min_up_z {run.min_up_z:.3f} vs main {MAIN_UP_Z:.3f}. "
+            f"Logged yellow max {yellow.max_fraction:.3f}. "
+            "Yellow >= 0.50 is not success. Not arrival and not go-anywhere."
+        )
+    if run.scene == "plant" and not yellow.seen:
+        main_free = MAIN_FREE_CELLS["plant"]
+        main_front = MAIN_FRONTIER_CELLS["plant"]
+        return (
+            f"Prefer FAIL: empty floor. Vision-free cells {free} (main {main_free}), "
+            f"frontiers {frontiers} (main {main_front}), walked cells {walked} "
+            f"(main {MAIN_WALKED_CELLS['plant']}), floor-feature cells {feature}. "
+            "No kitchen-like yellow. Frontiers are the edge of that floor paint, "
             "not rooms. Not go-anywhere."
         )
     if yellow.seen and yellow.ground_cell_ij is None:
@@ -1256,6 +1732,7 @@ def _print_run(run: SceneRun) -> None:
         f"dx={run.delta_x():+.3f} m dy={run.delta_y():+.3f} m "
         f"dyaw={math.degrees(run.delta_yaw()):+.2f} deg "
         f"min_up_z={run.min_up_z:.3f} fault={run.fault} "
+        f"remaining={run.remaining_m} yellow_end={run.after.yellow_frac:.3f} "
         f"stop={run.stop_reason} end_mode={run.end_mode} "
         f"phases[{phase_bits}]"
     )
@@ -1435,6 +1912,50 @@ def test_claimed_schedule() -> list[str]:
         _expect(abs(room[0].vx - EXPLORE_VX) < 1e-9 and room[0].yaw_rate < 0.0, "room right vel", failures)
         _expect(room[0].duration_s < steer_walk.CLAIMED_RIGHT_ARC_S, "room window is the 11 s hold", failures)
         _expect(abs(room[0].duration_s - FURNISHED_RIGHT_S) < 1e-9, "room window", failures)
+    longer = explore_schedule(DEMO_WALK_S + EMPTY_FORWARD_EXTEND_S, "plant")
+    _expect([phase.name for phase in longer[:5]] == names, f"extend reordered {longer}", failures)
+    _expect(longer[-1].name == "extend", f"missing extend {longer}", failures)
+    _expect(abs(longer[-1].duration_s - EMPTY_FORWARD_EXTEND_S) < 1e-9, "extend length", failures)
+    _expect(abs(longer[-1].vx - EXPLORE_VX) < 1e-9 and abs(longer[-1].yaw_rate) < 1e-9, "extend vel", failures)
+    _expect(longer[-1].name != "arc-left" and longer[-1].yaw_rate == 0.0, "extend is a second yaw", failures)
+    return failures
+
+
+def test_hole_fill_and_soft_goal() -> list[str]:
+    """Holes in the fan fill. The rim stays unknown. Soft XY is half-cap, not arrival."""
+    failures: list[str] = []
+    feature_map = ExploreMap.empty()
+    center = feature_map.cell_index(0.85, 0.05)
+    _expect(center is not None, "center cell missing", failures)
+    if center is None:
+        return failures
+    i, j = center
+    for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        feature_map.state[i + di, j + dj] = FREE
+    feature_map._fill_floor_holes()
+    _expect(int(feature_map.state[i, j]) == FREE, "one-cell hole stayed unknown", failures)
+    rim_i = i + 2
+    feature_map.state[rim_i, j] = UNKNOWN
+    feature_map._fill_floor_holes()
+    _expect(int(feature_map.state[rim_i, j]) == UNKNOWN, "frontier rim was filled", failures)
+    _expect(abs(MAX_RANGE_M - 2.60) < 1e-9, f"max range {MAX_RANGE_M}", failures)
+    _expect(FRONTIER_MAX_M > 1.60, f"frontier max {FRONTIER_MAX_M}", failures)
+    empty = ExploreMap.empty()
+    _expect(soft_goal_velocity(empty, 0.0, 0.0, 0.0) is None, "empty map produced a soft command", failures)
+    empty.soft_goal_xy = (1.20, 0.40)
+    command = soft_goal_velocity(empty, 0.0, 0.0, 0.0)
+    _expect(command is not None, "soft goal missing", failures)
+    if command is not None:
+        _expect(abs(command.vx - FINDER_HALF_VX) < 1e-9, f"soft vx {command.vx}", failures)
+        _expect(command.yaw_rate > 0.0, f"soft yaw should be left, got {command.yaw_rate}", failures)
+        _expect(_within_caps(command.vx, command.yaw_rate), "soft command outside caps", failures)
+        _expect(not (abs(command.vx) <= 1e-9 and abs(command.yaw_rate) > 1e-9), "soft goal sent vx=0 yaw", failures)
+    empty.soft_goal_xy = (1.20, 0.0)
+    ahead = soft_goal_velocity(empty, 0.0, 0.0, 0.0)
+    _expect(ahead is not None and ahead.vx > 0.0 and abs(ahead.yaw_rate) < 1e-9, f"ahead {ahead}", failures)
+    source = inspect.getsource(soft_goal_velocity)
+    _expect("ARRIVAL_YELLOW" not in source, "soft goal treats yellow fraction as success", failures)
+    _expect("arrival_bars" not in source, "soft goal claims arrival", failures)
     return failures
 
 
@@ -1445,6 +1966,14 @@ def test_last_mile_query() -> list[str]:
     _expect("query_kitchen_like_yellow" in source, "last mile does not query yellow", failures)
     _expect("frontier_cells" in source, "last mile does not query frontiers", failures)
     _expect("waypoint" not in source, "last mile mentions a waypoint", failures)
+    _expect("soft_goal_velocity(" not in source, "last mile calls the soft-XY probe", failures)
+    _expect("dense=True" not in source, "last mile uses the explore frontier rim", failures)
+    finder_source = (_SCRIPTS / "find_kitchen.py").read_text(encoding="utf-8")
+    _expect("soft_goal" not in finder_source, "find_kitchen.py mentions soft_goal", failures)
+    _expect("explore_fan" not in finder_source, "find_kitchen.py opts into the explore fan", failures)
+    _expect("run_soft_goal" not in finder_source, "find_kitchen.py runs the soft probe", failures)
+    _expect(abs(FINDER_MAX_RANGE_M - 1.80) < 1e-9, f"finder range {FINDER_MAX_RANGE_M}", failures)
+    _expect(abs(FINDER_FRONTIER_MAX_M - 1.60) < 1e-9, f"finder frontier {FINDER_FRONTIER_MAX_M}", failures)
     empty = ExploreMap.empty()
     _paint_free_rect(empty, 0.3, 1.2, -0.4, 0.4)
     _expect(last_mile_from_map(empty, 0.2, 0.0, 0.0) is None, "empty map produced a command", failures)
@@ -1478,6 +2007,7 @@ def self_test() -> int:
     failures.extend(test_policy_uses_frontiers_not_yellow())
     failures.extend(test_claimed_schedule())
     failures.extend(test_last_mile_query())
+    failures.extend(test_hole_fill_and_soft_goal())
     failures.extend(test_stand_scenes())
     failures.extend(test_short_walk())
     if _md5(PLANT_XML) != steer_walk.PLANT_MD5:
@@ -1511,8 +2041,9 @@ def _save_run(run: SceneRun) -> list[Path]:
     )
     for path, image in zip(paths, images):
         _save_png(image, path)
-    if run.scene == "kitchen" and run.frames:
-        clip = PREVIEWS / "explore_map_kitchen.mp4"
+    if run.frames and run.scene in ("kitchen", "kitchen-soft"):
+        clip_name = "explore_map_kitchen.mp4" if run.scene == "kitchen" else "explore_map_kitchen_soft.mp4"
+        clip = PREVIEWS / clip_name
         _write_mp4(run.frames, clip)
         paths.append(clip)
     return paths
@@ -1537,6 +2068,30 @@ def demo(walk_s: float) -> int:
             problems.append(f"{scene} sent vx=0 yaw")
         if run.end_mode != "stand":
             problems.append(f"{scene} end mode {run.end_mode}")
+        for command in run.sent:
+            if command.name != "vel":
+                continue
+            if abs(command.vx - EXPLORE_VX) > 1e-9:
+                problems.append(f"{scene} explore vel vx {command.vx}")
+                break
+    soft = run_soft_goal(SOFT_GOAL_HOLD_S, record_frames=True)
+    _print_run(soft)
+    payloads.append(_run_payload(soft))
+    saved.extend(_save_run(soft))
+    if soft.fault or soft.min_up_z < UP_Z_ABORT:
+        problems.append(f"kitchen-soft min_up_z {soft.min_up_z:.3f} fault {soft.fault_reason}")
+    if soft.vx_zero_yaw_sends() != 0:
+        problems.append("kitchen-soft sent vx=0 yaw")
+    if soft.end_mode != "stand":
+        problems.append(f"kitchen-soft end mode {soft.end_mode}")
+    if soft.soft_goal_xy is None:
+        problems.append("kitchen-soft did not freeze a soft XY")
+    for command in soft.sent:
+        if command.name != "vel":
+            continue
+        if abs(command.vx - FINDER_HALF_VX) > 1e-9:
+            problems.append(f"kitchen-soft vx {command.vx}")
+            break
     after = _md5(PLANT_XML)
     summary: dict[str, object] = {
         "plant_md5": after,
@@ -1553,15 +2108,34 @@ def demo(walk_s: float) -> int:
         "resend_hz": 1.0 / steer_walk.VEL_RESEND_S,
         "walk_s": walk_s,
         "cell_m": CELL_M,
+        "max_range_m": MAX_RANGE_M,
+        "frontier_max_m": FRONTIER_MAX_M,
+        "empty_forward_extend_s": EMPTY_FORWARD_EXTEND_S,
+        "soft_goal_range_m": SOFT_GOAL_RANGE_M,
+        "soft_goal_hold_s": SOFT_GOAL_HOLD_S,
+        "arrival_yellow_frac": ARRIVAL_YELLOW_FRAC,
+        "arrival_remaining_m": ARRIVAL_REMAINING_M,
+        "arrival_claimed": False,
+        "main_find_kitchen": {
+            "remaining_m": MAIN_REMAINING_M,
+            "yellow": MAIN_YELLOW,
+            "min_up_z": MAIN_UP_Z,
+        },
+        "main_explore_free_cells": MAIN_FREE_CELLS,
+        "main_explore_frontier_cells": MAIN_FRONTIER_CELLS,
+        "main_explore_walked_cells": MAIN_WALKED_CELLS,
         "honesty": HONESTY,
         "prefer_fail_bar": {
             "tonight": (
                 "A real land is not this slice. The map is a ground-plane floor fan "
-                "from one camera, frontiers on the edge of that fan, and a yellow "
-                "bearing when the backsplash is in frame. The walk holds the claimed "
-                "vel(+0.056, ±0.25) windows so the body can yaw. Rooms are separate "
-                "XML files, not one space. Pose is the sim freejoint. vx=0 does not turn. "
-                "Arrival is still yellow >= 0.50 and torso-to-kitchen <= 0.25 m."
+                "from one camera out to 2.60 m, with one-cell holes filled, frontiers "
+                "on the 8-connected edge of that fan, and a yellow bearing when the "
+                "backsplash is in frame. A soft XY is frozen along that bearing. "
+                "Yellow >= 0.50 is not success and arrival is not claimed. "
+                "The empty plant holds the claimed vel(+0.056, ±0.25) windows and "
+                "then one claimed forward. A second yaw hold is not claimable. "
+                "Rooms are separate XML files, not one space. Pose is the sim freejoint. "
+                "vx=0 does not turn. Arrival is still yellow >= 0.50 and torso-to-kitchen <= 0.25 m."
             ),
             "later": (
                 "A later land would need one continuous space, metric occupied cells "
@@ -1595,7 +2169,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Explore from kit_cam and build a partial map")
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--demo", action="store_true")
-    parser.add_argument("--walk-s", type=float, default=DEMO_WALK_S)
+    parser.add_argument(
+        "--walk-s",
+        type=float,
+        default=DEMO_WALK_S + EMPTY_FORWARD_EXTEND_S,
+    )
     args = parser.parse_args()
     if args.self_test:
         return self_test()

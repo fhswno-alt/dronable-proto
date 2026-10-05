@@ -16,19 +16,23 @@ Furnished scenes do not get that chain. A full-cap approach in the kitchen cross
 
 ## What the map is
 
-The grid is 0.10 m cells in the world frame, from x −0.80..2.60 m and y −1.80..1.80 m. A cell is painted only from `kit_cam` rays that meet the floor plane between 0.30 m and 1.80 m:
+The grid is 0.10 m cells in the world frame, from x −0.80..2.60 m and y −1.80..1.80 m. A cell is painted only from `kit_cam` rays that meet the floor plane between 0.30 m and 2.60 m. After each view, an unknown cell with three or four orthogonal free neighbors is filled. A frontier rim cell has one free neighbor and stays unknown.
 
 | Paint | Pixel test |
 |-------|------------|
 | Free | Low saturation (checker floor). Saturation under 12. |
 | Feature | Saturated and not sky, and the ray meets the floor. The entrance mat is this case. |
-| Not a cell | Elevated color. The ray misses the floor inside 1.80 m. Stored as a bearing only. |
+| Not a cell | Elevated color. The ray misses the floor inside 2.60 m. Stored as a bearing only. |
 
 The kitchen backsplash is the elevated case. The yellow test is the same pixel rule as `scripts/find_kitchen.py` (red and green high, blue low). At the stand pose that blob is about 0.039 of the frame and the ray does not meet the floor, so `ground_cell_ij` stays empty. The bearing is the camera ray. It is not a waypoint and it is not passed to `choose_velocity`.
 
 Sky is the empty-plant blue around rgb (70, 100, 140). Cyan tile fails that test (not enough red) and is counted as other chromatic color. Other chromatic pixels are not given a room name.
 
-Frontier cells are unknown cells next to a free cell or a walked cell, between 0.40 m and 1.60 m from the body, inside a ±1.20 rad cone of the current heading. The next `vel` aims at the nearest of those cells. A tie breaks to the left of the heading. Yellow is not an input. If the lower center of the frame is saturated inside 0.80 m, frontiers straight ahead are dropped.
+Frontier cells are unknown cells in the 8-neighborhood of a free cell or a walked cell, between 0.40 m and 2.70 m from the body, inside a ±1.20 rad cone of the current heading. The next `vel` aims at the nearest of those cells. A tie breaks to the left of the heading. Yellow is not an input. If the lower center of the frame is saturated inside 0.80 m, frontiers straight ahead are dropped.
+
+`find_kitchen.py` is not edited. It still paints with the main fan, 0.30–1.80 m and no hole fill, and it still calls `frontier_cells()` on the main ring: 4-connected, 0.40–1.60 m. `last_mile_from_map()` does not read a soft XY. The 2.60 m fan, the hole fill, and the 8-connected rim are the explore demo.
+
+The explore demo can freeze a soft XY 1.50 m along the first yellow bearing. A separate probe walks half-cap toward that guess for up to 20 s. That probe is not the kitchen path. Yellow ≥ 0.50 is not the success test and arrival is not claimed. The measured probe is Prefer FAIL against find-kitchen (remaining 0.982 m vs 0.239 m).
 
 The trail is the sim freejoint. In this sim that is odometry. It is not a visual pose.
 
@@ -48,7 +52,7 @@ All of these, together:
 
 ## Tonight's limit
 
-The empty plant now walks the claimed chain, so the floor fan is longer and the body yaws. Furnished scenes only take the 8 s right-first window, because the claimed windows cross `up_z` 0.90 there. The paint is still a fan from one camera. A yellow bearing is logged when the backsplash is in frame. Frontiers are the edge of the paint. White and gray furniture can fail the saturation test and never become a cell. That is a partial feature map of whatever was in view. It is not go-anywhere.
+The empty plant walks the claimed chain, then one more claimed forward window: `vel(+0.056, 0)` for 15 s. A second left hold does not yaw and then tips. A second right hold tips. Those are not this schedule. Furnished scenes only take the 8 s right-first window, because the claimed yaw windows cross `up_z` 0.90 there. The paint is still a fan from one camera, now out to 2.60 m with one-cell holes filled. A yellow bearing is logged when the backsplash is in frame, and a soft XY is frozen along it. Frontiers are the 8-connected edge of the paint. White and gray furniture can fail the saturation test and never become a cell. That is a partial feature map of whatever was in view. It is not go-anywhere.
 
 The empty plant is the honest miss: floor cells, no yellow, no room label.
 
@@ -57,36 +61,49 @@ MUJOCO_GL=osmesa python scripts/explore_map.py --self-test
 MUJOCO_GL=osmesa python scripts/explore_map.py --demo
 ```
 
-`--demo` walks the empty plant on the claimed chain, and the kitchen and bathroom on the 8 s right-first window, then stops and settles 1.2 s. It writes `previews/explore_map_summary.json`, kit_cam and map stills, and `previews/explore_map_kitchen.mp4`. Exit status is non-zero if the plant md5 changes, if `up_z` drops below 0.90, or if a `vx = 0` yaw is sent. A passing exit still prints Prefer FAIL for go-anywhere.
+`--demo` walks the empty plant on the claimed chain plus the 15 s forward extend, and the kitchen and bathroom on the 8 s right-first window. It then runs a 20 s half-cap probe toward the frozen soft XY in the kitchen. Each run stops and settles 1.2 s. It writes `previews/explore_map_summary.json`, kit_cam and map stills, `previews/explore_map_kitchen.mp4`, and `previews/explore_map_kitchen_soft.mp4`. Exit status is non-zero if the plant md5 changes, if `up_z` drops below 0.90, or if a `vx = 0` yaw is sent. A passing exit still prints Prefer FAIL for go-anywhere and for arrival.
 
 ## Measured
 
-Plant md5 after the demo: `71b2c86d133ebc603f58b99c53e496f3`. No tip, no fault, end mode stand on every run. `vx = 0` yaw sends: 0. Every moving command was `vx = +0.056`.
+Plant md5 after the demo: `71b2c86d133ebc603f58b99c53e496f3`. No tip, no fault, end mode stand on every run. `vx = 0` yaw sends: 0. Explore commands were `vx = +0.056`. The soft-XY probe was `vx = +0.028`. Arrival was not claimed. Both arrival bars stayed where they are: yellow ≥ 0.50 and torso-to-kitchen ≤ 0.25 m.
 
-The empty plant followed the claimed chain. Left arc **+75.5 deg** on `yaw_rate +0.25`. Chained right arc **−54.5 deg** on `yaw_rate −0.25`. Both are on the commanded side (the track bar used here is 20 deg; the swallowed run was about −12 deg on a left command). The resume then drifts **+30.8 deg**, which is the same drift the nav-multi clip already reports. It is not a second left command.
+The empty plant followed the claimed chain, then the 15 s forward extend. Left arc **+75.5 deg** on `yaw_rate +0.25`. Chained right arc **−54.5 deg** on `yaw_rate −0.25`. Both are on the commanded side. The resume drifts **+30.8 deg** with yaw commanded at 0, the same drift the nav-multi clip already reports. The extend is the same command held another 15 s and drifts another **+31.1 deg**. That drift is not a second yaw command.
 
 Δx below is the settled pose minus the pose after the stand. Δyaw is the same pair. min up_z is the whole run, including settle.
 
 | Scene | Command | Δx | Δy | Δyaw settled | Arc Δyaw | min up_z | Tip / fault |
 |-------|---------|----|----|--------------|----------|----------|-------------|
-| Empty plant | claimed chain | +1.569 m | +1.022 m | +52.7 deg | left +75.5, right −54.5 | 0.954 | no |
+| Empty plant | claimed chain + 15 s forward | +1.736 m | +1.746 m | +78.4 deg | left +75.5, right −54.5 | 0.949 | no |
 | Kitchen | 8 s right | +0.337 m | −0.209 m | −55.8 deg | −58.2 | 0.919 | no |
 | Bathroom | 8 s right | +0.423 m | −0.236 m | −50.6 deg | −56.4 | 0.934 | no |
+| Kitchen soft XY | 20 s half-cap toward the frozen point | +0.332 m | −0.025 m | +2.4 deg | +2.1 | 0.986 | no |
 
-The previous 12 s `vel(+0.028, yaw)` run moved **+0.156 / +0.185 / +0.190 m** and settled about **−12 deg** while commanding left. This run is longer on every scene, and each yaw arc moves the heading to the commanded side.
+Main's empty-plant chain, without the extend, was **+1.569 / +1.022 m**, settled **+52.7 deg**, min up_z **0.954**. This extend stays above up_z 0.90. It is still not a second left or a second right.
 
-What the map held at the end:
+What the map held at the end, next to main (1.80 m fan, 4-connected frontiers inside 1.60 m):
 
-| Scene | Free cells (start → end) | Floor-feature cells | Walked cells | Frontiers (start → end) | Kitchen-like yellow |
-|-------|--------------------------|---------------------|--------------|-------------------------|---------------------|
-| Empty plant | 266 → 766 | 0 | 41 | 55 → 11 | no (fraction 0) |
-| Kitchen | 221 → 366 | 25 → 150 | 7 | 45 → 26 | yes, max fraction 0.071 |
-| Bathroom | 266 → 531 | 0 | 10 | 55 → 28 | no (fraction 0) |
+| Scene | Free cells (start → end) | Main end | Floor-feature | Walked (main) | Frontiers (start → end) | Main end |
+|-------|--------------------------|----------|---------------|---------------|-------------------------|----------|
+| Empty plant | 404 → 821 | 766 | 0 | 52 (41) | 248 → 39 | 11 |
+| Kitchen | 293 → 450 | 366 | 47 → 305 | 7 (7) | 131 → 55 | 26 |
+| Bathroom | 404 → 794 | 531 | 0 | 10 (10) | 248 → 61 | 28 |
+| Kitchen soft XY | 293 → 315 | — | 47 → 288 | 8 | 131 → 50 | — |
 
-The empty plant is floor and sky. Frontiers are the rim of the floor paint. Walked cells went from 4–5 on the short run to 41 here because the body actually traveled. That is still not a house and not go-anywhere.
+The empty-plant stand fan is 404 free cells instead of 266 because rays now meet the floor out to 2.60 m and one-cell holes are filled. The median frontier gap at that stand is **0.007 rad**. After the longer walk the rim is still inside the query: **39** frontiers, median gap **0.025 rad**, against main's **11**. Walked cells are **52** against **41**. That is a larger floor fan. It is not a house and not go-anywhere.
 
-Kitchen yellow peaked at fraction **0.071**, bearing **+0.303 rad**, elevation **+0.526 rad**. That ray does not meet the floor inside 1.80 m, so there is no yellow cell. The 150 floor-feature cells are saturated pixels whose rays do meet the floor plane. They are not a counter outline and they were not the aim of the walk. The walk command is the right-first window, not the yellow bearing.
+Kitchen yellow on the right-first window peaked at fraction **0.071**, bearing **+0.303 rad**, elevation **+0.526 rad**. That ray does not meet the floor inside 2.60 m, so there is no yellow cell. The 305 floor-feature cells are saturated pixels whose rays meet the floor plane. The longer range is why that count is above main's 150. They are not a counter outline and they were not the aim of the walk. Settled yellow is **0.000**. Torso-to-kitchen remaining is **0.976 m**.
 
-Bathroom other-chromatic pixels peaked at **0.128** of a frame. They are not labeled as a room. None of them passed the yellow test. The map is another floor fan, swung to the right.
+Bathroom other-chromatic pixels peaked at **0.128** of a frame. They are not labeled as a room. None of them passed the yellow test.
+
+The soft XY is frozen at the stand log, at **(1.501, 0.036) m**, 1.50 m along the bearing in that first frame. The 20 s probe walks half-cap toward it and does not read yellow as success.
+
+| | This probe | Main find-kitchen |
+|--|------------|-------------------|
+| Remaining | **0.982 m** | **0.239 m** |
+| End yellow | **0.066** | **0.000** |
+| min up_z | **0.986** | **0.979** |
+| Arrival claimed | no | no |
+
+Remaining is worse than main. End yellow is above 0 and below 0.50. The gap bar and the yellow bar are not both met. This is Prefer FAIL on arrival. It is not the close-range yellow chase.
 
 This is not go-anywhere. The finder may query the yellow log and the frontiers. Arrival stays on the finder's bars.
