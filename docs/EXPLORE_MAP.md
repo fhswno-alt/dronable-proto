@@ -6,17 +6,15 @@ Voice still refuses "explore", "build a map", and "go anywhere" (`scripts/voice_
 
 ## What is frozen
 
-The walk plant is `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml`, md5 `71b2c86d133ebc603f58b99c53e496f3`. This slice does not edit that file, the gait, the tip check, `CommandBus`, or the `kit_cam` mount. The camera stays on `head_tilt_link` at `0.050 0.019 0.007`, fovy 104.82. One camera. No lidar. No second camera. No GPU and no paid API.
+The walk plant is `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml`, md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. This slice does not edit that file, the gait, the tip check, `CommandBus`, or the `kit_cam` mount. The camera stays on `head_tilt_link` at `0.050 0.019 0.007`, fovy 104.82. One camera. No lidar. No second camera. No GPU and no paid API.
 
-Commands are only `stand`, `stop`, and `vel(vx, yaw_rate)` on `CommandBus` in `scripts/steer_walk.py`. Resend is 10 Hz. 200 ms of silence stands. Caps stay **+0.056 / −0.032** m/s and yaw **±0.25** rad/s. `vx = 0` yaw does not change heading on this plant, and this script does not send it.
+Commands are only `stand`, `stop`, and `vel(vx, yaw_rate)` on `CommandBus` in `scripts/steer_walk.py`. Resend is 10 Hz. 200 ms of silence stands. Caps stay **+0.150 / −0.032** m/s and yaw **±0.25** rad/s. This script does not raise them. The walk uses the kit gait. `vel(0, yaw)` does change heading on this row. This script does not send it.
 
-The empty-plant walk starts with the claimed nav-multi prefix, not a 0.40 s frontier replan. Stand is **1.0 s** so the left arc starts at t = 16 s. Then `vel(+0.056, 0)` for 15 s and `vel(+0.056, +0.25)` for 12.5 s. A 0.6 s stand starts that left arc 0.4 s early, and the same 12.5 s hold then only reached about **+35 deg**. Half-cap `vel(+0.028, +0.25)` is upright, and a short left command on it is swallowed.
+The empty-plant walk is the remeasured nav-multi chain, not a frontier replan. Stand is **1.0 s**. Then `vel(+0.150, 0)` for 15 s, `vel(+0.150, +0.25)` for 12.5 s, forward 6 s, `vel(+0.150, −0.25)` for 11 s, and forward 6 s. Prefer FAIL: approach heading **+2.210 m**, left **+145.9 deg**, chained right **−138.6 deg**, min up_z **0.932**, no tip, no fault. The stale **+0.598 m / +75.7 deg** envelope is not this path.
 
-After that prefix the dense rim chooses the next held window. On this run the rim was still left, so the walk holds `vel(+0.056, 0)` for **4 s** and then `vel(+0.056, +0.25)` for **8 s**. The claimed 6 s mid is the wrong gap: a left command there is swallowed (about **+8 deg**) and then crosses `up_z` 0.90. Extending the first left hold through about 21 s also tips. The 4 s gap is the one where the 8 s left window yaws (about **+30 deg**) and stays up.
+The 4 s forward gap, the 8 s second left, and the 34 s right hold were not remeasured on this tip. `next_frontier_phase` can still build them. `QUALIFIED_FRONTIER_CHAIN` is false, so a walk does not append them. Their old Δyaw figures are not claimed.
 
-The right leg is one `vel(+0.056, −0.25)` hold for **34 s**. It is not a second right after yaw returns to 0. From the pose after the second left, the dense rim is still left of the heading. Another left window is not this hold. About **38 s** on the right hold crosses `up_z` 0.90. 34 s stayed at **0.939**.
-
-Furnished scenes do not get that chain. A full-cap approach in the kitchen crosses `up_z` 0.90 near **+0.39 m**. An 11 s `vel(+0.056, −0.25)` reached `up_z` **0.899** in the kitchen and **0.889** in the bathroom. A cold left hold stayed near **+5 to +11 deg** and then leaned. Those windows are not the room schedule. The room walk is the same right command for **8 s** (`vel(+0.056, −0.25)`). That hold stayed at `up_z` **0.919** (kitchen) and **0.934** (bathroom). It is not the claimed 11 s window and it is not a new cap.
+Furnished scenes use the remeasured 8 s right, `vel(+0.150, −0.25)`, after a 1 s stand. Kitchen and bathroom produced the same trace: heading **+0.540 m**, Δyaw **−94.6 deg**, min up_z **0.929** on the stop, no tip, no fault. Furniture did not change that result. The 11 s furnished window was not remeasured. The 8 s window is not a new cap.
 
 ## What the map is
 
@@ -52,11 +50,11 @@ All of these, together:
 4. The last-mile finder in `scripts/find_kitchen.py` now queries `query_kitchen_like_yellow()` and `frontier_cells()` and steers from that. It still has no pre-placed waypoint. A query is not this land by itself.
 5. Arrival still belongs to the finder (backsplash fills half the frame and the torso is within 0.25 m). This loop does not claim it.
 
-`vx = 0` yaw still does not turn. A turn-in-place gait would be a different controls change. It is not this slice.
+`vel(0, yaw)` does turn on this kit row. This explore schedule does not send it.
 
 ## Tonight's limit
 
-The empty plant walks the claimed left prefix, then the frontier windows above: 4 s forward, 8 s left, and one 34 s right. Furnished scenes only take the 8 s right-first window, because the claimed yaw windows cross `up_z` 0.90 there. The paint is still a fan from one camera, out to 2.60 m with one-cell holes filled. A yellow bearing is logged when the backsplash is in frame, and a soft XY is frozen along it. Frontiers are the 8-connected edge of the paint. White and gray furniture can fail the saturation test and never become a cell. That is a partial feature map of whatever was in view. It is not go-anywhere.
+The empty plant walks the remeasured nav-multi chain at the Day1 forward clamp. The 4 s / 8 s / 34 s frontier holds are refused as claims. Furnished scenes take the remeasured 8 s right. The paint is still a fan from one camera, out to 2.60 m with one-cell holes filled. A yellow bearing is logged when the backsplash is in frame, and a soft XY is frozen along it. Frontiers are the 8-connected edge of the paint. White and gray furniture can fail the saturation test and never become a cell. That is a partial feature map of whatever was in view. It is not go-anywhere. It is not arrival. It is not a demo-ready human walk.
 
 The empty plant is the honest miss: floor cells, no yellow, no room label.
 
@@ -65,51 +63,22 @@ MUJOCO_GL=osmesa python scripts/explore_map.py --self-test
 MUJOCO_GL=osmesa python scripts/explore_map.py --demo
 ```
 
-`--demo` walks the empty plant on the claimed left prefix plus the frontier windows, and the kitchen and bathroom on the 8 s right-first window. It then runs a 20 s half-cap probe toward the frozen soft XY in the kitchen. Each run stops and settles 1.2 s. It writes `previews/explore_map_summary.json`, kit_cam and map stills, `previews/explore_map_kitchen.mp4`, and `previews/explore_map_kitchen_soft.mp4`. Exit status is non-zero if the plant md5 changes, if `up_z` drops below 0.90, or if a `vx = 0` yaw is sent. A passing exit still prints Prefer FAIL for go-anywhere and for arrival.
+`--demo` walks the empty plant on the remeasured nav-multi chain, and the kitchen and bathroom on the 8 s right. It then runs a 20 s half-cap probe toward the frozen soft XY in the kitchen. That probe's old Δx is not a current claim. Each run stops and settles 1.2 s. It writes `previews/explore_map_summary.json`, kit_cam and map stills, `previews/explore_map_kitchen.mp4`, and `previews/explore_map_kitchen_soft.mp4`. Exit status is non-zero if the plant md5 changes, if `up_z` drops below 0.90, or if a `vx = 0` yaw is sent. A passing exit still prints Prefer FAIL for go-anywhere and for arrival.
 
 ## Measured
 
-Plant md5 after the demo: `71b2c86d133ebc603f58b99c53e496f3`. No tip, no fault, end mode stand on every run. `vx = 0` yaw sends: 0. Explore commands were `vx = +0.056`. The soft-XY probe was `vx = +0.028`. Arrival was not claimed. Both arrival bars stayed where they are: yellow ≥ 0.50 and torso-to-kitchen ≤ 0.25 m.
+Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Kit gait. Video off. Commands at the Day1 clamp `vx = +0.150`. `vx = 0` yaw sends: 0. Half-cap inside this script is `+0.075` m/s. Arrival was not claimed. The soft-XY probe was not remeasured, so its old **+0.332 m / min up_z 0.986** row is not claimed.
 
-The empty plant followed the claimed left prefix, then the frontier windows. Claimed left arc **+75.5 deg** on `yaw_rate +0.25`. The dense rim at that pose was left **31.3** against right **0.0**, so the next window was the 4 s forward gap and then an 8 s left. That second left tracked **+29.5 deg**. At the next pose the rim was still left (**30.4** against **0.0**). The walk then held one right command for 34 s, **−177.7 deg**, on the commanded side. It did not insert a yaw-0 gap and then a second right.
+Heading Δx is travel along the heading at the start of the window. The table is the fresh remeasure. The previous-basin rows (+75.5 deg, kitchen −58.2 deg, the 34 s right) are withdrawn.
 
-Δx below is the settled pose minus the pose after the stand. Δyaw is the same pair. min up_z is the whole run, including settle.
+| Scene | Command | Heading Δx | Δyaw | min up_z | Tip / fault |
+|-------|---------|------------|------|----------|-------------|
+| Empty plant, approach 15 s | `vel(+0.150, 0)` | +2.210 m | +1.4 deg | 0.934 run | no |
+| Empty plant, left 12.5 s | `vel(+0.150, +0.25)` | +0.422 m | +145.9 deg | 0.950 window | no |
+| Empty plant, chained right 11 s | `vel(+0.150, −0.25)` | +0.465 m | −138.6 deg | 0.932 run (stop) | no |
+| Kitchen and bathroom, 8 s right | `vel(+0.150, −0.25)` | +0.540 m | −94.6 deg | 0.929 | no |
+| 4 s gap, 8 s second left, 34 s right | not walked | refused | refused | not remeasured | — |
 
-| Scene | Command | Δx | Δy | Δyaw settled | Arc Δyaw | min up_z | Tip / fault |
-|-------|---------|----|----|--------------|----------|----------|-------------|
-| Empty plant | claimed left, frontier left, one 34 s right | +1.899 m | +1.287 m | −66.5 deg | left +75.5, frontier-left +29.5, right −177.7 | 0.939 | no |
-| Kitchen | 8 s right | +0.337 m | −0.209 m | −55.8 deg | −58.2 | 0.919 | no |
-| Bathroom | 8 s right | +0.423 m | −0.236 m | −50.6 deg | −56.4 | 0.934 | no |
-| Kitchen soft XY | 20 s half-cap toward the frozen point | +0.332 m | −0.025 m | +2.4 deg | +2.1 | 0.986 | no |
-
-Open-loop on this same dense fan, the claimed chain plus the 15 s forward, was **+1.736 / +1.746 m**, settled **+78.4 deg**, min up_z **0.949**. This frontier walk stays above up_z 0.90. The minimum is lower than that open-loop run. It is not a tip.
-
-What the map held at the end, next to that open-loop chain. The older 1.80 m fan is in parentheses.
-
-| Scene | Free cells (start → end) | Open-loop end | Floor-feature | Walked (open-loop) | Frontiers (start → end) | Open-loop end |
-|-------|--------------------------|---------------|---------------|--------------------|-------------------------|---------------|
-| Empty plant | 404 → 883 | 821 (766) | 0 | 57 (52) | 248 → 41 | 39 (11) |
-| Kitchen | 293 → 450 | 450 (366) | 47 → 305 | 7 (7) | 131 → 55 | 55 (26) |
-| Bathroom | 404 → 794 | 794 (531) | 0 | 10 (10) | 248 → 61 | 61 (28) |
-| Kitchen soft XY | 293 → 315 | — | 47 → 288 | 8 | 131 → 50 | — |
-
-The empty-plant stand fan is 404 free cells. The median frontier gap at that stand is **0.007 rad**. After the frontier walk the rim is still inside the query: **41** frontiers, median gap **0.023 rad**, against the open-loop chain's **39**. Walked cells are **57** against **52**. Free cells are **883** against **821**. The extra free cells are the 8 s left window, taken because the dense rim was on the left. The extra walked cells are the 34 s right hold. That is a larger floor fan than the open-loop chain. It is not a house and not go-anywhere.
-
-Kitchen and bathroom stay on the 8 s right window. Their cell counts match the open-loop chain. They are not a frontier search.
-
-Kitchen yellow on the right-first window peaked at fraction **0.071**, bearing **+0.303 rad**, elevation **+0.526 rad**. That ray does not meet the floor inside 2.60 m, so there is no yellow cell. The 305 floor-feature cells are saturated pixels whose rays meet the floor plane. The longer range is why that count is above main's 150. They are not a counter outline and they were not the aim of the walk. Settled yellow is **0.000**. Torso-to-kitchen remaining is **0.976 m**.
-
-Bathroom other-chromatic pixels peaked at **0.128** of a frame. They are not labeled as a room. None of them passed the yellow test.
-
-The soft XY is frozen at the stand log, at **(1.501, 0.036) m**, 1.50 m along the bearing in that first frame. The 20 s probe walks half-cap toward it and does not read yellow as success.
-
-| | This probe | Main find-kitchen |
-|--|------------|-------------------|
-| Remaining | **0.982 m** | **0.239 m** |
-| End yellow | **0.066** | **0.000** |
-| min up_z | **0.986** | **0.979** |
-| Arrival claimed | no | no |
-
-Remaining is worse than main. End yellow is above 0 and below 0.50. The gap bar and the yellow bar are not both met. This is Prefer FAIL on arrival. It is not the close-range yellow chase.
+Cell counts from the previous frontier walk (883 free, 41 frontiers, 34 s right, soft-XY remaining 0.982 m) were not remeasured on this tip. They are not the current claim. The map is still a floor fan plus a yellow bearing. Yellow ≥ 0.50 and torso-to-kitchen ≤ 0.25 m are still the arrival bars, and this loop does not claim either one.
 
 This is not go-anywhere. The finder may query the yellow log and the frontiers. Arrival stays on the finder's bars.
