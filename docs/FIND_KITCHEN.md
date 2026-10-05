@@ -21,36 +21,45 @@ A named-body projection of `kitchen`, `table`, and `chair` checks that the yello
 
 ## Phrase path
 
-The bus is `CommandBus` in `scripts/steer_walk.py`: `stand`, `stop`, and `vel(vx, yaw_rate)` only. Resend is 10 Hz. 200 ms of silence stands. The finder sends the forward cap and a yaw inside the yaw cap. The bus clamps again.
+The bus is `CommandBus` in `scripts/steer_walk.py`: `stand`, `stop`, and `vel(vx, yaw_rate)` only. Resend is 10 Hz. 200 ms of silence stands. The bus caps stay +0.056 / −0.032 m/s and yaw ±0.25. The phrase sends half the forward cap. The bus clamps again.
 
-From the stand pose the blob is already centered (`|bias| ≤ 0.08`, measured bias −0.014). The phrase then walks in 0.40 s slices and re-scores `kit_cam` between them:
+From the stand pose the blob is already centered (`|bias| ≤ 0.08`, measured bias −0.014). The phrase walks in 0.40 s slices, leaves the gait in move, and re-scores `kit_cam` between them:
 
-- centered: `vel(+0.056, 0)`
-- off center: `vel(+0.056, yaw)` with `yaw = clamp(−bias / 0.35 × 0.25, ±0.25)`
+- centered: `vel(+0.028, 0)`
+- off center: `vel(+0.028, yaw)` with `yaw = clamp(−bias / 0.35 × 0.25, ±0.25)`
 
-The trim is not a heading setpoint. Full yaw cap is used only when `|bias|` reaches 0.35. `vx = 0` yaw does not change heading on this plant, so the correction is a walking turn. A held full-cap turn of about 2 s pitched through `up_z` 0.90 and the bus then faulted, so the phrase does not do that. It stops on the first sample with `up_z` under 0.90.
+The trim is not a heading setpoint. Full yaw cap is used only when `|bias|` reaches 0.35. `vx = 0` yaw does not change heading on this plant, so a correction is a walking turn at the soft forward speed.
 
-There is also a 0.60 m world-x budget. That budget is a stop inside the 0.3–0.8 m band, not a counter pose. This room run did not reach it.
+The `up_z` Prefer FAIL bar stays **0.90**. It is not lowered. A full-cap slice run on the same bar stopped at end x +0.394 m when `up_z` hit 0.894. Shorter slices with a stand between them were tried and did not get past that distance:
+
+| Trial | Result |
+|-------|--------|
+| 0.25 s vel, 0.40 s stand | Δx −0.052 m at the time limit, min up_z 0.999. The velocity slew takes 0.70 s to reach a cap, so the slice never walks and the stand drifts backward. |
+| 0.25 s vel, 0.15 s stand | Δx −0.029 m, min up_z 0.999. Same stall. |
+| 0.20 s vel, 0.30 s stand | Kitchen left the frame at Δx +0.082 m (yaw +0.79 rad), min up_z 0.956. |
+
+Half the forward cap, with no stand between slices, is the duty that stayed upright. There is still a 0.60 m world-x budget. That budget is a stop, not a counter pose.
 
 Measured phrase, "go to the kitchen", room scene, after stand:
 
 | | |
 |--|--|
-| Stop | `up_z` 0.894 (bar 0.90), min up_z 0.890, mode stand |
-| End x | **+0.394 m** (start x +0.002 m, Δx **+0.392 m**) |
-| End y, yaw | +0.061 m, +0.095 rad |
-| Remaining | **0.921 m** from the torso to the kitchen geom (near face x = 1.315 m) |
-| Final blob | yellow fraction 0.076, bias +0.102, still in frame, still right of center |
+| Stop | 0.60 m world-x budget, mode stand |
+| End x | **+0.610 m** (start x +0.002 m, Δx **+0.608 m**) |
+| End y, yaw | +0.010 m, −0.020 rad |
+| min up_z | **0.989** (bar 0.90, not crossed) |
+| Remaining | **0.705 m** from the torso to the kitchen geom (near face x = 1.315 m) |
+| Final blob | yellow fraction **0.131**, bias −0.028, still centered, still in frame |
 | Arrival | **false** |
 
-Six centered slices and thirteen yaw trims were sent. The mid still is the first frame after Δx crossed 0.30 m (yellow 0.075, bias +0.49). The counter is larger than at the start and still a small part of the frame.
+79 centered slices and 12 yaw trims were sent, all at `vx = +0.028`. The mid still is the first frame after Δx crossed 0.30 m (yellow 0.066, bias −0.042). The counter is larger than at the start. 0.131 of the frame is not half.
 
 ## What would count as arrival
 
 Both bars, on the settled stop frame:
 
-1. Yellow fraction ≥ 0.50. Half the frame is "most of the frame". Stand is 0.039 and this stop is 0.076, so the counter does not fill the frame.
-2. Torso-to-kitchen horizontal gap ≤ 0.25 m. That is contact range for this torso, not a room crossing. 0.921 m is more than three times that bar.
+1. Yellow fraction ≥ 0.50. Half the frame is "most of the frame". Stand is 0.039 and this stop is 0.131, so the counter does not fill the frame.
+2. Torso-to-kitchen horizontal gap ≤ 0.25 m. That is contact range for this torso, not a room crossing. 0.705 m is still well outside that bar.
 
 Either bar alone is not arrival. A stop inside 0.25 m with the backsplash still small would be Prefer FAIL (`close`), not arrival. The gap is read from the kitchen geom boxes so the summary can state the remaining distance. It does not choose left versus right and it is not a waypoint.
 

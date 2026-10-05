@@ -13,12 +13,14 @@ are a sim honesty check that the blob sits on the kitchen. They are not
 waypoints and they are not given to a planner. If the backsplash is missing,
 split, or off the kitchen body, the finder sends no vel.
 
-The phrase path re-scores kit_cam every 0.40 s. A centered blob is forward
-at the bus cap. A side blob is the same forward cap plus a yaw trim scaled
-by the bias, not a held full-cap turn. The 1.2 s single forward hop stays
-in --self-test and still uses vx=0 for its one yaw. A burst budget near
-0.6 m is a stop, not a goal pose. Arrival is claimed only when the
-backsplash fills at least half the frame and the torso is within 0.25 m
+The phrase path re-scores kit_cam every 0.40 s and walks at half the
+forward cap (0.028 m/s). A centered blob is that vx with yaw 0. A side blob
+adds a yaw trim scaled by the bias. Full-cap slices and short slices with
+stand pauses between them are not this path: the first crossed up_z 0.90
+near +0.39 m, and the pauses never got past ~0.1 m. The up_z bar stays
+0.90. The 1.2 s hop stays in --self-test at the full forward cap. A burst
+budget near 0.6 m is a stop, not a goal pose. Arrival is claimed only when
+the backsplash fills at least half the frame and the torso is within 0.25 m
 of the kitchen geom. Otherwise the summary reports end x and the remaining
 gap and does not say arrived.
 
@@ -73,15 +75,19 @@ STAND_S = 0.60
 SETTLE_S = 0.60
 YAW_HOLD_S = 1.00
 FORWARD_HOLD_S = 1.20
-# Phrase path. kit_cam is scored between these slices.
-# A held full-cap walking turn (about 2 s of vel(+0.056, ±0.25)) pitched
-# through up_z 0.90 and the bus then faulted. These 0.40 s slices, with yaw
-# scaled by the bias, stayed above 0.92 out to the 0.60 m budget.
-# vx=0 yaw does not change heading on this plant.
+# Phrase path. kit_cam is scored between these slices. The gait stays in move.
+# Full-cap slices crossed up_z 0.90 near +0.39 m. A 0.20–0.30 s slice plus a
+# stand pause does not walk: vx slews to the cap in 0.70 s, and the pause
+# either drifts backward or yaws the kitchen out of frame. Half the forward
+# cap is the softer duty that stayed above up_z 0.90. vx=0 yaw does not
+# change heading on this plant.
 BURST_FORWARD_S = 0.40
 BURST_YAW_S = 0.40
-MAX_FORWARD_BURSTS = 40
-MAX_YAW_CORRECTIONS = 48
+SOFT_VX = steer_walk.VX_FWD_CAP * 0.5
+# Half-cap realized speed is about 0.016 m/s, so the 0.60 m stop needs
+# more slices than a full-cap walk. 120 * 0.40 s covers that with margin.
+MAX_FORWARD_BURSTS = 120
+MAX_YAW_CORRECTIONS = 80
 # |bias| at which the trim uses the full yaw cap. Inside CENTER_BIAS, yaw is 0.
 YAW_BIAS_FULL = 0.35
 # Stop once world-x progress is inside the requested 0.3–0.8 m band.
@@ -595,7 +601,7 @@ def correction_command(score: KitchenScore) -> tuple[float, float] | None:
     """Approach slice: forward cap, plus a bias trim when the blob is off center."""
     if score.decision == "fail":
         return None
-    return (steer_walk.VX_FWD_CAP, trim_yaw(score.bias))
+    return (SOFT_VX, trim_yaw(score.bias))
 
 
 BurstAction = Literal["forward", "yaw_left", "yaw_right", "stop"]
@@ -882,10 +888,11 @@ def _gap(model: mj.MjModel, data: mj.MjData) -> tuple[float, float]:
 
 
 def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
-    """Forward bursts while the backsplash stays valid, with a yaw burst if it drifts.
+    """Half-cap slices while the backsplash stays valid, with a yaw trim if it drifts.
 
-    The gait is left in move across a burst boundary so the 200 ms watchdog
-    does not stand between two vel segments. Stop is the end, or a Prefer FAIL.
+    The gait stays in move across a slice boundary. A stand between slices
+    resets the velocity slew and does not advance. Stop is the budget, or a
+    Prefer FAIL. up_z under 0.90 stops. That bar is not lowered.
     """
     _hold_stand(session, STAND_S)
     before = cam.grab(session.data)
@@ -1085,13 +1092,12 @@ def _commands_legal(sent: list[SentVel], *, allow_walk_yaw: bool = False) -> str
             return f"command outside caps vx={command.vx} yaw={command.yaw_rate}"
         if command.vx < 0.0:
             return "finder sent reverse"
-        both = command.vx != 0.0 and command.yaw_rate != 0.0
-        if not both:
+        if allow_walk_yaw:
+            if abs(command.vx - SOFT_VX) > 1e-9:
+                return "approach forward is half the bus cap"
             continue
-        if not allow_walk_yaw:
+        if command.vx != 0.0 and command.yaw_rate != 0.0:
             return "yaw and forward were sent together"
-        if command.vx != steer_walk.VX_FWD_CAP:
-            return "walk-yaw forward is only the forward cap"
     return None
 
 
@@ -1217,6 +1223,9 @@ def test_pixels() -> list[str]:
     _expect(command_for("yaw_left") == (0.0, steer_walk.YAW_RATE_CAP), "yaw left command", failures)
     _expect(command_for("yaw_right") == (0.0, -steer_walk.YAW_RATE_CAP), "yaw right command", failures)
     _expect(command_for("forward") == (steer_walk.VX_FWD_CAP, 0.0), "forward command", failures)
+    soft = correction_command(_fake_score("forward", 0.04, 0.0))
+    _expect(soft == (SOFT_VX, 0.0), f"soft forward {soft}", failures)
+    _expect(abs(SOFT_VX - 0.028) < 1e-9 and SOFT_VX < steer_walk.VX_FWD_CAP, "soft vx", failures)
     _expect(steer_walk.VX_FWD_CAP == 0.056 and steer_walk.VX_BACK_CAP == 0.032, "vx caps moved", failures)
     _expect(steer_walk.YAW_RATE_CAP == 0.25, "yaw cap moved", failures)
     return failures
@@ -1521,6 +1530,7 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
         "scene": str(ROOM_XML.relative_to(ROOT)),
         "phrase": phrase,
         "vx_fwd_cap": steer_walk.VX_FWD_CAP,
+        "approach_vx": SOFT_VX,
         "vx_back_cap": steer_walk.VX_BACK_CAP,
         "yaw_rate_cap": steer_walk.YAW_RATE_CAP,
         "resend_hz": 1.0 / steer_walk.VEL_RESEND_S,
