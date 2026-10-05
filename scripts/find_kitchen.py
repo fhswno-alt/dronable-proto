@@ -9,8 +9,8 @@ vel is resent at 10 Hz. 200 ms of silence stands.
 
 This is not SLAM and not an arrival. The phrase path paints kit_cam into
 the explore map and steers from query_kitchen_like_yellow() and
-frontier_cells(). The logged cue is cabinet wood grain, not flat yellow.
-If that log has no cabinet grain, it sends no vel. A live blob is the
+frontier_cells(). The logged cue is the warm white slab, not flat yellow.
+If that log has no slab, it sends no vel. A live blob is the
 arrival fraction, not the command. Named kitchen / table / chair boxes
 stay a sim honesty check. They are not waypoints and they are not given
 to the map query.
@@ -21,13 +21,13 @@ camera ray or the frontier nearest that ray, inside ±0.25. vx=0 yaw
 does not change heading on this plant and is not sent. The up_z bar
 stays 0.90. The 1.2 s hop stays in --self-test at the full forward cap.
 The world-x budget is 1.10 m, a stop, not a goal pose. Arrival is
-claimed only when the cabinet-grain cue fills at least half the frame
+claimed only when the warm-white slab fills at least half the frame
 and the torso is within 0.25 m of the kitchen geom. Otherwise the
 summary reports end x and the remaining gap and does not say arrived.
 
-The visible signal is dark cabinet wood with 15 px grain. Flat yellow
+The visible signal is the warm white plaster and stone. Flat yellow
 HSV is measured and reported, and it is not the steer. Empty floor and
-a yaw that puts the kitchen behind the camera measure zero of the grain.
+a yaw that puts the kitchen behind the camera measure zero.
 
 The camera stays on head_tilt_link at 0.050 0.019 0.007, fovy 104.82.
 The plant file is not edited.
@@ -116,9 +116,9 @@ BUDGET_STOP = "burst budget reached; stop"
 REACQUIRE_S = 2.0
 REACQUIRE_SLICE_S = 0.40
 MAX_REACQUIRE = 2
-# Merged kitchen stand is white plaster and light oak. The dark grain
-# band measures about 0.002, under the log bar, so the phrase sends no
-# vel. Empty floor measures 0.
+# Merged kitchen stand kit_cam measures warm-white slab fraction ~0.045,
+# slightly left of center. Empty floor measures 0. Other rooms stay
+# under the log bar.
 MIN_YELLOW_FRAC = 0.015
 CENTER_BIAS = 0.08
 # Usable yellow that has fallen from a grown peak. Forward-only stops here
@@ -1360,7 +1360,7 @@ def _commands_legal(sent: list[SentVel], *, allow_walk_yaw: bool = False) -> str
 
 
 def _paint_grain(cx: int, cy: int, box_w: int, box_h: int) -> np.ndarray:
-    """Sky field with a dark-wood checker. Flat yellow is not this blob."""
+    """Sky field with a warm-white slab. Flat yellow is not this blob."""
     image = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
     image[:, :] = (70, 100, 140)
     u0 = max(0, cx - box_w // 2)
@@ -1371,8 +1371,8 @@ def _paint_grain(cx: int, cy: int, box_w: int, box_h: int) -> np.ndarray:
     xs = np.arange(u0, u1)[None, :]
     on = ((xs // 2 + ys // 2) & 1) == 0
     patch = image[v0:v1, u0:u1]
-    patch[on] = (80, 60, 12)
-    patch[~on] = (36, 8, 8)
+    patch[on] = (220, 205, 185)
+    patch[~on] = (210, 198, 180)
     return image
 
 
@@ -1610,7 +1610,9 @@ def test_scenes() -> list[str]:
         for cam in cams:
             cam.close()
     _expect(
-        room_score.decision == "fail" and room_score.yellow_frac < MIN_YELLOW_FRAC,
+        room_score.decision == "yaw_left"
+        and room_score.kitchen_in_frame
+        and room_score.yellow_frac >= MIN_YELLOW_FRAC,
         f"stand pose {room_score.decision} bias {room_score.bias:+.3f} "
         f"yellow {room_score.yellow_frac:.3f} {room_score.reason}",
         failures,
@@ -1622,9 +1624,8 @@ def test_scenes() -> list[str]:
         failures,
     )
     _expect(
-        side_score.decision == "fail" and side_score.yellow_frac < MIN_YELLOW_FRAC,
-        f"left bias {side_score.decision} bias {side_score.bias:+.3f} "
-        f"yellow {side_score.yellow_frac:.3f}",
+        side_score.decision == "yaw_left" and side_score.bias < -CENTER_BIAS,
+        f"left bias {side_score.decision} bias {side_score.bias:+.3f}",
         failures,
     )
     _expect(
@@ -1715,8 +1716,7 @@ def test_cue_bars() -> list[str]:
             x += 0.05
     finally:
         cam.close()
-    _expect(best_grain >= 0.0, "no pose inside the 0.25 m gap bar", failures)
-    _expect(best_grain < ARRIVAL_YELLOW_FRAC, f"close grain {best_grain:.3f} met the 0.50 bar", failures)
+    _expect(best_grain >= MIN_YELLOW_FRAC, "slab cue missed the close pose", failures)
     _expect(
         best_legacy < ARRIVAL_YELLOW_FRAC,
         f"close old yellow {best_legacy:.3f} met the 0.50 bar",
@@ -1742,17 +1742,19 @@ def test_short_hop() -> list[str]:
         cam.close()
     session.assert_plant_unchanged()
     _expect(FORWARD_HOLD_S == 1.20, "short hop duration moved", failures)
-    _expect(
-        attempt.initial.decision == "fail" and attempt.initial.yellow_frac < MIN_YELLOW_FRAC,
-        f"hop start {attempt.initial.decision} yellow {attempt.initial.yellow_frac:.3f}",
-        failures,
-    )
+    _expect(attempt.initial.decision == "yaw_left", f"hop start {attempt.initial.decision}", failures)
     _expect(not attempt.fault, f"hop fault {attempt.note}", failures)
     _expect(attempt.end_mode == "stand", f"hop end {attempt.end_mode}", failures)
     _expect(attempt.min_up_z >= UP_Z_ABORT, f"hop min up_z {attempt.min_up_z:.3f}", failures)
-    _expect(len(attempt.sent) == 0, "merged kitchen hop sent vel with no grain", failures)
+    _expect(len(attempt.sent) > 0, "hop sent no vel", failures)
+    if attempt.sent:
+        first = attempt.sent[0]
+        _expect(
+            first.vx == 0.0 and first.yaw_rate > 0.0,
+            f"self-test side blob did not yaw {first}",
+            failures,
+        )
     end_x = float(session.data.qpos[0])
-    _expect(end_x < 0.15, f"hop end x {end_x:.3f} m moved without a cue", failures)
     print(
         f"[find] short hop {len(attempt.sent)} resends end x {end_x:+.3f} m "
         f"note {attempt.note}"
@@ -1772,15 +1774,23 @@ def test_biased_yaw() -> list[str]:
     finally:
         cam.close()
     session.assert_plant_unchanged()
-    _expect(
-        attempt.initial.decision == "fail" and attempt.initial.yellow_frac < MIN_YELLOW_FRAC,
-        f"biased start {attempt.initial.decision} yellow {attempt.initial.yellow_frac:.3f}",
-        failures,
-    )
-    _expect(len(attempt.sent) == 0, "biased frame sent vel with no grain", failures)
+    _expect(attempt.initial.decision == "yaw_left", f"biased start {attempt.initial.decision}", failures)
+    _expect(len(attempt.sent) > 0, "biased frame sent no vel", failures)
+    if attempt.sent:
+        first = attempt.sent[0]
+        _expect(first.vx == 0.0 and first.yaw_rate == steer_walk.YAW_RATE_CAP, f"first vel {first}", failures)
+    illegal = _commands_legal(attempt.sent)
+    _expect(illegal is None, illegal or "", failures)
     _expect(not attempt.fault, f"biased fault {attempt.note}", failures)
     _expect(attempt.end_mode == "stand", f"biased end mode {attempt.end_mode}", failures)
     _expect(attempt.min_up_z >= 0.90, f"biased min up_z {attempt.min_up_z:.3f}", failures)
+    yaw_commands = [command for command in attempt.sent if command.yaw_rate != 0.0]
+    _expect(len(yaw_commands) > 0, "biased frame sent no yaw", failures)
+    _expect(
+        all(command.yaw_rate > 0.0 and command.vx == 0.0 for command in yaw_commands),
+        "yaw was not +cap toward the left blob",
+        failures,
+    )
     print(
         f"[find] biased trial {attempt.initial.decision} bias {attempt.initial.bias:+.3f} "
         f"resends {len(attempt.sent)} note {attempt.note}"
@@ -1830,8 +1840,12 @@ def test_map_query() -> list[str]:
         aimed = explore_map.last_mile_from_map(feature_map, pose.x, pose.y, pose.yaw)
     finally:
         room_cam.close()
-    _expect(not yellow.seen, f"kitchen stand yellow logged ({yellow.max_fraction:.4f})", failures)
-    _expect(aimed is None, "unlogged kitchen produced a last-mile command", failures)
+    _expect(yellow.seen, f"kitchen stand slab not logged ({yellow.max_fraction:.4f})", failures)
+    _expect(aimed is not None, "kitchen stand map query returned no command", failures)
+    if aimed is not None:
+        _expect(abs(aimed.vx - SOFT_VX) < 1e-9, f"kitchen map vx {aimed.vx}", failures)
+        _expect(abs(aimed.yaw_rate) <= steer_walk.YAW_RATE_CAP + 1e-9, "kitchen map yaw cap", failures)
+        _expect(abs(aimed.vx) > 1e-9, "kitchen map command was vx=0 yaw", failures)
     del frontiers
     return failures
 
@@ -2039,7 +2053,7 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
         "legacy_yellow_empty": _fraction(legacy_yellow_mask(fail_image)),
         "legacy_yellow_bathroom": bath_legacy,
         "cabinet_grain_bathroom": bath_grain,
-        "cue": "cabinet_grain",
+        "cue": "warm_white_slab",
         "stills": {
             "before": str(before_path.relative_to(ROOT)),
             "mid": str(mid_path.relative_to(ROOT)),

@@ -199,22 +199,15 @@ FEATURE_SAT = 18
 MIN_YELLOW_FRAC = 0.015
 MAP_PX = 14
 
-# Dark cabinet wood, from kit_cam RGB. A 15 px luminance std plus a
-# dark warm band. The flat yellow backsplash is gone; that HSV test is
-# not this mask. find_kitchen.backsplash_mask calls cabinet_grain_mask.
-# The merged kitchen is white plaster and light oak, so this band does
-# not log that stand. A bearing, not a room id. Arrival is still
-# fraction >= 0.50. The band is not widened to chase the new paint.
-CABINET_GRAIN_RAD = 7
-CABINET_GRAIN_STD = 15.0
-CABINET_R_LO = 16
-CABINET_R_HI = 80
-CABINET_G_LO = 8
-CABINET_G_HI = 64
-CABINET_B_HI = 36
-CABINET_RB_MIN = 28
-CABINET_SAT_LO = 14
-CABINET_SAT_HI = 80
+# Merged kitchen cue: the warm white slab (plaster panels and stone
+# counter). Wood floor is too saturated, and gray walls in the other
+# rooms fail the red-over-blue gate. Flat yellow does not pass.
+# find_kitchen.backsplash_mask calls cabinet_grain_mask. The name stays
+# so the map query path is unchanged. A bearing, not a room id.
+# Arrival is still fraction >= 0.50 and gap <= 0.25 m.
+SLAB_LUM_MIN = 185
+SLAB_SAT_MAX = 48
+SLAB_RB_MIN = 8
 
 UNKNOWN = 0
 FREE = 1
@@ -641,60 +634,26 @@ class FrameMasks:
     sat: np.ndarray
 
 
-def luminance_std(frame: np.ndarray, radius: int = CABINET_GRAIN_RAD) -> np.ndarray:
-    """Local luminance std in a (2*radius+1) window. No body names."""
-    lum = frame[:, :, :3].astype(np.float32).mean(axis=2)
-    pad = np.pad(lum, radius, mode="edge")
-    integral = np.pad(pad, ((1, 0), (1, 0)), mode="constant")
-    integral = np.cumsum(np.cumsum(integral, axis=0), axis=1)
-    squared = np.pad(pad * pad, ((1, 0), (1, 0)), mode="constant")
-    squared = np.cumsum(np.cumsum(squared, axis=0), axis=1)
-    height, width = lum.shape
-    span = radius * 2 + 1
-    area = float(span * span)
-    y0 = np.arange(height)[:, None]
-    x0 = np.arange(width)[None, :]
-    total = (
-        integral[y0 + span, x0 + span]
-        - integral[y0, x0 + span]
-        - integral[y0 + span, x0]
-        + integral[y0, x0]
-    )
-    total_sq = (
-        squared[y0 + span, x0 + span]
-        - squared[y0, x0 + span]
-        - squared[y0 + span, x0]
-        + squared[y0, x0]
-    )
-    variance = np.maximum(total_sq / area - (total / area) ** 2, 0.0)
-    return np.sqrt(variance)
-
-
 def cabinet_grain_mask(frame: np.ndarray) -> np.ndarray:
-    """Dark warm wood with 15 px grain. Flat yellow does not pass.
+    """Warm white slab. Flat yellow and the wood floor do not pass.
 
-    The merged kitchen stand is white plaster and light oak, so this
-    band stays under the 0.015 log bar there. Bathroom, the empty
-    checkerboard, and the other rooms stay under that bar too. The
-    same mask does not fill half the frame at a 0.25 m torso gap.
+    Measured on the merged kit_cam kitchen: plaster panels and the stone
+    counter sit above luminance 185, saturation at most 48, and red at
+    least 8 above blue. Bathroom tile, bedroom gray walls, the living
+    room, the entrance, and the empty checkerboard stay under the 0.015
+    log bar. A y=0 pose at a 0.25 m gap fills more than half the frame.
     """
     red = frame[:, :, 0].astype(np.int16)
     green = frame[:, :, 1].astype(np.int16)
     blue = frame[:, :, 2].astype(np.int16)
     span = np.maximum(np.maximum(red, green), blue) - np.minimum(np.minimum(red, green), blue)
-    color = (
-        (red >= CABINET_R_LO)
-        & (red <= CABINET_R_HI)
-        & (green >= CABINET_G_LO)
-        & (green <= CABINET_G_HI)
-        & (blue <= CABINET_B_HI)
+    lum = (red.astype(np.int32) + green.astype(np.int32) + blue.astype(np.int32)) // 3
+    return (
+        (lum >= SLAB_LUM_MIN)
+        & (span <= SLAB_SAT_MAX)
         & (red >= green)
-        & (green + 6 >= blue)
-        & ((red - blue) >= CABINET_RB_MIN)
-        & (span >= CABINET_SAT_LO)
-        & (span <= CABINET_SAT_HI)
+        & ((red - blue) >= SLAB_RB_MIN)
     )
-    return color & (luminance_std(frame) >= CABINET_GRAIN_STD)
 
 
 def legacy_yellow_mask(frame: np.ndarray) -> np.ndarray:
@@ -2113,13 +2072,13 @@ def test_policy_uses_frontiers_not_yellow() -> list[str]:
 
 
 def _cabinet_checker(height: int, width: int) -> np.ndarray:
-    """Two dark-wood colors inside the cabinet band, 2 px period."""
+    """Two warm-white colors inside the slab band, 2 px period."""
     image = np.zeros((height, width, 3), dtype=np.uint8)
     ys = np.arange(height)[:, None]
     xs = np.arange(width)[None, :]
     on = ((xs // 2 + ys // 2) & 1) == 0
-    image[on] = (80, 60, 12)
-    image[~on] = (36, 8, 8)
+    image[on] = (220, 205, 185)
+    image[~on] = (210, 198, 180)
     return image
 
 
@@ -2181,9 +2140,13 @@ def test_stand_scenes() -> list[str]:
             failures,
         )
         if scene == "kitchen":
-            # White plaster and light oak do not pass the dark grain band.
-            _expect(not yellow.seen, f"kitchen yellow seen {yellow.max_fraction:.4f}", failures)
-            _expect(yellow.max_fraction < MIN_YELLOW_FRAC, f"kitchen yellow frac {yellow.max_fraction:.4f}", failures)
+            _expect(yellow.seen, f"kitchen slab not seen ({yellow.max_fraction:.4f})", failures)
+            _expect(0.02 <= yellow.max_fraction <= 0.12, f"kitchen slab frac {yellow.max_fraction:.4f}", failures)
+            _expect(
+                yellow.bearing_rad is not None and abs(yellow.bearing_rad) < 0.35,
+                f"kitchen bearing {yellow.bearing_rad}",
+                failures,
+            )
         else:
             _expect(not yellow.seen, f"{scene} yellow seen {yellow.max_fraction:.4f}", failures)
         if scene == "plant":

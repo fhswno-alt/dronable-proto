@@ -30,7 +30,7 @@ The grid is 0.10 m cells in the world frame, from x −0.80..2.60 m and y −1.8
 | Feature | Saturated and not sky, and the ray meets the floor. On the previous box entrance the violet mat was this case. The current mat is hessian, and this script was not retuned. |
 | Not a cell | Elevated color. The ray misses the floor inside 2.60 m. Stored as a bearing only. |
 
-The cabinet grain is the elevated case. The pixel test is the same mask as `scripts/find_kitchen.py` (15 px luminance std and a dark warm band). On the merged kitchen the stand frame is about 0.002 of the image, under the log bar, so no bearing is stored. The bearing, when a cue is logged, is the camera ray. It is not a waypoint and it is not passed to `choose_velocity`. The 0.039 figure below is the previous flat backsplash.
+The kitchen cue is the warm white slab, the same mask as `scripts/find_kitchen.py` (luminance ≥ 185, saturation ≤ 48, red at least 8 above blue). On the merged kitchen the stand frame is about 0.046 of the image. The bearing is the camera ray. It is not a waypoint and it is not passed to `choose_velocity`. The 0.039 figure below is the previous flat backsplash.
 
 Sky is the empty-plant blue around rgb (70, 100, 140). Cyan tile fails that test (not enough red) and is counted as other chromatic color. Other chromatic pixels are not given a room name.
 
