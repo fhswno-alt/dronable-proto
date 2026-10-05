@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""Open-vocab room steer from kit_cam. Not a per-room colour bar.
+"""Open-vocab room scores from a frozen kit_cam. Not a per-room colour bar.
 
 google/owlvit-base-patch32 runs locally. Objects map to rooms in one
-table, and one score cutoff applies to every scene. A phrase walks only
-when that room's object is the unique top hit. The kitchen slab path in
-find_kitchen.py is not this script.
+table, and one score cutoff applies to every scene. The measurement places
+the stand pose on a straight line and reads kit_cam. It does not step the
+gait and it does not publish vel. The kitchen slab path in find_kitchen.py
+is not this script.
 
-Arrival still needs both bars on the stop frame: cue fraction >= 0.50 and
-torso-to-room <= 0.25 m. A box that already covers half the stand frame is
-not an approach cue, so that stop is not arrival. vx stays at half cap.
-vx=0 yaw is not sent.
+This pass does not claim arrival. A later walk, after the plant shuffle
+thaws, can use the same object map.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import inspect
 import json
 import math
 import sys
@@ -59,7 +59,10 @@ OBJECTS: tuple[tuple[str, str], ...] = (
     ("hallway", "entrance"),
 )
 # Misses in a row that still reuse the last good box. Then the cue is lost.
+# The gait walk is not this measurement. Detection uses scripted poses.
 HOLD_SLICES = 4
+# Straight kit_cam path. Freejoint x only. No vel and no gait step.
+DETECT_X_M = (0.0, 0.3, 0.6, 0.9, 1.2)
 SCENE_XML = {
     "kitchen": ROOT / "mujoco" / "room_kitchen.xml",
     "bathroom": ROOT / "mujoco" / "room_bathroom.xml",
@@ -109,6 +112,7 @@ class Detection:
     scores: dict[str, float]
     box: tuple[float, float, float, float] | None
     object_name: str | None = None
+    object_scores: dict[str, float] | None = None
 
 
 @dataclass
@@ -216,10 +220,12 @@ class RoomDetector:
         best = probs.max(dim=0).values
         boxes = outputs.pred_boxes[0]
         scores = {room: 0.0 for room in STAND_TOP if room != "plant"}
+        object_scores: dict[str, float] = {}
         winner_i = 0
         winner_score = -1.0
         for index, (name, room) in enumerate(OBJECTS):
             score = float(best[index])
+            object_scores[name] = score
             if score > scores[room]:
                 scores[room] = score
             if score > winner_score:
@@ -227,7 +233,7 @@ class RoomDetector:
                 winner_i = index
         name, room = OBJECTS[winner_i]
         if winner_score < SCORE_MIN:
-            return Detection(None, winner_score, 0.0, 0.0, scores, None, None)
+            return Detection(None, winner_score, 0.0, 0.0, scores, None, None, object_scores)
         query = int(best_q[winner_i])
         cx, cy, width, height = (float(value) for value in boxes[query])
         x0 = (cx - width / 2.0) * image_w
@@ -240,7 +246,7 @@ class RoomDetector:
         y1 = min(max(y1, 0.0), float(image_h))
         frac = max(0.0, x1 - x0) * max(0.0, y1 - y0) / float(image_w * image_h)
         bias = (((x0 + x1) * 0.5) - (image_w * 0.5)) / (image_w * 0.5)
-        return Detection(room, winner_score, frac, bias, scores, (x0, y0, x1, y1), name)
+        return Detection(room, winner_score, frac, bias, scores, (x0, y0, x1, y1), name, object_scores)
 
 
 def _hold_slice(
@@ -424,6 +430,12 @@ def test_phrases() -> list[str]:
     vx, yaw = command_from_bias(-0.40)
     _expect(abs(vx - fk.SOFT_VX) < 1e-9 and 0.0 < yaw <= steer_walk.YAW_RATE_CAP, f"left command {vx} {yaw}", failures)
     _expect(_md5(PLANT_XML) == steer_walk.PLANT_MD5, "plant md5 changed", failures)
+    _expect(_false_objects({"kitchen": 0.07, "bathroom": 0.01}, "kitchen") == [], "true room counted false", failures)
+    _expect(_false_objects({"kitchen": 0.07, "bathroom": 0.08}, "kitchen") == ["bathroom"], "wrong room missed", failures)
+    _expect(_false_objects({"living": 0.004}, "plant") == [], "plant under cutoff flagged", failures)
+    step = _bearing_stats([0.1, 0.1, 0.4])["max_step"]
+    _expect(step is not None and abs(step - 0.3) < 1e-9, "bearing step", failures)
+    _expect("bus.vel" not in inspect.getsource(_set_scripted_pose), "scripted pose publishes vel", failures)
     return failures
 
 
@@ -433,7 +445,7 @@ def test_stand(detector: RoomDetector) -> list[str]:
         session = steer_walk.SteerSession(video=False, scene_xml=xml)
         cam = fk.KitCam(session.model)
         try:
-            fk._hold_stand(session, STAND_S)
+            _set_scripted_pose(session, 0.0)
             seen = detector.read(cam.grab(session.data))
         finally:
             cam.close()
@@ -483,6 +495,161 @@ def _walk_dict(walk: Walk) -> dict[str, object]:
     }
 
 
+def _set_scripted_pose(session: steer_walk.SteerSession, x: float, yaw: float = 0.0) -> None:
+    """Place the frozen stand pose. Does not step the gait or publish vel."""
+    session._reset_stand()
+    session.data.qpos[0] = float(x)
+    session.data.qpos[1] = 0.0
+    half = 0.5 * float(yaw)
+    session.data.qpos[3] = math.cos(half)
+    session.data.qpos[6] = math.sin(half)
+    session.data.qvel[:] = 0.0
+    mj.mj_forward(session.model, session.data)
+
+
+def _bearing_rad(bias: float, fovy_deg: float) -> float:
+    focal = (fk.HEIGHT / 2.0) / math.tan(math.radians(fovy_deg) / 2.0)
+    return math.atan((bias * (fk.WIDTH / 2.0)) / focal)
+
+
+def _false_objects(scores: dict[str, float], scene: str) -> list[str]:
+    """Other rooms at or above the one cutoff. Empty plant has no true room."""
+    return sorted(room for room, score in scores.items() if room != scene and score >= SCORE_MIN)
+
+
+def _false_object_hits(object_scores: dict[str, float], scene: str) -> list[dict[str, object]]:
+    """Wrong-room objects at or above the one cutoff, highest score first."""
+    hits = [
+        {"object": name, "room": room, "score": float(object_scores[name])}
+        for name, room in OBJECTS
+        if name in object_scores and room != scene and float(object_scores[name]) >= SCORE_MIN
+    ]
+    hits.sort(key=lambda row: float(row["score"]), reverse=True)
+    return hits
+
+
+def _bearing_stats(bearings: list[float]) -> dict[str, float | None]:
+    if len(bearings) < 2:
+        return {"std": None, "max_step": None}
+    mean = sum(bearings) / len(bearings)
+    var = sum((value - mean) ** 2 for value in bearings) / len(bearings)
+    steps = [abs(bearings[i] - bearings[i - 1]) for i in range(1, len(bearings))]
+    return {"std": math.sqrt(var), "max_step": max(steps)}
+
+
+def detect_paths(detector: RoomDetector) -> dict[str, object]:
+    """Score kit_cam along a scripted line. No CommandBus vel."""
+    scenes: list[dict[str, object]] = []
+    for scene, xml in SCENE_XML.items():
+        session = steer_walk.SteerSession(video=False, scene_xml=xml)
+        cam = fk.KitCam(session.model)
+        fovy = float(session.model.cam_fovy[cam.cam_id])
+        samples: list[dict[str, object]] = []
+        try:
+            for x in DETECT_X_M:
+                _set_scripted_pose(session, x)
+                seen = detector.read(cam.grab(session.data))
+                object_scores = seen.object_scores or {}
+                bearing = None if seen.room is None else _bearing_rad(seen.bias, fovy)
+                false_hits = _false_object_hits(object_scores, scene)
+                samples.append({
+                    "x_m": x,
+                    "object": seen.object_name,
+                    "room": seen.room,
+                    "score": seen.score,
+                    "frac": seen.frac,
+                    "bias": seen.bias,
+                    "bearing_rad": bearing,
+                    "scores": seen.scores,
+                    "object_scores": object_scores,
+                    "false_rooms": _false_objects(seen.scores, scene),
+                    "false_objects": false_hits,
+                    "hit": seen.room == scene,
+                })
+        finally:
+            cam.close()
+        hits = [sample for sample in samples if sample["hit"]]
+        bearings = [float(sample["bearing_rad"]) for sample in hits if sample["bearing_rad"] is not None]
+        stats = _bearing_stats(bearings)
+        false_rooms = sorted({room for sample in samples for room in sample["false_rooms"]})
+        false_best: dict[str, dict[str, object]] = {}
+        object_max: dict[str, float] = {}
+        for sample in samples:
+            for name, score in sample["object_scores"].items():
+                object_max[name] = max(object_max.get(name, 0.0), float(score))
+            for row in sample["false_objects"]:
+                key = str(row["object"])
+                prev = false_best.get(key)
+                if prev is None or float(row["score"]) > float(prev["score"]):
+                    false_best[key] = row
+        if scene == "plant":
+            true_object = None
+            true_max = 0.0
+        else:
+            true_pairs = [(name, object_max.get(name, 0.0)) for name, room in OBJECTS if room == scene]
+            true_object, true_max = max(true_pairs, key=lambda pair: pair[1])
+        fired = sorted({str(sample["object"]) for sample in hits if sample["object"]})
+        false_objects = sorted(false_best.values(), key=lambda row: float(row["score"]), reverse=True)
+        scenes.append({
+            "scene": scene,
+            "poses": len(samples),
+            "hits": len(hits),
+            "winner_object": true_object,
+            "winner_score": true_max,
+            "fired_objects": fired,
+            "false_rooms": false_rooms,
+            "false_objects": false_objects,
+            "bearing_std_rad": stats["std"],
+            "bearing_max_step_rad": stats["max_step"],
+            "max_score": max(float(sample["score"]) for sample in samples),
+            "samples": samples,
+        })
+    plant = next(row for row in scenes if row["scene"] == "plant")
+    return {
+        "model": MODEL_ID,
+        "model_rev": MODEL_REV,
+        "score_min": SCORE_MIN,
+        "objects": [{"name": name, "room": room} for name, room in OBJECTS],
+        "path_x_m": list(DETECT_X_M),
+        "gait": False,
+        "vel": False,
+        "arrival": False,
+        "plant_md5": _md5(PLANT_XML),
+        "plant_under_cutoff": float(plant["max_score"]) < SCORE_MIN and plant["hits"] == 0,
+        "scenes": scenes,
+    }
+
+
+def run_detect() -> int:
+    if _md5(PLANT_XML) != steer_walk.PLANT_MD5:
+        print("FAIL plant md5")
+        return 1
+    payload = detect_paths(RoomDetector())
+    summary = PREVIEWS / "find_room_detect.json"
+    fk._write_summary(summary, payload)
+    fk._copy_artifacts((summary,))
+    print(
+        f"[room] detect cutoff {SCORE_MIN} plant_under {payload['plant_under_cutoff']} "
+        f"md5 {payload['plant_md5']} gait {payload['gait']}"
+    )
+    for scene in payload["scenes"]:
+        std = scene["bearing_std_rad"]
+        step = scene["bearing_max_step_rad"]
+        std_s = "n/a" if std is None else f"{std:.3f}"
+        step_s = "n/a" if step is None else f"{step:.3f}"
+        print(
+            f"[room] {scene['scene']:9} hits {scene['hits']}/{scene['poses']} "
+            f"object {scene['winner_object']} score {scene['winner_score']:.3f} "
+            f"fired {scene['fired_objects'] or '-'} "
+            f"false {[row['object'] for row in scene['false_objects']] or '-'} "
+            f"bearing_std {std_s} max_step {step_s} max_score {scene['max_score']:.3f}"
+        )
+    if not payload["plant_under_cutoff"]:
+        print("FAIL empty plant crossed the cutoff")
+        return 1
+    return 0
+
+
 def prefer_fail() -> int:
     if _md5(PLANT_XML) != steer_walk.PLANT_MD5:
         print("FAIL plant md5")
@@ -529,10 +696,13 @@ def main() -> int:
     parser.add_argument("phrase", nargs="?", default="")
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--prefer-fail", action="store_true")
+    parser.add_argument("--detect", action="store_true")
     parser.add_argument("--scene", default="")
     args = parser.parse_args()
     if args.self_test:
         return self_test()
+    if args.detect:
+        return run_detect()
     if args.prefer_fail:
         return prefer_fail()
     room = room_of_phrase(args.phrase)
