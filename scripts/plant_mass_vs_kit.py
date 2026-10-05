@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import struct
 import subprocess
 import sys
 import tempfile
@@ -1493,6 +1494,233 @@ def kit_walk_armature_bound(
     }
 
 
+# Stance width offsets, outward positive. +Y is the robot's left. A positive
+# offset adds to the left foot's world Y and subtracts from the right foot's.
+STANCE_Y_OFFSETS_M = (0.0, -0.005, 0.005, 0.018)
+
+
+def _geom_y_half_extent(model: mujoco.MjModel, data: mujoco.MjData, gid: int) -> float:
+    """Half-width of a box along world Y, including orientation."""
+    rot = np.array(data.geom_xmat[gid], dtype=np.float64).reshape(3, 3)
+    size = np.array(model.geom_size[gid][:3], dtype=np.float64)
+    return float(np.abs(rot[1]).dot(size))
+
+
+def _foot_pair_gap(model: mujoco.MjModel, data: mujoco.MjData) -> dict[str, float]:
+    """Left box min-Y minus right box max-Y. Negative means the boxes overlap."""
+    gl = _geom_id(model, "l_foot_contact")
+    gr = _geom_id(model, "r_foot_contact")
+    left_y = float(data.geom_xpos[gl][1])
+    right_y = float(data.geom_xpos[gr][1])
+    left_half = _geom_y_half_extent(model, data, gl)
+    right_half = _geom_y_half_extent(model, data, gr)
+    left_inner = left_y - left_half
+    right_inner = right_y + right_half
+    return {
+        "left_inner_y_m": left_inner,
+        "right_inner_y_m": right_inner,
+        "gap_m": left_inner - right_inner,
+    }
+
+
+def _foot_collision(model: mujoco.MjModel, data: mujoco.MjData) -> dict[str, float | int | bool]:
+    """Whether the two foot boxes are allowed to contact, and whether they do."""
+    gl = _geom_id(model, "l_foot_contact")
+    gr = _geom_id(model, "r_foot_contact")
+    contype_l = int(model.geom_contype[gl])
+    contype_r = int(model.geom_contype[gr])
+    conaff_l = int(model.geom_conaffinity[gl])
+    conaff_r = int(model.geom_conaffinity[gr])
+    can = (contype_l & conaff_r) != 0 and (contype_r & conaff_l) != 0
+    fromto = np.zeros(6, dtype=np.float64)
+    dist = float(mujoco.mj_geomDistance(model, data, gl, gr, 1.0, fromto))
+    mujoco.mj_collision(model, data)
+    n_pair = 0
+    for i in range(int(data.ncon)):
+        contact = data.contact[i]
+        pair = {int(contact.geom1), int(contact.geom2)}
+        if pair == {gl, gr}:
+            n_pair += 1
+    return {
+        "contype_l": contype_l,
+        "contype_r": contype_r,
+        "conaffinity_l": conaff_l,
+        "conaffinity_r": conaff_r,
+        "filters_allow_contact": can,
+        "geom_distance_m": dist,
+        "n_foot_contacts": n_pair,
+        "feet_collide": can and (dist < 0.0 or n_pair > 0),
+    }
+
+
+def _solve_outward(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    side: str,
+    y_target: float,
+) -> tuple[float, float]:
+    """Hip roll and ankle roll that put this foot's box center on ``y_target``.
+
+    The sole stays level. The search is the zero-pose leg, sagittal joints at 0.
+    """
+    base: dict[str, float] = {}
+
+    def err(hip_roll: float) -> tuple[float, float, float]:
+        ank = solve_ank_for_level(model, data, base, side, hip_roll)
+        set_pose(model, data, apply_roll(base, side, hip_roll, ank))
+        y = foot_y_offset(model, data, side)
+        _dx, _dy, _sole, up = sole_metrics(model, data, side)
+        return (y - y_target) ** 2, ank, up
+
+    best = float("inf")
+    best_hip = 0.0
+    best_ank = 0.0
+    for hip in np.linspace(-0.35, 0.35, 29):
+        e, ank, _up = err(float(hip))
+        if e < best:
+            best = e
+            best_hip = float(hip)
+            best_ank = ank
+    span = 0.04
+    for _ in range(5):
+        for hip in np.linspace(best_hip - span, best_hip + span, 15):
+            e, ank, _up = err(float(hip))
+            if e < best:
+                best = e
+                best_hip = float(hip)
+                best_ank = ank
+        span *= 0.45
+    if best > (1e-4) ** 2:
+        raise SystemExit(f"{side} stance offset missed by {math.sqrt(best)} m")
+    return best_hip, best_ank
+
+
+def _foot_frame_row(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    side: str,
+) -> dict[str, float | int]:
+    """Ankle axis, hip roll, and foot box in the world frame.
+
+    At the zero pose the pelvis (``body_link``) sits at world XY origin, so
+    these XY values are also pelvis-frame coordinates.
+    """
+    prefix = f"{side}_"
+    ank = _joint_id(model, f"{prefix}ank_roll")
+    hip = _joint_id(model, f"{prefix}hip_roll")
+    gid = _geom_id(model, f"{prefix}foot_contact")
+    axis = np.array(data.xanchor[ank], dtype=np.float64)
+    hip_axis = np.array(data.xanchor[hip], dtype=np.float64)
+    center = np.array(data.geom_xpos[gid], dtype=np.float64)
+    size = np.array(model.geom_size[gid][:3], dtype=np.float64)
+    pelvis = np.array(data.xpos[_body_id(model, "body_link")], dtype=np.float64)
+    return {
+        "ankle_x_m": float(axis[0]),
+        "ankle_y_m": float(axis[1]),
+        "ankle_z_m": float(axis[2]),
+        "hip_x_m": float(hip_axis[0]),
+        "hip_y_m": float(hip_axis[1]),
+        "hip_z_m": float(hip_axis[2]),
+        "box_x_m": float(center[0]),
+        "box_y_m": float(center[1]),
+        "box_z_m": float(center[2]),
+        "box_hx_m": float(size[0]),
+        "box_hy_m": float(size[1]),
+        "box_hz_m": float(size[2]),
+        "offset_x_m": float(center[0] - axis[0]),
+        "offset_y_m": float(center[1] - axis[1]),
+        "pelvis_x_m": float(pelvis[0]),
+        "pelvis_y_m": float(pelvis[1]),
+        "contype": int(model.geom_contype[gid]),
+        "conaffinity": int(model.geom_conaffinity[gid]),
+    }
+
+
+def _stl_aabb(path: Path) -> dict[str, list[float]]:
+    """Axis-aligned bounds of a binary STL, in the file's frame (metres)."""
+    blob = path.read_bytes()
+    if len(blob) < 84:
+        raise SystemExit(f"{path} is not a binary STL")
+    n = int.from_bytes(blob[80:84], "little")
+    if len(blob) < 84 + n * 50:
+        raise SystemExit(f"{path} STL triangle count does not fit")
+    lo = [float("inf"), float("inf"), float("inf")]
+    hi = [float("-inf"), float("-inf"), float("-inf")]
+    for i in range(n):
+        base = 84 + i * 50 + 12
+        for k in range(3):
+            x, y, z = struct.unpack_from("<fff", blob, base + k * 12)
+            for axis, value in enumerate((x, y, z)):
+                lo[axis] = min(lo[axis], float(value))
+                hi[axis] = max(hi[axis], float(value))
+    center = [(lo[i] + hi[i]) / 2.0 for i in range(3)]
+    full = [hi[i] - lo[i] for i in range(3)]
+    return {"min_m": lo, "max_m": hi, "center_m": center, "full_m": full, "triangles": n}
+
+
+def foot_box_vs_ankle(
+    plants: dict[str, mujoco.MjModel],
+) -> dict[str, object]:
+    """Foot box against the ankle-roll axis at the zero pose, plus stance gaps.
+
+    No plant XML is written. The y offsets are posed with hip roll and ankle
+    roll; sagittal joints stay at zero.
+    """
+    out: dict[str, object] = {
+        "pose": "qpos zero; these plants have no keyframe",
+        "frame": "+X forward, +Y robot left, +Z up. Pelvis XY is the world origin at this pose.",
+        "outward_positive": "positive offset adds to left-foot Y and subtracts from right-foot Y",
+        "offset_y_sign": "box Y minus ankle-axis Y; positive means the box center is left of that ankle",
+        "offset_x_sign": "box X minus ankle-axis X; positive is forward of the ankle axis",
+        "gap_sign": "left box min world-Y minus right box max world-Y; negative is overlap",
+        "plants": {},
+    }
+    plant_rows: dict[str, object] = {}
+    for label, model in plants.items():
+        data = mujoco.MjData(model)
+        set_pose(model, data, {})
+        feet = {side: _foot_frame_row(model, data, side) for side in ("r", "l")}
+        gaps: list[dict[str, float | bool | int]] = []
+        for offset in STANCE_Y_OFFSETS_M:
+            if abs(offset) < 1e-15:
+                set_pose(model, data, {})
+            else:
+                y_l = float(feet["l"]["box_y_m"]) + offset
+                y_r = float(feet["r"]["box_y_m"]) - offset
+                hip_l, ank_l = _solve_outward(model, data, "l", y_l)
+                hip_r, ank_r = _solve_outward(model, data, "r", y_r)
+                set_pose(
+                    model,
+                    data,
+                    {
+                        "l_hip_roll": hip_l,
+                        "l_ank_roll": ank_l,
+                        "r_hip_roll": hip_r,
+                        "r_ank_roll": ank_r,
+                    },
+                )
+            gap = _foot_pair_gap(model, data)
+            hit = _foot_collision(model, data)
+            y_l_now = float(data.geom_xpos[_geom_id(model, "l_foot_contact")][1])
+            y_r_now = float(data.geom_xpos[_geom_id(model, "r_foot_contact")][1])
+            gaps.append(
+                {
+                    "offset_m": offset,
+                    "left_box_y_m": y_l_now,
+                    "right_box_y_m": y_r_now,
+                    **gap,
+                    **hit,
+                }
+            )
+        plant_rows[label] = {"feet": feet, "gaps": gaps}
+    out["plants"] = plant_rows
+    meshes = {}
+    for side in ("r", "l"):
+        meshes[side] = _stl_aabb(MESH_DIR / f"{side}_ank_roll_link.STL")
+    out["urdf_mesh_aabb"] = meshes
+    return out
+
+
 def joint_force_limit(model: mujoco.MjModel, joint: str) -> float:
     jid = _joint_id(model, joint)
     limit = np.asarray(model.jnt_actfrcrange[jid], dtype=np.float64)
@@ -1660,6 +1888,7 @@ def main() -> None:
         static[f"0.00:{which}"] = static_hip_torque(model, data, "r", which, total)
 
     thaw_model = load_model(thaw_xml)
+    foot_box = foot_box_vs_ankle({"main": model, "thaw": thaw_model})
     for side in ("r", "l"):
         gid_main = _geom_id(model, f"{side}_foot_contact")
         gid_thaw = _geom_id(thaw_model, f"{side}_foot_contact")
@@ -1776,6 +2005,7 @@ def main() -> None:
         "reflected": reflected,
         "arm_torque": arm_torque,
         "knee": knee_report,
+        "foot_box": foot_box,
         "joints": dyn_rows,
         "links": link_rows,
         "max_tensor_abs": max(float(row["tensor_max_abs"]) for row in link_rows),

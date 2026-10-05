@@ -335,6 +335,32 @@ The three poses already in the knee table, at their published 2 cm amplitudes an
 | 0.015 m crouch | 0.392 rad | 0.494 N·m | 0.00947 | 0.01517 |
 | +0.34 rad | 0.308 rad | 0.891 N·m | 0.00956 | 0.01681 |
 
+## Foot box vs ankle axis
+
+Neither plant has a keyframe. The pose is every joint at zero, pelvis (`body_link`) at the world origin in X and Y, so the coordinates below are world and pelvis frame together. +X is forward, +Y is to the robot's left, +Z is up. The box-to-ankle offset is box center minus the ankle-roll anchor: Y positive means the box center is to the left of that ankle, X positive means it is forward of the ankle. Both feet read the same signs. A stance y-offset is applied outward-positive: it is added to the left foot's Y and subtracted from the right foot's Y, with hip roll and ankle roll holding the sole level and the sagittal joints left at zero. The inner-edge gap is the left box's minimum world Y minus the right box's maximum world Y. Negative is overlap. No plant XML is changed. Both md5s stay `71b2c86d133ebc603f58b99c53e496f3` and `17dc4ff37491c8e61900fd83b5d31f0c`.
+
+The two skeletons match at this pose. Ankle-roll anchors are at **(y, x) = (±28.95 mm, −18.89 mm)**. Hip-roll anchors are at **y = ±29.00 mm** (x −19.55 mm). The contact box is centered on the ankle axis laterally and **30.0 mm** forward of it.
+
+| Plant | Foot | Ankle (y, x) mm | Hip roll y mm | Box centre (y, x, z) mm | Box full size (x, y, z) mm | Box − ankle (y, x) mm |
+|---|---|---|---|---|---|---|
+| Main 145×86 | right | −28.95, −18.89 | −29.00 | −28.95, 11.11, 38.54 | 145.0 × 86.0 × 16.0 | 0, +30.0 |
+| Main 145×86 | left | +28.95, −18.89 | +29.00 | +28.95, 11.11, 38.54 | 145.0 × 86.0 × 16.0 | 0, +30.0 |
+| Thaw 135×76 | right | −28.95, −18.89 | −29.00 | −28.95, 11.11, 38.54 | 135.0 × 76.0 × 16.0 | 0, +30.0 |
+| Thaw 135×76 | left | +28.95, −18.89 | +29.00 | +28.95, 11.11, 38.54 | 135.0 × 76.0 × 16.0 | 0, +30.0 |
+
+Compiled half-sizes are 72.5 × 43.0 × 8.0 mm on main and 67.5 × 38.0 × 8.0 mm on the thaw. Both boxes have `contype` 1 and `conaffinity` 1, so the pair is allowed to contact. The mesh geoms are `contype` 0.
+
+| Offset per side | Main gap | Main feet collide | Thaw gap | Thaw feet collide |
+|---|---|---|---|---|
+| 0 | −28.10 mm | yes, 4 contacts | −18.10 mm | yes, 4 contacts |
+| −5 mm (inward) | −38.12 mm | yes, 4 contacts | −28.12 mm | yes, 4 contacts |
+| +5 mm | −18.09 mm | yes, 4 contacts | −8.09 mm | yes, 4 contacts |
+| +18 mm | +7.87 mm | no, distance 7.87 mm | +17.87 mm | no, distance 17.87 mm |
+
+Where the lateral overlap is deeper than the 16 mm box height, `mj_geomDistance` reports **−16.0 mm**. That is the vertical overlap, the smallest separating axis, not the lateral gap. At +18 mm, and at the thaw's +5 mm row, the distance matches the lateral gap.
+
+The Hiwonder URDF collision for `r_ank_roll_link` and `l_ank_roll_link` is the link mesh with origin **0 0 0** (`ainex.urdf.xacro` lines 366–374 and 708–716). The ankle joint origin is `−0.019037 ±0.020 0` (lines 379–381 and 721–723). The STL in this repo, in that ankle frame, measures 135.1 × 76.1 mm in X and Y. Its center is **+29.6 mm** forward and **14.0 mm outward** of the ankle axis (right mesh Y center −14.0 mm, left +14.0 mm), not on the axis. The inner face of each mesh is **24.1 mm** toward the midline from the ankle axis. At the zero pose those inner faces clear by **9.8 mm**. The contact boxes are centered on the axis, so each one reaches **18.9 mm** (main) or **13.9 mm** (thaw) past that mesh inner face. The boxes overlap each other. The meshes do not.
+
 ## Verdict
 
 **sim body matches kit within 15%, so hip rail is gait/Controls.**
