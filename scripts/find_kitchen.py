@@ -8,10 +8,19 @@ scripts/steer_walk.py. Caps stay +0.056 / -0.032 m/s and yaw ±0.25 rad/s.
 vel is resent at 10 Hz. 200 ms of silence stands.
 
 This is not a map, not SLAM, and not an arrival. The pixel blob picks yaw
-left, yaw right, or a brief forward. Named kitchen / table / chair boxes
+left, yaw right, or a forward burst. Named kitchen / table / chair boxes
 are a sim honesty check that the blob sits on the kitchen. They are not
 waypoints and they are not given to a planner. If the backsplash is missing,
 split, or off the kitchen body, the finder sends no vel.
+
+The phrase path re-scores kit_cam every 0.40 s. A centered blob is forward
+at the bus cap. A side blob is the same forward cap plus a yaw trim scaled
+by the bias, not a held full-cap turn. The 1.2 s single forward hop stays
+in --self-test and still uses vx=0 for its one yaw. A burst budget near
+0.6 m is a stop, not a goal pose. Arrival is claimed only when the
+backsplash fills at least half the frame and the torso is within 0.25 m
+of the kitchen geom. Otherwise the summary reports end x and the remaining
+gap and does not say arrived.
 
 The visible signal under this lighting is the yellow backsplash. The wood
 counter's lit face does not separate from the blue cabinet, and the red
@@ -64,7 +73,30 @@ STAND_S = 0.60
 SETTLE_S = 0.60
 YAW_HOLD_S = 1.00
 FORWARD_HOLD_S = 1.20
+# Phrase path. kit_cam is scored between these slices.
+# A held full-cap walking turn (about 2 s of vel(+0.056, ±0.25)) pitched
+# through up_z 0.90 and the bus then faulted. These 0.40 s slices, with yaw
+# scaled by the bias, stayed above 0.92 out to the 0.60 m budget.
+# vx=0 yaw does not change heading on this plant.
+BURST_FORWARD_S = 0.40
+BURST_YAW_S = 0.40
+MAX_FORWARD_BURSTS = 40
+MAX_YAW_CORRECTIONS = 48
+# |bias| at which the trim uses the full yaw cap. Inside CENTER_BIAS, yaw is 0.
+YAW_BIAS_FULL = 0.35
+# Stop once world-x progress is inside the requested 0.3–0.8 m band.
+# This is a burst budget, not a waypoint at the counter.
+PROGRESS_STOP_M = 0.60
+# First sample under the plant's throttle line stops the approach.
+# A lean that holds under 0.85 also trips the bus fault in this room,
+# because the world COM includes the furniture.
+UP_Z_ABORT = 0.90
+# Arrival requires both. Half the frame is "most of the frame".
+# 0.25 m is contact range for this torso, not a room crossing.
+ARRIVAL_YELLOW_FRAC = 0.50
+ARRIVAL_REMAINING_M = 0.25
 PERCEPT_S = 0.40
+BUDGET_STOP = "burst budget reached; stop"
 # Stand kit_cam measures yellow fraction ~0.039 and bias ~-0.014.
 # Empty floor and a yaw that hides the kitchen measure 0.
 MIN_YELLOW_FRAC = 0.015
@@ -104,12 +136,12 @@ NO_PIXELS_LINE = "Prefer FAIL: kit_cam pixels do not show the backsplash; no mot
 AMBIGUOUS_LINE = "Prefer FAIL: kitchen blob is ambiguous; no motion"
 BLOCKED_LINE = "Prefer FAIL: backsplash fills the lower center; no forward"
 HONESTY = (
-    "Vision-reactive steer from one kit_cam frame. Not SLAM, not a map, "
-    "not a waypoint planner, and not an arrival guarantee. "
-    "The yellow backsplash blob picks the command. "
-    "Projecting the named kitchen, table, and chair bodies only checks "
-    "that the blob sits on the kitchen. A miss, a split blob, or an empty "
-    "floor sends no vel."
+    "Vision-reactive bursts from kit_cam. Not SLAM, not a map, "
+    "not a waypoint planner, and not an arrival unless the backsplash "
+    "fills at least half the frame and the torso is within 0.25 m of the "
+    "kitchen geom. The yellow blob picks yaw and forward. "
+    "The kitchen geom distance is only the arrival bar and the reported gap. "
+    "A miss, a split blob, a tip, or an empty floor stops with no further vel."
 )
 
 
@@ -173,6 +205,34 @@ class Attempt:
     min_up_z: float
     end_mode: str
     fault: bool
+
+
+@dataclass
+class Approach:
+    """Multi-burst approach. arrival is true only when both bars hold on the stop frame."""
+
+    before: np.ndarray
+    mid: np.ndarray
+    after: np.ndarray
+    initial: KitchenScore
+    mid_score: KitchenScore
+    final: KitchenScore
+    sent: list[SentVel]
+    note: str
+    stop_kind: BurstKind
+    min_up_z: float
+    end_mode: str
+    fault: bool
+    x0_m: float
+    end_x_m: float
+    end_y_m: float
+    end_yaw_rad: float
+    dx_m: float
+    remaining_m: float
+    near_face_x_m: float
+    arrival: bool
+    forward_bursts: int
+    yaw_corrections: int
 
 
 def _md5(path: Path) -> str:
@@ -321,6 +381,42 @@ def _project(
     return u, v
 
 
+def kitchen_clearance(model: mj.MjModel, data: mj.MjData) -> tuple[float, float] | None:
+    """Torso-to-kitchen horizontal gap, and the kitchen geom's near face x.
+
+    Read from the included scene geoms after the sim step. This is the
+    arrival bar and the reported remaining distance. It does not pick a
+    heading or a waypoint.
+    """
+    body_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "body_link")
+    kitchen_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "kitchen")
+    if body_id < 0 or kitchen_id < 0:
+        return None
+    point_x = float(data.xpos[body_id][0])
+    point_y = float(data.xpos[body_id][1])
+    nearest = float("inf")
+    near_face_x = float("inf")
+    for geom_id in range(model.ngeom):
+        if int(model.geom_bodyid[geom_id]) != kitchen_id:
+            continue
+        half_x = float(model.geom_size[geom_id][0])
+        half_y = float(model.geom_size[geom_id][1])
+        rotation = np.asarray(data.geom_xmat[geom_id], dtype=np.float64).reshape(3, 3)
+        origin = np.asarray(data.geom_xpos[geom_id], dtype=np.float64)
+        delta = np.array([point_x - float(origin[0]), point_y - float(origin[1]), 0.0])
+        local = rotation.T @ delta
+        outside_x = max(abs(float(local[0])) - half_x, 0.0)
+        outside_y = max(abs(float(local[1])) - half_y, 0.0)
+        nearest = min(nearest, math.hypot(outside_x, outside_y))
+        for sx in (-1.0, 1.0):
+            for sy in (-1.0, 1.0):
+                corner = origin + rotation @ np.array([sx * half_x, sy * half_y, 0.0])
+                near_face_x = min(near_face_x, float(corner[0]))
+    if nearest == float("inf"):
+        return None
+    return nearest, near_face_x
+
+
 def _body_box(model: mj.MjModel, data: mj.MjData, body_name: str) -> BodyBox | None:
     body_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, body_name)
     if body_id < 0:
@@ -464,7 +560,11 @@ def score_frame(model: mj.MjModel, data: mj.MjData, image: np.ndarray) -> Kitche
 
 
 def command_for(decision: DecisionName) -> tuple[float, float] | None:
-    """Bus command for a passing score. None means no motion."""
+    """Bus command for a passing score. None means no motion.
+
+    Yaw here is vx=0. The approach uses correction_command instead, because
+    a pure yaw does not change heading on this plant.
+    """
     if decision == "forward":
         return (steer_walk.VX_FWD_CAP, 0.0)
     if decision == "yaw_left":
@@ -472,6 +572,114 @@ def command_for(decision: DecisionName) -> tuple[float, float] | None:
     if decision == "yaw_right":
         return (0.0, -steer_walk.YAW_RATE_CAP)
     return None
+
+
+def trim_yaw(bias: float) -> float:
+    """Yaw rate for one approach slice. Sign faces the blob. Magnitude follows it.
+
+    Full cap only when |bias| reaches YAW_BIAS_FULL. A smaller bias gets a
+    smaller rate, still above the bus deadband once the blob is outside the
+    center band. This is not a heading setpoint and not a path.
+    """
+    if abs(bias) <= CENTER_BIAS:
+        return 0.0
+    yaw = -bias / YAW_BIAS_FULL * steer_walk.YAW_RATE_CAP
+    if yaw > steer_walk.YAW_RATE_CAP:
+        return steer_walk.YAW_RATE_CAP
+    if yaw < -steer_walk.YAW_RATE_CAP:
+        return -steer_walk.YAW_RATE_CAP
+    return yaw
+
+
+def correction_command(score: KitchenScore) -> tuple[float, float] | None:
+    """Approach slice: forward cap, plus a bias trim when the blob is off center."""
+    if score.decision == "fail":
+        return None
+    return (steer_walk.VX_FWD_CAP, trim_yaw(score.bias))
+
+
+BurstAction = Literal["forward", "yaw_left", "yaw_right", "stop"]
+BurstKind = Literal["steer", "budget", "tip", "blob", "yaw_limit", "close", "arrival"]
+
+
+@dataclass(frozen=True)
+class ApproachChoice:
+    """Next burst. Distance is used only for the arrival bar and the close stop."""
+
+    action: BurstAction
+    kind: BurstKind
+    line: str
+
+
+def arrival_bars(yellow_frac: float, remaining_m: float) -> bool:
+    """Both bars. Either one alone is not arrival."""
+    return yellow_frac >= ARRIVAL_YELLOW_FRAC and remaining_m <= ARRIVAL_REMAINING_M
+
+
+def approach_choice(
+    score: KitchenScore,
+    *,
+    dx_m: float,
+    up_z: float,
+    yaw_corrections: int,
+    forward_bursts: int,
+    remaining_m: float,
+) -> ApproachChoice:
+    """Pick the next burst from the latest kit_cam score and a few stop bars.
+
+    dx_m and remaining_m do not choose left versus right. The blob does.
+    """
+    if up_z < UP_Z_ABORT:
+        return ApproachChoice(
+            "stop",
+            "tip",
+            f"Prefer FAIL: up_z {up_z:.3f} is below {UP_Z_ABORT:.2f}; stop",
+        )
+    if score.decision == "fail":
+        return ApproachChoice("stop", "blob", score.line)
+    if arrival_bars(score.yellow_frac, remaining_m):
+        return ApproachChoice(
+            "stop",
+            "arrival",
+            (
+                "arrival bars met: backsplash fills at least half the frame "
+                f"and torso-to-kitchen is {remaining_m:.3f} m"
+            ),
+        )
+    if remaining_m <= ARRIVAL_REMAINING_M:
+        return ApproachChoice(
+            "stop",
+            "close",
+            (
+                "Prefer FAIL: torso is within "
+                f"{ARRIVAL_REMAINING_M:.2f} m of the kitchen geom "
+                "but the backsplash does not fill the frame; not arrival"
+            ),
+        )
+    if dx_m >= PROGRESS_STOP_M:
+        return ApproachChoice(
+            "stop",
+            "budget",
+            (
+                f"burst budget {dx_m:.3f} m is inside 0.30–0.80 m; stop; "
+                "this is not a counter pose and not arrival"
+            ),
+        )
+    if score.decision in ("yaw_left", "yaw_right"):
+        if yaw_corrections >= MAX_YAW_CORRECTIONS:
+            return ApproachChoice(
+                "stop",
+                "yaw_limit",
+                "Prefer FAIL: blob still off center after yaw corrections; no further search",
+            )
+        return ApproachChoice(score.decision, "steer", score.reason)
+    if forward_bursts >= MAX_FORWARD_BURSTS:
+        return ApproachChoice(
+            "stop",
+            "budget",
+            "forward burst cap; stop; not arrival",
+        )
+    return ApproachChoice("forward", "steer", score.reason)
 
 
 def _within_caps(vx: float, yaw_rate: float) -> bool:
@@ -512,11 +720,14 @@ def _hold_vel(
     sent: list[SentVel],
     *,
     stop_when_centered: bool = False,
+    progress_x0: float | None = None,
+    progress_cap_m: float | None = None,
 ) -> str | None:
     """Resend one vel at 10 Hz. Stop early if the kitchen leaves the frame.
 
     A yaw hold also stops when the blob reaches the center, or when it
     crosses to the other side. Crossing does not reverse. That would be a search.
+    progress_cap_m stops a burst once world-x progress hits the budget.
     """
     if not _within_caps(vx, yaw_rate):
         return "refused: command outside the bus caps"
@@ -534,6 +745,15 @@ def _hold_vel(
         session.step()
         if session.bus.fault:
             return f"fault: {session.bus.fault_reason}"
+        if session.samples and session.samples[-1].up_z < UP_Z_ABORT:
+            up_now = session.samples[-1].up_z
+            return f"Prefer FAIL: up_z {up_now:.3f} during the burst; stop"
+        if (
+            progress_x0 is not None
+            and progress_cap_m is not None
+            and (float(session.data.qpos[0]) - progress_x0) >= progress_cap_m
+        ):
+            return BUDGET_STOP
         if (now - last_look) >= PERCEPT_S:
             last_look = now
             live = score_frame(session.model, session.data, cam.grab(session.data))
@@ -646,6 +866,164 @@ def run_attempt(
     )
 
 
+def _abort_kind(abort: str) -> BurstKind:
+    if abort == BUDGET_STOP:
+        return "budget"
+    if abort.startswith("fault:") or "up_z" in abort:
+        return "tip"
+    return "blob"
+
+
+def _gap(model: mj.MjModel, data: mj.MjData) -> tuple[float, float]:
+    found = kitchen_clearance(model, data)
+    if found is None:
+        return float("inf"), float("nan")
+    return found
+
+
+def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
+    """Forward bursts while the backsplash stays valid, with a yaw burst if it drifts.
+
+    The gait is left in move across a burst boundary so the 200 ms watchdog
+    does not stand between two vel segments. Stop is the end, or a Prefer FAIL.
+    """
+    _hold_stand(session, STAND_S)
+    before = cam.grab(session.data)
+    score = score_frame(session.model, session.data, before)
+    stand_score = score
+    x0 = float(session.data.qpos[0])
+    sent: list[SentVel] = []
+    mid_image: np.ndarray | None = None
+    mid_score = stand_score
+    forward_bursts = 0
+    yaw_corrections = 0
+    note = stand_score.line
+    stop_kind: BurstKind = "blob"
+    if stand_score.decision == "fail":
+        return _approach_result(
+            session, cam, before, before, stand_score, stand_score, sent, note,
+            stop_kind, x0, forward_bursts, yaw_corrections, False,
+        )
+    while True:
+        dx = float(session.data.qpos[0]) - x0
+        up_z = session.samples[-1].up_z if session.samples else 1.0
+        remaining, _near = _gap(session.model, session.data)
+        choice = approach_choice(
+            score,
+            dx_m=dx,
+            up_z=up_z,
+            yaw_corrections=yaw_corrections,
+            forward_bursts=forward_bursts,
+            remaining_m=remaining,
+        )
+        if choice.action == "stop":
+            note = choice.line
+            stop_kind = choice.kind
+            break
+        command = correction_command(score)
+        if command is None:
+            note = "Prefer FAIL: no bus command for this score"
+            stop_kind = "blob"
+            break
+        if abs(command[1]) > 1e-9:
+            yaw_corrections += 1
+            hold_s = BURST_YAW_S
+        else:
+            forward_bursts += 1
+            hold_s = BURST_FORWARD_S
+        abort = _hold_vel(
+            session, cam, command[0], command[1], hold_s, sent,
+            stop_when_centered=False,
+            progress_x0=x0,
+            progress_cap_m=PROGRESS_STOP_M,
+        )
+        score = score_frame(session.model, session.data, cam.grab(session.data))
+        moved = float(session.data.qpos[0]) - x0
+        if mid_image is None and moved >= (PROGRESS_STOP_M * 0.5):
+            mid_image = cam.grab(session.data)
+            mid_score = score
+        if abort:
+            note = abort
+            stop_kind = _abort_kind(abort)
+            break
+    if mid_image is None and (forward_bursts + yaw_corrections) > 1:
+        mid_image = cam.grab(session.data)
+        mid_score = score
+    if mid_image is None:
+        mid_image = before
+        mid_score = stand_score
+    return _approach_result(
+        session, cam, before, mid_image, stand_score, mid_score, sent, note,
+        stop_kind, x0, forward_bursts, yaw_corrections, stop_kind == "arrival",
+    )
+
+
+def _approach_result(
+    session: steer_walk.SteerSession,
+    cam: KitCam,
+    before: np.ndarray,
+    mid_image: np.ndarray,
+    stand_score: KitchenScore,
+    mid_score: KitchenScore,
+    sent: list[SentVel],
+    note: str,
+    stop_kind: BurstKind,
+    x0: float,
+    forward_bursts: int,
+    yaw_corrections: int,
+    arrival_candidate: bool,
+) -> Approach:
+    session.bus.stop(float(session.data.time))
+    _hold_stand(session, SETTLE_S)
+    after = cam.grab(session.data)
+    final = score_frame(session.model, session.data, after)
+    remaining, near_face_x = _gap(session.model, session.data)
+    end_x = float(session.data.qpos[0])
+    arrival = arrival_bars(final.yellow_frac, remaining) and math.isfinite(remaining)
+    if arrival:
+        note = (
+            "arrival bars met on the stop frame: backsplash fills at least half "
+            f"the frame and torso-to-kitchen is {remaining:.3f} m"
+        )
+        stop_kind = "arrival"
+    elif arrival_candidate:
+        note = (
+            "Prefer FAIL: the stop frame does not still meet both arrival bars; "
+            "not arrival"
+        )
+        stop_kind = "close"
+    elif stop_kind == "budget":
+        note = (
+            f"burst budget; dx {end_x - x0:+.3f} m; "
+            f"remaining torso-to-kitchen {remaining:.3f} m; not arrival"
+        )
+    fault = session.bus.fault or note.startswith("fault:")
+    return Approach(
+        before=before,
+        mid=mid_image,
+        after=after,
+        initial=stand_score,
+        mid_score=mid_score,
+        final=final,
+        sent=sent,
+        note=note,
+        stop_kind=stop_kind,
+        min_up_z=session.min_up_z,
+        end_mode=session.bus.mode,
+        fault=fault,
+        x0_m=x0,
+        end_x_m=end_x,
+        end_y_m=float(session.data.qpos[1]),
+        end_yaw_rad=session.yaw(),
+        dx_m=end_x - x0,
+        remaining_m=remaining,
+        near_face_x_m=near_face_x,
+        arrival=arrival,
+        forward_bursts=forward_bursts,
+        yaw_corrections=yaw_corrections,
+    )
+
+
 def _save_png(image: np.ndarray, path: Path) -> None:
     from PIL import Image
 
@@ -701,14 +1079,19 @@ def _attempt_dict(attempt: Attempt) -> dict[str, object]:
     }
 
 
-def _commands_legal(sent: list[SentVel]) -> str | None:
+def _commands_legal(sent: list[SentVel], *, allow_walk_yaw: bool = False) -> str | None:
     for command in sent:
         if not _within_caps(command.vx, command.yaw_rate):
             return f"command outside caps vx={command.vx} yaw={command.yaw_rate}"
-        if command.vx != 0.0 and command.yaw_rate != 0.0:
-            return "yaw and forward were sent together"
         if command.vx < 0.0:
             return "finder sent reverse"
+        both = command.vx != 0.0 and command.yaw_rate != 0.0
+        if not both:
+            continue
+        if not allow_walk_yaw:
+            return "yaw and forward were sent together"
+        if command.vx != steer_walk.VX_FWD_CAP:
+            return "walk-yaw forward is only the forward cap"
     return None
 
 
@@ -726,6 +1109,93 @@ def _paint(cx: int, cy: int, box_w: int, box_h: int, color: tuple[int, int, int]
 def _expect(cond: bool, msg: str, failures: list[str]) -> None:
     if not cond:
         failures.append(msg)
+
+
+def _fake_score(
+    decision: DecisionName,
+    frac: float = 0.04,
+    bias: float = 0.0,
+) -> KitchenScore:
+    return KitchenScore(
+        decision=decision,
+        reason="test",
+        line="Prefer FAIL: test blob" if decision == "fail" else "test",
+        needs_map=False,
+        bias=bias,
+        yellow_frac=frac,
+        centroid_u=None if decision == "fail" else 320.0,
+        centroid_v=None if decision == "fail" else 140.0,
+        kitchen_in_frame=decision != "fail",
+    )
+
+
+def test_approach_policy() -> list[str]:
+    failures: list[str] = []
+    centered = _fake_score("forward", 0.04, -0.01)
+    left = _fake_score("yaw_left", 0.05, -0.30)
+    lost = _fake_score("fail", 0.0, 0.0)
+    full = _fake_score("forward", 0.62, 0.0)
+    go = approach_choice(
+        centered, dx_m=0.10, up_z=0.98, yaw_corrections=0,
+        forward_bursts=0, remaining_m=1.20,
+    )
+    _expect(go.action == "forward" and go.kind == "steer", f"open burst {go}", failures)
+    budget = approach_choice(
+        centered, dx_m=0.60, up_z=0.98, yaw_corrections=0,
+        forward_bursts=3, remaining_m=0.70,
+    )
+    _expect(budget.action == "stop" and budget.kind == "budget", f"budget {budget}", failures)
+    yaw = approach_choice(
+        left, dx_m=0.20, up_z=0.97, yaw_corrections=0,
+        forward_bursts=1, remaining_m=1.00,
+    )
+    _expect(yaw.action == "yaw_left", f"yaw correct {yaw}", failures)
+    hunted = approach_choice(
+        left, dx_m=0.20, up_z=0.97, yaw_corrections=MAX_YAW_CORRECTIONS,
+        forward_bursts=1, remaining_m=1.00,
+    )
+    _expect(hunted.action == "stop" and hunted.kind == "yaw_limit", f"yaw limit {hunted}", failures)
+    _expect(trim_yaw(0.0) == 0.0, "center trim", failures)
+    _expect(trim_yaw(0.05) == 0.0, "in-band trim", failures)
+    right = trim_yaw(0.35)
+    left = trim_yaw(-0.35)
+    _expect(abs(right + steer_walk.YAW_RATE_CAP) < 1e-9, f"full right {right}", failures)
+    _expect(abs(left - steer_walk.YAW_RATE_CAP) < 1e-9, f"full left {left}", failures)
+    mild = trim_yaw(0.14)
+    _expect(mild < 0.0 and abs(mild) < steer_walk.YAW_RATE_CAP, f"mild trim {mild}", failures)
+    tip = approach_choice(
+        centered, dx_m=0.20, up_z=0.89, yaw_corrections=0,
+        forward_bursts=1, remaining_m=1.00,
+    )
+    _expect(tip.action == "stop" and tip.kind == "tip", f"tip {tip}", failures)
+    blob = approach_choice(
+        lost, dx_m=0.20, up_z=0.97, yaw_corrections=0,
+        forward_bursts=1, remaining_m=1.00,
+    )
+    _expect(blob.action == "stop" and blob.kind == "blob", f"blob {blob}", failures)
+    # Half the frame but still far: not arrival, keep steering.
+    far_fill = approach_choice(
+        full, dx_m=0.20, up_z=0.97, yaw_corrections=0,
+        forward_bursts=1, remaining_m=0.80,
+    )
+    _expect(far_fill.action == "forward" and far_fill.kind == "steer", f"far fill {far_fill}", failures)
+    # Close but the frame is not mostly backsplash: stop, do not claim arrival.
+    close = approach_choice(
+        centered, dx_m=0.20, up_z=0.97, yaw_corrections=0,
+        forward_bursts=1, remaining_m=0.20,
+    )
+    _expect(close.action == "stop" and close.kind == "close", f"close {close}", failures)
+    arrived = approach_choice(
+        full, dx_m=0.20, up_z=0.97, yaw_corrections=0,
+        forward_bursts=1, remaining_m=0.20,
+    )
+    _expect(arrived.action == "stop" and arrived.kind == "arrival", f"arrival {arrived}", failures)
+    _expect(not arrival_bars(0.039, 1.25), "stand frame was called arrival", failures)
+    _expect(not arrival_bars(0.80, 0.40), "full frame at 0.40 m was called arrival", failures)
+    _expect(not arrival_bars(0.20, 0.10), "close but small blob was called arrival", failures)
+    _expect(arrival_bars(0.50, 0.25), "both bars at the threshold did not pass", failures)
+    _expect(arrival_bars(0.62, 0.20), "clear arrival bars did not pass", failures)
+    return failures
 
 
 def test_pixels() -> list[str]:
@@ -829,6 +1299,55 @@ def test_scenes() -> list[str]:
         failures,
     )
     _expect(_md5(PLANT_XML) == steer_walk.PLANT_MD5, "plant md5 changed during score", failures)
+    gap = kitchen_clearance(room.model, room.data)
+    _expect(gap is not None, "stand pose has no kitchen clearance", failures)
+    if gap is not None:
+        _expect(
+            1.00 <= gap[0] <= 1.60,
+            f"stand torso-to-kitchen {gap[0]:.3f} m is not the open-room gap",
+            failures,
+        )
+        _expect(gap[1] > 1.0, f"kitchen near face x {gap[1]:.3f}", failures)
+    return failures
+
+
+def test_short_hop() -> list[str]:
+    """Regression: the 1.2 s single forward hop, not the multi-burst approach."""
+    failures: list[str] = []
+    session = steer_walk.SteerSession(video=False, scene_xml=ROOM_XML)
+    cam = KitCam(session.model)
+    try:
+        attempt = run_attempt(
+            session, cam, yaw_hold_s=YAW_HOLD_S, forward_hold_s=FORWARD_HOLD_S,
+        )
+    finally:
+        cam.close()
+    session.assert_plant_unchanged()
+    _expect(FORWARD_HOLD_S == 1.20, "short hop duration moved", failures)
+    _expect(attempt.initial.decision == "forward", f"hop start {attempt.initial.decision}", failures)
+    _expect(not attempt.fault, f"hop fault {attempt.note}", failures)
+    _expect(attempt.end_mode == "stand", f"hop end {attempt.end_mode}", failures)
+    _expect(attempt.min_up_z >= UP_Z_ABORT, f"hop min up_z {attempt.min_up_z:.3f}", failures)
+    _expect(len(attempt.sent) > 0, "hop sent no vel", failures)
+    _expect(
+        all(command.vx == steer_walk.VX_FWD_CAP and command.yaw_rate == 0.0 for command in attempt.sent),
+        "hop did not stay on forward-only vel",
+        failures,
+    )
+    if len(attempt.sent) >= 2:
+        span = attempt.sent[-1].t - attempt.sent[0].t
+        _expect(span <= FORWARD_HOLD_S + 0.05, f"hop span {span:.2f} s exceeded 1.2 s", failures)
+    end_x = float(session.data.qpos[0])
+    _expect(end_x < 0.15, f"hop end x {end_x:.3f} m is no longer the short hop", failures)
+    _expect(
+        attempt.note == "brief forward on a centered backsplash, then stop",
+        f"hop note {attempt.note}",
+        failures,
+    )
+    print(
+        f"[find] short hop {len(attempt.sent)} resends end x {end_x:+.3f} m "
+        f"note {attempt.note}"
+    )
     return failures
 
 
@@ -879,11 +1398,13 @@ def self_test() -> int:
     failures: list[str] = []
     failures.extend(test_pixels())
     failures.extend(test_phrases())
+    failures.extend(test_approach_policy())
     if failures:
         for msg in failures:
             print(f"FAIL {msg}")
         return 1
     failures.extend(test_scenes())
+    failures.extend(test_short_hop())
     failures.extend(test_biased_yaw())
     digest = _md5(PLANT_XML)
     if digest != steer_walk.PLANT_MD5:
@@ -938,7 +1459,7 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
     room = steer_walk.SteerSession(video=False, scene_xml=ROOM_XML)
     room_cam = KitCam(room.model)
     try:
-        attempt = run_attempt(room, room_cam)
+        approach = run_approach(room, room_cam)
     finally:
         room_cam.close()
     room.assert_plant_unchanged()
@@ -953,32 +1474,44 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
         empty_cam.close()
 
     before_path = PREVIEWS / "find_kitchen_before.png"
+    mid_path = PREVIEWS / "find_kitchen_mid.png"
     after_path = PREVIEWS / "find_kitchen_after.png"
     fail_path = PREVIEWS / "find_kitchen_prefer_fail.png"
     summary_path = PREVIEWS / "find_kitchen_summary.json"
-    _save_png(attempt.before, before_path)
-    _save_png(attempt.after, after_path)
+    _save_png(approach.before, before_path)
+    _save_png(approach.mid, mid_path)
+    _save_png(approach.after, after_path)
     _save_png(fail_image, fail_path)
 
-    illegal = _commands_legal(attempt.sent)
+    illegal = _commands_legal(approach.sent, allow_walk_yaw=True)
     after_md5 = _md5(PLANT_XML)
+    bars_now = arrival_bars(approach.final.yellow_frac, approach.remaining_m)
     problems: list[str] = []
-    if attempt.initial.decision == "fail":
-        problems.append(f"stand pose refused: {attempt.initial.line}")
-    if attempt.fault:
-        problems.append(f"steer fault: {attempt.note}")
+    if approach.initial.decision == "fail":
+        problems.append(f"stand pose refused: {approach.initial.line}")
+    if approach.fault:
+        problems.append(f"steer fault: {approach.note}")
     if illegal:
         problems.append(illegal)
-    if not attempt.sent:
+    if not approach.sent:
         problems.append("kitchen was in frame but no vel was sent")
     if fail_score.decision != "fail":
         problems.append(f"empty plant scored {fail_score.decision}")
     if after_md5 != before_md5 or after_md5 != steer_walk.PLANT_MD5:
         problems.append(f"plant md5 changed {before_md5} -> {after_md5}")
-    if attempt.min_up_z < 0.90:
-        problems.append(f"min up_z {attempt.min_up_z:.3f}")
-    if attempt.end_mode != "stand":
-        problems.append(f"end mode {attempt.end_mode}")
+    if approach.end_mode != "stand":
+        problems.append(f"end mode {approach.end_mode}")
+    if approach.arrival != bars_now:
+        problems.append(
+            f"arrival flag {approach.arrival} does not match the bars "
+            f"(yellow {approach.final.yellow_frac:.3f}, remaining {approach.remaining_m:.3f} m)"
+        )
+    if approach.arrival:
+        problems.append("arrival was claimed; this draft does not expect the bars to pass")
+    if approach.stop_kind == "budget" and not (0.30 <= approach.dx_m <= 0.85):
+        problems.append(f"budget stop dx {approach.dx_m:.3f} m is outside 0.30–0.85")
+    if approach.stop_kind == "budget" and approach.min_up_z < UP_Z_ABORT:
+        problems.append(f"budget stop min up_z {approach.min_up_z:.3f}")
 
     payload: dict[str, object] = {
         "plant": str(PLANT_XML.relative_to(ROOT)),
@@ -991,35 +1524,57 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
         "vx_back_cap": steer_walk.VX_BACK_CAP,
         "yaw_rate_cap": steer_walk.YAW_RATE_CAP,
         "resend_hz": 1.0 / steer_walk.VEL_RESEND_S,
-        "stand": _attempt_dict(attempt),
-        "end_x_m": float(room.data.qpos[0]),
-        "end_y_m": float(room.data.qpos[1]),
-        "end_yaw_rad": room.yaw(),
+        "short_hop_s": FORWARD_HOLD_S,
+        "burst_forward_s": BURST_FORWARD_S,
+        "progress_stop_m": PROGRESS_STOP_M,
+        "arrival_yellow_frac": ARRIVAL_YELLOW_FRAC,
+        "arrival_remaining_m": ARRIVAL_REMAINING_M,
+        "arrival": approach.arrival,
+        "stop_kind": approach.stop_kind,
+        "note": approach.note,
+        "forward_bursts": approach.forward_bursts,
+        "yaw_corrections": approach.yaw_corrections,
+        "x0_m": approach.x0_m,
+        "end_x_m": approach.end_x_m,
+        "end_y_m": approach.end_y_m,
+        "end_yaw_rad": approach.end_yaw_rad,
+        "dx_m": approach.dx_m,
+        "remaining_m": approach.remaining_m,
+        "near_face_x_m": approach.near_face_x_m,
+        "min_up_z": approach.min_up_z,
+        "initial": _score_dict(approach.initial),
+        "mid": _score_dict(approach.mid_score),
+        "final": _score_dict(approach.final),
+        "commands": _collapse(approach.sent),
         "prefer_fail_empty_plant": _score_dict(fail_score),
         "stills": {
             "before": str(before_path.relative_to(ROOT)),
+            "mid": str(mid_path.relative_to(ROOT)),
             "after": str(after_path.relative_to(ROOT)),
             "prefer_fail": str(fail_path.relative_to(ROOT)),
         },
         "honesty": HONESTY,
     }
     _write_summary(summary_path, payload)
-    _copy_artifacts((before_path, after_path, fail_path))
+    _copy_artifacts((before_path, mid_path, after_path, fail_path))
 
     print(
-        f"[find] stand {attempt.initial.decision} bias {attempt.initial.bias:+.3f} "
-        f"yellow {attempt.initial.yellow_frac:.3f}  {attempt.note}"
+        f"[find] stand {approach.initial.decision} bias {approach.initial.bias:+.3f} "
+        f"yellow {approach.initial.yellow_frac:.3f}  {approach.note}"
     )
-    for group in _collapse(attempt.sent):
+    for group in _collapse(approach.sent):
         print(
             f"  vel vx={float(group['vx']):+.3f} yaw_rate={float(group['yaw_rate']):+.3f} "
             f"t={float(group['t0']):.2f}..{float(group['t1']):.2f} "
             f"resends={int(group['resends'])}"
         )
     print(
-        f"[find] end mode {attempt.end_mode} min_up_z {attempt.min_up_z:.3f} "
-        f"end x {float(room.data.qpos[0]):+.3f} m "
-        f"end yaw {math.degrees(room.yaw()):+.1f} deg "
+        f"[find] stop {approach.stop_kind} bursts {approach.forward_bursts} "
+        f"yaw_corrections {approach.yaw_corrections} "
+        f"end mode {approach.end_mode} min_up_z {approach.min_up_z:.3f} "
+        f"dx {approach.dx_m:+.3f} m end x {approach.end_x_m:+.3f} m "
+        f"remaining {approach.remaining_m:.3f} m "
+        f"arrival {approach.arrival} "
         f"empty-plant {fail_score.decision}  plant md5 {after_md5}"
     )
     if problems:
