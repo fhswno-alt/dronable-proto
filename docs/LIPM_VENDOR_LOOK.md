@@ -136,3 +136,29 @@ The clips of this 1.00 s row are `previews/gm_forward.mp4` and
 vx +1.9 cm/s, sole p90 2.0 cm, min up_z 0.992, peak torque 2.10 Nm.
 Close-up forward Δx +11.3 cm, then stop. It is still a Prefer FAIL
 against a 300–600 ms kit walk. Soft-pass is off.
+
+The pooled sole p90 hides which foot moves. On the same 8.4 s window
+the right swing sole is p90 2.03 cm (max 2.19 cm, contact fraction
+0.14) and the left swing sole is p90 0.51 cm (max 0.64 cm, contact
+fraction 0.48). The left knee does flex, and the foot is briefly
+unloaded, but the hip reach is already large at the z peak and the
+sole stays on the floor. One foot is stepping. The other is not.
+
+Raising the stance-hip cap from 0.07 rad does not buy the missing
+speed. 0.10 rad stays up (min up_z 0.977) and is slower. 0.14 rad
+tips at 7.2 s. 0.18 rad tips at 2.6 s. Zeroing swing x while that
+foot is loaded, and slewing the landing hip back to 0.07 rad instead
+of snapping it, both drop the sole below 1 cm and do not raise Δx.
+
+A 0.15 s lead on y-swap, so the lean arrives before the knee flex,
+does get both soles near 1.8 cm and then tips at 2.8 s. Clamping that
+lead so it cannot reverse onto the swing foot keeps the robot up, and
+at 0.32 s the left sole p90 reaches 2.30 cm, but min up_z falls to
+0.955, the body drifts 8.7 cm to the side, and forward speed falls to
+about 0.6 cm/s. Holding the full y-swap for the whole single-support
+interval never unloads the left foot.
+
+Shorter periods with the 0.07 rad cap stay upright and lose both
+clearance and forward speed. 0.80 s raw is about 1.2 cm/s with sole
+p90 1.10 cm. The 1.00 s one-sided step is still the fastest upright
+row, and it is still about 4× short of 7 cm/s. Soft-pass is off.
