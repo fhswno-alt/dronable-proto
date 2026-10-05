@@ -9,15 +9,21 @@ The walk uses the kit gait. This script does not raise the clamps.
 On the empty plant the qualified windows are the remeasured nav-multi
 chain: stand 1.0 s, vel(+0.150, 0) for 15 s, vel(+0.150, +0.25) for
 12.5 s, forward 6 s, vel(+0.150, -0.25) for 11 s, forward 6 s.
-Prefer FAIL on plant 207f3d5e…: approach heading +2.210 m, left
-+145.9 deg, right −138.6 deg, min up_z 0.932, no tip, no fault.
-The stale +0.598 m / +75.7 deg envelope is not this path.
+Prefer FAIL on the live explore schedule, plant 207f3d5e…:
+approach heading +2.210 m, left +145.1 deg, mid +0.944 m with
++12.3 deg drift, right −138.6 deg, resume heading +0.958 m,
+run min up_z 0.932, no tip, no fault. The voice clip's +145.9 deg
+is the same command on a summarize window. The stale +0.598 m /
++75.7 deg envelope is not this path.
 
-The 4 s gap, the 8 s second left, and the 34 s right hold were not
-remeasured on this tip. next_frontier_phase still builds them for
-the planner test. A walk does not append them. Furnished scenes use
-the remeasured 8 s right, vel(+0.150, -0.25). Kitchen and bathroom
-traced the same motion. That is not furniture avoidance.
+The 4 s gap, the 8 s second left, and the 34 s right hold stay off.
+This run appended none of them. next_frontier_phase still builds
+them for the planner test. Furnished scenes use 8 s of
+vel(+0.150, -0.25). Kitchen and bathroom traced the same motion
+(heading +0.540 m, −94.6 deg, min up_z 0.929). That is not
+furniture avoidance. The soft-XY probe stopped at 13.8 s because
+the guess was inside 0.40 m (heading +1.099 m, remaining 0.159 m,
+yellow 0). That is not arrival.
 
 vel(0, yaw) does change heading on this kit row. This script does
 not send it. The windows are walk-yaw at the forward cap.
@@ -223,12 +229,14 @@ HONESTY = (
     "not a waypoint and not arrival. A soft XY is frozen along that bearing "
     "the first time yellow is logged. Yellow >= 0.50 is not success. "
     "Frontiers are the 8-connected edge of that paint. Pose is the sim freejoint, "
-    "not SLAM. The empty plant walks the remeasured nav-multi chain at "
-    "vel(+0.150, yaw) on the kit gait: approach heading +2.210 m, left "
-    "+145.9 deg, chained right −138.6 deg, min up_z 0.932, no tip, no fault. "
-    "The 4 s gap, 8 s second left, and 34 s right hold are not claimed. "
-    "vel(0, yaw) turns and is not sent. Not go-anywhere. Not arrival. "
-    "Not a demo-ready human walk."
+    "not SLAM. The live explore schedule on the kit gait is the nav-multi "
+    "chain, not the 4/8/34 frontier holds. Measured on this path: approach "
+    "heading +2.210 m, left +145.1 deg, mid +0.944 m with +12.3 deg drift, "
+    "right −138.6 deg, resume heading +0.958 m, run min up_z 0.932, no tip, "
+    "no fault. Frontiers on the empty plant ended at 0. That is a closed "
+    "floor fan, not a house. The soft-XY probe stopped at 13.8 s on the "
+    "guess (heading +1.099 m, remaining 0.159 m, yellow 0). The gap bar "
+    "alone is not arrival. Not go-anywhere. Not a demo-ready human walk."
 )
 
 
@@ -302,6 +310,8 @@ class PhaseRecord:
     dyaw_deg: float
     tracked: bool | None
     reason: str = ""
+    heading_dx_m: float = 0.0
+    min_up_z: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -1434,22 +1444,26 @@ def run_explore(
         )
         stop_reason = "claimed walk-yaw schedule"
 
+        phase_min_up = 1.0
+
         def _close_phase(pose: RobotPose) -> None:
             phase = schedule[phase_i]
+            dx = pose.x - phase_origin.x
+            dy = pose.y - phase_origin.y
+            dyaw = math.degrees(_wrap(pose.yaw - phase_origin.yaw))
             phases.append(
                 PhaseRecord(
                     name=phase.name,
                     commanded_vx=phase.vx,
                     commanded_yaw=phase.yaw_rate,
                     duration_s=float(pose.t - phase_t0),
-                    dx_m=pose.x - phase_origin.x,
-                    dy_m=pose.y - phase_origin.y,
-                    dyaw_deg=math.degrees(_wrap(pose.yaw - phase_origin.yaw)),
-                    tracked=yaw_tracked(
-                        phase.yaw_rate,
-                        math.degrees(_wrap(pose.yaw - phase_origin.yaw)),
-                    ),
+                    dx_m=dx,
+                    dy_m=dy,
+                    dyaw_deg=dyaw,
+                    tracked=yaw_tracked(phase.yaw_rate, dyaw),
                     reason=phase.reason,
+                    heading_dx_m=dx * math.cos(phase_origin.yaw) + dy * math.sin(phase_origin.yaw),
+                    min_up_z=phase_min_up,
                 )
             )
 
@@ -1461,6 +1475,7 @@ def run_explore(
                 _close_phase(pose_now)
                 note_frontier_phase(drive, schedule[phase_i])
                 phase_i += 1
+                phase_min_up = 1.0
                 if (
                     QUALIFIED_FRONTIER_CHAIN
                     and phase_i >= len(schedule)
@@ -1499,6 +1514,8 @@ def run_explore(
             if len(trail) == 0 or math.hypot(pose.x - trail[-1][0], pose.y - trail[-1][1]) >= 0.02:
                 trail.append((pose.x, pose.y))
             up_z = session.samples[-1].up_z if session.samples else 1.0
+            if up_z < phase_min_up:
+                phase_min_up = up_z
             if report.mode == "fault" or session.bus.fault:
                 stop_reason = f"fault: {session.bus.fault_reason or report.mode}"
                 _close_phase(pose)
@@ -1678,16 +1695,20 @@ def run_soft_goal(hold_s: float, *, record_frames: bool) -> SceneRun:
             last_yaw = vels[-1].yaw_rate if vels else 0.0
             last_vx = vels[-1].vx if vels else FINDER_HALF_VX
             dyaw = math.degrees(_wrap(end_phase.yaw - phase_origin.yaw))
+            dx = end_phase.x - phase_origin.x
+            dy = end_phase.y - phase_origin.y
             phases.append(
                 PhaseRecord(
                     name="soft-goal",
                     commanded_vx=last_vx,
                     commanded_yaw=last_yaw,
                     duration_s=float(end_phase.t - phase_t0),
-                    dx_m=end_phase.x - phase_origin.x,
-                    dy_m=end_phase.y - phase_origin.y,
+                    dx_m=dx,
+                    dy_m=dy,
                     dyaw_deg=dyaw,
                     tracked=yaw_tracked(last_yaw, dyaw),
+                    heading_dx_m=dx * math.cos(phase_origin.yaw) + dy * math.sin(phase_origin.yaw),
+                    min_up_z=float(session.min_up_z),
                 )
             )
         stop_pose = _pose(session)
@@ -1982,12 +2003,14 @@ def _scene_limit(run: SceneRun) -> str:
         open_front = OPEN_LOOP_FRONTIER_CELLS["plant"]
         open_walked = OPEN_LOOP_WALKED_CELLS["plant"]
         return (
-            f"Prefer FAIL: empty floor. Vision-free cells {free} (open-loop {open_free}), "
-            f"frontiers {frontiers} (open-loop {open_front}), walked cells {walked} "
-            f"(open-loop {open_walked}), floor-feature cells {feature}. "
-            f"min_up_z {run.min_up_z:.3f} (open-loop {OPEN_LOOP_MIN_UP_Z['plant']:.3f}). "
-            "No kitchen-like yellow. Frontiers are the edge of that floor paint, "
-            "not rooms. Not go-anywhere."
+            f"Prefer FAIL: empty floor. Vision-free cells {free}, "
+            f"frontiers {frontiers}, walked cells {walked}, "
+            f"floor-feature cells {feature}. "
+            f"min_up_z {run.min_up_z:.3f}. "
+            "Previous-basin open-loop counts are not this claim "
+            f"({open_free} free, {open_front} frontiers, {open_walked} walked). "
+            "No kitchen-like yellow. A frontier count of 0 is a closed floor fan, "
+            "not rooms and not go-anywhere."
         )
     if yellow.seen and yellow.ground_cell_ij is None:
         return (
@@ -2503,12 +2526,12 @@ def demo(walk_s: float) -> int:
                 "on the 8-connected edge of that fan, and a yellow bearing when the "
                 "backsplash is in frame. A soft XY is frozen along that bearing. "
                 "Yellow >= 0.50 is not success and arrival is not claimed. "
-                "The empty plant walks the remeasured nav-multi chain at the "
-                "Day1 forward clamp 0.150 m/s. The 4 s gap, 8 s second left, and "
-                "34 s right hold were not remeasured and are not claimed. "
+                "The empty plant walks the nav-multi chain on the kit bus at "
+                "0.150 m/s. The 4 s gap, 8 s second left, and 34 s right hold "
+                "stay off. A soft-XY stop inside 0.40 m is not arrival. "
                 "Rooms are separate XML files, not one space. Pose is the sim freejoint. "
                 "vel(0, yaw) turns and is not sent. Arrival is still yellow >= 0.50 "
-                "and torso-to-kitchen <= 0.25 m. Not go-anywhere. Not a human walk."
+                "and torso-to-kitchen <= 0.25 m together. Not go-anywhere. Not a human walk."
             ),
             "later": (
                 "A later land would need one continuous space, metric occupied cells "
