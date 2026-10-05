@@ -144,6 +144,97 @@ On the four preset rows, static plus the full joint inertia stays at or below **
 
 Viscous torque at the same peak speed, `0.08 × A × (2π / T)`, is about **0.20 N·m** on the fastest preset corners (300 ms / 2 cm roll, and 600 ms / 4 cm roll). Frictionloss is 0, so there is no Coulomb term. Adding that viscous piece to the preset full-inertia totals still leaves them under 1.5 N·m.
 
+## Knee and ankle pitch
+
+PR #42 ran the ROBOTIS OP3 `WalkingModule` with `calcInverseKinematicsForLeg` and this plant's leg lengths (plant md5 `17dc4ff37491c8e61900fd83b5d31f0c`). The first rail on that run is the right knee at about 0.42 s, then hip roll, at periods of 300–600 ms. This section is the static knee-pitch and ankle-pitch torque of three poses, plus the knee armature and link inertia for a 2 cm step height. No plant value is changed. The script checks that the foot-contact `pos` and the foot box half-height match on the two plants, so this free-body diagram is the same on both. The comparison limit is the thaw joint actuator range, compiled `jnt_actfrcrange` **±2.45 N·m**. The main plant's compiled range on the same joint is ±2.1 N·m.
+
+`M = 2.347498 kg` and `g = 9.81` give **`Mg = 23.029 N`** and **`Mg/2 = 11.514 N`**. Those are the "about 23 N" and "about 11.5 N" loads below.
+
+Assumptions, all in `scripts/plant_mass_vs_kit.py`:
+
+- Ground reaction is vertical, at the center of that foot's contact box. No horizontal force. Double support puts `Mg/2` on each foot. Single support puts `Mg` on one foot and 0 on the other. The split is equal; the script does not solve an indeterminate contact distribution.
+- Knee distal links are the shank, the ankle-pitch link, and the foot (`0.2325 kg`). Ankle-pitch distal links are the ankle-pitch link and the foot (`0.1875 kg`). Torque is that wrench about the joint anchor, projected on the joint axis. Arms stay at `init_pose.yaml` and are outside both distal sets.
+- The sinusoid is the same one as the hip section: `θ = A sin(2π t / T)`, `α = A (2π / T)²`, `A` the peak angle of one cycle per period. `τ_arm = 0.01 α`, `τ_link = I_link α`, `I_link = M_ii − 0.01` from `mj_fullM` at that pose. Viscous peak is `0.08 A (2π / T)`.
+- The 2 cm is a sole-height rise with hip yaw, hip roll, and hip pitch held. Ankle pitch is solved so the contact box's world Z axis is as vertical as that joint can make it. `A` is the knee change that achieves the rise.
+
+### OP3 initial pose, scaled to AiNex lengths
+
+Checkout [`ROBOTIS-GIT/ROBOTIS-OP3`](https://github.com/ROBOTIS-GIT/ROBOTIS-OP3) **`3bc2bd514e8ee6054e9726d23c8c0b13236f84f0`** (2024-12-13). `op3_walking_module/src/op3_walking_module.cpp` `WalkingModule::initialize` writes an init pose and then calls `loadWalkingParam`, which replaces it from `op3_walking_module/config/param.yaml` (blob `540afd68383f8e9bc3ec262657b3c2a1309571d4`) before `updatePoseParam` copies those fields into the IK. The yaml is the pose the module IK's:
+
+| Field | param.yaml | Unit in the IK |
+|---|---|---|
+| `x_offset` | −0.020 | m |
+| `y_offset` | 0.015 | m |
+| `z_offset` | 0.035 | m |
+| `roll_offset`, `pitch_offset`, `yaw_offset` | 0 | deg in the file, × `DEGREE2RADIAN` |
+| `hip_pitch_offset` | 7 | deg in the file, × `DEGREE2RADIAN` |
+
+`DEGREE2RADIAN` is `(M_PI / 180.0)` in [`ROBOTIS-Math`](https://github.com/ROBOTIS-GIT/ROBOTIS-Math) `robotis_math/include/robotis_math/robotis_math_base.h` at `2413107b1f3bebaae61c24d3eb3bdaaf8bf45234`. The hardcoded block that yaml replaces is `init_x_offset −0.010`, `init_y_offset 0.005`, `init_z_offset 0.020`, `hip_pitch_offset 13°`. `init_position_` for the twelve leg joints is 0, and the IK angle is added to that.
+
+The live IK is `OP3KinematicsDynamics::calcInverseKinematicsForLeg` in `op3_kinematics_dynamics/src/op3_kinematics_dynamics.cpp`. OP3 lengths there are thigh `hypot(0.0001, 0.11015) = 0.110150 m`, calf `0.110 m`, ankle `0.0305 m` (leg `0.250650 m`). Scaling keeps the metre offsets and substitutes the plant chain, the same three reads as the PR #42 port: thigh `0.096887 m`, calf `0.089077 m`, sole drop `0.026 m` (leg `0.211964 m`). Joint signs are the plant axis sums. `computeLegAngle` then applies `hip_pitch_offset` on both hip pitches. The table is that pose with the gait sinusoids at zero. At time 0 the yaml's own z clock (`foot_height 0.06`, `swing_top_down 0.006`, period 600 ms, dsp 0.2) adds **−0.003 m** to `z_offset`; that sample's right-knee double-support torque is **0.313 N·m**, against **0.336 N·m** for the offset pose.
+
+With the OP3 lengths and the same offsets, the right knee in this plant's sign is **−1.121 rad** (hip pitch **0.574 rad**, ankle pitch **−0.670 rad**). With the AiNex lengths it is **−1.225 rad**.
+
+### The other two poses
+
+The 0.015 m crouch is the geometric pose in method 5: forward **0.395 rad**, knee flex **0.825 rad**, sole level, foot XY on the straight-leg foot. Body-to-sole drop **0.2225 m** against a straight-leg drop of **0.2375 m**.
+
+The +0.34 rad knee crouch is the stand in `d2e393b` (`scripts/steer_walk.py` `apply_frozen_forward_gait`: `HIP_BIAS_FWD = 0.06`, `KNEE_STANCE = 0.40`; `scripts/lipm_gait.py` adds `0.34` rad of knee and sets the ankle to hip+knee). `gait_targets` at that commit also sets hip roll to **−0.05 / +0.05 rad**. On this plant the body-to-sole distance goes from **0.2323 m** at flex 0.40 rad to **0.2179 m** at flex 0.74 rad. The measured drop is **0.0144 m**. Sole `n_z` is **0.999** because the hip roll is left in and the ankle roll stays 0.
+
+PR #42's own stand is a different command. `scripts/op3_walk.py` there uses `z_offset 0.015 m`, x and y offsets 0, and `hit_pitch_offset_ = 0`. Its time-0 stand, z clock included, returns right knee **−0.988 rad** and hip pitch **0.475 rad** (`docs/LIPM_VENDOR_LOOK.md` on that branch rounds those to ±0.99 and ±0.48). An IK target with `z_offset 0.015 m` and the other offsets at zero, sinusoids off, returns right knee **−0.813 rad**.
+
+| Pose | Right hip pitch | Right knee | Right ankle pitch | Body-to-sole |
+|---|---|---|---|---|
+| OP3 yaml, AiNex lengths | 0.578 rad | −1.225 rad | −0.769 rad | 0.2029 m |
+| 0.015 m geometric crouch | 0.395 rad | −0.825 rad | −0.431 rad | 0.2225 m |
+| +0.34 rad on the 0.40 rad stand | 0.060 rad | −0.740 rad | −0.680 rad | 0.2179 m |
+
+The OP3 row's sole `n_z` is **0.993**. The IK levels the foot, and the 7° hip-pitch offset is applied after that. Straight-leg body-to-sole is **0.2375 m**, so this pose shortens that distance by **0.0346 m** (the yaml `z_offset` is 0.035 m). Left-leg magnitudes match the right to **0.0002 N·m**. The right-knee support torque is negative on the plant's −Y knee axis.
+
+### Static torque
+
+N·m. "Of 2.45" is `|τ| / 2.45`.
+
+| Pose | Support | Knee | Ankle pitch | Knee / 2.45 | Knee moment arm, CoP − joint, x |
+|---|---|---|---|---|---|
+| OP3 yaml | double, 11.514 N/foot | 0.336 | 0.165 | 0.137 | −39.8 mm |
+| OP3 yaml | single, 23.029 N | 0.793 | 0.315 | 0.324 | −39.8 mm |
+| 0.015 m crouch | double | 0.203 | 0.141 | 0.083 | −25.3 mm |
+| 0.015 m crouch | single | 0.494 | 0.267 | 0.202 | −25.3 mm |
+| +0.34 rad | double | 0.382 | 0.140 | 0.156 | −44.2 mm |
+| +0.34 rad | single | 0.891 | 0.267 | 0.364 | −44.2 mm |
+
+With the foot unloaded (GRF 0) the OP3 right knee is **0.122 N·m**, the weight of the 0.2325 kg distal links. Every static cell is under ±2.45 N·m. The largest is the +0.34 rad pose in single support, **0.891 N·m**.
+
+**The OP3 starting pose is not deep enough to put the knee near ±2.45 N·m before swing.** Double support, which is the pose with both feet down, is **0.336 N·m** at the right knee and **0.165 N·m** at the right ankle pitch.
+
+### Knee armature at a 2 cm step height
+
+Right knee, armature **0.01**. Reflected link inertia is about **0.002 kg·m²**. Armature over that link term is **4.98×** at the OP3 pose, **5.22×** at the 0.015 m crouch, and **5.05×** at the +0.34 rad pose. Achieved sole rise is **0.0200 m** on each pose (residual under **10⁻⁵ m**).
+
+| Pose | Knee amplitude | `I_link` | 300 ms armature | 300 ms link | 300 ms full `M_ii` | 600 ms armature | 600 ms full `M_ii` |
+|---|---|---|---|---|---|---|---|
+| OP3 yaml | 0.337 rad | 0.002009 | 1.477 | 0.297 | 1.774 | 0.369 | 0.444 |
+| 0.015 m crouch | 0.392 rad | 0.001915 | 1.718 | 0.329 | 2.047 | 0.430 | 0.512 |
+| +0.34 rad | 0.308 rad | 0.001980 | 1.351 | 0.268 | 1.619 | 0.338 | 0.405 |
+
+Armature alone, link inertia alone, and full `M_ii` alone stay under ±2.45 N·m at 300–600 ms. The largest lone term is the 0.015 m crouch at 300 ms, full `M_ii` **2.047 N·m**.
+
+OP3 pose, static plus that acceleration. N·m.
+
+| Period | Armature | Link | Full `M_ii` | Double + full | Single + full | Double + armature | Single + armature |
+|---|---|---|---|---|---|---|---|
+| 300 ms | 1.477 | 0.297 | 1.774 | 2.110 | **2.567** | 1.813 | 2.271 |
+| 400 ms | 0.831 | 0.167 | 0.998 | 1.334 | 1.791 | 1.167 | 1.624 |
+| 500 ms | 0.532 | 0.107 | 0.639 | 0.974 | 1.432 | 0.868 | 1.325 |
+| 600 ms | 0.369 | 0.074 | 0.444 | 0.779 | 1.237 | 0.705 | 1.163 |
+
+The cell past ±2.45 N·m is **single support plus full knee inertia at 300 ms (2.567 N·m)**. The same stack at 300 ms is **2.542 N·m** on the 0.015 m crouch and **2.510 N·m** on the +0.34 rad pose. Double support plus full inertia at 300 ms stays under the rail on all three (**2.110**, **2.251**, **2.001 N·m**). Single support plus armature, without the link term, stays under on the OP3 pose (**2.271 N·m** at 300 ms).
+
+Peak viscous torque on the OP3 knee at 300 ms is **0.564 N·m**. Added to single support plus full inertia that is **3.132 N·m**. Added to double support plus full inertia it is **2.674 N·m**, which also crosses ±2.45 N·m. At 400–600 ms the OP3 single-support full-inertia total, viscous included, stays under (**2.215**, **1.771**, **1.519 N·m**).
+
+Raising the OP3 foot-target z by 0.02 m, with x, y, and orientation held, changes the right knee by **−0.334 rad**. The hip-held lift above changes it by **−0.337 rad**. The hip pitch also moves **0.136 rad** in that IK, and the table assigns the height to the knee.
+
 ## Verdict
 
 **sim body matches kit within 15%, so hip rail is gait/Controls.**
@@ -151,3 +242,5 @@ Viscous torque at the same peak speed, `0.08 × A × (2π / T)`, is about **0.20
 No leg link is a mass or link-inertia candidate for a later plant peel. The sim torso, hips, thighs, shanks, ankles, and feet are the Hiwonder URDF inertials. The Standard product weight is 4.2% above that sum and is not a per-link error in this plant.
 
 Armature `0.01` is an uncited add, about 1.4× the reflected link inertia at the crouched hips. At the kit gait presets the torque it adds is a fraction of ±2.45 N·m. It is not changed here. A later peel would need a cited rotor inertia; this pass did not find one for the HX-35H.
+
+The OP3 yaml start, scaled to these leg lengths, holds the right knee at **0.336 N·m** in double support and **0.793 N·m** in single support. That is the stand, before the 2 cm lift. The 300 ms single-support stack with the full knee inertia of that lift is **2.567 N·m**, past ±2.45 N·m. The stand by itself is not.

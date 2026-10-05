@@ -7,7 +7,8 @@ Read-only. Does not edit plant XML. Loads:
 - the PR #43 thaw tip of that same file (git show; mesh symlink only)
 
 and the vendored URDF, which ``git hash-object`` must match the Hiwonder
-blob cited in ``docs/PLANT_MASS_VS_KIT.md``.
+blob cited in ``docs/PLANT_MASS_VS_KIT.md``. The same run prints the knee
+and ankle-pitch static torques and the 2 cm knee-lift inertia term.
 
 Run from anywhere:
 
@@ -639,6 +640,585 @@ def static_hip_torque(
     }
 
 
+@dataclass(frozen=True)
+class LegLengths:
+    """Analytic thigh / calf / sole chain. Metres and radians."""
+
+    thigh_m: float
+    calf_m: float
+    ankle_m: float
+    hip_pitch_offset_m: float
+    hip_offset_angle_rad: float
+
+
+# OP3 link lengths at ROBOTIS-OP3 3bc2bd51, op3_kinematics_dynamics.cpp.
+# Thigh is the knee-link xz distance (relative pos 0.0001, 0, -0.11015).
+# Calf is |ankle-pitch z| = 0.110. Ankle is |leg-end z| = 0.0305.
+# hip_offset_angle_rad_ = atan2(0.0001, 0.11015); hip_pitch_offset_m_ = 0.0001.
+OP3_LENGTHS = LegLengths(
+    thigh_m=math.hypot(0.0001, 0.11015),
+    calf_m=0.110,
+    ankle_m=0.0305,
+    hip_pitch_offset_m=0.0001,
+    hip_offset_angle_rad=math.atan2(0.0001, 0.11015),
+)
+
+# param.yaml after loadWalkingParam. Degrees are converted by DEGREE2RADIAN
+# (M_PI/180) in ROBOTIS-Math robotis_math_base.h.
+OP3_X_OFFSET_M = -0.020
+OP3_Y_OFFSET_M = 0.015
+OP3_Z_OFFSET_M = 0.035
+OP3_HIP_PITCH_OFFSET_RAD = 7.0 * math.pi / 180.0
+
+# +0.34 rad knee on the stand that measured it: steer_walk.apply_frozen_forward_gait
+# at d2e393b sets HIP_BIAS_FWD = 0.06 and KNEE_STANCE = 0.40, then lipm_gait adds
+# 0.34 rad of knee and sets the ankle to hip+knee. gait_targets also sets hip roll.
+KNEE_STAND_FLEX_RAD = 0.40
+HIP_BIAS_FWD_RAD = 0.06
+KNEE_EXTRA_FLEX_RAD = 0.34
+STAND_HIP_ROLL_L_RAD = -0.05
+STAND_HIP_ROLL_R_RAD = 0.05
+
+_LEG_R: tuple[str, ...] = ("r_hip_yaw", "r_hip_roll", "r_hip_pitch", "r_knee", "r_ank_pitch", "r_ank_roll")
+_LEG_L: tuple[str, ...] = ("l_hip_yaw", "l_hip_roll", "l_hip_pitch", "l_knee", "l_ank_pitch", "l_ank_roll")
+STEP_HEIGHT_M = 0.02
+RAIL_NM = 2.45
+
+
+def _rot_x(angle: float) -> np.ndarray:
+    c = math.cos(angle)
+    s = math.sin(angle)
+    return np.array([[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]], dtype=np.float64)
+
+
+def _rot_y(angle: float) -> np.ndarray:
+    c = math.cos(angle)
+    s = math.sin(angle)
+    return np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]], dtype=np.float64)
+
+
+def _rot_z(angle: float) -> np.ndarray:
+    c = math.cos(angle)
+    s = math.sin(angle)
+    return np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]], dtype=np.float64)
+
+
+def _rpy(roll: float, pitch: float, yaw: float) -> np.ndarray:
+    return _rot_z(yaw) @ _rot_y(pitch) @ _rot_x(roll)
+
+
+def _sign(value: float) -> float:
+    return 1.0 if value >= 0.0 else -1.0
+
+
+def lengths_from_model(model: mujoco.MjModel) -> LegLengths:
+    """Same three lengths ``lengths_from_model`` reads on the OP3 IK port."""
+    knee = _body_id(model, "r_knee_link")
+    ank = _body_id(model, "r_ank_pitch_link")
+    foot = _geom_id(model, "r_foot_contact")
+    knee_pos = np.asarray(model.body_pos[knee], dtype=np.float64)
+    calf = abs(float(model.body_pos[ank][2]))
+    sole_z = float(model.geom_pos[foot][2] - model.geom_size[foot][2])
+    ankle = abs(sole_z)
+    hip_x = float(knee_pos[0])
+    return LegLengths(
+        thigh_m=float(math.hypot(hip_x, float(knee_pos[2]))),
+        calf_m=calf,
+        ankle_m=ankle,
+        hip_pitch_offset_m=hip_x,
+        hip_offset_angle_rad=math.atan2(hip_x, abs(float(knee_pos[2]))),
+    )
+
+
+def ik_leg(
+    lengths: LegLengths,
+    x: float,
+    y: float,
+    z: float,
+    roll: float,
+    pitch: float,
+    yaw: float,
+) -> np.ndarray:
+    """``OP3KinematicsDynamics::calcInverseKinematicsForLeg``.
+
+    Six angles before the joint-direction multiply: hip yaw, hip roll,
+    hip pitch, knee, ankle pitch, ankle roll.
+    """
+    r06 = _rpy(roll, pitch, yaw)
+    p06 = np.array([x, y, z], dtype=np.float64) + lengths.ankle_m * r06[:, 2]
+    p60 = -r06.T @ p06
+    out = np.zeros(6, dtype=np.float64)
+    out[5] = math.atan2(float(p60[1]), float(p60[2]))
+    r05 = r06 @ _rot_x(-float(out[5]))
+    out[0] = math.atan2(-float(r05[0, 1]), float(r05[1, 1]))
+    p03 = _rot_z(float(out[0])) @ np.array([lengths.hip_pitch_offset_m, 0.0, 0.0], dtype=np.float64)
+    p36 = p06 - p03
+    dist = float(np.linalg.norm(p36))
+    if dist < 1e-8:
+        raise SystemExit("OP3 IK: zero hip-to-ankle distance")
+    cos_knee = (lengths.thigh_m ** 2 + lengths.calf_m ** 2 - dist ** 2) / (2.0 * lengths.thigh_m * lengths.calf_m)
+    if abs(cos_knee) > 1.0 + 1e-6:
+        raise SystemExit(f"OP3 IK: knee cosine {cos_knee} out of range")
+    cos_knee = max(-1.0, min(1.0, cos_knee))
+    out[3] = -math.acos(cos_knee) + math.pi
+    sin_arg = lengths.thigh_m * math.sin(math.pi - float(out[3])) / dist
+    if abs(sin_arg) > 1.0 + 1e-6:
+        raise SystemExit(f"OP3 IK: knee sine {sin_arg} out of range")
+    sin_arg = max(-1.0, min(1.0, sin_arg))
+    alpha = math.asin(sin_arg)
+    p63 = -r06.T @ p36
+    horiz = math.sqrt(float(p63[1]) ** 2 + float(p63[2]) ** 2)
+    out[4] = -math.atan2(float(p63[0]), _sign(float(p63[2])) * horiz) - alpha
+    r13 = _rot_z(-float(out[0])) @ r05 @ _rot_y(-(float(out[4]) + float(out[3])))
+    out[1] = math.atan2(float(r13[2, 1]), float(r13[1, 1]))
+    out[2] = math.atan2(float(r13[0, 2]), float(r13[0, 0]))
+    out[2] += lengths.hip_offset_angle_rad
+    out[3] -= lengths.hip_offset_angle_rad
+    if not np.all(np.isfinite(out)):
+        raise SystemExit("OP3 IK: non-finite angle")
+    return out
+
+
+def _axis_sum(model: mujoco.MjModel, joint: str) -> float:
+    jid = _joint_id(model, joint)
+    axis = np.asarray(model.jnt_axis[jid], dtype=np.float64)
+    return float(axis[0] + axis[1] + axis[2])
+
+
+def _apply_ik_leg(
+    raw: np.ndarray,
+    directions: dict[str, float],
+    names: tuple[str, ...],
+    hip_pitch_offset: float,
+) -> dict[str, float]:
+    """Direction multiply, then the walking module's hip-pitch offset."""
+    out: dict[str, float] = {}
+    for i, name in enumerate(names):
+        out[name] = float(raw[i]) * directions[name]
+    hip_name = names[2]
+    out[hip_name] = out[hip_name] - directions[hip_name] * hip_pitch_offset
+    return out
+
+
+def op3_endpoints(lengths: LegLengths, z_offset: float, x_offset: float, y_offset: float) -> tuple[np.ndarray, np.ndarray]:
+    """Foot targets with the gait sinusoids at zero.
+
+    ``computeLegAngle`` uses ``ep_z = z_offset - leg_length``. x and y are the
+    init offsets. Roll, pitch, and yaw offsets are 0 in param.yaml.
+    """
+    leg = lengths.thigh_m + lengths.calf_m + lengths.ankle_m
+    right = np.array([x_offset, -y_offset / 2.0, z_offset - leg, 0.0, 0.0, 0.0], dtype=np.float64)
+    left = np.array([x_offset, y_offset / 2.0, z_offset - leg, 0.0, 0.0, 0.0], dtype=np.float64)
+    return right, left
+
+
+def op3_pose(
+    model: mujoco.MjModel,
+    lengths: LegLengths,
+    z_offset: float,
+    x_offset: float,
+    y_offset: float,
+    hip_pitch_offset: float,
+) -> dict[str, float]:
+    directions = {name: _axis_sum(model, name) for name in _LEG_R + _LEG_L}
+    right, left = op3_endpoints(lengths, z_offset, x_offset, y_offset)
+    raw_r = ik_leg(lengths, float(right[0]), float(right[1]), float(right[2]), float(right[3]), float(right[4]), float(right[5]))
+    raw_l = ik_leg(lengths, float(left[0]), float(left[1]), float(left[2]), float(left[3]), float(left[4]), float(left[5]))
+    angles = dict(INIT_ARM)
+    angles.update(_apply_ik_leg(raw_r, directions, _LEG_R, hip_pitch_offset))
+    angles.update(_apply_ik_leg(raw_l, directions, _LEG_L, hip_pitch_offset))
+    return angles
+
+
+def clock0_z_added(period_s: float, dsp: float, foot_height: float, z_swap: float) -> float:
+    """``swap.z + right_leg_move.z`` at time 0, from the yaml gait terms.
+
+    ``updateMovementParam`` halves ``foot_height`` into ``z_move_amplitude_``
+    and sets the shift to half of that. At time 0 the right foot's z sample
+    is frozen at ``r_ssp_start``. This is not part of the init-offset pose.
+    """
+    ssp = 1.0 - dsp
+    l_ssp_start = (1.0 - ssp) * period_s / 4.0
+    r_ssp_start = (3.0 - ssp) * period_s / 4.0
+    z_move_period = period_s * ssp / 2.0
+    z_move_amp = foot_height / 2.0
+    z_move_shift = z_move_amp / 2.0
+    z_phase = math.pi / 2.0
+    swap_z = z_swap * math.sin(-1.5 * math.pi) + z_swap
+
+    def wsin(time: float, period: float, phase: float, mag: float, shift: float) -> float:
+        return mag * math.sin(2.0 * math.pi / period * time - phase) + shift
+
+    phase_r = z_phase + 2.0 * math.pi / z_move_period * r_ssp_start
+    move_r = wsin(r_ssp_start, z_move_period, phase_r, z_move_amp, z_move_shift)
+    phase_l = z_phase + 2.0 * math.pi / z_move_period * l_ssp_start
+    move_l = wsin(l_ssp_start, z_move_period, phase_l, z_move_amp, z_move_shift)
+    return swap_z + move_r if abs(move_r - move_l) < 1e-9 else float("nan")
+
+
+def _pose_only(angles: dict[str, float]) -> dict[str, float]:
+    return {k: float(v) for k, v in angles.items() if not k.startswith("_")}
+
+
+def knee_crouch_pose(flex: float, fwd: float) -> dict[str, float]:
+    """Level-sole sagittal pose plus the stand hip-roll from ``gait_targets``."""
+    angles = dict(INIT_ARM)
+    angles.update(leg_pitch_angles(flex, fwd))
+    angles["l_hip_roll"] = STAND_HIP_ROLL_L_RAD
+    angles["r_hip_roll"] = STAND_HIP_ROLL_R_RAD
+    return angles
+
+
+def body_sole_drop(model: mujoco.MjModel, data: mujoco.MjData, side: str) -> float:
+    sole = sole_metrics(model, data, side)[2]
+    body_z = float(data.xpos[_body_id(model, "body_link")][2])
+    return body_z - sole
+
+
+def static_joint_torque(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    joint: str,
+    distal: tuple[str, ...],
+    grf_z: float,
+    foot_side: str,
+) -> dict[str, float]:
+    """GRF at the contact-box center plus distal link weight, on the joint axis."""
+    jid = _joint_id(model, joint)
+    anchor = np.array(data.xanchor[jid], dtype=np.float64)
+    axis = np.array(data.xaxis[jid], dtype=np.float64)
+    gid = _geom_id(model, f"{foot_side}_foot_contact")
+    cop = np.array(data.geom_xpos[gid], dtype=np.float64)
+    grf = np.array([0.0, 0.0, grf_z], dtype=np.float64)
+    tau = np.cross(cop - anchor, grf)
+    distal_mass = 0.0
+    for name in distal:
+        bid = _body_id(model, name)
+        mass = float(model.body_mass[bid])
+        distal_mass += mass
+        com = np.array(data.xipos[bid], dtype=np.float64)
+        weight = np.array([0.0, 0.0, -mass * G], dtype=np.float64)
+        tau = tau + np.cross(com - anchor, weight)
+    signed = float(np.dot(tau, axis))
+    return {
+        "tau_nm": signed,
+        "abs_nm": abs(signed),
+        "distal_mass_kg": distal_mass,
+        "grf_z_n": grf_z,
+        "cop_x_m": float(cop[0] - anchor[0]),
+        "cop_y_m": float(cop[1] - anchor[1]),
+        "cop_z_m": float(cop[2] - anchor[2]),
+    }
+
+
+def _distal(side: str, which: str) -> tuple[str, tuple[str, ...]]:
+    prefix = f"{side}_"
+    if which == "knee":
+        return (
+            f"{prefix}knee",
+            (f"{prefix}knee_link", f"{prefix}ank_pitch_link", f"{prefix}ank_roll_link"),
+        )
+    if which == "ank_pitch":
+        return (
+            f"{prefix}ank_pitch",
+            (f"{prefix}ank_pitch_link", f"{prefix}ank_roll_link"),
+        )
+    raise SystemExit(which)
+
+
+def support_torques(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    pose: dict[str, float],
+    total_mass: float,
+) -> dict[str, dict[str, float]]:
+    """Equal double-support split, and single support on each foot."""
+    set_pose(model, data, _pose_only(pose))
+    half = 0.5 * total_mass * G
+    full = total_mass * G
+    out: dict[str, dict[str, float]] = {}
+    for side in ("r", "l"):
+        for which in ("knee", "ank_pitch"):
+            joint, distal = _distal(side, which)
+            out[f"ds:{side}:{which}"] = static_joint_torque(model, data, joint, distal, half, side)
+            out[f"ss:{side}:{which}"] = static_joint_torque(model, data, joint, distal, full, side)
+            out[f"swing:{side}:{which}"] = static_joint_torque(model, data, joint, distal, 0.0, side)
+    return out
+
+
+def solve_ank_pitch_level(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    base: dict[str, float],
+    side: str,
+    knee: float,
+) -> float:
+    prefix = "r_" if side == "r" else "l_"
+    joint = f"{prefix}ank_pitch"
+    best_up = -2.0
+    best = float(base[joint])
+
+    def up_at(ank: float) -> float:
+        angles = _pose_only(base)
+        angles[f"{prefix}knee"] = knee
+        angles[joint] = ank
+        set_pose(model, data, angles)
+        return sole_metrics(model, data, side)[3]
+
+    for ank in np.linspace(-2.0, 2.0, 81):
+        up = up_at(float(ank))
+        if up > best_up:
+            best_up = up
+            best = float(ank)
+    span = 0.08
+    for _ in range(6):
+        for ank in np.linspace(best - span, best + span, 21):
+            up = up_at(float(ank))
+            if up > best_up:
+                best_up = up
+                best = float(ank)
+        span *= 0.4
+    return best
+
+
+def solve_knee_lift(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    base: dict[str, float],
+    side: str,
+    height_m: float,
+) -> dict[str, float]:
+    """Knee change that raises this sole by ``height_m``.
+
+    Hip pitch, hip roll, and hip yaw stay at the pose. Ankle pitch is the
+    value that makes the contact box's world Z axis as vertical as that
+    one joint can. The search is on the right knee for the rail.
+    """
+    prefix = "r_" if side == "r" else "l_"
+    clean = _pose_only(base)
+    set_pose(model, data, clean)
+    sole0 = sole_metrics(model, data, side)[2]
+    knee0 = float(clean[f"{prefix}knee"])
+    target = sole0 + height_m
+
+    def evaluate(knee: float) -> tuple[float, float, float, float]:
+        ank = solve_ank_pitch_level(model, data, clean, side, knee)
+        angles = dict(clean)
+        angles[f"{prefix}knee"] = knee
+        angles[f"{prefix}ank_pitch"] = ank
+        set_pose(model, data, angles)
+        _dx, _dy, sole, up = sole_metrics(model, data, side)
+        return sole - target, ank, sole, up
+
+    best = float("inf")
+    best_knee = knee0
+    best_ank = float(clean[f"{prefix}ank_pitch"])
+    best_sole = sole0
+    best_up = 0.0
+    for knee in np.linspace(knee0 - 1.2, knee0 + 1.2, 49):
+        err, ank, sole, up = evaluate(float(knee))
+        if abs(err) < best:
+            best = abs(err)
+            best_knee = float(knee)
+            best_ank = ank
+            best_sole = sole
+            best_up = up
+    span = 0.06
+    for _ in range(6):
+        for knee in np.linspace(best_knee - span, best_knee + span, 21):
+            err, ank, sole, up = evaluate(float(knee))
+            if abs(err) < best:
+                best = abs(err)
+                best_knee = float(knee)
+                best_ank = ank
+                best_sole = sole
+                best_up = up
+        span *= 0.45
+    return {
+        "knee0_rad": knee0,
+        "knee_rad": best_knee,
+        "d_knee_rad": best_knee - knee0,
+        "ank_rad": best_ank,
+        "sole0_m": sole0,
+        "sole_m": best_sole,
+        "height_m": best_sole - sole0,
+        "height_err_m": best_sole - target,
+        "foot_up_z": best_up,
+    }
+
+
+def knee_dynamic(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    pose: dict[str, float],
+    lift: dict[str, float],
+    static_abs: dict[str, float],
+) -> dict[str, object]:
+    """Armature and link inertia at the pose, times the 2 cm knee amplitude."""
+    set_pose(model, data, _pose_only(pose))
+    total_i, arm, link_i = reflected_link_inertia(model, data, "r_knee")
+    amplitude = abs(float(lift["d_knee_rad"]))
+    rows: list[dict[str, float]] = []
+    for period in (0.300, 0.400, 0.500, 0.600):
+        omega = 2.0 * math.pi / period
+        alpha = amplitude * omega * omega
+        tau_arm = arm * alpha
+        tau_link = link_i * alpha
+        tau_full = total_i * alpha
+        viscous = 0.08 * amplitude * omega
+        row: dict[str, float] = {
+            "period_s": period,
+            "alpha_rad_s2": alpha,
+            "tau_arm_nm": tau_arm,
+            "tau_link_nm": tau_link,
+            "tau_full_nm": tau_full,
+            "tau_viscous_nm": viscous,
+        }
+        for key, static_nm in static_abs.items():
+            row[f"{key}_plus_arm_nm"] = static_nm + tau_arm
+            row[f"{key}_plus_full_nm"] = static_nm + tau_full
+            row[f"{key}_plus_full_visc_nm"] = static_nm + tau_full + viscous
+        rows.append(row)
+    return {
+        "M_ii": total_i,
+        "armature": arm,
+        "I_link": link_i,
+        "arm_over_link": arm / link_i if link_i else float("nan"),
+        "amplitude_rad": amplitude,
+        "rows": rows,
+    }
+
+
+def pose_snapshot(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    pose: dict[str, float],
+) -> dict[str, float]:
+    set_pose(model, data, _pose_only(pose))
+    out: dict[str, float] = {}
+    for name in (
+        "r_hip_pitch",
+        "r_knee",
+        "r_ank_pitch",
+        "r_hip_roll",
+        "l_hip_pitch",
+        "l_knee",
+        "l_ank_pitch",
+        "l_hip_roll",
+    ):
+        out[name] = float(pose.get(name, 0.0))
+    for side in ("r", "l"):
+        dx, dy, sole, up = sole_metrics(model, data, side)
+        out[f"{side}_dx_m"] = dx
+        out[f"{side}_dy_m"] = dy
+        out[f"{side}_drop_m"] = body_sole_drop(model, data, side)
+        out[f"{side}_up_z"] = up
+        out[f"{side}_sole_z_m"] = sole
+    return out
+
+
+def build_knee_report(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    crouch_pose: dict[str, float],
+    total_mass: float,
+    rail_nm: float,
+) -> dict[str, object]:
+    """Static knee/ankle torque and the 2 cm knee-lift inertia term."""
+    lengths = lengths_from_model(model)
+    op3 = op3_pose(
+        model,
+        lengths,
+        OP3_Z_OFFSET_M,
+        OP3_X_OFFSET_M,
+        OP3_Y_OFFSET_M,
+        OP3_HIP_PITCH_OFFSET_RAD,
+    )
+    z_clock = clock0_z_added(0.600, 0.2, 0.060, 0.006)
+    op3_clock = op3_pose(
+        model,
+        lengths,
+        OP3_Z_OFFSET_M + z_clock,
+        OP3_X_OFFSET_M,
+        OP3_Y_OFFSET_M,
+        OP3_HIP_PITCH_OFFSET_RAD,
+    )
+    # Cross-check against the PR #42 stand: z_offset 0.015, other offsets 0.
+    ik_z015 = op3_pose(model, lengths, 0.015, 0.0, 0.0, 0.0)
+    native = op3_pose(
+        model,
+        OP3_LENGTHS,
+        OP3_Z_OFFSET_M,
+        OP3_X_OFFSET_M,
+        OP3_Y_OFFSET_M,
+        OP3_HIP_PITCH_OFFSET_RAD,
+    )
+    stand_034 = knee_crouch_pose(KNEE_STAND_FLEX_RAD, HIP_BIAS_FWD_RAD)
+    crouch_034 = knee_crouch_pose(KNEE_STAND_FLEX_RAD + KNEE_EXTRA_FLEX_RAD, HIP_BIAS_FWD_RAD)
+    poses: dict[str, dict[str, float]] = {
+        "op3_init": op3,
+        "crouch_015": crouch_pose,
+        "knee_034": crouch_034,
+    }
+    snapshots: dict[str, dict[str, float]] = {}
+    torques: dict[str, dict[str, dict[str, float]]] = {}
+    lifts: dict[str, dict[str, float]] = {}
+    dynamics: dict[str, dict[str, object]] = {}
+    for name, pose in poses.items():
+        snapshots[name] = pose_snapshot(model, data, pose)
+        torques[name] = support_torques(model, data, pose, total_mass)
+        lifts[name] = solve_knee_lift(model, data, pose, "r", STEP_HEIGHT_M)
+        static_abs = {
+            "ds": torques[name]["ds:r:knee"]["abs_nm"],
+            "ss": torques[name]["ss:r:knee"]["abs_nm"],
+        }
+        dynamics[name] = knee_dynamic(model, data, pose, lifts[name], static_abs)
+    set_pose(model, data, _pose_only(stand_034))
+    stand_drop = body_sole_drop(model, data, "r")
+    set_pose(model, data, _pose_only(crouch_034))
+    crouch_drop = body_sole_drop(model, data, "r")
+    set_pose(model, data, dict(INIT_ARM))
+    straight_drop = body_sole_drop(model, data, "r")
+    return {
+        "lengths_ainex": {
+            "thigh_m": lengths.thigh_m,
+            "calf_m": lengths.calf_m,
+            "ankle_m": lengths.ankle_m,
+            "hip_pitch_offset_m": lengths.hip_pitch_offset_m,
+            "hip_offset_angle_rad": lengths.hip_offset_angle_rad,
+            "leg_m": lengths.thigh_m + lengths.calf_m + lengths.ankle_m,
+        },
+        "lengths_op3": {
+            "thigh_m": OP3_LENGTHS.thigh_m,
+            "calf_m": OP3_LENGTHS.calf_m,
+            "ankle_m": OP3_LENGTHS.ankle_m,
+            "leg_m": OP3_LENGTHS.thigh_m + OP3_LENGTHS.calf_m + OP3_LENGTHS.ankle_m,
+        },
+        "weight_n": total_mass * G,
+        "half_weight_n": 0.5 * total_mass * G,
+        "rail_nm": rail_nm,
+        "clock0_z_added_m": z_clock,
+        "native_angles": {k: float(native[k]) for k in ("r_hip_pitch", "r_knee", "r_ank_pitch", "l_hip_pitch", "l_knee", "l_ank_pitch")},
+        "ik_z015_angles": {k: float(ik_z015[k]) for k in ("r_hip_pitch", "r_knee", "r_ank_pitch", "l_knee")},
+        "stand_034_drop_m": stand_drop,
+        "knee_034_drop_m": crouch_drop,
+        "knee_034_delta_drop_m": stand_drop - crouch_drop,
+        "straight_drop_m": straight_drop,
+        "snapshots": snapshots,
+        "torques": torques,
+        "lifts": lifts,
+        "dynamics": dynamics,
+        "op3_clock_snapshot": pose_snapshot(model, data, op3_clock),
+        "op3_clock_torque_ds_knee": support_torques(model, data, op3_clock, total_mass)["ds:r:knee"],
+    }
+
+
+def joint_force_limit(model: mujoco.MjModel, joint: str) -> float:
+    jid = _joint_id(model, joint)
+    limit = np.asarray(model.jnt_actfrcrange[jid], dtype=np.float64)
+    return float(max(abs(float(limit[0])), abs(float(limit[1]))))
+
+
 def pct(sim: float, kit: float) -> float:
     if abs(kit) < 1e-15:
         return float("nan")
@@ -799,6 +1379,20 @@ def main() -> None:
     for which in ("roll", "pitch"):
         static[f"0.00:{which}"] = static_hip_torque(model, data, "r", which, total)
 
+    thaw_model = load_model(thaw_xml)
+    for side in ("r", "l"):
+        gid_main = _geom_id(model, f"{side}_foot_contact")
+        gid_thaw = _geom_id(thaw_model, f"{side}_foot_contact")
+        if not np.allclose(model.geom_pos[gid_main], thaw_model.geom_pos[gid_thaw]):
+            raise SystemExit(f"{side} foot contact pos differs between plants")
+        if abs(float(model.geom_size[gid_main][2]) - float(thaw_model.geom_size[gid_thaw][2])) > 1e-12:
+            raise SystemExit(f"{side} foot contact half-z differs between plants")
+    thaw_rail = joint_force_limit(thaw_model, "r_knee")
+    main_rail = joint_force_limit(model, "r_knee")
+    knee_report = build_knee_report(model, data, crouch_pose, total, thaw_rail)
+    knee_report["main_rail_nm"] = main_rail
+    knee_report["thaw_rail_nm"] = thaw_rail
+
     periods_s = (0.300, 0.400, 0.500, 0.600)
     a_pitch = abs(float(step["d_hip_rad"]))
     arm_torque: list[dict[str, float]] = []
@@ -901,6 +1495,7 @@ def main() -> None:
         },
         "reflected": reflected,
         "arm_torque": arm_torque,
+        "knee": knee_report,
         "joints": dyn_rows,
         "links": link_rows,
         "max_tensor_abs": max(float(row["tensor_max_abs"]) for row in link_rows),
