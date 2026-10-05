@@ -44,6 +44,10 @@ SCORE_MIN = 0.06
 # bed 0.102 versus bathtub 0.092 is a 0.010 gap and does not commit.
 VOTE_FRAMES = 3
 VOTE_MARGIN = 0.15
+# Bedroom only, after a straight pose stays undecided. Positive yaw faces
+# the nightstand and lamp. Negative yaw faces the dresser, prompted as a
+# wardrobe. Scripted looks. No vel.
+RELOOK_YAW = (0.55, 0.90, -0.75, -1.05)
 # Object text, then the room it votes for. Room-name labels are not used.
 # Cupboard is the cabinet hit on this kit_cam. Fridge, oven, stove, and
 # kitchen sink stay in the map and score under the door.
@@ -57,6 +61,11 @@ OBJECTS: tuple[tuple[str, str], ...] = (
     ("bathtub", "bathroom"),
     ("bathroom sink", "bathroom"),
     ("bed", "bedroom"),
+    ("pillow", "bedroom"),
+    ("nightstand", "bedroom"),
+    ("wardrobe", "bedroom"),
+    ("lamp", "bedroom"),
+    ("rug", "bedroom"),
     ("sofa", "living"),
     ("TV", "living"),
     ("couch", "living"),
@@ -464,6 +473,21 @@ def test_phrases() -> list[str]:
     noise = {name: 0.01 for name, _room in OBJECTS}
     vote = decide_window([_frame(noise), _frame(noise), _frame(noise)])
     _expect(vote.room is None and vote.vote < SCORE_MIN, f"plant noise committed {vote}", failures)
+    _expect(SCORE_MIN == 0.06, "cutoff moved", failures)
+    _expect(VOTE_MARGIN == 0.15, "margin moved", failures)
+    thin = {name: 0.0 for name, _room in OBJECTS}
+    thin["bed"] = 0.10
+    thin["pillow"] = 0.08
+    thin["couch"] = 0.09
+    thin["sofa"] = 0.08
+    vote = decide_window([_frame(thin)])
+    _expect(vote.room is None, f"thin bedroom lead committed {vote}", failures)
+    wide = dict(thin)
+    wide["nightstand"] = 0.08
+    wide["lamp"] = 0.08
+    wide["wardrobe"] = 0.08
+    vote = decide_window([_frame(wide)])
+    _expect(vote.room == "bedroom", f"bedroom objects did not commit {vote}", failures)
     return failures
 
 
@@ -633,6 +657,43 @@ def _bearing_stats(bearings: list[float]) -> dict[str, float | None]:
     return {"std": math.sqrt(var), "max_step": max(steps)}
 
 
+def _read_pose(session, cam, detector: RoomDetector, x: float, yaw: float):
+    _set_scripted_pose(session, x, yaw)
+    seen = detector.read(cam.grab(session.data))
+    frame = _frame(seen.object_scores or {}, seen.object_bias or {})
+    return seen, frame
+
+
+def _sample_record(x, yaw, seen: Detection, vote: Vote, fovy: float, scene: str, relook: bool) -> dict[str, object]:
+    object_scores = seen.object_scores or {}
+    raw_bearing = None if seen.room is None else _bearing_rad(seen.bias, fovy)
+    return {
+        "x_m": x,
+        "yaw": yaw,
+        "relook_pose": relook,
+        "raw_object": seen.object_name,
+        "raw_room": seen.room,
+        "raw_score": seen.score,
+        "room": vote.room,
+        "vote": vote.vote,
+        "gap": vote.gap,
+        "runner": vote.runner,
+        "bearing_rad": vote.bearing,
+        "raw_bearing_rad": raw_bearing,
+        "scores": seen.scores,
+        "object_scores": object_scores,
+        "object_bias": seen.object_bias or {},
+        "false_objects": _false_object_hits(object_scores, scene),
+        "hit": vote.room == scene,
+    }
+
+
+def _views(sample: dict[str, object]):
+    yield sample
+    for extra in sample.get("relook") or []:
+        yield extra
+
+
 def detect_paths(detector: RoomDetector) -> dict[str, object]:
     """Score kit_cam along a scripted line. No CommandBus vel."""
     scenes: list[dict[str, object]] = []
@@ -641,31 +702,43 @@ def detect_paths(detector: RoomDetector) -> dict[str, object]:
         cam = fk.KitCam(session.model)
         fovy = float(session.model.cam_fovy[cam.cam_id])
         samples: list[dict[str, object]] = []
+        straight: list[dict[str, object]] = []
         try:
             for x in DETECT_X_M:
-                _set_scripted_pose(session, x)
-                seen = detector.read(cam.grab(session.data))
-                object_scores = seen.object_scores or {}
-                object_bias = seen.object_bias or {}
-                samples.append(_frame(object_scores, object_bias))
-                vote = decide_window(samples, fovy)
-                false_hits = _false_object_hits(object_scores, scene)
-                raw_bearing = None if seen.room is None else _bearing_rad(seen.bias, fovy)
-                samples[-1].update({
-                    "x_m": x,
-                    "raw_object": seen.object_name,
-                    "raw_room": seen.room,
-                    "raw_score": seen.score,
-                    "room": vote.room,
-                    "vote": vote.vote,
-                    "gap": vote.gap,
-                    "runner": vote.runner,
-                    "bearing_rad": vote.bearing,
-                    "raw_bearing_rad": raw_bearing,
-                    "scores": seen.scores,
-                    "false_objects": false_hits,
-                    "hit": vote.room == scene,
-                })
+                seen, frame = _read_pose(session, cam, detector, x, 0.0)
+                straight.append(frame)
+                vote = decide_window(straight, fovy)
+                sample = _sample_record(x, 0.0, seen, vote, fovy, scene, relook=False)
+                sample["straight_room"] = vote.room
+                sample["straight_gap"] = vote.gap
+                sample["straight_hit"] = vote.room == scene
+                sample["relook_intent"] = None
+                sample["relook"] = []
+                if scene == "bedroom" and vote.room is None:
+                    sample["relook_intent"] = (
+                        f"undecided; lead {vote.gap:.3f} under {VOTE_MARGIN:.2f}; keep looking"
+                    )
+                    looked = list(straight)
+                    for yaw in RELOOK_YAW:
+                        seen_y, frame_y = _read_pose(session, cam, detector, x, yaw)
+                        looked.append(frame_y)
+                        vote_y = decide_window(looked, fovy)
+                        turned = _sample_record(x, yaw, seen_y, vote_y, fovy, scene, relook=True)
+                        sample["relook"].append(turned)
+                        vote = vote_y
+                        seen = seen_y
+                        if vote_y.room is not None:
+                            break
+                    sample.update({
+                        "room": vote.room,
+                        "vote": vote.vote,
+                        "gap": vote.gap,
+                        "runner": vote.runner,
+                        "bearing_rad": vote.bearing,
+                        "hit": vote.room == scene,
+                        "yaw": sample["relook"][-1]["yaw"] if sample["relook"] else 0.0,
+                    })
+                samples.append(sample)
         finally:
             cam.close()
         hits = [sample for sample in samples if sample["hit"]]
@@ -675,15 +748,16 @@ def detect_paths(detector: RoomDetector) -> dict[str, object]:
         committed_false: dict[str, dict[str, object]] = {}
         object_max: dict[str, float] = {}
         for sample in samples:
-            for name, score in sample["object_scores"].items():
-                object_max[name] = max(object_max.get(name, 0.0), float(score))
-            for row in sample["false_objects"]:
-                key = str(row["object"])
-                prev = false_best.get(key)
-                if prev is None or float(row["score"]) > float(prev["score"]):
-                    false_best[key] = row
-                if sample["room"] not in (None, scene):
-                    committed_false[key] = false_best[key]
+            for view in _views(sample):
+                for name, score in view["object_scores"].items():
+                    object_max[name] = max(object_max.get(name, 0.0), float(score))
+                for row in view["false_objects"]:
+                    key = str(row["object"])
+                    prev = false_best.get(key)
+                    if prev is None or float(row["score"]) > float(prev["score"]):
+                        false_best[key] = row
+                    if view["room"] not in (None, scene):
+                        committed_false[key] = false_best[key]
         if scene == "plant":
             true_object = None
             true_max = 0.0
@@ -703,6 +777,8 @@ def detect_paths(detector: RoomDetector) -> dict[str, object]:
             "scene": scene,
             "poses": len(samples),
             "hits": len(hits),
+            "straight_hits": sum(1 for sample in samples if sample["straight_hit"]),
+            "relooks": sum(1 for sample in samples if sample["relook"]),
             "winner_object": true_object,
             "winner_score": true_max,
             "fired_objects": fired,
@@ -712,7 +788,7 @@ def detect_paths(detector: RoomDetector) -> dict[str, object]:
             "min_gap": min((float(sample["gap"]) for sample in hits), default=None),
             "bearing_std_rad": stats["std"],
             "bearing_max_step_rad": stats["max_step"],
-            "max_score": max(float(sample["raw_score"]) for sample in samples),
+            "max_score": max(float(view["raw_score"]) for sample in samples for view in _views(sample)),
             "samples": samples,
         })
     plant = next(row for row in scenes if row["scene"] == "plant")
@@ -724,6 +800,7 @@ def detect_paths(detector: RoomDetector) -> dict[str, object]:
         "vote_margin": VOTE_MARGIN,
         "objects": [{"name": name, "room": room} for name, room in OBJECTS],
         "path_x_m": list(DETECT_X_M),
+        "relook_yaw": list(RELOOK_YAW),
         "gait": False,
         "vel": False,
         "arrival": False,
@@ -752,6 +829,7 @@ def run_detect() -> int:
         step_s = "n/a" if step is None else f"{step:.3f}"
         print(
             f"[room] {scene['scene']:9} hits {scene['hits']}/{scene['poses']} "
+            f"straight {scene['straight_hits']} relook {scene['relooks']} "
             f"object {scene['winner_object']} score {scene['winner_score']:.3f} "
             f"fired {scene['fired_objects'] or '-'} "
             f"wrong_rooms {scene['wrong_rooms'] or '-'} "
