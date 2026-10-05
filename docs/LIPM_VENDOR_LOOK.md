@@ -761,11 +761,68 @@ knee as well as the hip, at 0.60 s, either rails the hip pitch or
 leaves the sole near 1 cm. Kit cadence, 300–600 ms, still fails.
 Soft-pass is off.
 
-The clips are this 1.16 s sole row. Forward 8.400 s stays up (Δx
-+35.5 cm, mean vx +4.4 cm/s, pooled sole p90 2.1 cm, min up_z 0.997,
-peak torque 2.39 Nm, sat_rate 0). Close-up 7.600 s stays up through
-the stop (forward Δx +22.8 cm, mean vx +4.1 cm/s, stop Δx +1.0 cm,
-pooled sole p90 2.1 cm, min up_z 0.997, sat_rate 0.009). The close-up
-peak is 2.45 Nm during the walk, the same left hip-roll rail sample
-as the 24 s row. Hip pitch on that row peaks at 1.95 Nm. Constrained
-Baseline, yuv420p, `+faststart`.
+Those clips were replaced by the kit-preset row below.
+
+## Kit speed presets, with a 1.5 cm crouch
+
+`gait_manager.py` move(1..4) is the clock. Plant md5 stays
+`17dc4ff37491c8e61900fd83b5d31f0c`. Soft-pass is off.
+
+| Move | Period | dsp | y_swap | x amp | z |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 300 ms | 0.20 | 0.02 m | 0.02 m | 0.02 m |
+| 2 | 400 ms | 0.20 | 0.02 m | 0.02 m | 0.02 m |
+| 3 | 500 ms | 0.20 | 0.02 m | 0.02 m | 0.02 m |
+| 4 | 600 ms | 0.10 | 0.04 m | 0.02 m | 0.02 m |
+
+The body is lowered 0.015 m from the full stand by +0.34 rad of knee,
+sole level, hip left at the stand angle. That is the measured drop on
+this nearly straight leg (stand knee 0.40 rad). +0.36 rad falls over.
+It is not the kit's cartesian body-z offset. z_swap stays the published
+0.006 m. Changing it to 0.020 m does not move these numbers.
+
+Three knobs do not map 1:1. Clock y is a hip-roll lean of `dy / 0.22`
+rad, not a sideways foot step. 0.02 m of y_swap is 0.091 rad and fits
+in the 0.15 rad basin. 0.04 m wants 0.182 rad, so the 600 ms gear
+raises that clamp. The published wSin at x = 0.02 m still travels about
+4.0 cm fore-aft; the amplitude cap is 0.02 m, and the swing-hip gain
+on this row is 1.0 so that clock is not enlarged. The 150 ms move, the
+1.05 rad knee command, the 0.070 rad stance clip, and pelvis 0 stay.
+The kit's 5 deg pelvis offset tipped this plant before and is not added.
+The 0.22 s hip lead is not in the preset and is off.
+
+8.4 s, gain 1.0, lead 0, crouch on:
+
+| Period | Mean vx | min up_z | Sole p90 L / R | Hip pitch R / L | Hip roll R / L | Rail while up_z is 1 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| 300 ms | +0.84 cm/s | 0.992 | 0.83 / 0.69 cm | 1.90 / 1.89 Nm | 1.04 / 1.74 Nm | none on the hips; left knee later |
+| 400 ms | +7.24 cm/s | 0.744 | 1.83 / 0.13 cm | 2.45 / 2.45 Nm | 2.45 / 2.45 Nm | right hip pitch at 0.692 s, ω +0.39, kp·e −1.78, damp −0.70, F −2.45, then the body tips |
+| 500 ms | +8.05 cm/s | 0.765 | 2.23 / 1.10 cm | 2.45 / 2.45 Nm | 2.45 / 2.45 Nm | right hip pitch at 0.760 s, ω +0.31, kp·e −1.95, damp −0.56, F −2.45, then the body tips |
+| 600 ms | +10.42 cm/s | 0.668 | 2.97 / −0.19 cm | 2.45 / 2.45 Nm | 1.89 / 2.45 Nm | right hip pitch at 0.806 s, ω +0.35, kp·e −1.86, damp −0.63, F −2.45, then the body tips |
+
+The 300 ms row is the one that stays up. At 24 s, min up_z 0.992,
+sat_rate 0.001, no hip-pitch or hip-roll sample at ±2.45 Nm:
+
+| | |
+| --- | ---: |
+| Period | 300 ms |
+| Sole p90 L / R | 0.88 / 0.63 cm |
+| Mean vx | +1.29 cm/s |
+| Knee achieved L / R | 0.66 / 0.66 rad |
+| Swing hip command / achieved | 0.466 / 0.027 rad |
+| Airborne foot Δx | −0.82 cm |
+| Body Δx during the swing | +0.15 cm |
+| Hip pitch peak R / L | 1.90 / 1.89 Nm |
+| Hip roll peak R / L | 1.04 / 1.74 Nm |
+| Knee peak R / L | 2.26 / 2.45 Nm |
+
+The left knee touches ±2.45 Nm at 0.800 s while `up_z` is 1 (ω +0.37,
+kp·e +1.59, damp −0.54, F +2.45). The swing is 120 ms and the move is
+150 ms, so the hip is asked for 0.47 rad and delivers 0.03 rad. The
+foot's airborne travel is backward. Mean vx is +1.29 cm/s. Sole p90
+stays under 1 cm. Raising the knee command to the ctrlrange limit,
+1.35 rad, still leaves the sole near 1 cm and rails the right hip pitch
+at 1.260 s. Soft-pass is off. This is not a kit walk.
+
+The clips are the 300 ms row. Constrained Baseline, yuv420p,
+`+faststart`.

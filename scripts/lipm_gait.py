@@ -160,6 +160,15 @@ class LipmConfig:
     # near 2 cm and the hip pitch off ±2.45 Nm. 2.80 with that knee rails
     # the hip. The stance clip is not scaled.
     gm_swing_hip_gain: float = 1.75
+    # Body drop from the full stand, controller side. 0.015 m is the kit
+    # crouch. On this stand the leg is nearly straight, so that drop is
+    # +0.34 rad of knee with the sole kept level and the hip left at the
+    # stand angle. 0.36 rad falls over. 0 leaves the full stand.
+    gm_crouch_m: float = 0.0
+    # Clamp on the left hip-roll lean, rad. Clock y becomes dy/0.22 rad.
+    # 0.15 rad is the measured basin (|lat| ≤ 1). A 0.04 m y_swap wants
+    # 0.18 rad, so the 600 ms kit gear raises this.
+    gm_sway_max: float = 0.15
 
 
 @dataclass
@@ -231,6 +240,17 @@ class LipmWalker:
         self.act_idx = act_idx
         self.cfg = cfg
         self.q_stand = dict(q_stand)
+        if cfg.gm_crouch_m > 0.0:
+            # 0.34 rad knee per 0.015 m, measured with the sole level.
+            extra = 0.34 * (float(cfg.gm_crouch_m) / 0.015)
+            self.q_stand["l_knee"] = self.q_stand.get("l_knee", 0.0) + extra
+            self.q_stand["r_knee"] = self.q_stand.get("r_knee", 0.0) - extra
+            self.q_stand["l_ank_pitch"] = (
+                self.q_stand.get("l_hip_pitch", 0.0) + self.q_stand["l_knee"]
+            )
+            self.q_stand["r_ank_pitch"] = (
+                self.q_stand.get("r_hip_pitch", 0.0) + self.q_stand["r_knee"]
+            )
         self.phase: PhaseName = "stand"
         self.stance: Side = "L"
         self.lat = 0.0
@@ -425,8 +445,13 @@ class LipmWalker:
         self._gm_swing = swing if phase in ("L", "R") else None
         dy = 0.5 * (left.y + right.y)
         # +y puts both feet to the left of the pelvis, so the pelvis sits
-        # over the right foot. lat > 0 is the measured lean onto the left.
-        lat = max(-1.0, min(1.0, (-dy / 0.22) / SHIFT_HIP_L))
+        # over the right foot. The clock y is not a cartesian foot target.
+        # It becomes a hip-roll lean of dy/0.22 rad, clamped to gm_sway_max
+        # on the left hip. The right hip keeps the 0.20/0.15 ratio.
+        raw = -dy / 0.22
+        cap = max(1e-6, float(self.cfg.gm_sway_max))
+        roll = max(-cap, min(cap, raw))
+        lat = roll / SHIFT_HIP_L
         self.lat = lat
         # The published z is a foot-to-foot gap. Map that gap through the
         # joint Bézier, then GM_FLEX_CMD, instead of a cartesian target
