@@ -254,9 +254,48 @@ The previous one-sided row was faster (about 1.9 cm/s) and cleared
 only the right foot, by commanding that thigh back at mid-swing. That
 pose is the t=0 delta, not the published endpoint. Soft-pass is off.
 
-`previews/gm_forward.mp4` and `previews/gm_step_closeup.mp4` are this
-absolute-x row, Constrained Baseline, yuv420p, `+faststart`. Forward
-clip 8.400 s: Δx +12.7 cm, mean body vx +1.4 cm/s, pooled sole p90
-0.8 cm, swing contact 0.16, min up_z 0.989, peak torque 2.14 Nm, no
-tip. Close-up 7.600 s: forward Δx +9.7 cm, then the stop settles
-Δx −2.3 cm, min up_z 0.960, peak torque 2.12 Nm, no tip.
+`previews/gm_forward.mp4` and `previews/gm_step_closeup.mp4` were that
+absolute-x row before the HX slew below. Forward clip then: Δx +12.7 cm,
+mean body vx +1.4 cm/s, pooled sole p90 0.8 cm, min up_z 0.989, peak
+torque 2.14 Nm, no tip. Those files are re-rendered from the slew.
+
+## Command tick and the HX slew
+
+The gait command is written at **50 Hz** (`CTRL_DT` 0.02 s). The plant
+timestep stays 0.002 s (10 substeps per command). It is not a 100 Hz tick.
+
+`0.98 * 2.45 / 45 = 0.0534` rad. At 50 Hz that is 2.67 rad/s. At 100 Hz
+it would be 5.34 rad/s. The knee and hip pitch share that linear band
+(kp 45).
+
+Published no-load speed, [HX-35H](https://www.hiwonder.com/products/hx-35h):
+0.18 s/60° at 11.1 V is 5.8 rad/s. The hip HX-35HM is 0.19 s/60°, 5.5 rad/s.
+Knee and hip pitch now lead the joint by `5.5 rad/s * 0.02 s = 0.110 rad`
+per command. That is under the 5.8 rad/s ceiling. Ankle, hip roll, and
+hip yaw stay on the linear band. Plant `forcerange`, kp, and ±2.45 Nm
+are not changed. md5 `17dc4ff37491c8e61900fd83b5d31f0c`.
+
+The joint does not reach 5.5 rad/s. Knee speed peaks around 2.4–2.6 rad/s.
+Actuator damping on the knee is about 1.46 N·m·s/rad, so ±2.45 Nm cannot
+hold the published no-load speed. Hip pitch force hits ±2.45 Nm first
+(right hip pitch at 0.52 s, left at 0.84 s on the 1.00 s row).
+
+Same absolute-x map, pelvis 0, stance hip cap 0.070 rad, dsp 0.2, x = z = 0.02 m:
+
+| Period | min up_z | Tip | Sole p90 L / R | Mean vx | sat_rate | Peak torque |
+| --- | ---: | --- | --- | ---: | ---: | ---: |
+| 1.00 s | 0.570 | 4.44 s, COM outside support | 2.0 / 1.0 cm before 3 s, then the fall | — | 0.24 | 2.45 Nm |
+| 0.60 s, 24 s | 0.977 | no | 0.83 / 0.69 cm | +4.0 cm/s | 0.20 | 2.45 Nm |
+| 0.50 s, 8.4 s | 0.988 | no | 0.61 / 0.47 cm | +4.5 cm/s | 0.20 | 2.45 Nm |
+| 0.40 s, 24 s | 0.986 | no | 0.20 / 0.62 cm | +4.5 cm/s | 0.36 | 2.45 Nm |
+| 0.30 s, 8.4 s | 0.961 | no | 0.30 / 0.04 cm | −0.8 cm/s | 0.39 | 2.45 Nm |
+
+On the 1.00 s row the knee joint reaches about 0.50 rad, not 0.62, and
+the body tips at 4.44 s (Δy about +15 cm). On 0.60 s the flex command
+still peaks under the hip (`|dhip| ≤ 0.02`) but the knee joint only
+reaches about 0.36 rad before the sine falls. Δx over 24 s is +95 cm.
+That is still short of 7–21 cm/s and short of 2 cm on both feet.
+Soft-pass is off.
+
+The re-rendered clips are the 1.00 s row with this slew, so the tip is
+in the picture. Constrained Baseline, yuv420p, `+faststart`.

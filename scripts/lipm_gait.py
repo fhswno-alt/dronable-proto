@@ -3,17 +3,19 @@
 
 Replaces the open-loop CPG as the schedule. CSF50 numbers are not the clock
 and are not swept here. Joint targets go to the existing 50 Hz position
-servos. Commands are clipped to the linear band of those servos
-(|ctrl-q| <= 0.98 * tau / kp) so a knee target past ~0.046 rad does not
-pretend to add torque. Nothing in this file writes the plant: no forcerange,
-kp, damping, or armature edits, and no free-joint wrench.
+servos (CTRL_DT 0.02 s). Knee and hip pitch may lead the joint by the
+published HX slew (5.5 rad/s times that tick). Other joints stay inside
+the linear band (|ctrl-q| <= 0.98 * tau / kp). Nothing in
+this file writes the plant: no forcerange, kp, damping, or armature edits,
+and no free-joint wrench. The actuator forcerange still clips force.
 
 Weight moves onto the stance foot before the swing foot is allowed to rise.
 The swing is a joint-space Bézier measured on this plant: knee flexion for
 about 2 cm of level-sole clearance, hip pitch for a landing at most 2 cm
 ahead. The ankle target is the hip and knee commands actually sent this
 tick (the flat-foot sum), plus a measured-normal trim, so the box does not
-ride a corner. Commands stay inside |ctrl-q| <= 0.98 * tau / kp.
+ride a corner. Knee and hip pitch lead by the HX slew. Other commands
+stay inside |ctrl-q| <= 0.98 * tau / kp.
 """
 from __future__ import annotations
 
@@ -29,8 +31,16 @@ import gait_manager_traj as gm
 CTRL_DT = 0.02
 G = 9.81
 LEG_TAU = 2.45
-# Position-servo saturation boundary. Commanding past this does not add torque.
+# Position-servo saturation boundary. Commanding past this does not add torque
+# on joints that stay inside the linear band.
 SAT_FRAC = 0.98
+# Hiwonder no-load speed, https://www.hiwonder.com/products/hx-35h
+# HX-35H (knee / leg) 0.18 s/60° at 11.1 V ≈ 5.8 rad/s.
+# HX-35HM (hip) 0.19 s/60° ≈ 5.5 rad/s.
+# Command tick is 50 Hz. 0.98*2.45/45 ≈ 0.053 rad is 2.65 rad/s at that
+# tick, half the kit. Use the slower published rate so the sim does not
+# outrun a real hip servo. Do not exceed ~5.8 rad/s.
+HX35_SLEW_RAD_S = 5.5
 # Hiwonder GaitManager look: step height about 2 cm, step length at most 2 cm.
 # These are foothold clips, not CommandBus caps and not a torque change.
 VENDOR_CLEAR_M = 0.020
@@ -280,12 +290,21 @@ class LipmWalker:
         return float(self.data.qpos[self.model.jnt_qposadr[jid]])
 
     def write_clipped(self, jn: str, q_des: float) -> None:
-        """Position target inside the servo's torque band. Never past it."""
+        """Position target. Knee and hip pitch use the HX slew.
+
+        Those two share the 0.053 rad linear band (kp 45). The lead is
+        5.5 rad/s times the 50 Hz tick, and it does not exceed the HX-35H
+        5.8 rad/s. Other joints stay inside |ctrl-q| <= 0.98 * tau / kp.
+        The plant forcerange is unchanged and still clips force at ±2.45 Nm.
+        """
         act = f"{jn}_pos"
         idx = self.act_idx.get(act)
         if idx is None:
             return
-        band = self.e_sat.get(act, 0.0)
+        if jn.endswith(("knee", "hip_pitch")):
+            band = HX35_SLEW_RAD_S * CTRL_DT
+        else:
+            band = self.e_sat.get(act, 0.0)
         q = self.q(jn)
         cmd = min(q + band, max(q - band, q_des))
         lo = float(self.model.actuator_ctrlrange[idx, 0])
@@ -436,7 +455,7 @@ class LipmWalker:
         self._write_unused()
 
     def _write_leg_delta(self, side: Side, flex: float, dhip: float, yaw: float) -> None:
-        """Stand pose plus a Bézier flex and a forward hip. Clipped to tau/kp.
+        """Stand pose plus a Bézier flex and a forward hip. HX slew on pitch.
 
         Plant axes (md5 17dc4ff3…), verified against a pelvis-fixed step:
         pitch is mirrored (left hip/knee ``0 1 0``, right ``0 -1 0``);
@@ -646,8 +665,8 @@ class LipmWalker:
         World-frame Jacobian IK left the knee almost idle: at this pose the
         knee's vertical lever is about 2 cm per radian, and the hip ate the
         update to chase a longer step. The joint curve below is the IK of a
-        2 cm Bézier on this plant. write_clipped keeps every command inside
-        tau/kp, so a taller clear scales the shape without overdriving.
+        2 cm Bézier on this plant. Knee and hip pitch may lead by the HX
+        slew. The plant forcerange still clips torque.
         """
         scale_h = max(0.0, self.cfg.clear_m) / VENDOR_CLEAR_M
         scale_x = abs(step_m) / VENDOR_STEP_M
