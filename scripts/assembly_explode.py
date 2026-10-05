@@ -40,7 +40,7 @@ EXPECTED_MD5 = "71b2c86d133ebc603f58b99c53e496f3"
 WIDTH = 1280
 HEIGHT = 720
 FPS = 30
-INTRO_S = 2.00
+INTRO_S = 2.00  # max-explode hold; must stay at least 1.5 s
 MOVE_S = 1.25
 SETTLE_S = 0.70
 ORBIT_S = 4.50
@@ -53,20 +53,36 @@ DISTANCE = 1.02
 AZIMUTH0 = 148.0
 ELEVATION = -14.0
 
-# World-frame offsets away from the assembled centre. Plant +Y is the left
-# side (l_* bodies). Head goes up, arms out, hips and legs down and out,
-# foot pads further down. Pad size and assembled pose are the plant's.
+# World-frame offsets from the assembled pose. Plant +Y is the left side
+# (l_* bodies). These are large on purpose: a few centimetres does not read
+# at the demo camera. apply_offsets turns them into world motion (free-joint
+# qpos for body_link, parent-relative body_pos for children, geom_pos for
+# the outsole plates) so each group leaves a visible air gap.
 EXPLODE_OFFSET_M: dict[str, Vec3] = {
-    "torso": np.array([0.00, 0.00, 0.04], dtype=np.float64),
-    "hips_l": np.array([0.00, 0.16, -0.15], dtype=np.float64),
-    "hips_r": np.array([0.00, -0.16, -0.15], dtype=np.float64),
-    "left_leg": np.array([0.02, 0.30, -0.05], dtype=np.float64),
-    "right_leg": np.array([0.02, -0.30, -0.05], dtype=np.float64),
-    "foot_l": np.array([0.00, 0.14, -0.20], dtype=np.float64),
-    "foot_r": np.array([0.00, -0.14, -0.20], dtype=np.float64),
-    "arm_l": np.array([0.00, 0.24, 0.10], dtype=np.float64),
-    "arm_r": np.array([0.00, -0.24, 0.10], dtype=np.float64),
-    "head": np.array([0.00, 0.00, 0.12], dtype=np.float64),
+    "torso": np.array([0.00, 0.00, 0.26], dtype=np.float64),
+    "hips_l": np.array([0.00, 0.32, -0.36], dtype=np.float64),
+    "hips_r": np.array([0.00, -0.32, -0.36], dtype=np.float64),
+    "left_leg": np.array([0.04, 0.68, -0.16], dtype=np.float64),
+    "right_leg": np.array([0.04, -0.68, -0.16], dtype=np.float64),
+    "foot_l": np.array([0.00, 0.30, -0.48], dtype=np.float64),
+    "foot_r": np.array([0.00, -0.30, -0.48], dtype=np.float64),
+    "arm_l": np.array([0.00, 0.50, 0.18], dtype=np.float64),
+    "arm_r": np.array([0.00, -0.50, 0.18], dtype=np.float64),
+    "head": np.array([0.00, 0.00, 0.50], dtype=np.float64),
+}
+
+# axis, bound, "ge" or "le". The render fails if a group is pulled in tighter.
+EXPLODE_OFFSET_FLOOR: dict[str, tuple[tuple[int, float, str], ...]] = {
+    "torso": ((2, 0.22, "ge"),),
+    "head": ((2, 0.35, "ge"),),
+    "arm_l": ((1, 0.45, "ge"), (2, 0.12, "ge")),
+    "arm_r": ((1, -0.45, "le"), (2, 0.12, "ge")),
+    "hips_l": ((1, 0.28, "ge"), (2, -0.22, "le")),
+    "hips_r": ((1, -0.28, "le"), (2, -0.22, "le")),
+    "left_leg": ((1, 0.50, "ge"), (2, -0.12, "le")),
+    "right_leg": ((1, -0.50, "le"), (2, -0.12, "le")),
+    "foot_l": ((1, 0.22, "ge"), (2, -0.40, "le")),
+    "foot_r": ((1, -0.22, "le"), (2, -0.40, "le")),
 }
 
 GROUP_ORDER: tuple[str, ...] = (
@@ -517,10 +533,26 @@ def _offset_key(group_key: str, name: str) -> str:
     return group_key
 
 
+def assert_explode_offsets() -> None:
+    """World offsets must clear the demo floors. Small deltas look assembled."""
+    if INTRO_S < 1.5:
+        raise SystemExit(f"FAIL: exploded hold is {INTRO_S:.2f}s, need at least 1.5s")
+    for key, rules in EXPLODE_OFFSET_FLOOR.items():
+        offset = EXPLODE_OFFSET_M[key]
+        for axis, bound, compare in rules:
+            value = float(offset[axis])
+            ok = value >= bound - 1e-9 if compare == "ge" else value <= bound + 1e-9
+            if not ok:
+                raise SystemExit(
+                    f"FAIL: explode offset {key} axis {axis} is {value:.3f}, floor {compare} {bound:.3f}"
+                )
+
+
 def build_offsets(
     model: mj.MjModel,
     groups: dict[str, AssemblyGroup],
 ) -> tuple[dict[int, Vec3], dict[int, Vec3]]:
+    assert_explode_offsets()
     body_delta: dict[int, Vec3] = {
         body_id: np.zeros(3, dtype=np.float64) for body_id in range(model.nbody)
     }
@@ -684,6 +716,8 @@ def project_scene(
     camera_forward: Vec3,
     camera_up: Vec3,
     fovy_deg: float,
+    *,
+    reject_offscreen: bool = True,
 ) -> tuple[float, float] | None:
     """Pixel of a world point using the camera MuJoCo just rendered. None if behind."""
     forward = camera_forward / float(np.linalg.norm(camera_forward))
@@ -701,7 +735,9 @@ def project_scene(
     focal = (HEIGHT / 2.0) / math.tan(math.radians(fovy_deg) / 2.0)
     pixel_x = (WIDTH / 2.0) + focal * float(np.dot(relative, right)) / depth
     pixel_y = (HEIGHT / 2.0) - focal * float(np.dot(relative, up)) / depth
-    if pixel_x < 16 or pixel_y < 16 or pixel_x > WIDTH - 16 or pixel_y > HEIGHT - 16:
+    if reject_offscreen and (
+        pixel_x < 16 or pixel_y < 16 or pixel_x > WIDTH - 16 or pixel_y > HEIGHT - 16
+    ):
         return None
     return pixel_x, pixel_y
 
@@ -863,6 +899,199 @@ def progress_for(cue: FrameCue) -> dict[str, float]:
     return progress
 
 
+# Connected parts whose screen gap must open at max explode. The second name
+# is a body, unless it is a foot plate.
+_JOINT_GAPS: tuple[tuple[str, str], ...] = (
+    ("body_link", "head_pan_link"),
+    ("body_link", "l_hip_yaw_link"),
+    ("body_link", "r_hip_yaw_link"),
+    ("body_link", "l_sho_pitch_link"),
+    ("body_link", "r_sho_pitch_link"),
+    ("l_hip_roll_link", "l_hip_pitch_link"),
+    ("r_hip_roll_link", "r_hip_pitch_link"),
+    ("l_ank_roll_link", "l_printed_outsole"),
+    ("r_ank_roll_link", "r_printed_outsole"),
+)
+MIN_JOINT_GAP_PX = 70.0
+
+
+def _anchor_points(
+    model: mj.MjModel,
+    data: mj.MjData,
+    groups: dict[str, AssemblyGroup],
+) -> dict[str, Vec3]:
+    """One world point per side of a group, used to judge on-screen gaps."""
+
+    def mean_bodies(body_ids: list[int] | tuple[int, ...]) -> Vec3:
+        if not body_ids:
+            raise SystemExit("FAIL: explode anchor has no bodies")
+        stacked = np.stack([np.array(data.xpos[body_id], dtype=np.float64) for body_id in body_ids])
+        return stacked.mean(axis=0)
+
+    def side_bodies(group_key: str, prefix: str) -> list[int]:
+        return [
+            body_id
+            for body_id in groups[group_key].body_ids
+            if _body_name(model, body_id).startswith(prefix)
+        ]
+
+    def foot_point(prefix: str) -> Vec3:
+        for name in (f"{prefix}printed_outsole", f"{prefix}foot_contact"):
+            geom_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, name)
+            if geom_id >= 0:
+                return np.array(data.geom_xpos[geom_id], dtype=np.float64)
+        raise SystemExit(f"FAIL: no foot geom for {prefix}")
+
+    torso_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "body_link")
+    if torso_id < 0:
+        raise SystemExit("FAIL: body_link missing")
+    return {
+        "torso": np.array(data.xpos[torso_id], dtype=np.float64),
+        "head": mean_bodies(groups["head"].body_ids),
+        "hips_l": mean_bodies(side_bodies("hips", "l_")),
+        "hips_r": mean_bodies(side_bodies("hips", "r_")),
+        "left_leg": mean_bodies(groups["left_leg"].body_ids),
+        "right_leg": mean_bodies(groups["right_leg"].body_ids),
+        "arm_l": mean_bodies(side_bodies("arms", "l_")),
+        "arm_r": mean_bodies(side_bodies("arms", "r_")),
+        "foot_l": foot_point("l_"),
+        "foot_r": foot_point("r_"),
+    }
+
+
+def _gl_pixels(
+    renderer: mj.Renderer,
+    points: dict[str, Vec3],
+    fovy_deg: float,
+) -> dict[str, tuple[float, float]]:
+    gl_cam = renderer.scene.camera[0]
+    pos = np.array(gl_cam.pos, dtype=np.float64)
+    forward = np.array(gl_cam.forward, dtype=np.float64)
+    up = np.array(gl_cam.up, dtype=np.float64)
+    pixels: dict[str, tuple[float, float]] = {}
+    for key, point in points.items():
+        pixel = project_scene(point, pos, forward, up, fovy_deg, reject_offscreen=False)
+        if pixel is None:
+            raise SystemExit(f"FAIL: {key} is behind the camera")
+        pixels[key] = pixel
+    return pixels
+
+
+def _fit_explode_camera(
+    model: mj.MjModel,
+    data: mj.MjData,
+    renderer: mj.Renderer,
+    anchors: dict[str, Vec3],
+) -> tuple[Vec3, float]:
+    """Pull back until every exploded group sits inside the caption-safe frame."""
+    lookat = np.mean(np.stack(list(anchors.values())), axis=0)
+    fovy_deg = float(model.vis.global_.fovy)
+    camera = mj.MjvCamera()
+    mj.mjv_defaultCamera(camera)
+    camera.type = mj.mjtCamera.mjCAMERA_FREE
+    camera.lookat[:] = lookat
+    camera.elevation = ELEVATION
+    camera.azimuth = AZIMUTH0
+    distance = DISTANCE
+    while distance <= 3.6:
+        camera.distance = distance
+        renderer.update_scene(data, camera=camera)
+        pixels = _gl_pixels(renderer, anchors, fovy_deg)
+        inside = all(
+            48.0 <= pixel[0] <= WIDTH - 48.0 and 96.0 <= pixel[1] <= HEIGHT - 130.0
+            for pixel in pixels.values()
+        )
+        if inside:
+            return lookat, distance
+        distance += 0.05
+    raise SystemExit("FAIL: exploded groups do not fit in frame at distance 3.6 m")
+
+
+def _assert_visible_gaps(
+    model: mj.MjModel,
+    data: mj.MjData,
+    renderer: mj.Renderer,
+    groups: dict[str, AssemblyGroup],
+    apply_kwargs: dict[str, object],
+    body_delta: dict[int, Vec3],
+    geom_delta: dict[int, Vec3],
+    lookat: Vec3,
+    distance: float,
+) -> None:
+    """Fail if the exploded still would still read as an assembled T-pose."""
+    fovy_deg = float(model.vis.global_.fovy)
+    camera = mj.MjvCamera()
+    mj.mjv_defaultCamera(camera)
+    camera.type = mj.mjtCamera.mjCAMERA_FREE
+    camera.lookat[:] = lookat
+    camera.distance = distance
+    camera.elevation = ELEVATION
+    camera.azimuth = AZIMUTH0
+
+    def shot(progress: dict[str, float]) -> dict[str, tuple[float, float]]:
+        apply_offsets(
+            model,
+            data,
+            progress=progress,
+            body_delta=body_delta,
+            geom_delta=geom_delta,
+            **apply_kwargs,  # type: ignore[arg-type]
+        )
+        renderer.update_scene(data, camera=camera)
+        return _gl_pixels(renderer, _anchor_points(model, data, groups), fovy_deg)
+
+    exploded_px = shot({key: 1.0 for key in GROUP_ORDER})
+    for left_name, right_name in _JOINT_GAPS:
+        left_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, left_name)
+        if left_id < 0:
+            raise SystemExit(f"FAIL: missing body {left_name}")
+        left_point = np.array(data.xpos[left_id], dtype=np.float64)
+        right_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, right_name)
+        if right_id >= 0:
+            right_point = np.array(data.xpos[right_id], dtype=np.float64)
+        else:
+            geom_name = right_name
+            geom_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, geom_name)
+            if geom_id < 0 and geom_name.endswith("printed_outsole"):
+                geom_name = geom_name.replace("printed_outsole", "foot_contact")
+                geom_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, geom_name)
+            if geom_id < 0:
+                raise SystemExit(f"FAIL: missing explode partner {right_name}")
+            right_point = np.array(data.geom_xpos[geom_id], dtype=np.float64)
+        gl_cam = renderer.scene.camera[0]
+        fovy_deg = float(model.vis.global_.fovy)
+        left_px = project_scene(
+            left_point,
+            np.array(gl_cam.pos, dtype=np.float64),
+            np.array(gl_cam.forward, dtype=np.float64),
+            np.array(gl_cam.up, dtype=np.float64),
+            fovy_deg,
+            reject_offscreen=False,
+        )
+        right_px = project_scene(
+            right_point,
+            np.array(gl_cam.pos, dtype=np.float64),
+            np.array(gl_cam.forward, dtype=np.float64),
+            np.array(gl_cam.up, dtype=np.float64),
+            fovy_deg,
+            reject_offscreen=False,
+        )
+        if left_px is None or right_px is None:
+            raise SystemExit(f"FAIL: {left_name}/{right_name} is behind the exploded camera")
+        gap_px = math.hypot(left_px[0] - right_px[0], left_px[1] - right_px[1])
+        print(f"joint {left_name} — {right_name}: {gap_px:.0f}px", flush=True)
+        if gap_px < MIN_JOINT_GAP_PX:
+            raise SystemExit(
+                f"FAIL: {left_name} and {right_name} are only {gap_px:.0f}px apart "
+                f"when exploded (need {MIN_JOINT_GAP_PX:.0f}px)"
+            )
+    for key, pixel in exploded_px.items():
+        if pixel[0] < 36.0 or pixel[0] > WIDTH - 36.0 or pixel[1] < 80.0 or pixel[1] > HEIGHT - 110.0:
+            raise SystemExit(
+                f"FAIL: exploded {key} is outside the frame at ({pixel[0]:.0f}, {pixel[1]:.0f})"
+            )
+
+
 def render_animation(
     model: mj.MjModel,
     data: mj.MjData,
@@ -901,26 +1130,63 @@ def render_animation(
     if site_id < 0:
         raise SystemExit("FAIL: site kit_cam_site is missing")
     fovy_deg = float(model.vis.global_.fovy)
+    apply_offsets(
+        model,
+        data,
+        progress={key: 1.0 for key in GROUP_ORDER},
+        body_delta=body_delta,
+        geom_delta=geom_delta,
+        **apply_kwargs,  # type: ignore[arg-type]
+    )
+    explode_lookat, explode_distance = _fit_explode_camera(
+        model,
+        data,
+        renderer,
+        _anchor_points(model, data, groups),
+    )
+    print(
+        f"explode camera distance {explode_distance:.2f} lookat {np.round(explode_lookat, 3)}",
+        flush=True,
+    )
+    _assert_visible_gaps(
+        model,
+        data,
+        renderer,
+        groups,
+        apply_kwargs,
+        body_delta,
+        geom_delta,
+        explode_lookat,
+        explode_distance,
+    )
     wrote_exploded = False
     wrote_assembled = False
     title_frames = int(round(TITLE_S * FPS))
     total_frames = len(cues) + title_frames
     try:
         for index, cue in enumerate(cues):
+            progress = progress_for(cue)
             apply_offsets(
                 model,
                 data,
-                progress=progress_for(cue),
+                progress=progress,
                 body_delta=body_delta,
                 geom_delta=geom_delta,
                 **apply_kwargs,  # type: ignore[arg-type]
             )
+            spread = max(progress.values())
+            camera.lookat[:] = LOOKAT + (explode_lookat - LOOKAT) * spread
+            camera.distance = DISTANCE + (explode_distance - DISTANCE) * spread
             camera.azimuth = AZIMUTH0 + cue.spin_deg
             renderer.update_scene(data, camera=camera)
             rgb = np.asarray(renderer.render(), dtype=np.uint8)
             if cue.phase == "orbit" and not wrote_assembled:
                 fraction = _robot_height_fraction(rgb)
                 print(f"assembled height fraction {fraction:.2f}", flush=True)
+                if fraction < 0.52 or fraction > 0.70:
+                    raise SystemExit(
+                        f"FAIL: assembled body fills {fraction:.2f} of the frame, expected about 0.60"
+                    )
             group = groups[cue.group_key] if cue.group_key is not None else None
             title, subtitle = label_for(group, cue.phase)
             gl_cam = renderer.scene.camera[0]
