@@ -67,11 +67,22 @@ Fresh Places ids:
 
 Fresh iTHOR is **15/20**. The five wrong names are living or entrance on a kitchen, and living on a bedroom. Fresh Places is **28/30**. Two entrance-hall photos were named living. The empty plant answer was `None`, parsed as none. A corridor named entrance counts as a hit. Unknown on a corridor would have been allowed.
 
-Kit_cam entrance is untested. There is no Hardware hallway in this tree, and `room_entrance.xml` was not scored as one.
+## Hardware hallway still
+
+Draft #48 supplied `kit_cam_hallway_front.png` and `hallway_front_side.png`. That branch was not merged. The plant file was not edited. The same pin and the same prompt scored the copies in `previews/moondream_fresh/kit/`.
+
+| Still | Raw | Parsed | Confidence | Seconds |
+|--|--|--|--|--|
+| Front (primary) | entrance | entrance | 0.946 | 5.74 |
+| Side (secondary) | entrance | entrance | 0.267 | 4.39 |
+
+The front still is an entrance hit. The side still is the same word at a low first-token probability. Neither answer was living or none.
+
+Stop-look-ask stays the cadence. Explore CommandBus vel is still blocked on the walk Prefer FAIL.
 
 ## Latency
 
-55 answers on this agent VM, 4x Intel Xeon. Median **5.16 s**, 95th percentile **6.28 s**. This is not Dave's M4. A which-room question every few steps fits that cost. Every frame does not.
+55 answers on this agent VM, 4x Intel Xeon. Median **5.16 s**, 95th percentile **6.28 s**. The hallway front answer took **5.74 s**. This is not Dave's M4. A which-room question every few steps fits that cost. Every frame does not.
 
 ## Not a walk
 
