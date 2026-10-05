@@ -101,11 +101,12 @@ ROOMS: dict[str, RoomScene] = {
         name="bathroom",
         xml_name="room_bathroom.xml",
         png_name="kit_cam_room_bathroom.png",
-        bodies=("bathroom", "sink", "toilet"),
+        bodies=("bathroom", "sink", "toilet", "bathtub"),
         geoms=(
             ("bathroom", "bathroom_tile"),
             ("sink", "sink_basin"),
             ("toilet", "toilet_bowl"),
+            ("bathtub", "bathtub_shell"),
         ),
     ),
     "living": RoomScene(
@@ -132,10 +133,11 @@ ROOMS: dict[str, RoomScene] = {
         name="entrance",
         xml_name="room_entrance.xml",
         png_name="kit_cam_room_entrance.png",
-        bodies=("entrance", "mat"),
+        bodies=("entrance", "mat", "shoes"),
         geoms=(
             ("entrance", "entrance_panel"),
             ("mat", "mat_rug"),
+            ("shoes", "shoes_pair"),
         ),
     ),
 }

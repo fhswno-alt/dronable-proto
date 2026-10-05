@@ -8,11 +8,11 @@ Furniture is CC0 textured meshes under `mujoco/assets/rooms/`. Licenses, authors
 
 | Scene | Bodies | What kit_cam is meant to see |
 |-------|--------|------------------------------|
-| `mujoco/room_kitchen.xml` | `kitchen`, `table`, `chair` | Counter, tall pantry, stove, and kettle facing +X. Dining table and chair sit off to image-right so they do not block the counter. Closed beige room, wood floor. No flat yellow backsplash |
-| `mujoco/room_bathroom.xml` | `bathroom`, `sink`, `toilet` | Painted cabinet and ornate mirror; pedestal basin in front; round toilet to image-right. Closed tile room, marble floor |
-| `mujoco/room_living.xml` | `living`, `tv` | Leather sofa (`living`) across the view; CRT television to image-right. Closed beige room |
-| `mujoco/room_bedroom.xml` | `bedroom`, `nightstand` | Gothic bed; nightstand with an arm lamp to image-left. Closed plaster room |
-| `mujoco/room_entrance.xml` | `entrance`, `mat` | Static castle-door panel as a visual frame in a closed beige room, and a hessian floor mat |
+| `mujoco/room_kitchen.xml` | `kitchen`, `table`, `chair` | Counter, tall pantry, upright stove, and kettle facing +X. Dining table and chair sit off to image-right so they do not block the counter. Closed beige room, wood floor. No flat yellow backsplash |
+| `mujoco/room_bathroom.xml` | `bathroom`, `sink`, `toilet`, `bathtub` | Vanity and mirror on the left, basin on the vanity, toilet in the center, stylized tub on the right. Closed tile room, marble floor |
+| `mujoco/room_living.xml` | `living`, `tv` | Leather sofa (`living`) with the cushions toward +X; CRT television to image-right. Closed beige room |
+| `mujoco/room_bedroom.xml` | `bedroom`, `nightstand` | Gothic bed seen along its long side, headboard toward image-left; nightstand with an arm lamp. Closed plaster room |
+| `mujoco/room_entrance.xml` | `entrance`, `mat`, `shoes` | Smaller static panel in wood trim, hessian mat, rubber boots. No hinge, no lever, no latch |
 
 Furniture sits in front of `kit_cam` look (+X), so a quiet stand sees the named room body.
 

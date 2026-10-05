@@ -35,11 +35,11 @@
     <geom name="room_wall_right" type="box" pos="0.86 -1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_ceiling" type="box" pos="0.86 0 2.48" size="1.64 1.88 0.04" material="room_ceiling" contype="0" conaffinity="0"/>
     <!-- Sofa faces the robot (+X is kit_cam look). Static bodies, no joints. -->
-    <body name="living" pos="1.78 0.05 0">
+    <body name="living" pos="1.88 0.00 0">
       <site name="living" pos="-0.15 0 0.55" size="0.015" group="4" rgba="0.55 0.32 0.18 1"/>
-      <geom name="living_sofa_back" type="mesh" mesh="room_sofa" material="room_sofa" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+      <geom name="living_sofa_back" type="mesh" mesh="room_sofa" material="room_sofa" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
     </body>
-    <body name="tv" pos="1.18 -1.15 0">
+    <body name="tv" pos="1.28 -1.40 0">
       <site name="tv" pos="0 0 0.32" size="0.012" group="4" rgba="0.25 0.35 0.45 1"/>
       <geom name="tv_screen" type="mesh" mesh="room_tv" material="room_tv" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
     </body>

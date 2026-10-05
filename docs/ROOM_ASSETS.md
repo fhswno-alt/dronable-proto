@@ -59,12 +59,29 @@ Attribution is not required. The pack README asks for credit anyway: loafbrr.
 | `bathroom/toilet_tank.obj` | Toilet_Round_A flush box | Same frame as the bowl, so the cistern sits behind the bowl |
 | `bathroom/toilet_seat.obj` | seat and cover | Same frame. Lies on the bowl |
 | `bathroom/toilet_handle.obj` | flusher | Same frame, flush-box albedo. The pack has no separate flusher atlas |
-| `bathroom/sink.obj` | Sink_A plus both faucets | Pedestal basin. Replaces the earlier Sink_C trough, which read as a wooden block from `kit_cam` |
+| `bathroom/sink.obj` | Sink_A plus both faucets | Pedestal basin on the vanity. Replaces the earlier Sink_C trough, which read as a wooden block from `kit_cam` |
+| `bathroom/bathtub.obj` | bath | Stylized tub, about 1.08 × 0.72 × 0.58 m. See below |
+| `bathroom/bathtub_water.obj` | bath_water | Water surface in the same frame as the shell |
+| `entrance/boots.obj` | Rubber Boots | Pair of wellies beside the mat. Poly Haven, not the bathroom pack |
 
 The four toilet files are one round toilet split by material. They were re-exported from the pack glTF in a shared Z-up frame (Y-up to Z-up, then one floor-center for the whole fixture). An earlier export centered each part on its own, so the tank lay flat and the seat stood on edge. The sink file is Sink_A from the same CC0 pack, not a new download and not a paid model.
 
 The glTF did not embed images. UVs were kept and the pack's diffuse PNGs were assigned. These are textured game meshes, not photogrammetry. They are still shaped fixtures, not flat rgba boxes.
 
+Poly Haven has no bathtub. The tub is from Isa Lousberg's **Tiny Treats — Bubbly Bathroom** set, licensed **CC0**:
+
+- https://opengameart.org/content/tiny-treats-bubbly-bathroom-set
+
+Only the bath shell and the water surface are in the repo, with the set's gradient atlas. It is stylized low-poly game art, not a scan. That style gap against the Poly Haven vanity is still a Prefer FAIL for photoreal kit_cam, and it is the CC0 mesh that reads as a tub.
+
+## Entrance boots (Poly Haven, CC0)
+
+| Repo file | Poly Haven asset | Author | Page |
+|-----------|------------------|--------|------|
+| `entrance/boots.obj` | Rubber Boots | L | https://polyhaven.com/a/rubber_boots |
+
+There is no CC0 coat in this set. The shoes cue is the boots. The entrance panel is the same castle-door mesh, scaled down and set in static wood trim. Still no hinge, no lever, and no latch.
+
 ## Scene names
 
-Body and site names stay `kitchen`, `table`, `chair`, `bathroom`, `sink`, `toilet`, `living`, `tv`, `bedroom`, `nightstand`, `entrance`, `mat`. Geometry changed. Each room adds a floor texture, side walls, a back wall, and a ceiling as extra worldbody geoms, using the CC0 textures above. The plant's checker plane is still in the included file. Furniture stays static. The entrance panel is still a visual frame: no hinge, no lever, no latch.
+Body and site names stay `kitchen`, `table`, `chair`, `bathroom`, `sink`, `toilet`, `living`, `tv`, `bedroom`, `nightstand`, `entrance`, `mat`. This pass adds `bathtub` and `shoes`. Each room adds a floor texture, side walls, a back wall, and a ceiling as extra worldbody geoms, using the CC0 textures above. The plant's checker plane is still in the included file. Furniture stays static. The entrance panel is still a visual frame: no hinge, no lever, no latch.
