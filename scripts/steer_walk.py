@@ -152,7 +152,7 @@ PLANT_XML = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145.xml"
 # freeze was fc94709c84f5598d4474ecfc4bb41fdc.
 # Plant thaw from cursor/plant-thaw-legs-foot-6f10 (PR #43): legs ±2.45 Nm,
 # foot contact 135×76 mm. Was 71b2c86d… at ±2.1 and 145×86.
-PLANT_MD5 = "17dc4ff37491c8e61900fd83b5d31f0c"
+PLANT_MD5 = "207f3d5e9c6a72e16f7aa0c8d224f75e"
 KIT_CAM_POS = (0.050, 0.019, 0.007)
 KIT_CAM_FOVY = 104.82
 # xyaxes "0 -1 0 0 0 1" → camera-frame columns (x, y, z). Look is −Z = +X.
@@ -1990,7 +1990,14 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
                 f"z {session.lipm.cfg.gm_z_m:.3f} m, y_swap {session.lipm.cfg.gm_y_swap_m:.3f} m, "
                 f"body drop {session.lipm.cfg.gm_crouch_m:.3f} m, "
                 f"servo move {session.lipm.cfg.gm_move_s:.3f} s, "
-                f"pelvis {session.lipm.cfg.gm_pelvis_deg:.0f} deg. "
+                f"pelvis {session.lipm.cfg.gm_pelvis_deg:.0f} deg, "
+                f"hip pitch offset {session.lipm.cfg.gm_hip_pitch_deg:.0f} deg "
+                "on the stand and the walk, "
+                f"z_swap {session.lipm.cfg.gm_z_swap_m:.3f} m, "
+                "arms swing with gain 0.5. "
+                "Kit stance is +0.005 m outward on each foot. "
+                "The 0.018 m sole-vs-hip hack is not the live stance. "
+                "Plant file is the #43 foot-box shift, not edited here. "
             )
         else:
             lead = (

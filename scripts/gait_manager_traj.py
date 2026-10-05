@@ -18,8 +18,8 @@ The shape is the ROBOTIS OP2 ``wSin`` schedule that ``walking_module.so``
 embeds (same field names, including ``hit_pitch_offset_``). Period in that
 code is one left-plus-right cycle. ``step_fb_ratio`` stays 0.028.
 
-``hip_pitch_offset`` of 15 deg is their offset from a different init pose
-(knee about 1.19 rad). It is not added on top of this plant's stand.
+``hip_pitch_offset`` of 15 deg is on the live OP3 stand and the walk.
+This clock does not add the trim; the live path is ``op3_walk``.
 """
 from __future__ import annotations
 

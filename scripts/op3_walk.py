@@ -10,13 +10,9 @@ same field names (``x_swap_amplitude_``, ``dsp_ratio_``, ``pelvis_swing_``,
 
 Limb lengths are read from the loaded plant (thigh, calf, sole drop). They
 are not the OP3's 110 mm / 110 mm / 30.5 mm links. Kit ``init_z_offset`` is
-0.025 m (the cartesian body drop). Kit ``init_y_offset`` is −0.005 m. On
-this plant that pulls the soles together: at 2 s the normals are 23.03 / 0 N
-and the right knee is on +2.45 Nm. The offset that shares the weight is the
-sole-vs-hip gap, 0.018 m (11.51 / 11.52 N at the 0.025 m drop, knee ±0.39 Nm).
-Kit ``hip_pitch_offset`` of 15° is their trim from a different init pose.
-Applied on this IK it pitches the body to up_z 0.966 at a standstill, so
-``hit_pitch_offset_`` stays 0.
+0.025 m (the cartesian body drop). The 0.018 m sole-vs-hip stance is not
+used. Kit ``init_y`` is outward-positive: +0.005 m on each foot. Kit
+``hip_pitch_offset`` of 15° is on the stand and the walk.
 
 The OP3 module steps at 8 ms (``control_cycle_msec_``). This port uses that
 period. The plant timestep stays 0.002 s. Balance is off. No gyro feedback,
@@ -37,6 +33,13 @@ PELVIS_DEG = 5.0
 # walking_param.yaml arm_swing_gain. OP3 multiplies x_move * gain * 1000
 # and treats that product as degrees. 0.5 at x = 0.02 m is 10°.
 ARM_SWING_GAIN = 0.5
+# Hiwonder init_y, outward-positive. Each foot's hip-frame y moves
+# 0.005 m outward. OP3 applies ±y_offset/2, so the stored offset is
+# twice that. The 0.018 m sole-vs-hip hack is not the live stance.
+KIT_Y_OUT_M = 0.005
+# walking_param.yaml hip_pitch_offset. On the stand and the walk.
+# 15° moves this plant's right hip pitch from +0.504 rad to +0.766 rad.
+HIP_PITCH_OFFSET_DEG = 15.0
 # WalkingModule::control_cycle_msec_. Four plant steps of 0.002 s.
 OP3_CTRL_S = 0.008
 # Frozen hip-roll position gain on this plant. Not written. The 1.29 Nm
@@ -120,7 +123,9 @@ def _axis_sum(model: mj.MjModel, joint: str) -> float:
 
 
 def y_offset_from_model(model: mj.MjModel) -> float:
-    """``init_y_offset`` that puts each sole's inboard edge on the midline.
+    """Retired sole-vs-hip width. The live stance is ``2 * KIT_Y_OUT_M``.
+
+    ``init_y_offset`` that puts each sole's inboard edge on the midline.
 
     Hip yaw sits at ±hip_y. The sole half-width is larger, so ``y_offset``
     of 0 places both contact patches across the center and the solver parks
@@ -235,6 +240,7 @@ class Op3Walker:
         step_fb: float = STEP_FB_RATIO,
         pelvis_deg: float = PELVIS_DEG,
         arm_swing_gain: float = ARM_SWING_GAIN,
+        hip_pitch_deg: float = HIP_PITCH_OFFSET_DEG,
     ) -> None:
         self.lengths = lengths
         self.directions = directions
@@ -251,8 +257,8 @@ class Op3Walker:
         self.roll_offset = 0.0
         self.pitch_offset = 0.0
         self.yaw_offset = 0.0
-        # Not stacked on the cartesian crouch. See the module docstring.
-        self.hit_pitch_offset = 0.0
+        # Kit trim, stand and walk. See the module note.
+        self.hit_pitch_offset = math.radians(hip_pitch_deg)
         self.z_swap_cmd = float(z_swap_m)
         self.step_fb = float(step_fb)
         self.pelvis_offset = math.radians(pelvis_deg)
@@ -296,8 +302,8 @@ class Op3Walker:
         directions["r_sho_pitch"] = _axis_sum(model, "r_sho_pitch")
         directions["l_sho_pitch"] = _axis_sum(model, "l_sho_pitch")
         walker = cls(lengths_from_model(model), directions, **kwargs)
-        # Kit init_y_offset −0.005 stacks this plant's soles. See the module note.
-        walker.y_offset = y_offset_from_model(model)
+        # ±y_offset/2 in the hip frame. +KIT_Y_OUT_M on each foot.
+        walker.y_offset = 2.0 * KIT_Y_OUT_M
         return walker
 
     def update_time(self) -> None:
@@ -545,6 +551,8 @@ class Op3Walker:
         jl = self._apply_direction(raw_l, _LEG_L)
         jr[1] += self.directions["r_hip_roll"] * pel_r
         jl[1] += self.directions["l_hip_roll"] * pel_l
+        # Kit hip_pitch_offset, including the stand pose. Right hip pitch
+        # at the 0.025 m crouch is +0.766 rad; the knee stays −1.049 rad.
         jr[2] -= self.directions["r_hip_pitch"] * self.hit_pitch_offset
         jl[2] -= self.directions["l_hip_pitch"] * self.hit_pitch_offset
         out: dict[str, float] = {}

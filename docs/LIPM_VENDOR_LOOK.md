@@ -1090,9 +1090,10 @@ and the kit lateral offset is a stand Prefer FAIL here.
 
 Kit `hip_pitch_offset` 15°, on top of this IK, pitches the body. With
 the even stance and the 0.025 m drop the normals stay 11.51 / 11.52 N
-and up_z is 0.966, which is cos(15°). The offset stays 0. `pelvis_offset`
-stays 5°. `arm_swing_gain` is the yaml 0.5 (x·gain·1000 as degrees).
-Arms stayed off on these rows, so that gain is not in the torques.
+and up_z is 0.966, which is cos(15°). That row left the offset at 0.
+Hardware #49's stand bar is hip pitch about 0.77 rad and knee about
+−1.05 rad, so the offset is on the stand in the section below.
+`pelvis_offset` stays 5°. `arm_swing_gain` is the yaml 0.5.
 
 500 ms period, dsp 0.2, y_swap 0.020 m, z 0.020 m, walk from 0.40 s
 for 8.4 s. Torque is the peak `|actuator_force|` on every 2 ms step.
@@ -1167,4 +1168,53 @@ stop (forward Δx +81.2 cm, mean vx +14.5 cm/s, stop Δx +1.1 cm,
 min up_z 0.992 while walking and 0.999 after the stop, stop peak
 2.36 Nm). The feet leave the floor. The robot stays standing after
 the stop.
+
+## Kit stance on the #43 foot boxes
+
+The plant file is #43 tip `921f5941`. Foot contact local y is +0.014 m
+on the left and −0.014 m on the right. Size, friction, torque, kp,
+dampratio, and kit_cam are the #43 file. This tree does not edit it.
+md5 is `207f3d5e9c6a72e16f7aa0c8d224f75e`.
+
+`init_z_offset` is 0.025 m. The 0.018 m sole-vs-hip stance is not the
+live offset. Kit `init_y` is outward-positive: +0.005 m on each foot.
+OP3 applies ±`y_offset`/2, so the stored offset is 0.010 m. At a posed
+stand the sole centres sit at −0.0477 / +0.0477 m. Against zero offset
+(−0.0430 / +0.0430 m) that is 4.7 mm outward on each foot. The inner-edge
+gap is 19.4 mm. The feet do not overlap.
+
+Stand targets at that pose: right hip pitch +0.768 rad, right knee
+−1.052 rad. Left hip pitch −0.768 rad and left knee +1.052 rad, which
+is the same crouch on the opposite joint axes. Hardware #49's bar is
+hip pitch about 0.77 rad and knee about −1.05 rad. A 2.0 s hold
+settles at hip pitch +0.770 / −0.770 rad and knee −1.059 / +1.059 rad.
+Normals 11.51 / 11.52 N. Settled up_z is 0.966. Knee torque on the
+hold peaks at ±0.84 Nm.
+
+`pelvis_offset` 5° is the single-support hip-roll correction.
+`z_swap_amplitude` 0.006 m is the body bob. `arm_swing_gain` 0.5
+commands ±10° of shoulder at x = 0.02 m. The gait-manager tick writes
+that command. After 1.5 s the shoulder joints move 6.0 / 5.9° peak to
+peak. The arm actuators stay at ±0.7 Nm, so the joint does not reach
+the command. `hip_pitch_offset` 15° is on the stand and the walk.
+Lateral y_swap stays 0.020 m.
+
+500 ms period, 20 ms servo move. Foot height stays 0.020 m. Torque is
+the peak `|actuator_force|` on every 2 ms step. The 8.4 s walk starts
+at 0.40 s. The close-up starts at 0.50 s and stops at 6.00 s.
+
+| Window | Mean vx | Δx | min up_z | Sole p90 L / R | Body z ptp | Hip roll R / L | Knee R / L |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Walk 8.4 s | +14.18 cm/s | +118.8 cm | 0.932 | 1.75 / 1.75 cm | 11.7 mm | 2.13 / 2.16 Nm | 2.03 / 1.97 Nm |
+| Stop from 6.00 s | +13.8 cm/s while walking | walk +80.1 cm, stop +1.0 cm | 0.952 after the stop | 1.75 / 1.74 cm | 11.0 mm | 1.79 / 1.86 Nm | 2.27 / 1.24 Nm |
+
+Nothing on either window crosses 2.449 Nm. The close-up right knee
+peaks at +2.423 Nm at 0.788 s. Forward yaw drift is −5.8 deg. Close-up
+yaw at the stop is −4.0 deg and +1.3 deg during the stand after the
+stop. Loaded-foot skate on the 8.4 s row, normal above 5 N, is
+1.72 / 1.75 cm/s mean. That skate is not peeled.
+
+Clips are this row. Constrained Baseline, yuv420p, `+faststart`.
+Forward 8.400 s and close-up 7.600 s. Settled up_z after the stop is
+0.966.
 

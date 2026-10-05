@@ -128,7 +128,7 @@ def assert_freeze() -> None:
     digest = sw._md5(sw.PLANT_XML)
     if digest != sw.PLANT_MD5:
         raise SystemExit(f"plant md5 {digest} != {sw.PLANT_MD5}")
-    if sw.PLANT_MD5 != "17dc4ff37491c8e61900fd83b5d31f0c":
+    if sw.PLANT_MD5 != "207f3d5e9c6a72e16f7aa0c8d224f75e":
         raise SystemExit("PLANT_MD5 constant left the thawed plant digest")
     if sw.VX_FWD_CAP != 0.056 or sw.VX_BACK_CAP != 0.032 or sw.YAW_RATE_CAP != 0.25:
         raise SystemExit(

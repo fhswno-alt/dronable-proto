@@ -133,6 +133,9 @@ class LipmConfig:
     gm_step_fb: float = gm.GM_STEP_FB
     gm_pelvis_deg: float = gm.GM_PELVIS_DEG
     gm_arm_deg: float = gm.GM_ARM_DEG
+    # Kit hip_pitch_offset, on the stand pose and the walk. 15° takes
+    # the 0.025 m crouch from hip pitch +0.504 rad to +0.766 rad.
+    gm_hip_pitch_deg: float = gm.GM_HIP_PITCH_DEG
     # A loaded swing foot is not dragged along x. The z target still rises.
     gm_drag_gate: bool = False
     # Hold the published step height through the first half of single support
@@ -155,9 +158,9 @@ class LipmConfig:
     # near 2 cm and the hip pitch off ±2.45 Nm. 2.80 with that knee rails
     # the hip. The stance clip is not scaled.
     gm_swing_hip_gain: float = 1.75
-    # Kit walking_param init_z_offset. 0.025 m. On this plant, with the
-    # 0.018 m stance width, a 2 s hold is 11.51 / 11.52 N per foot and
-    # knee ±0.39 Nm. 0 leaves the geometric full extension.
+    # Kit walking_param init_z_offset. 0.025 m. With the kit stance of
+    # +0.005 m outward on each foot, a 2 s hold is 11.51 / 11.52 N per
+    # foot. 0 leaves the geometric full extension.
     gm_crouch_m: float = 0.025
     # OP3 path only. Kit servo_control_cycle is 0.02 s; the planner is
     # already 8 ms, so a 150 ms approach is a second smoother. 0.008 and
@@ -252,6 +255,7 @@ class LipmWalker:
                 z_swap_m=cfg.gm_z_swap_m,
                 step_fb=cfg.gm_step_fb,
                 pelvis_deg=cfg.gm_pelvis_deg,
+                hip_pitch_deg=cfg.gm_hip_pitch_deg,
             )
             for name, val in self.op3.stand_joints().items():
                 if "sho" in name:
@@ -479,11 +483,9 @@ class LipmWalker:
             self._write_unused()
             return
         for name, val in joints.items():
-            if "sho" in name:
-                extra = val if self.cfg.arms else 0.0
-                self.write_clipped(name, self.q_stand.get(name, 0.0) + extra)
-            else:
-                self.write_clipped(name, val)
+            # Shoulder targets already include arm_swing_gain. This path
+            # writes them. The Bézier `arms` flag does not freeze the kit swing.
+            self.write_clipped(name, val)
         if phase in ("L", "R"):
             self.z_bez = abs(info.ep_l[2] - info.ep_r[2])
         else:
