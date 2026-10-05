@@ -4,8 +4,14 @@
 This is not a room finder and not go-anywhere. The only commands are
 stand, stop, and vel(vx, yaw_rate) on CommandBus in scripts/steer_walk.py,
 resent at 10 Hz. Caps stay +0.056 / -0.032 m/s and yaw ±0.25 rad/s.
-Motion is soft walk-yaw, vel(+0.028, yaw). vx=0 yaw does not change
-heading on this plant, so this script never sends it.
+On the empty plant the walk is the claimed nav-multi chain:
+vel(+0.056, +0.25) for 12.5 s, then vel(+0.056, -0.25) for 11 s,
+after a 1.0 s stand so the left arc starts at t = 16 s. A 0.6 s
+stand starts that arc early and the left hold only reaches about
++35 deg. Furnished scenes cannot hold those windows (up_z crosses
+0.90). They use the same vel(+0.056, -0.25) for 8 s, right first.
+A short vel(+0.028, +0.25) left command is swallowed here. vx=0
+yaw does not change heading either, so this script never sends it.
 
 The plant file is not edited. kit_cam stays on head_tilt_link at
 0.050 0.019 0.007. Scenes are vision only (room_kitchen.xml and the
@@ -24,8 +30,10 @@ What the map actually is:
   - The walked trail uses the sim freejoint. That is odometry in this
     sim, not visual SLAM.
 
-Prefer FAIL: a short fan of floor, plus a bearing if yellow was in
-frame, is not a house map and not an arrival.
+Prefer FAIL: a longer floor fan, plus a bearing if yellow was in
+frame, is not a house map and not an arrival. The last-mile finder
+may query query_kitchen_like_yellow() and frontier_cells(). That
+query is not a waypoint.
 
 Run:
   MUJOCO_GL=osmesa python scripts/explore_map.py --self-test
@@ -67,13 +75,38 @@ ARTIFACTS = Path("/opt/cursor/artifacts")
 
 WIDTH = 640
 HEIGHT = 480
-STAND_S = 0.60
+# 1.0 s is the claimed nav-multi stand, so the left arc starts at t = 16 s.
+# A 0.6 s stand starts that same vel 0.4 s earlier. On this plant the 12.5 s
+# left hold then only reached about +35 deg instead of about +75 deg.
+STAND_S = 1.00
 SETTLE_S = 1.20
-DEMO_WALK_S = 12.0
 PERCEPT_S = 0.40
 FRAME_EVERY_S = 0.20
 UP_Z_ABORT = 0.90
-SOFT_VX = steer_walk.VX_FWD_CAP * 0.5
+# Claimed walk speed. Half-cap (+0.028) stays upright, but a left yaw
+# on that speed is swallowed. The windows below are the ones Controls
+# already measured: left ~+75.7 deg in 12.5 s, chained right ~-55 deg
+# in 11 s. Caps are not raised.
+EXPLORE_VX = steer_walk.VX_FWD_CAP
+# Finder last-mile stays at half the forward cap. Full-cap finder
+# bursts crossed up_z 0.90. This is not the explore schedule.
+FINDER_HALF_VX = steer_walk.VX_FWD_CAP * 0.5
+# A yaw arc "tracked" when realized heading moves more than this on
+# the commanded side. The swallowed left command was about -12 deg.
+YAW_TRACK_DEG = 20.0
+DEMO_WALK_S = (
+    steer_walk.CLAIMED_APPROACH_S
+    + steer_walk.CLAIMED_LEFT_ARC_S
+    + steer_walk.CLAIMED_RESUME_S
+    + steer_walk.CLAIMED_RIGHT_ARC_S
+    + steer_walk.CLAIMED_RESUME_S
+)
+# Furnished scenes cross up_z 0.90 on the claimed 11 s / 12.5 s windows
+# (kitchen right 11 s reached 0.899, bathroom 0.889; a cold left hold
+# stayed near +5 to +11 deg and then leaned). The same vel(+0.056, -0.25)
+# for 8 s stayed at about 0.919 / 0.934 and the heading followed right.
+# This is not a new cap and not the claimed 11 s window.
+FURNISHED_RIGHT_S = 8.0
 
 CELL_M = 0.10
 X_MIN = -0.80
@@ -127,7 +160,8 @@ HONESTY = (
     "Partial kit_cam map. Floor cells are a ground-plane paint. "
     "Kitchen-like yellow is a camera-ray bearing, not a waypoint and not arrival. "
     "Frontiers are the edge of that paint. Pose is the sim freejoint, not SLAM. "
-    "vx=0 yaw is not used. Not go-anywhere."
+    "Explore holds the claimed vel(+0.056, ±0.25) windows "
+    "(left 12.5 s, then right 11 s). vx=0 yaw is not used. Not go-anywhere."
 )
 
 
@@ -179,6 +213,26 @@ class VelocityCommand:
     yaw_rate: float
     reason: str
     frontier_ij: tuple[int, int] | None
+
+
+@dataclass(frozen=True)
+class ExplorePhase:
+    name: str
+    duration_s: float
+    vx: float
+    yaw_rate: float
+
+
+@dataclass(frozen=True)
+class PhaseRecord:
+    name: str
+    commanded_vx: float
+    commanded_yaw: float
+    duration_s: float
+    dx_m: float
+    dy_m: float
+    dyaw_deg: float
+    tracked: bool | None
 
 
 @dataclass(frozen=True)
@@ -546,13 +600,15 @@ def _has_free_neighbor(known_free: np.ndarray, i: int, j: int) -> bool:
 
 
 def choose_velocity(feature_map: ExploreMap, x: float, y: float, yaw: float) -> VelocityCommand:
-    """Next bus command from frontier cells only.
+    """Frontier side as a claimed-cap walk-yaw.
 
-    Yellow bearings are not an input. vx stays at the soft forward speed.
-    A pure yaw (vx=0) is not produced.
+    The demo does not replan from this every percept. A short left trim
+    was commanded and the body did not follow. The held windows are
+    claimed_explore_phases(). This function still does not read a
+    bearing log, and it does not produce a pure yaw.
     """
-    if not _within_caps(SOFT_VX, 0.0):
-        raise RuntimeError("soft vx is outside the bus caps")
+    if not _within_caps(EXPLORE_VX, 0.0):
+        raise RuntimeError("explore vx is outside the bus caps")
     frontiers = feature_map.frontier_cells(x, y)
     cone = [
         cell
@@ -570,31 +626,134 @@ def choose_velocity(feature_map: ExploreMap, x: float, y: float, yaw: float) -> 
         feature_map.hold_ij = None
         if feature_map.last_blocked:
             return VelocityCommand(
-                SOFT_VX,
-                steer_walk.YAW_RATE_CAP * 0.5,
-                "lower center is saturated; walk-yaw left, no forward frontier",
+                EXPLORE_VX,
+                steer_walk.YAW_RATE_CAP,
+                "lower center is saturated; claimed walk-yaw left",
                 None,
             )
         return VelocityCommand(
-            SOFT_VX,
+            EXPLORE_VX,
             0.0,
-            "no forward frontier; keep the soft forward command",
+            "no forward frontier; claimed forward",
             None,
         )
     feature_map.hold_ij = (target.i, target.j)
     err = _wrap(target.bearing_rad - yaw)
-    yaw_rate = _clamp(err / YAW_FULL_ERR_RAD * steer_walk.YAW_RATE_CAP, -steer_walk.YAW_RATE_CAP, steer_walk.YAW_RATE_CAP)
+    if abs(err) < max(steer_walk.DEADBAND_YAW, 0.05):
+        yaw_rate = 0.0
+        reason = "frontier is ahead; claimed forward, yaw 0"
+    elif err > 0.0:
+        yaw_rate = steer_walk.YAW_RATE_CAP
+        reason = "frontier is left; claimed walk-yaw left"
+    else:
+        yaw_rate = -steer_walk.YAW_RATE_CAP
+        reason = "frontier is right; claimed walk-yaw right"
+    if not _within_caps(EXPLORE_VX, yaw_rate):
+        raise RuntimeError(f"command outside caps vx={EXPLORE_VX} yaw={yaw_rate}")
+    return VelocityCommand(EXPLORE_VX, yaw_rate, reason, (target.i, target.j))
+
+
+def claimed_explore_phases() -> tuple[ExplorePhase, ...]:
+    """nav-multi order. Left then right. A second left, or right then left, is not claimed."""
+    vx = EXPLORE_VX
+    yaw = steer_walk.YAW_RATE_CAP
+    return (
+        ExplorePhase("approach", steer_walk.CLAIMED_APPROACH_S, vx, 0.0),
+        ExplorePhase("arc-left", steer_walk.CLAIMED_LEFT_ARC_S, vx, yaw),
+        ExplorePhase("mid", steer_walk.CLAIMED_RESUME_S, vx, 0.0),
+        ExplorePhase("arc-right", steer_walk.CLAIMED_RIGHT_ARC_S, vx, -yaw),
+        ExplorePhase("resume", steer_walk.CLAIMED_RESUME_S, vx, 0.0),
+    )
+
+
+def explore_schedule(walk_s: float, scene: str = "plant") -> tuple[ExplorePhase, ...]:
+    """Plant uses the claimed left-then-right chain. Furnished scenes yaw right first.
+
+    A full-cap left hold is swallowed or leans in the kitchen and bathroom.
+    The claimed 11 s right window also crosses up_z 0.90 there. The shorter
+    right hold uses the same vel and stays under that bar.
+    """
+    if scene != "plant":
+        duration = min(FURNISHED_RIGHT_S, walk_s)
+        if duration <= 1e-9:
+            return ()
+        return (
+            ExplorePhase(
+                "arc-right",
+                duration,
+                EXPLORE_VX,
+                -steer_walk.YAW_RATE_CAP,
+            ),
+        )
+    remaining = walk_s
+    chosen: list[ExplorePhase] = []
+    for phase in claimed_explore_phases():
+        if remaining <= 1e-9:
+            break
+        duration = min(phase.duration_s, remaining)
+        chosen.append(ExplorePhase(phase.name, duration, phase.vx, phase.yaw_rate))
+        remaining -= duration
+    return tuple(chosen)
+
+
+def last_mile_from_map(
+    feature_map: ExploreMap,
+    x: float,
+    y: float,
+    yaw: float,
+) -> VelocityCommand | None:
+    """Finder query. None means the map has no kitchen-like yellow yet.
+
+    Always calls query_kitchen_like_yellow() and frontier_cells().
+    The aim is the frontier nearest the logged camera ray when one sits
+    inside the forward cone of that ray. Otherwise the aim is the ray.
+    vx stays at the finder half cap. A pure yaw is not returned.
+    """
+    yellow = feature_map.query_kitchen_like_yellow()
+    frontiers = feature_map.frontier_cells(x, y)
+    if not yellow.seen or yellow.bearing_rad is None:
+        return None
+    aim = yellow.bearing_rad
+    chosen_ij: tuple[int, int] | None = None
+    best_err: float | None = None
+    best_bearing: float | None = None
+    for cell in frontiers:
+        err = abs(_wrap(cell.bearing_rad - yellow.bearing_rad))
+        if best_err is None or err < best_err:
+            best_err = err
+            best_bearing = cell.bearing_rad
+            chosen_ij = (cell.i, cell.j)
+    if (
+        best_bearing is not None
+        and best_err is not None
+        and best_err <= FORWARD_CONE_RAD
+    ):
+        aim = best_bearing
+        reason = "map yellow logged; half-cap walk-yaw toward the frontier nearest that ray"
+    else:
+        chosen_ij = None
+        reason = "map yellow logged; half-cap walk-yaw toward the camera ray"
+    heading_err = _wrap(aim - yaw)
+    yaw_rate = _clamp(
+        heading_err / YAW_FULL_ERR_RAD * steer_walk.YAW_RATE_CAP,
+        -steer_walk.YAW_RATE_CAP,
+        steer_walk.YAW_RATE_CAP,
+    )
     if abs(yaw_rate) < steer_walk.DEADBAND_YAW:
         yaw_rate = 0.0
-    if not _within_caps(SOFT_VX, yaw_rate):
-        raise RuntimeError(f"command outside caps vx={SOFT_VX} yaw={yaw_rate}")
-    if yaw_rate == 0.0:
-        reason = "frontier is ahead; soft forward, yaw 0"
-    elif yaw_rate > 0.0:
-        reason = "frontier is left; soft walk-yaw"
-    else:
-        reason = "frontier is right; soft walk-yaw"
-    return VelocityCommand(SOFT_VX, yaw_rate, reason, (target.i, target.j))
+        reason = "map yellow logged; aim is ahead; half-cap forward"
+    if not _within_caps(FINDER_HALF_VX, yaw_rate):
+        raise RuntimeError(f"last-mile command outside caps vx={FINDER_HALF_VX} yaw={yaw_rate}")
+    return VelocityCommand(FINDER_HALF_VX, yaw_rate, reason, chosen_ij)
+
+
+def yaw_tracked(commanded_yaw: float, dyaw_deg: float) -> bool | None:
+    """True when realized heading follows the commanded side. None on a straight hold."""
+    if abs(commanded_yaw) <= 1e-9:
+        return None
+    if commanded_yaw > 0.0:
+        return dyaw_deg > YAW_TRACK_DEG
+    return dyaw_deg < -YAW_TRACK_DEG
 
 
 def _select_frontier(
@@ -702,6 +861,7 @@ class SceneRun:
     map_after: np.ndarray
     frames: list[np.ndarray]
     other_chromatic_max: float
+    phases: list[PhaseRecord]
 
     def delta_x(self) -> float:
         return self.end.x - self.start.x
@@ -741,14 +901,54 @@ def run_explore(
         last_send = -1.0
         last_look = float(session.data.time)
         last_frame = -1.0
-        mid_time = float(session.data.time) + (walk_s * 0.5)
         kit_mid = frame
         map_mid = map_before
         trail: list[tuple[float, float]] = [(start.x, start.y)]
-        stop_reason = "walk budget"
-        command = choose_velocity(feature_map, start.x, start.y, start.yaw)
-        while float(session.data.time) < walk_end - 1e-9:
+        schedule = explore_schedule(walk_s, scene)
+        schedule_s = sum(phase.duration_s for phase in schedule)
+        mid_time = float(session.data.time) + (schedule_s * 0.5)
+        if not schedule:
+            raise RuntimeError("explore schedule is empty")
+        phase_i = 0
+        phase_origin = start
+        phase_t0 = float(session.data.time)
+        phases: list[PhaseRecord] = []
+        command = VelocityCommand(
+            schedule[0].vx, schedule[0].yaw_rate, schedule[0].name, None,
+        )
+        stop_reason = "claimed walk-yaw schedule"
+
+        def _close_phase(pose: RobotPose) -> None:
+            phase = schedule[phase_i]
+            phases.append(
+                PhaseRecord(
+                    name=phase.name,
+                    commanded_vx=phase.vx,
+                    commanded_yaw=phase.yaw_rate,
+                    duration_s=float(pose.t - phase_t0),
+                    dx_m=pose.x - phase_origin.x,
+                    dy_m=pose.y - phase_origin.y,
+                    dyaw_deg=math.degrees(_wrap(pose.yaw - phase_origin.yaw)),
+                    tracked=yaw_tracked(
+                        phase.yaw_rate,
+                        math.degrees(_wrap(pose.yaw - phase_origin.yaw)),
+                    ),
+                )
+            )
+
+        while float(session.data.time) < walk_end - 1e-9 and phase_i < len(schedule):
             now = float(session.data.time)
+            phase = schedule[phase_i]
+            if now >= (phase_t0 + phase.duration_s) - 1e-9:
+                pose_now = _pose(session)
+                _close_phase(pose_now)
+                phase_i += 1
+                if phase_i >= len(schedule):
+                    break
+                phase_origin = pose_now
+                phase_t0 = now
+                phase = schedule[phase_i]
+                command = VelocityCommand(phase.vx, phase.yaw_rate, phase.name, None)
             if (now - last_send) >= (steer_walk.VEL_RESEND_S - 1e-9):
                 _send_vel(session, command, sent)
                 last_send = now
@@ -760,14 +960,15 @@ def run_explore(
             up_z = session.samples[-1].up_z if session.samples else 1.0
             if report.mode == "fault" or session.bus.fault:
                 stop_reason = f"fault: {session.bus.fault_reason or report.mode}"
+                _close_phase(pose)
                 break
             if up_z < UP_Z_ABORT:
                 stop_reason = f"up_z {up_z:.3f} below {UP_Z_ABORT:.2f}"
+                _close_phase(pose)
                 break
             if (now - last_look) >= (PERCEPT_S - 1e-9):
                 frame, cam_pos, cam_mat, fovy = cam.grab(session.model, session.data)
                 feature_map.integrate(pose, frame, cam_pos, cam_mat, fovy)
-                command = choose_velocity(feature_map, pose.x, pose.y, pose.yaw)
                 last_look = now
                 if pose.t >= mid_time and kit_mid is kit_before:
                     kit_mid = frame.copy()
@@ -777,6 +978,13 @@ def run_explore(
                     frame, cam_pos, cam_mat, fovy = cam.grab(session.model, session.data)
                 frames.append(frame.copy())
                 last_frame = now
+        else:
+            if phase_i < len(schedule) and stop_reason == "claimed walk-yaw schedule":
+                _close_phase(_pose(session))
+        if stop_reason == "claimed walk-yaw schedule" and scene != "plant":
+            stop_reason = "furnished right-first window"
+        elif abs(walk_s - DEMO_WALK_S) > 1e-6 and stop_reason == "claimed walk-yaw schedule":
+            stop_reason = "walk budget"
         stop_pose = _pose(session)
         now = float(session.data.time)
         refusal = session.bus.stop(now)
@@ -820,6 +1028,7 @@ def run_explore(
             map_after=map_after,
             frames=frames,
             other_chromatic_max=feature_map.other_chromatic_max,
+            phases=phases,
         )
     finally:
         cam.close()
@@ -995,6 +1204,12 @@ def _run_payload(run: SceneRun) -> dict[str, object]:
         "other_chromatic_max": run.other_chromatic_max,
         "trail_points": len(run.trail),
         "commands": _command_stats(run.sent),
+        "phases": [asdict(phase) for phase in run.phases],
+        "yaw_tracked": {
+            phase.name: phase.tracked
+            for phase in run.phases
+            if phase.tracked is not None
+        },
         "limit": _scene_limit(run),
     }
 
@@ -1031,12 +1246,18 @@ def _scene_limit(run: SceneRun) -> str:
 
 
 def _print_run(run: SceneRun) -> None:
+    phase_bits = " ".join(
+        f"{phase.name} dyaw={phase.dyaw_deg:+.1f}deg"
+        f"{'' if phase.tracked is None else (' track' if phase.tracked else ' SWALLOWED')}"
+        for phase in run.phases
+    )
     print(
         f"[explore] {run.scene}: {_scene_limit(run)} "
         f"dx={run.delta_x():+.3f} m dy={run.delta_y():+.3f} m "
         f"dyaw={math.degrees(run.delta_yaw()):+.2f} deg "
         f"min_up_z={run.min_up_z:.3f} fault={run.fault} "
-        f"stop={run.stop_reason} end_mode={run.end_mode}"
+        f"stop={run.stop_reason} end_mode={run.end_mode} "
+        f"phases[{phase_bits}]"
     )
 
 
@@ -1071,7 +1292,7 @@ def test_policy_uses_frontiers_not_yellow() -> list[str]:
     right.yellow_elevation_rad = 0.4
     _paint_free_rect(right, -0.2, 1.4, -0.05, 1.4)
     command = choose_velocity(right, 0.50, 0.0, 0.0)
-    _expect(abs(command.vx - SOFT_VX) < 1e-9, f"right-map vx {command.vx}", failures)
+    _expect(abs(command.vx - EXPLORE_VX) < 1e-9, f"right-map vx {command.vx}", failures)
     _expect(command.yaw_rate < 0.0, f"frontier on the right should yaw right, got {command.yaw_rate} ({command.reason})", failures)
     _expect(command.frontier_ij is not None, "missing right frontier", failures)
     left = ExploreMap.empty()
@@ -1080,7 +1301,7 @@ def test_policy_uses_frontiers_not_yellow() -> list[str]:
     left.yellow_elevation_rad = 0.4
     _paint_free_rect(left, -0.2, 1.4, -1.4, 0.05)
     left_command = choose_velocity(left, 0.50, 0.0, 0.0)
-    _expect(abs(left_command.vx - SOFT_VX) < 1e-9, f"left-map vx {left_command.vx}", failures)
+    _expect(abs(left_command.vx - EXPLORE_VX) < 1e-9, f"left-map vx {left_command.vx}", failures)
     _expect(left_command.yaw_rate > 0.0, f"frontier on the left should yaw left, got {left_command.yaw_rate} ({left_command.reason})", failures)
     zero = VelocityCommand(0.0, steer_walk.YAW_RATE_CAP, "illegal", None)
     _expect(not _within_caps(zero.vx, zero.yaw_rate), "vx=0 yaw was accepted", failures)
@@ -1157,7 +1378,17 @@ def test_short_walk() -> list[str]:
     _expect(not run.fault, f"short walk fault {run.fault_reason}", failures)
     _expect(run.end_mode == "stand", f"short walk end mode {run.end_mode}", failures)
     _expect(run.vx_zero_yaw_sends() == 0, "short walk sent vx=0 yaw", failures)
-    _expect(all(abs(command.vx - SOFT_VX) < 1e-9 for command in run.sent if command.name == "vel"), "short walk vx", failures)
+    _expect(
+        all(abs(command.vx - EXPLORE_VX) < 1e-9 for command in run.sent if command.name == "vel"),
+        "short walk vx",
+        failures,
+    )
+    _expect(
+        all(abs(command.yaw_rate) < 1e-9 for command in run.sent if command.name == "vel"),
+        "short walk left the approach yaw",
+        failures,
+    )
+    _expect(len(run.phases) == 1 and run.phases[0].name == "approach", f"short phases {run.phases}", failures)
     _expect(not run.yellow.seen, "short walk saw yellow on the empty plant", failures)
     _expect(run.after.free_cells >= run.before.free_cells, "map lost free cells", failures)
     return failures
@@ -1167,11 +1398,76 @@ def test_caps_and_plant() -> list[str]:
     failures: list[str] = []
     digest = _md5(PLANT_XML)
     _expect(digest == steer_walk.PLANT_MD5, f"plant md5 {digest}", failures)
-    _expect(abs(SOFT_VX - 0.028) < 1e-9, f"soft vx {SOFT_VX}", failures)
+    _expect(abs(EXPLORE_VX - 0.056) < 1e-9, f"explore vx {EXPLORE_VX}", failures)
+    _expect(abs(FINDER_HALF_VX - 0.028) < 1e-9, f"finder half vx {FINDER_HALF_VX}", failures)
+    _expect(abs(steer_walk.CLAIMED_LEFT_ARC_S - 12.5) < 1e-9, "left window moved", failures)
+    _expect(abs(steer_walk.CLAIMED_RIGHT_ARC_S - 11.0) < 1e-9, "right window moved", failures)
     _expect(steer_walk.VX_FWD_CAP == 0.056 and steer_walk.VX_BACK_CAP == 0.032, "vx caps", failures)
     _expect(steer_walk.YAW_RATE_CAP == 0.25, "yaw cap", failures)
     _expect(abs(steer_walk.VEL_RESEND_S - 0.10) < 1e-9, "resend", failures)
     _expect(steer_walk.KIT_CAM_POS == (0.050, 0.019, 0.007), "kit_cam pos", failures)
+    return failures
+
+
+def test_claimed_schedule() -> list[str]:
+    failures: list[str] = []
+    phases = claimed_explore_phases()
+    names = [phase.name for phase in phases]
+    _expect(
+        names == ["approach", "arc-left", "mid", "arc-right", "resume"],
+        f"phase order {names}",
+        failures,
+    )
+    by_name = {phase.name: phase for phase in phases}
+    left = by_name["arc-left"]
+    right = by_name["arc-right"]
+    _expect(abs(left.duration_s - 12.5) < 1e-9 and abs(left.vx - EXPLORE_VX) < 1e-9, "left window", failures)
+    _expect(abs(left.yaw_rate - steer_walk.YAW_RATE_CAP) < 1e-9, "left yaw", failures)
+    _expect(abs(right.duration_s - 11.0) < 1e-9 and right.yaw_rate < 0.0, "right window", failures)
+    _expect(names.index("arc-left") < names.index("arc-right"), "right-then-left is not the claimed chain", failures)
+    _expect(all(_within_caps(phase.vx, phase.yaw_rate) for phase in phases), "schedule outside caps", failures)
+    short = explore_schedule(2.0, "plant")
+    _expect(len(short) == 1 and short[0].name == "approach" and abs(short[0].duration_s - 2.0) < 1e-9, f"short schedule {short}", failures)
+    _expect(abs(sum(phase.duration_s for phase in phases) - DEMO_WALK_S) < 1e-9, "demo length", failures)
+    room = explore_schedule(DEMO_WALK_S, "kitchen")
+    _expect(len(room) == 1 and room[0].name == "arc-right", f"room schedule {room}", failures)
+    if room:
+        _expect(abs(room[0].vx - EXPLORE_VX) < 1e-9 and room[0].yaw_rate < 0.0, "room right vel", failures)
+        _expect(room[0].duration_s < steer_walk.CLAIMED_RIGHT_ARC_S, "room window is the 11 s hold", failures)
+        _expect(abs(room[0].duration_s - FURNISHED_RIGHT_S) < 1e-9, "room window", failures)
+    return failures
+
+
+def test_last_mile_query() -> list[str]:
+    """Logged yellow is queried. An empty map is a Prefer FAIL with no command."""
+    failures: list[str] = []
+    source = inspect.getsource(last_mile_from_map)
+    _expect("query_kitchen_like_yellow" in source, "last mile does not query yellow", failures)
+    _expect("frontier_cells" in source, "last mile does not query frontiers", failures)
+    _expect("waypoint" not in source, "last mile mentions a waypoint", failures)
+    empty = ExploreMap.empty()
+    _paint_free_rect(empty, 0.3, 1.2, -0.4, 0.4)
+    _expect(last_mile_from_map(empty, 0.2, 0.0, 0.0) is None, "empty map produced a command", failures)
+    logged = ExploreMap.empty()
+    logged.yellow_max_fraction = 0.08
+    logged.yellow_bearing_rad = 0.0
+    logged.yellow_elevation_rad = 0.5
+    missed = last_mile_from_map(logged, 0.2, 0.0, 0.0)
+    _expect(missed is not None, "logged yellow with no frontier returned None", failures)
+    if missed is not None:
+        _expect(abs(missed.vx - FINDER_HALF_VX) < 1e-9, f"last-mile vx {missed.vx}", failures)
+        _expect(missed.frontier_ij is None, "ray aim invented a frontier", failures)
+        _expect(abs(missed.yaw_rate) <= steer_walk.YAW_RATE_CAP + 1e-9, "last-mile yaw cap", failures)
+    painted = ExploreMap.empty()
+    painted.yellow_max_fraction = 0.08
+    painted.yellow_bearing_rad = 0.0
+    painted.yellow_elevation_rad = 0.5
+    _paint_free_rect(painted, 0.3, 1.2, -0.3, 0.3)
+    aimed = last_mile_from_map(painted, 0.2, 0.0, 0.0)
+    _expect(aimed is not None and aimed.frontier_ij is not None, f"frontier aim {aimed}", failures)
+    if aimed is not None:
+        _expect(abs(aimed.vx - FINDER_HALF_VX) < 1e-9, f"frontier aim vx {aimed.vx}", failures)
+        _expect(_within_caps(aimed.vx, aimed.yaw_rate), "frontier aim outside caps", failures)
     return failures
 
 
@@ -1180,6 +1476,8 @@ def self_test() -> int:
     failures.extend(test_caps_and_plant())
     failures.extend(test_classify_colors())
     failures.extend(test_policy_uses_frontiers_not_yellow())
+    failures.extend(test_claimed_schedule())
+    failures.extend(test_last_mile_query())
     failures.extend(test_stand_scenes())
     failures.extend(test_short_walk())
     if _md5(PLANT_XML) != steer_walk.PLANT_MD5:
@@ -1248,24 +1546,28 @@ def demo(walk_s: float) -> int:
         "vx_fwd_cap": steer_walk.VX_FWD_CAP,
         "vx_back_cap": steer_walk.VX_BACK_CAP,
         "yaw_rate_cap": steer_walk.YAW_RATE_CAP,
-        "soft_vx": SOFT_VX,
+        "explore_vx": EXPLORE_VX,
+        "finder_half_vx": FINDER_HALF_VX,
+        "claimed_left_arc_s": steer_walk.CLAIMED_LEFT_ARC_S,
+        "claimed_right_arc_s": steer_walk.CLAIMED_RIGHT_ARC_S,
         "resend_hz": 1.0 / steer_walk.VEL_RESEND_S,
         "walk_s": walk_s,
         "cell_m": CELL_M,
         "honesty": HONESTY,
         "prefer_fail_bar": {
             "tonight": (
-                "A real land is not this slice. Tonight the map is a ground-plane "
-                "floor fan from one camera, frontiers on the edge of that fan, and "
-                "a yellow bearing when the backsplash is in frame. Rooms are separate "
-                "XML files, not one space. Pose is the sim freejoint. vx=0 does not turn."
+                "A real land is not this slice. The map is a ground-plane floor fan "
+                "from one camera, frontiers on the edge of that fan, and a yellow "
+                "bearing when the backsplash is in frame. The walk holds the claimed "
+                "vel(+0.056, ±0.25) windows so the body can yaw. Rooms are separate "
+                "XML files, not one space. Pose is the sim freejoint. vx=0 does not turn. "
+                "Arrival is still yellow >= 0.50 and torso-to-kitchen <= 0.25 m."
             ),
             "later": (
                 "A later land would need one continuous space, metric occupied cells "
                 "for elevated furniture (depth or parallax, not a floor-plane guess), "
-                "a pose that is not the simulator freejoint, and a last-mile finder "
-                "that queries this interface without a pre-placed waypoint. "
-                "Arrival is still the finder's bars, not this explore loop."
+                "and a pose that is not the simulator freejoint. The finder can query "
+                "this interface. That query is not a waypoint and not arrival."
             ),
         },
         "runs": payloads,

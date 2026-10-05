@@ -1,6 +1,6 @@
 # Find kitchen (Prefer FAIL)
 
-`scripts/find_kitchen.py` is a vision-reactive steer on the frozen walk plant. It is not SLAM, not a map, and not an arrival.
+`scripts/find_kitchen.py` is a last-mile steer on the frozen walk plant. The phrase path paints `kit_cam` into the explore map and commands from `query_kitchen_like_yellow()` and `frontier_cells()`. It is not SLAM and not an arrival. If that log has no kitchen-like yellow, it sends no vel.
 
 The scene is `mujoco/room_kitchen.xml`, which includes `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml` (md5 `71b2c86d133ebc603f58b99c53e496f3`). The finder does not edit that file. `kit_cam` stays on `head_tilt_link` at `0.050 0.019 0.007`, fovy 104.82. Feet stay 145×86. Leg actuators stay ±2.1 Nm. No second camera, no lidar, no door.
 
@@ -17,20 +17,15 @@ From the stand pose the backsplash is the signal that separates the kitchen from
 
 The wood counter's lit face does not separate from the blue cabinet, and the kettle renders brown, so those colors are not the blob. The blue cabinet is not the blob either: the empty-floor sky already passes a loose blue test.
 
-A named-body projection of `kitchen`, `table`, and `chair` checks that the yellow centroid sits on the kitchen. That check can only refuse. It is not a waypoint, and it is not passed to a planner. The `vel` sign comes from which side of the image the centroid is on.
+A named-body projection of `kitchen`, `table`, and `chair` checks that the yellow centroid sits on the kitchen. That check can only refuse. It is not a waypoint, and it is not passed to the map query. The phrase `vel` comes from the logged ray and the frontiers.
 
 ## Phrase path
 
-The bus is `CommandBus` in `scripts/steer_walk.py`: `stand`, `stop`, and `vel(vx, yaw_rate)` only. Resend is 10 Hz. 200 ms of silence stands. The bus caps stay +0.056 / −0.032 m/s and yaw ±0.25. The phrase sends half the forward cap. The bus clamps again.
+The bus is `CommandBus` in `scripts/steer_walk.py`: `stand`, `stop`, and `vel(vx, yaw_rate)` only. Resend is 10 Hz. 200 ms of silence stands. The bus caps stay +0.056 / −0.032 m/s and yaw ±0.25. The phrase sends half the forward cap. The bus clamps again. Full-cap finder bursts crossed `up_z` 0.90 near +0.39 m, so this last mile stays at `vel(+0.028, yaw)`.
 
-From the stand pose the blob is already centered (`|bias| ≤ 0.08`, measured bias −0.014). The phrase walks in 0.40 s slices, leaves the gait in move, and re-scores `kit_cam` between them:
+The stand frame is integrated into an `ExploreMap`. The next command is `last_mile_from_map()`, which calls `query_kitchen_like_yellow()` and `frontier_cells()`. If yellow was not logged, the phrase sends no vel. If it was, yaw aims at the frontier nearest that camera ray, or at the ray when no frontier sits in the cone. That aim is not a waypoint and not a counter cell. The live yellow fraction is only the arrival bar. A lost blob does not replace the map command.
 
-- centered: `vel(+0.028, 0)`
-- off center: `vel(+0.028, yaw)` with `yaw = clamp(−bias / 0.35 × 0.25, ±0.25)`
-
-The trim is not a heading setpoint. Full yaw cap is used only when `|bias|` reaches 0.35. `vx = 0` yaw does not change heading on this plant, so a correction is a walking turn at the soft forward speed.
-
-While yellow is still at least 0.015 but has fallen below 75% of a peak that reached 0.05, forward-only stops sooner. `|bias|` above 0.04 gets `vel(+0.028, yaw trim)` instead of waiting for 0.08. The yaw gain is unchanged. This is a recenter while the blob is still visible, not a search after it is gone.
+`vx = 0` yaw does not change heading on this plant, so it is not sent.
 
 The `up_z` Prefer FAIL bar stays **0.90**. It is not lowered. A full-cap slice run on the same bar stopped at end x +0.394 m when `up_z` hit 0.894. Shorter slices with a stand between them were tried and did not get past that distance:
 
@@ -44,7 +39,7 @@ Half the forward cap, with no stand between slices, is the duty that stayed upri
 
 The world-x budget on this draft is **1.10 m**. That is still a stop, not a counter pose. The `up_z` bar, the half-cap command, and both arrival bars are unchanged.
 
-Without a reacquire, the same half-cap walk stopped at end x +0.938 m when the yellow fraction fell to 0.004 with the kitchen body still in frame (remaining 0.377 m, min up_z 0.981). `vx = 0` yaw does not change heading on this plant, so a yaw-only reacquire is not used. This draft instead keeps half-cap `vel(+0.028, yaw trim)` toward the last bias for at most two tries of 2.0 s. The normal approach resumes only if yellow returns to at least 0.015 and the score is usable (`forward`, `yaw_left`, or `yaw_right`). A blob that stays lost, a kitchen that leaves the frame, `up_z` under 0.90, or the end of that budget is Prefer FAIL and sends no further `vel`.
+Without a reacquire, an earlier half-cap walk stopped at end x +0.938 m when the yellow fraction fell to 0.004 with the kitchen body still in frame (remaining 0.377 m, min up_z 0.981). `vx = 0` yaw does not change heading on this plant, so a yaw-only reacquire was not used. A later blob-only draft kept half-cap `vel(+0.028, yaw trim)` for at most two tries of 2.0 s. The phrase path in this draft does not do that. It keeps steering from the map log until a stop bar.
 
 Baseline on main, before the fade recenter, "go to the kitchen", room scene, after stand:
 
@@ -61,27 +56,30 @@ Baseline on main, before the fade recenter, "go to the kitchen", room scene, aft
 
 111 centered slices and 50 walking yaw trims were sent at `vx = +0.028`, including the slices after yellow briefly returned. The mid still is the first frame after Δx crossed 0.55 m (yellow 0.105, bias −0.078). That bias is inside the 0.08 forward-only band, so the walk kept going straight while the backsplash later fell to 0.000. 0.291 m is still outside the 0.25 m gap.
 
-This draft recenters with soft walk-yaw once yellow is fading and `|bias|` leaves 0.04, before the fraction hits zero. Measured phrase, "go to the kitchen", room scene, after stand:
+The blob-only draft, before this map query, stopped at end x **+1.038 m** (Δx **+1.036 m**), remaining **0.277 m**, settled yellow **0.006**, min up_z **0.980**. That was Prefer FAIL on a lost blob.
+
+This phrase queries the map. Measured "go to the kitchen", room scene, after stand:
 
 | | |
 |--|--|
-| Stop | Prefer FAIL, `stop_kind` blob. 37 fade recenters, then the two-try walk-yaw reacquire. Yellow did not stay usable. No further `vel`. |
-| End x | **+1.038 m** (start x +0.002 m, Δx **+1.036 m**) |
-| End y, yaw | +0.047 m, +0.367 rad |
-| min up_z | **0.980** (bar 0.90, not crossed) |
-| Remaining | **0.277 m** (main was 0.291 m) |
-| Final blob | yellow fraction **0.006**, bias −0.704, kitchen body still in frame. Under the 0.015 bar. |
-| Commands | 104 forward slices, 60 yaw trims, all `vx = +0.028`. `vx = 0` was not sent. |
+| Stop | Prefer FAIL, `stop_kind` close. The torso gap is inside 0.25 m and the backsplash does not fill half the frame. Not arrival. |
+| Map | Yellow was logged (max fraction **0.148**, bearing **−0.181 rad**). `map_command_source` is `map`. **315** queries. An empty map returns no command; the empty plant still sends no vel. |
+| End x | **+1.076 m** (Δx **+1.074 m**) |
+| End y, yaw | +0.003 m, −0.049 rad |
+| min up_z | **0.979** (bar 0.90, not crossed) |
+| Remaining | **0.239 m** |
+| Final blob | yellow fraction **0.000** on the settled frame. The logged ray is not a counter outline. |
+| Commands | 48 forward slices and 109 yaw slices, every one `vx = +0.028`, yaw inside ±0.25. `vx = 0` was not sent. |
 | Arrival | **false** |
 
-The mid still is still the frame after Δx crossed 0.55 m (yellow 0.105, bias −0.078). The gap is 0.014 m smaller than main and 0.027 m outside the 0.25 m bar. Settled yellow is a sliver, not the 0.000 on main, and not a usable blob. That is the Prefer FAIL.
+0.239 m meets the gap bar alone. Settled yellow is 0, not 0.50. Both bars are required. That is the Prefer FAIL.
 
 ## What would count as arrival
 
 Both bars, on the settled stop frame:
 
-1. Yellow fraction ≥ 0.50. Half the frame is "most of the frame". Stand is 0.039 and this stop is 0.006, so the counter does not fill the frame.
-2. Torso-to-kitchen horizontal gap ≤ 0.25 m. That is contact range for this torso, not a room crossing. 0.277 m is still outside that bar.
+1. Yellow fraction ≥ 0.50. Half the frame is "most of the frame". Stand is 0.039 and this stop is 0.000, so the counter does not fill the frame.
+2. Torso-to-kitchen horizontal gap ≤ 0.25 m. That is contact range for this torso, not a room crossing. This stop is 0.239 m, inside that bar, and still not arrival without the yellow bar.
 
 Either bar alone is not arrival. A stop inside 0.25 m with the backsplash still small would be Prefer FAIL (`close`), not arrival. The gap is read from the kitchen geom boxes so the summary can state the remaining distance. It does not choose left versus right and it is not a waypoint.
 
@@ -97,12 +95,10 @@ No further `vel` is sent when:
 
 - the phrase is bathroom, or any other room
 - the loaded scene is the empty walk plant
-- the kitchen body is outside the frame (including turned away)
-- the backsplash fraction is below 0.015 and the soft walk-yaw reacquire does not keep it usable (two tries of `vel(+0.028, yaw trim)`, then stop), including after a fade recenter while yellow was still visible
-- the yellow is split across the left and right of the frame
-- the centroid does not sit on the kitchen body
+- the explore map has no kitchen-like yellow yet (the stand frame never logged it)
 - `up_z` drops below 0.90
-- the 1.10 m budget is reached, or the slice caps are exhausted
+- the 1.10 m budget is reached, or the slice cap is exhausted
+- the torso is within 0.25 m and the backsplash does not fill half the frame (`close`)
 - the stop frame does not meet both arrival bars
 
 ```bash
