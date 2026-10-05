@@ -104,7 +104,7 @@ Forward clamp is **+0.056 m/s**, reverse **−0.032 m/s**, yaw **±0.25 rad/s**.
 
 ## Voice commands (same CommandBus)
 
-`scripts/voice_caller.py` turns a typed phrase into `stand`, `stop`, or `vel(vx, yaw_rate)` on the bus above. It resends `vel` at 10 Hz. 200 ms of silence stands. Caps stay **+0.056 / −0.032** m/s and yaw **±0.25** rad/s. Walk forward is `vel(+0.056, 0)`. A turn is soft walk-yaw `vel(+0.028, ±0.25)` — half the forward cap — because `vx = 0` yaw does not change heading on this plant. Kitchen, bathroom, SLAM, maps, waypoints, and strafe are refused. The finders are separate scripts. This is not go-anywhere. Phrases, the refusal lines, and the clip are in `docs/VOICE_COMMANDS.md`.
+`scripts/voice_caller.py` turns a typed phrase into `stand`, `stop`, or `vel(vx, yaw_rate)` on the bus above. It resends `vel` at 10 Hz. 200 ms of silence stands. Caps stay **+0.056 / −0.032** m/s and yaw **±0.25** rad/s. Walk forward is `vel(+0.056, 0)`. A turn is walk-yaw `vel(+0.056, ±0.25)` because `vx = 0` yaw does not change heading on this plant. Half-cap `vel(+0.028, ±0.25)` stays upright and does not accumulate a visible heading in the windows checked for this clip. Kitchen, bathroom, SLAM, maps, waypoints, and strafe are refused. The finders are separate scripts. This is not go-anywhere. Phrases, the refusal lines, and the clip are in `docs/VOICE_COMMANDS.md`.
 
 ```bash
 python scripts/voice_caller.py "turn left"
@@ -112,7 +112,7 @@ python scripts/voice_caller.py --self-test
 MUJOCO_GL=osmesa python scripts/voice_caller.py --clip
 ```
 
-The clip is stand → walk forward → turn left → stop on the frozen plant. The third-person frame captions the phrase and the bus command. `kit_cam` is not moved.
+The clip is stand → walk forward → turn right → stop on the frozen plant. The third-person frame captions the phrase and the bus command. `kit_cam` is not moved.
 
 ## kit_cam rooms (vision only, not a map)
 

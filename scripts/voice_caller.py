@@ -9,10 +9,13 @@ It does not move kit_cam. It does not add waypoints, a map, or strafe.
 Caps stay the bus caps: vx +0.056 / −0.032 m/s, yaw ±0.25 rad/s.
 vel is resent at 10 Hz. 200 ms with no command stands inside the bus.
 
-Walk forward publishes vel(+0.056, 0). A turn publishes soft walk-yaw
-vel(+0.028, ±0.25), half the forward cap, which is the envelope that
-changes heading on this plant. vx=0 with a yaw command does not change
+Walk forward publishes vel(+0.056, 0). A turn publishes walk-yaw at the
+forward cap, vel(+0.056, ±0.25). vx=0 with a yaw command does not change
 heading here, so "turn in place" is refused and is not published.
+vel(+0.028, ±0.25) stays inside the caps and stays upright, and on the
+windows checked for this clip it does not accumulate a visible heading
+(about +9 deg left in 10 s, about −17 deg right in 8 s). The demo turn
+is the cap walk-yaw, which does. The command is not the heading rate.
 
 Go to the kitchen, the bathroom, anywhere, SLAM, a map, a waypoint, or
 a strafe is refused. Kitchen and bathroom finders are other scripts.
@@ -54,7 +57,8 @@ PLANT_XML = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145.xml"
 FWD_MPS = 0.056
 BACK_MPS = 0.032
 YAW_RAD_S = 0.25
-# Half the forward cap. find_kitchen calls this soft walk-yaw.
+# Half the forward cap. The finder uses this as a trim. It is inside the
+# caps, and it is not the demo turn: heading barely accumulates.
 SOFT_VX = 0.028
 RESEND_S = 0.10
 TIMEOUT_S = 0.200
@@ -164,20 +168,21 @@ class Cue:
     label: str
 
 
-# One continuous steer: stand, walk, soft left turn, stop.
-# Turn ends before a second arc. Durations are a demo, not a room crossing.
+# One continuous steer: stand, walk, right walk-yaw, stop.
+# Right is the side that changes heading after this walk. A left yaw in
+# the same window is swallowed by the open-loop left drift. Not a second arc.
 DEMO_CUES: tuple[Cue, ...] = (
     Cue(1.0, "stand", "stand"),
     Cue(8.0, "walk forward", "walk"),
-    Cue(18.0, "turn left", "turn"),
-    Cue(21.0, "stop", "stop"),
+    Cue(16.0, "turn right", "turn"),
+    Cue(19.0, "stop", "stop"),
 )
 
 STILLS: tuple[tuple[float, str, str], ...] = (
     (0.80, "stand", "voice_commands_stand.png"),
     (6.00, "walk", "voice_commands_walk.png"),
-    (16.00, "turn", "voice_commands_turn.png"),
-    (20.80, "stop", "voice_commands_stop.png"),
+    (14.00, "turn", "voice_commands_turn.png"),
+    (18.20, "stop", "voice_commands_stop.png"),
 )
 
 
@@ -230,9 +235,9 @@ def parse_phrase(phrase: str) -> VoiceCommand:
     if text in _FORWARD_PHRASES:
         return _vel(FWD_MPS, 0.0)
     if text in _LEFT_PHRASES:
-        return _vel(SOFT_VX, YAW_RAD_S)
+        return _vel(FWD_MPS, YAW_RAD_S)
     if text in _RIGHT_PHRASES:
-        return _vel(SOFT_VX, -YAW_RAD_S)
+        return _vel(FWD_MPS, -YAW_RAD_S)
     if text in _STOP_PHRASES:
         return VoiceCommand("stop", 0.0, 0.0, "stop")
     if text in _STAND_PHRASES:
@@ -354,13 +359,18 @@ def test_phrases() -> list[str]:
     _expect(back.vx == -BACK_MPS and back.yaw_rate == 0.0, f"back {back}", failures)
     left = parse_phrase("turn left")
     _expect(
-        left.kind == "vel" and left.vx == SOFT_VX and left.yaw_rate == YAW_RAD_S,
+        left.kind == "vel" and left.vx == FWD_MPS and left.yaw_rate == YAW_RAD_S,
         f"left {left}",
         failures,
     )
-    _expect(left.line == "vel(+0.028, +0.250)", f"left line {left.line}", failures)
+    _expect(left.line == "vel(+0.056, +0.250)", f"left line {left.line}", failures)
     right = parse_phrase("turn right")
-    _expect(right.vx == SOFT_VX and right.yaw_rate == -YAW_RAD_S, f"right {right}", failures)
+    _expect(
+        right.vx == FWD_MPS and right.yaw_rate == -YAW_RAD_S and right.vx != 0.0,
+        f"right {right}",
+        failures,
+    )
+    _expect(right.line == "vel(+0.056, -0.250)", f"right line {right.line}", failures)
     for phrase in (
         "turn left in place",
         "spin",
@@ -386,7 +396,7 @@ def test_phrases() -> list[str]:
     _expect(parse_phrase("dance").line == UNKNOWN_LINE, "unknown", failures)
     phrases = [cue.phrase for cue in DEMO_CUES]
     _expect(
-        phrases == ["stand", "walk forward", "turn left", "stop"],
+        phrases == ["stand", "walk forward", "turn right", "stop"],
         f"demo phrases {phrases}",
         failures,
     )
@@ -401,6 +411,7 @@ def test_bus() -> list[str]:
     _expect(steer.VX_BACK_CAP == BACK_MPS, f"back cap {steer.VX_BACK_CAP}", failures)
     _expect(steer.YAW_RATE_CAP == YAW_RAD_S, f"yaw cap {steer.YAW_RATE_CAP}", failures)
     _expect(abs(SOFT_VX - 0.5 * steer.VX_FWD_CAP) < 1e-12, "soft vx is not half cap", failures)
+    _expect(SOFT_VX < FWD_MPS, "soft vx is not under the forward cap", failures)
     _expect(steer.COMMAND_TIMEOUT_S == TIMEOUT_S, f"timeout {steer.COMMAND_TIMEOUT_S}", failures)
     _expect(steer.VEL_RESEND_S == RESEND_S, f"resend {steer.VEL_RESEND_S}", failures)
     _expect(steer.PLANT_MD5 == PLANT_MD5, f"steer md5 {steer.PLANT_MD5}", failures)
@@ -448,10 +459,10 @@ def test_bus() -> list[str]:
 
     turn_bus = steer.CommandBus()
     turn = VoiceCaller(turn_bus, resend_s=steer.VEL_RESEND_S)
-    turn_line = turn.hear("turn left", 0.0)
-    _expect(turn_line == "vel(+0.028, +0.250)", f"turn hear {turn_line}", failures)
-    _expect(abs(turn_bus.target_vx - SOFT_VX) < 1e-12, f"target vx {turn_bus.target_vx}", failures)
-    _expect(abs(turn_bus.target_yaw - YAW_RAD_S) < 1e-12, f"target yaw {turn_bus.target_yaw}", failures)
+    turn_line = turn.hear("turn right", 0.0)
+    _expect(turn_line == "vel(+0.056, -0.250)", f"turn hear {turn_line}", failures)
+    _expect(abs(turn_bus.target_vx - FWD_MPS) < 1e-12, f"target vx {turn_bus.target_vx}", failures)
+    _expect(abs(turn_bus.target_yaw - (-YAW_RAD_S)) < 1e-12, f"target yaw {turn_bus.target_yaw}", failures)
 
     place = VoiceCaller(steer.CommandBus(), resend_s=steer.VEL_RESEND_S)
     place.command = VoiceCommand("vel", 0.0, YAW_RAD_S, "vel(+0.000, +0.250)")
@@ -739,7 +750,7 @@ def run_demo(*, video: bool, out_mp4: Path | None) -> DemoResult:
         mean_body_vx_walk=_mean_body_vx(walk),
         mean_body_vx_turn=_mean_body_vx(turn),
         stop_dyaw_deg=_dyaw_deg(stop),
-        turn_bus=bus_text("vel", SOFT_VX, YAW_RAD_S),
+        turn_bus=bus_text("vel", FWD_MPS, -YAW_RAD_S),
         walk_bus=bus_text("vel", FWD_MPS, 0.0),
         stills=tuple(stills),
         mp4=str(mp4_path.relative_to(ROOT)) if mp4_path is not None else None,
@@ -764,7 +775,7 @@ def _honesty(result: DemoResult) -> str:
         f"Voice clip on plant md5 {result.plant_md5}. "
         f"kit_cam stayed at {pos[0]:.3f} {pos[1]:.3f} {pos[2]:.3f}. "
         f"Phrases were stand, then walk forward as {result.walk_bus}, "
-        f"then turn left as {result.turn_bus}, then stop. "
+        f"then turn right as {result.turn_bus}, then stop. "
         f"Approach along the walk heading {result.approach_m:+.3f} m "
         f"(walk heading change {result.walk_dyaw_deg:+.1f} deg, "
         f"mean body vx {result.mean_body_vx_walk:+.3f} m/s). "

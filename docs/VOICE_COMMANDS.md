@@ -12,12 +12,12 @@ The clip types the phrases. A speech front-end would hand the same text over. No
 | stop, halt, freeze, stop walking | `stop` |
 | walk forward, go forward, move forward, walk | `vel(+0.056, +0.000)` |
 | back up, reverse, walk backward | `vel(-0.032, +0.000)` |
-| turn left, go left, yaw left | `vel(+0.028, +0.250)` |
-| turn right, go right, yaw right | `vel(+0.028, -0.250)` |
+| turn left, go left, yaw left | `vel(+0.056, +0.250)` |
+| turn right, go right, yaw right | `vel(+0.056, -0.250)` |
 
 `please` may sit on either end. A polite prefix does not change the bus command.
 
-A turn is soft walk-yaw: half the forward cap, plus yaw at the cap. That is the envelope that changes heading on this plant. `vx = 0` with a yaw command does not change heading, so it is not published.
+A turn is walk-yaw at the forward cap: `vel(+0.056, ±0.250)`. `vx = 0` with a yaw command does not change heading, so it is not published. `vel(+0.028, ±0.250)` is inside the caps and stays upright, and on the windows checked for this clip it does not accumulate a visible heading (about +9 deg left in 10 s, about −17 deg right in 8 s). The demo does not use it. The command is not the realized heading rate.
 
 ## Refused (Prefer FAIL)
 
@@ -34,7 +34,7 @@ Caps stay `vx` **+0.056 / −0.032** m/s and yaw **±0.25** rad/s. This caller d
 
 ## Clip
 
-`MUJOCO_GL=osmesa python scripts/voice_caller.py --clip` plays one steer on the frozen plant: **stand → walk forward → turn left → stop**. The frame is the third-person view so the body is visible. Each frame captions the phrase and the bus command. `kit_cam` stays at `0.050 0.019 0.007` and is not the demo camera.
+`MUJOCO_GL=osmesa python scripts/voice_caller.py --clip` plays one steer on the frozen plant: **stand → walk forward → turn right → stop**. The frame is the third-person view so the body is visible. Each frame captions the phrase and the bus command. `kit_cam` stays at `0.050 0.019 0.007` and is not the demo camera. A left yaw after this short walk is swallowed by the open-loop left drift, so the clip turns right. That is the side that changes heading in this window.
 
 Measured approach, heading, tip, and fault are written to `previews/voice_commands_summary.json` by that run. Those numbers are the clip. They are not a kitchen arrival and not a go-anywhere claim.
 
