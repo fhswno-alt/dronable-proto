@@ -30,7 +30,7 @@ The entrance panel file is named `panel.obj` so the loaded MuJoCo name does not 
 | `living/sofa.obj` | Sofa 03 | Fran Calvente | https://polyhaven.com/a/sofa_03 |
 | `living/coffee.obj` | Gothic Coffee Table | Ulan Cabanilla | https://polyhaven.com/a/gothic_coffee_table |
 | `living/tv.obj` | Television 01 | Gabriel Radić | https://polyhaven.com/a/Television_01 |
-| `bedroom/bed.obj` | Gothic Bed 01 | Kirill Sannikov | https://polyhaven.com/a/GothicBed_01 |
+| `bedroom/bed.obj` | Gothic Bed 01 (not placed) | Kirill Sannikov | https://polyhaven.com/a/GothicBed_01 |
 | `bedroom/nightstand.obj` | Classic Nightstand 01 | Kirill Sannikov | https://polyhaven.com/a/ClassicNightstand_01 |
 | `bedroom/lamp.obj` | Desk Lamp Arm 01 | Kuutti Siitonen (model and texture), Yann Kervran (rigging) | https://polyhaven.com/a/desk_lamp_arm_01 |
 | `bathroom/vanity.obj` | Painted Wooden Cabinet | Kirill Sannikov | https://polyhaven.com/a/painted_wooden_cabinet |
@@ -51,6 +51,8 @@ Each OBJ has a matching PNG albedo next to it.
 | `textures/hessian_mat.png` | Hessian 380 | colormass (photography), Rico Cilliers (processing) | https://polyhaven.com/a/hessian_380 |
 | `textures/marble.png` | Marble 01 | Rob Tuytel | https://polyhaven.com/a/marble_01 |
 | `textures/oak_veneer.png` | Oak Veneer 01 | Jenelle van Heerden | https://polyhaven.com/a/oak_veneer_01 |
+| `textures/rough_linen.png` | Rough Linen | colormass (photography), Rico Cilliers (processing) | https://polyhaven.com/a/rough_linen |
+| `textures/wool_boucle.png` | Wool Boucle | colormass (photography), Rico Cilliers (processing) | https://polyhaven.com/a/wool_boucle |
 
 ## Bathroom fixtures (loafbrr, CC0)
 
@@ -81,6 +83,10 @@ Poly Haven has no kitchen sink. `kitchen/basin.obj` is the same CC0 Sink_A mesh,
 Poly Haven also has no flat-panel kitchen cabinet, no kitchen island, no flush induction hob, and no stacked double oven. The kit_cam run is authored boxes, not a scanned cabinet: white plaster for the slab fronts, the counter, the backsplash, and the island; oak veneer for the upper panels. There are no handles. The counters are plaster, not veined stone (`marble_01` is beige). Those are Prefer FAIL gaps against a photoreal modern kitchen. The freestanding electric stove is the appliance column. It is a white coil-top range with one oven, not a black built-in double oven and not a flush cooktop. Island seating is Metal Stool 02 (round wood seat, metal pedestal), not an upholstered bar stool. The pendants are Modern Ceiling Lamp 01, a disc shade, not a glass globe.
 
 The ribbed wooden cabinet, the drawer cabinet, the dining table, the dining chair, the vintage microwave, the kettle, and the enamel pot stay in the repo and are not placed. From `kit_cam` those reads were gothic props or a wire rack, not the flat white run.
+
+`kit_cam` stands at about 0.38 m and looks level along +X. That pose is frozen. Countertops at 0.90 m stay above the lens, so the still cannot match a standing-eye photo of the cooktop. The island and stools sit image-right of the lens axis so the cabinet fronts, sink, and stove are in frame. That low-camera gap is a Prefer FAIL. Moving `kit_cam` would be required to see the counter surface the way the reference photo does.
+
+Poly Haven has no contemporary bed. The other bed meshes are Gothic Bed 01, a rusty hospital frame, and a carved daybed. The bedroom scene does not place them. The bed in frame is an authored platform: oak veneer base, rough-linen mattress and pillow, and a flat wool-boucle headboard with no posts. That is a CC0-texture stand-in, not a scanned modern bed. That photoreal gap is a Prefer FAIL. The nightstand is still Classic Nightstand 01.
 
 Poly Haven has no bathtub. The tub is from Isa Lousberg's **Tiny Treats — Bubbly Bathroom** set, licensed **CC0**:
 

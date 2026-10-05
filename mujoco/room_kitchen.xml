@@ -28,10 +28,10 @@
     <mesh name="room_basin" file="assets/rooms/kitchen/basin.obj" scale="1.35 1.35 1.35"/>
     <texture name="room_stool" type="2d" file="assets/rooms/kitchen/stool.png"/>
     <material name="room_stool" texture="room_stool" specular="0.25"/>
-    <mesh name="room_stool" file="assets/rooms/kitchen/stool.obj" scale="1.25 1.25 1.25"/>
+    <mesh name="room_stool" file="assets/rooms/kitchen/stool.obj" scale="1.05 1.05 1.05"/>
     <texture name="room_pendant" type="2d" file="assets/rooms/kitchen/pendant.png"/>
     <material name="room_pendant" texture="room_pendant" specular="0.35" emission="0.20"/>
-    <mesh name="room_pendant" file="assets/rooms/kitchen/pendant.obj" scale="0.72 0.72 0.72"/>
+    <mesh name="room_pendant" file="assets/rooms/kitchen/pendant.obj" scale="0.50 0.50 0.50"/>
   </asset>
   <worldbody>
     <light name="room_key" pos="0.35 0.0 2.25" dir="0.62 0.0 -1" diffuse="1.05 1.02 0.96"/>
@@ -54,36 +54,37 @@
       the appliance column. Stove yaw 180 faces the oven toward +X.
     -->
     <body name="kitchen" pos="0 0 0">
-      <site name="kitchen" pos="2.00 -0.35 1.05" size="0.015" group="4" rgba="0.75 0.62 0.35 1"/>
-      <geom name="kitchen_kick" type="box" pos="2.10 -0.355 0.05" size="0.24 1.195 0.05" material="room_recess" contype="0" conaffinity="0"/>
-      <geom name="kitchen_cabinet" type="box" pos="2.07 -0.355 0.48" size="0.27 1.195 0.38" material="room_recess" contype="0" conaffinity="0"/>
-      <geom name="kitchen_panel_a" type="box" pos="1.772 -1.258 0.48" size="0.028 0.292 0.36" material="room_white" contype="0" conaffinity="0"/>
-      <geom name="kitchen_panel_b" type="box" pos="1.772 -0.656 0.48" size="0.028 0.292 0.36" material="room_white" contype="0" conaffinity="0"/>
-      <geom name="kitchen_panel_c" type="box" pos="1.772 -0.054 0.48" size="0.028 0.292 0.36" material="room_white" contype="0" conaffinity="0"/>
-      <geom name="kitchen_panel_d" type="box" pos="1.772 0.548 0.48" size="0.028 0.292 0.36" material="room_white" contype="0" conaffinity="0"/>
-      <geom name="kitchen_counter" type="box" pos="2.02 -0.355 0.885" size="0.34 1.195 0.025" material="room_stone" contype="0" conaffinity="0"/>
+      <site name="kitchen" pos="1.84 -0.05 1.00" size="0.015" group="4" rgba="0.75 0.62 0.35 1"/>
+      <geom name="kitchen_kick" type="box" pos="1.92 -0.355 0.05" size="0.24 1.195 0.05" material="room_recess" contype="0" conaffinity="0"/>
+      <geom name="kitchen_cabinet" type="box" pos="1.89 -0.355 0.48" size="0.27 1.195 0.38" material="room_recess" contype="0" conaffinity="0"/>
+      <geom name="kitchen_panel_a" type="box" pos="1.592 -1.258 0.48" size="0.028 0.292 0.36" material="room_white" contype="0" conaffinity="0"/>
+      <geom name="kitchen_panel_b" type="box" pos="1.592 -0.656 0.48" size="0.028 0.292 0.36" material="room_white" contype="0" conaffinity="0"/>
+      <geom name="kitchen_panel_c" type="box" pos="1.592 -0.054 0.48" size="0.028 0.292 0.36" material="room_white" contype="0" conaffinity="0"/>
+      <geom name="kitchen_panel_d" type="box" pos="1.592 0.548 0.48" size="0.028 0.292 0.36" material="room_white" contype="0" conaffinity="0"/>
+      <geom name="kitchen_counter" type="box" pos="1.84 -0.355 0.885" size="0.34 1.195 0.025" material="room_stone" contype="0" conaffinity="0"/>
       <geom name="kitchen_splash" type="box" pos="2.358 -0.355 1.16" size="0.012 1.195 0.26" material="room_white" contype="0" conaffinity="0"/>
-      <geom name="kitchen_end" type="box" pos="2.04 -1.66 0.455" size="0.30 0.10 0.455" material="room_white" contype="0" conaffinity="0"/>
-      <geom name="kitchen_pier" type="box" pos="2.05 1.66 1.10" size="0.26 0.10 1.10" material="room_white" contype="0" conaffinity="0"/>
+      <geom name="kitchen_end" type="box" pos="1.86 -1.66 0.455" size="0.30 0.10 0.455" material="room_white" contype="0" conaffinity="0"/>
+      <geom name="kitchen_pier" type="box" pos="1.87 1.66 1.10" size="0.26 0.10 1.10" material="room_white" contype="0" conaffinity="0"/>
       <geom name="kitchen_upper_a" type="box" pos="2.18 -1.258 1.78" size="0.16 0.292 0.36" material="room_oak" contype="0" conaffinity="0"/>
       <geom name="kitchen_upper_b" type="box" pos="2.18 -0.656 1.78" size="0.16 0.292 0.36" material="room_oak" contype="0" conaffinity="0"/>
       <geom name="kitchen_upper_c" type="box" pos="2.18 -0.054 1.78" size="0.16 0.292 0.36" material="room_oak" contype="0" conaffinity="0"/>
       <geom name="kitchen_upper_d" type="box" pos="2.18 0.548 1.78" size="0.16 0.292 0.36" material="room_oak" contype="0" conaffinity="0"/>
-      <geom name="kitchen_stove" type="mesh" mesh="room_stove" material="room_stove" pos="2.05 1.22 0" quat="0 0 0 1" contype="0" conaffinity="0"/>
-      <geom name="kitchen_sink" type="mesh" mesh="room_basin" material="room_basin" pos="2.02 -0.35 0.91" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
-      <geom name="kitchen_pendant_a" type="mesh" mesh="room_pendant" material="room_pendant" pos="1.28 -0.32 1.72" contype="0" conaffinity="0"/>
-      <geom name="kitchen_pendant_b" type="mesh" mesh="room_pendant" material="room_pendant" pos="1.28 0.18 1.72" contype="0" conaffinity="0"/>
+      <geom name="kitchen_stove" type="mesh" mesh="room_stove" material="room_stove" pos="1.87 1.22 0" quat="0 0 0 1" contype="0" conaffinity="0"/>
+      <geom name="kitchen_sink" type="mesh" mesh="room_basin" material="room_basin" pos="1.84 -0.05 0.91" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+      <geom name="kitchen_pendant_a" type="mesh" mesh="room_pendant" material="room_pendant" pos="1.16 -1.12 1.92" contype="0" conaffinity="0"/>
+      <geom name="kitchen_pendant_b" type="mesh" mesh="room_pendant" material="room_pendant" pos="1.16 -0.68 1.92" contype="0" conaffinity="0"/>
     </body>
-    <!-- Island parallel to the run. Top overhangs toward the camera for seating. -->
-    <body name="table" pos="1.28 -0.12 0">
+    <!-- Island is off the lens axis, image-right, so the low frozen camera
+         sees the cabinet run. The top still overhangs toward the camera. -->
+    <body name="table" pos="1.16 -1.00 0">
       <site name="table" pos="0 0 0.90" size="0.012" group="4" rgba="0.75 0.75 0.72 1"/>
-      <geom name="table_base" type="box" pos="0 0 0.43" size="0.28 0.58 0.43" material="room_white" contype="0" conaffinity="0"/>
-      <geom name="table_top" type="box" pos="-0.14 0 0.888" size="0.42 0.74 0.028" material="room_stone" contype="0" conaffinity="0"/>
+      <geom name="table_base" type="box" pos="0 0 0.43" size="0.26 0.40 0.43" material="room_white" contype="0" conaffinity="0"/>
+      <geom name="table_top" type="box" pos="-0.10 0 0.888" size="0.36 0.50 0.028" material="room_stone" contype="0" conaffinity="0"/>
     </body>
-    <body name="chair" pos="0.68 -0.12 0">
-      <site name="chair" pos="0 0 0.50" size="0.012" group="4" rgba="0.45 0.45 0.42 1"/>
-      <geom name="chair_seat" type="mesh" mesh="room_stool" material="room_stool" pos="0 -0.30 0" contype="0" conaffinity="0"/>
-      <geom name="chair_stool_b" type="mesh" mesh="room_stool" material="room_stool" pos="0 0.30 0" contype="0" conaffinity="0"/>
+    <body name="chair" pos="0.64 -1.00 0">
+      <site name="chair" pos="0 0 0.42" size="0.012" group="4" rgba="0.45 0.45 0.42 1"/>
+      <geom name="chair_seat" type="mesh" mesh="room_stool" material="room_stool" pos="0 -0.20 0" contype="0" conaffinity="0"/>
+      <geom name="chair_stool_b" type="mesh" mesh="room_stool" material="room_stool" pos="0 0.20 0" contype="0" conaffinity="0"/>
     </body>
   </worldbody>
 </mujoco>
