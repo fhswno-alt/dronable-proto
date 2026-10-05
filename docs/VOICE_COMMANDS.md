@@ -17,7 +17,7 @@ The clip types the phrases. A speech front-end would hand the same text over. No
 
 `please` may sit on either end. A polite prefix does not change the bus command.
 
-A turn is walk-yaw at the forward cap: `vel(+0.056, ±0.250)`. `vx = 0` with a yaw command does not change heading, so it is not published. `vel(+0.028, ±0.250)` is inside the caps and stays upright, and on the windows checked for this clip it does not accumulate a visible heading (about +9 deg left in 10 s, about −17 deg right in 8 s). The demo does not use it. The command is not the realized heading rate.
+A turn is walk-yaw at the forward cap: `vel(+0.056, ±0.250)`. `vx = 0` with a yaw command does not change heading, so it is not published. `vel(+0.028, yaw)` is the finder trim on the kitchen script. It is not this clip. The command is not the realized heading rate.
 
 ## Refused (Prefer FAIL)
 
@@ -34,9 +34,11 @@ Caps stay `vx` **+0.056 / −0.032** m/s and yaw **±0.25** rad/s. This caller d
 
 ## Clip
 
-`MUJOCO_GL=osmesa python scripts/voice_caller.py --clip` plays one steer on the frozen plant: **stand → walk forward → turn right → stop**. The frame is the third-person view so the body is visible. Each frame captions the phrase and the bus command. `kit_cam` stays at `0.050 0.019 0.007` and is not the demo camera. A left yaw after this short walk is swallowed by the open-loop left drift, so the clip turns right. That is the side that changes heading in this window.
+`MUJOCO_GL=osmesa python scripts/voice_caller.py --clip` plays the claimed nav-left window as phrases: **stand → walk forward → turn left → walk forward → stop**. Times are 1 s, 15 s, 12.5 s, 6 s, then a 2.5 s stop. The bus commands are `stand`, `vel(+0.056, +0.000)`, `vel(+0.056, +0.250)`, `vel(+0.056, +0.000)`, `stop`. Each frame captions the phrase and that bus command. The view is the third-person camera so the body is visible. `kit_cam` stays at `0.050 0.019 0.007` and is not the demo camera.
 
-Measured approach, heading, tip, and fault are written to `previews/voice_commands_summary.json` by that run. Those numbers are the clip. They are not a kitchen arrival and not a go-anywhere claim.
+Controls' claimed envelope on that same path is approach **+0.598 m**, left arc **+75.7 deg**, resume **+0.317 m**, min up_z **0.954**, end mode stand. This voice run matched it: approach **+0.598 m**, left arc **+75.7 deg** (mean yaw rate **+0.106 rad/s**, not the 0.25 command), resume **+0.317 m**, end heading **+72.0 deg**, min up_z **0.954**, peak leg torque **2.10 Nm**, CoP in the box, end mode **stand**, end margin **+0.063 m**, no fault, no tip. Plant md5 `71b2c86d133ebc603f58b99c53e496f3`. `kit_cam` stayed at `0.050 0.019 0.007`.
+
+This is not nav-multi, not a 14 s left hold from t=15 s (that tips on the resume), and not a kitchen arrival.
 
 ```bash
 python scripts/voice_caller.py "turn left"

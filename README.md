@@ -104,7 +104,7 @@ Forward clamp is **+0.056 m/s**, reverse **−0.032 m/s**, yaw **±0.25 rad/s**.
 
 ## Voice commands (same CommandBus)
 
-`scripts/voice_caller.py` turns a typed phrase into `stand`, `stop`, or `vel(vx, yaw_rate)` on the bus above. It resends `vel` at 10 Hz. 200 ms of silence stands. Caps stay **+0.056 / −0.032** m/s and yaw **±0.25** rad/s. Walk forward is `vel(+0.056, 0)`. A turn is walk-yaw `vel(+0.056, ±0.25)` because `vx = 0` yaw does not change heading on this plant. Half-cap `vel(+0.028, ±0.25)` stays upright and does not accumulate a visible heading in the windows checked for this clip. Kitchen, bathroom, SLAM, maps, waypoints, and strafe are refused. The finders are separate scripts. This is not go-anywhere. Phrases, the refusal lines, and the clip are in `docs/VOICE_COMMANDS.md`.
+`scripts/voice_caller.py` turns a typed phrase into `stand`, `stop`, or `vel(vx, yaw_rate)` on the bus above. It resends `vel` at 10 Hz. 200 ms of silence stands. Caps stay **+0.056 / −0.032** m/s and yaw **±0.25** rad/s. Walk forward is `vel(+0.056, 0)`. Turn left / turn right is walk-yaw `vel(+0.056, ±0.25)`. `vx = 0` yaw does not change heading and is refused. The clip speaks the claimed nav-left window: stand, walk forward, turn left, walk forward, stop. Kitchen, bathroom, SLAM, maps, waypoints, and strafe are refused. The finders are separate scripts. This is not go-anywhere. Phrases and the refusal lines are in `docs/VOICE_COMMANDS.md`.
 
 ```bash
 python scripts/voice_caller.py "turn left"
@@ -112,7 +112,7 @@ python scripts/voice_caller.py --self-test
 MUJOCO_GL=osmesa python scripts/voice_caller.py --clip
 ```
 
-The clip is stand → walk forward → turn right → stop on the frozen plant. The third-person frame captions the phrase and the bus command. `kit_cam` is not moved.
+The clip is that claimed left arc with the phrase and the bus command on each frame. `kit_cam` is not moved. This run matched the envelope: approach **+0.598 m**, left arc **+75.7 deg**, resume **+0.317 m**, min up_z **0.954**, end mode stand, no tip. Numbers are in `previews/voice_commands_summary.json`.
 
 ## kit_cam rooms (vision only, not a map)
 
@@ -152,7 +152,7 @@ Gait params & teleop stubs: top of `scripts/walk_gait.py` (wired to Controls/AI 
 - `previews/kit_cam_room_bedroom.png` — bedroom vision still (not a go-to)
 - `previews/kit_cam_room_entrance.png` — entrance vision still (visual frame only, not a go-to)
 - `previews/find_kitchen_before.png` / `find_kitchen_mid.png` / `find_kitchen_after.png` / `find_kitchen_prefer_fail.png` — kit_cam before the bursts, between them, after the stop, and an empty-plant Prefer FAIL
-- `previews/voice_commands_demo.mp4` plus `voice_commands_stand.png`, `voice_commands_walk.png`, `voice_commands_turn.png`, `voice_commands_stop.png` — voice phrase → bus command → stand / walk / turn / stop
+- `previews/voice_commands_demo.mp4` plus stand / walk / turn / resume / stop stills — voice phrase → bus command on the claimed left arc
 
 ## Model summary
 

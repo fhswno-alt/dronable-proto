@@ -12,10 +12,11 @@ vel is resent at 10 Hz. 200 ms with no command stands inside the bus.
 Walk forward publishes vel(+0.056, 0). A turn publishes walk-yaw at the
 forward cap, vel(+0.056, ±0.25). vx=0 with a yaw command does not change
 heading here, so "turn in place" is refused and is not published.
-vel(+0.028, ±0.25) stays inside the caps and stays upright, and on the
-windows checked for this clip it does not accumulate a visible heading
-(about +9 deg left in 10 s, about −17 deg right in 8 s). The demo turn
-is the cap walk-yaw, which does. The command is not the heading rate.
+
+The clip is Controls' claimed nav-left window, spoken as phrases:
+stand, walk forward, turn left, walk forward, stop. Same times, same
+vel(+0.056, 0) and vel(+0.056, +0.25). It is not a second arc and not
+a room crossing. Half-cap vel(+0.028, yaw) is the finder trim, not this arc.
 
 Go to the kitchen, the bathroom, anywhere, SLAM, a map, a waypoint, or
 a strafe is refused. Kitchen and bathroom finders are other scripts.
@@ -168,21 +169,23 @@ class Cue:
     label: str
 
 
-# One continuous steer: stand, walk, right walk-yaw, stop.
-# Right is the side that changes heading after this walk. A left yaw in
-# the same window is swallowed by the open-loop left drift. Not a second arc.
+# Claimed nav-left window. Phrase times match NAV_LEFT_SCRIPT t_end.
+# stand → walk forward → turn left → walk forward → stop.
+# Not the 14 s left that starts at 15 s. Not a second arc.
 DEMO_CUES: tuple[Cue, ...] = (
     Cue(1.0, "stand", "stand"),
-    Cue(8.0, "walk forward", "walk"),
-    Cue(16.0, "turn right", "turn"),
-    Cue(19.0, "stop", "stop"),
+    Cue(16.0, "walk forward", "walk"),
+    Cue(28.5, "turn left", "turn"),
+    Cue(34.5, "walk forward", "resume"),
+    Cue(37.0, "stop", "stop"),
 )
 
 STILLS: tuple[tuple[float, str, str], ...] = (
     (0.80, "stand", "voice_commands_stand.png"),
-    (6.00, "walk", "voice_commands_walk.png"),
-    (14.00, "turn", "voice_commands_turn.png"),
-    (18.20, "stop", "voice_commands_stop.png"),
+    (9.25, "walk", "voice_commands_walk.png"),
+    (22.90, "turn", "voice_commands_turn.png"),
+    (31.80, "resume", "voice_commands_resume.png"),
+    (36.60, "stop", "voice_commands_stop.png"),
 )
 
 
@@ -396,7 +399,7 @@ def test_phrases() -> list[str]:
     _expect(parse_phrase("dance").line == UNKNOWN_LINE, "unknown", failures)
     phrases = [cue.phrase for cue in DEMO_CUES]
     _expect(
-        phrases == ["stand", "walk forward", "turn right", "stop"],
+        phrases == ["stand", "walk forward", "turn left", "walk forward", "stop"],
         f"demo phrases {phrases}",
         failures,
     )
@@ -459,10 +462,23 @@ def test_bus() -> list[str]:
 
     turn_bus = steer.CommandBus()
     turn = VoiceCaller(turn_bus, resend_s=steer.VEL_RESEND_S)
-    turn_line = turn.hear("turn right", 0.0)
-    _expect(turn_line == "vel(+0.056, -0.250)", f"turn hear {turn_line}", failures)
+    turn_line = turn.hear("turn left", 0.0)
+    _expect(turn_line == "vel(+0.056, +0.250)", f"turn hear {turn_line}", failures)
     _expect(abs(turn_bus.target_vx - FWD_MPS) < 1e-12, f"target vx {turn_bus.target_vx}", failures)
-    _expect(abs(turn_bus.target_yaw - (-YAW_RAD_S)) < 1e-12, f"target yaw {turn_bus.target_yaw}", failures)
+    _expect(abs(turn_bus.target_yaw - YAW_RAD_S) < 1e-12, f"target yaw {turn_bus.target_yaw}", failures)
+    script = steer.NAV_LEFT_SCRIPT
+    cue_ends = [cue.t_end for cue in DEMO_CUES]
+    seg_ends = [seg.t_end for seg in script]
+    _expect(cue_ends == seg_ends, f"cue times {cue_ends} != nav-left {seg_ends}", failures)
+    for cue, seg in zip(DEMO_CUES, script, strict=True):
+        cmd = parse_phrase(cue.phrase)
+        _expect(cmd.kind == seg.kind, f"{cue.label} kind {cmd.kind} != {seg.kind}", failures)
+        if seg.kind == "vel":
+            _expect(
+                cmd.vx == seg.vx and cmd.yaw_rate == seg.yaw_rate,
+                f"{cue.label} {cmd.line} != vel({seg.vx:+.3f}, {seg.yaw_rate:+.3f})",
+                failures,
+            )
 
     place = VoiceCaller(steer.CommandBus(), resend_s=steer.VEL_RESEND_S)
     place.command = VoiceCommand("vel", 0.0, YAW_RAD_S, "vel(+0.000, +0.250)")
@@ -520,6 +536,11 @@ class DemoResult:
     mean_body_vx_walk: float
     mean_body_vx_turn: float
     stop_dyaw_deg: float
+    resume_m: float
+    end_heading_deg: float
+    peak_tau_nm: float
+    cop_in_box: bool
+    matches_claimed_nav_left: bool
     turn_bus: str
     walk_bus: str
     stills: tuple[str, ...]
@@ -670,8 +691,8 @@ def run_demo(*, video: bool, out_mp4: Path | None) -> DemoResult:
         command = caller.command
         phrase = cue.phrase
         published = command.line if command is not None else "(none)"
+        latest = session.samples[-1]
         if (now - last_print) >= 0.999:
-            latest = session.samples[-1]
             print(
                 f"t={now:.2f} {cue.label} voice={phrase!r} bus={published} "
                 f"{report.line()} x={latest.x:+.3f} "
@@ -696,13 +717,13 @@ def run_demo(*, video: bool, out_mp4: Path | None) -> DemoResult:
         if not video or session.renderer is None or len(session.samples) % 2 != 0:
             continue
         lines = [
-            f'voice: "{phrase}"',
-            f"bus: {published}",
+            f'"{phrase}"  →  {published}',
             report.line(),
             (
-                f"t={now:.2f}s  x={float(session.data.qpos[0]):+.3f} m  "
-                f"heading={math.degrees(session.yaw()):+.1f} deg"
+                f"t={now:.2f}s  x={latest.x:+.3f} m  "
+                f"heading={math.degrees(latest.yaw):+.1f} deg"
             ),
+            "CommandBus only  |  no map  |  not go-anywhere",
         ]
         frame = _render_body(session, lines)
         frames.append(frame)
@@ -724,33 +745,33 @@ def run_demo(*, video: bool, out_mp4: Path | None) -> DemoResult:
         mp4_path = out_mp4
         print(f"[voice] wrote {out_mp4} ({len(frames)} frames)")
 
-    walk = _window(session.samples, *_bounds("walk", DEMO_CUES))
-    turn = _window(session.samples, *_bounds("turn", DEMO_CUES))
+    import demo_8pm_motion as pack
+
+    summary = steer.summarize(session, steer.NAV_LEFT_SCRIPT)
+    matched = pack._claimed_match(summary)
     stop = _window(session.samples, *_bounds("stop", DEMO_CUES))
-    tail = session.samples[-1] if session.samples else None
-    end_mode = str(getattr(tail, "mode")) if tail is not None else "stand"
-    end_margin = float(getattr(tail, "margin")) if tail is not None else 0.0
-    min_up_z = float(session.min_up_z)
-    fault = bool(session.bus.fault)
-    reason = str(session.bus.fault_reason)
-    tip = bool(min_up_z < 0.85 or (fault and "tip" in reason))
     result = DemoResult(
         plant_md5=_plant_md5(),
         kit_cam_pos=cam_pos,
-        fault=fault,
-        fault_reason=reason,
-        tip=tip,
-        min_up_z=min_up_z,
-        end_mode=end_mode,
-        end_margin_m=end_margin,
-        approach_m=_heading_travel(walk),
-        walk_dyaw_deg=_dyaw_deg(walk),
-        heading_deg=_dyaw_deg(turn),
-        mean_yaw_rate_turn=_mean_yaw_rate(turn),
-        mean_body_vx_walk=_mean_body_vx(walk),
-        mean_body_vx_turn=_mean_body_vx(turn),
+        fault=bool(summary.fault),
+        fault_reason=summary.fault_reason,
+        tip=bool(summary.tip),
+        min_up_z=float(summary.min_up_z),
+        end_mode=summary.end_mode,
+        end_margin_m=float(summary.end_margin_m),
+        approach_m=float(summary.dx_forward_m),
+        walk_dyaw_deg=math.degrees(summary.dyaw_forward_rad),
+        heading_deg=math.degrees(summary.dyaw_turn_rad),
+        mean_yaw_rate_turn=float(summary.mean_yaw_rate_turn),
+        mean_body_vx_walk=float(summary.mean_body_vx_forward),
+        mean_body_vx_turn=float(summary.mean_body_vx_turn),
         stop_dyaw_deg=_dyaw_deg(stop),
-        turn_bus=bus_text("vel", FWD_MPS, -YAW_RAD_S),
+        resume_m=float(summary.dx_resume_m),
+        end_heading_deg=math.degrees(summary.dyaw_end_rad),
+        peak_tau_nm=float(summary.peak_torque_nm),
+        cop_in_box=bool(summary.cop_in_box),
+        matches_claimed_nav_left=bool(matched),
+        turn_bus=bus_text("vel", FWD_MPS, YAW_RAD_S),
         walk_bus=bus_text("vel", FWD_MPS, 0.0),
         stills=tuple(stills),
         mp4=str(mp4_path.relative_to(ROOT)) if mp4_path is not None else None,
@@ -770,24 +791,37 @@ def _honesty(result: DemoResult) -> str:
         else "no fault"
     )
     tip = "tipped (up_z < 0.85)" if result.tip else "did not tip"
+    match = (
+        "matches Controls' claimed nav-left envelope"
+        if result.matches_claimed_nav_left
+        else "does not match Controls' claimed nav-left envelope"
+    )
     pos = result.kit_cam_pos
     return (
         f"Voice clip on plant md5 {result.plant_md5}. "
         f"kit_cam stayed at {pos[0]:.3f} {pos[1]:.3f} {pos[2]:.3f}. "
-        f"Phrases were stand, then walk forward as {result.walk_bus}, "
-        f"then turn right as {result.turn_bus}, then stop. "
-        f"Approach along the walk heading {result.approach_m:+.3f} m "
+        f"Phrases were stand, walk forward as {result.walk_bus}, "
+        f"turn left as {result.turn_bus}, walk forward again, then stop. "
+        f"Same windows as the claimed nav-left arc. "
+        f"Approach Δx {result.approach_m:+.3f} m "
         f"(walk heading change {result.walk_dyaw_deg:+.1f} deg, "
         f"mean body vx {result.mean_body_vx_walk:+.3f} m/s). "
-        f"Turn heading {result.heading_deg:+.1f} deg, "
+        f"Left arc Δyaw {result.heading_deg:+.1f} deg, "
         f"mean yaw rate {result.mean_yaw_rate_turn:+.3f} rad/s "
         f"(cap ±{YAW_RAD_S:.2f}; the command is not the heading rate), "
         f"mean body vx {result.mean_body_vx_turn:+.3f} m/s. "
+        f"Resume along the new heading {result.resume_m:+.3f} m. "
+        f"End heading {result.end_heading_deg:+.1f} deg. "
         f"Heading change during the stop hold {result.stop_dyaw_deg:+.1f} deg. "
-        f"min up_z {result.min_up_z:.3f}. End mode {result.end_mode}. "
+        f"min up_z {result.min_up_z:.3f}. Peak leg torque {result.peak_tau_nm:.2f} Nm. "
+        f"CoP in box {result.cop_in_box}. End mode {result.end_mode}. "
         f"End support margin {result.end_margin_m:+.3f} m. "
-        f"{fault}; {tip}. "
-        "vx=0 yaw was not sent. Not a kitchen trip, not a map, not go-anywhere."
+        f"{fault}; {tip}. This clip {match}. "
+        "Claimed on that envelope: approach +0.598 m, left arc +75.7 deg, "
+        "resume +0.317 m, min up_z 0.954. "
+        "vx=0 yaw was not sent. Not a kitchen trip, not a map, not go-anywhere. "
+        "Prefer FAIL, not this clip: a 14 s left hold from t=15 s tips on the resume; "
+        "a second arc is not published."
     )
 
 
@@ -824,7 +858,7 @@ def main(argv: list[str] | None = None) -> int:
         _write_summary(result, Path(args.summary))
         if args.clip and result.mp4 is None:
             return 2
-        if result.fault or result.tip:
+        if result.fault or result.tip or not result.matches_claimed_nav_left:
             return 2
         return 0
     if args.phrase is None:
