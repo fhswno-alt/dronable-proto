@@ -10,17 +10,21 @@ vel is resent at 10 Hz. 200 ms of silence stands.
 This is not SLAM and not an arrival. The phrase path paints kit_cam into
 the explore map and steers from query_kitchen_like_yellow() and
 frontier_cells(). The logged cue is the warm white slab, not flat yellow.
-If that log has no slab, it sends no vel. A live blob is the
-arrival fraction, not the command. Named kitchen / table / chair boxes
+If that log has no slab, it sends no vel. Once the slab is large, the
+live centroid trims yaw. The live fraction is still an arrival bar.
+Named kitchen / table / chair boxes
 stay a sim honesty check. They are not waypoints and they are not given
 to the map query.
 
 The last-mile walks at half the forward cap (0.028 m/s), because a
-full-cap finder burst crossed up_z 0.90. Yaw comes from the logged
-camera ray or the frontier nearest that ray, inside ±0.25. vx=0 yaw
-does not change heading on this plant and is not sent. The up_z bar
+full-cap finder burst crossed up_z 0.90. Until the slab fills a fifth
+of the frame, yaw comes from the logged camera ray or the frontier
+nearest that ray, inside ±0.25. After that, yaw is a tighter trim on
+the live centroid. vx=0 yaw does not change heading on this plant and
+is not sent. The up_z bar
 stays 0.90. The 1.2 s hop stays in --self-test at the full forward cap.
-The world-x budget is 1.10 m, a stop, not a goal pose. Arrival is
+The world-x budget is 1.32 m, a stop, not a goal pose. The 1.10 m
+budget on the merged kitchen stopped at 0.384 m still to go. Arrival is
 claimed only when the warm-white slab fills at least half the frame
 and the torso is within 0.25 m of the kitchen geom. Otherwise the
 summary reports end x and the remaining gap and does not say arrived.
@@ -86,7 +90,7 @@ BURST_FORWARD_S = 0.40
 BURST_YAW_S = 0.40
 SOFT_VX = steer_walk.VX_FWD_CAP * 0.5
 # Half-cap realized speed is about 0.016 m/s. The slice cap is only so a
-# stalled walk cannot run forever. 280 * 0.40 s is longer than the 1.10 m
+# stalled walk cannot run forever. 280 * 0.40 s is longer than the 1.32 m
 # budget at that speed, so the distance stop fires first.
 MAX_FORWARD_BURSTS = 280
 # Fade recentering turns some forward-only slices into walk-yaw. The cap
@@ -94,12 +98,17 @@ MAX_FORWARD_BURSTS = 280
 MAX_YAW_CORRECTIONS = 120
 # |bias| at which the trim uses the full yaw cap. Inside CENTER_BIAS, yaw is 0.
 YAW_BIAS_FULL = 0.35
-# World-x progress stop. On the closed kitchen the near face is about 0.94 m,
-# so this 1.10 m budget can pass the cabinet. The close stop (gap <= 0.25 m)
-# fires first while the grain is still in frame. This is a burst budget, not
-# a waypoint. The up_z bar is still 0.90, and arrival still needs both
-# grain >= 0.50 and gap <= 0.25 m.
-PROGRESS_STOP_M = 1.10
+# World-x progress stop. The merged counter face is about 1.50 m. The
+# 1.10 m budget stopped at remaining 0.384 m with the slab at 0.496.
+# 1.32 m is enough world-x for the torso to reach the 0.25 m gap if the
+# walk stays on that line. The close and arrival checks fire before this
+# budget. This is a burst budget, not a waypoint. The up_z bar is still
+# 0.90, and arrival still needs both cue >= 0.50 and gap <= 0.25 m.
+PROGRESS_STOP_M = 1.32
+# Once the slab fills a fifth of the frame, yaw follows the live centroid
+# inside a tighter band than the map ray. vx stays at the half cap.
+LATE_RECENTER_FRAC = 0.20
+LATE_CENTER_BIAS = 0.04
 # First sample under the plant's throttle line stops the approach.
 # A lean that holds under 0.85 also trips the bus fault in this room,
 # because the world COM includes the furniture.
@@ -669,6 +678,16 @@ def yellow_fading(yellow_frac: float, peak_yellow: float) -> bool:
     )
 
 
+def late_recenter_yaw(score: KitchenScore, map_yaw: float) -> float:
+    """Map ray yaw until the slab is large, then a tighter live trim.
+
+    The caller keeps vx at the half cap. This does not return a pure yaw.
+    """
+    if score.yellow_frac < LATE_RECENTER_FRAC or score.decision == "fail":
+        return map_yaw
+    return trim_yaw(score.bias, LATE_CENTER_BIAS)
+
+
 def center_bias_for(yellow_frac: float, peak_yellow: float) -> float:
     """Tighter forward-only band while the backsplash is fading. Otherwise 0.08."""
     if yellow_fading(yellow_frac, peak_yellow):
@@ -1173,12 +1192,13 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
             note = MAP_NO_YELLOW
             stop_kind = "no_yellow"
             break
-        if abs(command.yaw_rate) > 1e-9:
+        yaw_rate = late_recenter_yaw(score, command.yaw_rate)
+        if abs(yaw_rate) > 1e-9:
             yaw_corrections += 1
         else:
             forward_bursts += 1
         abort = _hold_vel(
-            session, cam, command.vx, command.yaw_rate, BURST_FORWARD_S, sent,
+            session, cam, command.vx, yaw_rate, BURST_FORWARD_S, sent,
             stop_when_centered=False,
             progress_x0=x0,
             progress_cap_m=PROGRESS_STOP_M,
@@ -1431,6 +1451,20 @@ def test_approach_policy() -> list[str]:
         forward_bursts=3, remaining_m=0.40,
     )
     _expect(budget.action == "stop" and budget.kind == "budget", f"budget {budget}", failures)
+    past_old = approach_choice(
+        centered, dx_m=1.10, up_z=0.98, yaw_corrections=0,
+        forward_bursts=3, remaining_m=0.40,
+    )
+    _expect(past_old.action == "forward", f"1.10 m is no longer the budget {past_old}", failures)
+    small = _fake_score("forward", 0.10, 0.20)
+    _expect(late_recenter_yaw(small, 0.12) == 0.12, "early yaw left the map ray", failures)
+    grown = _fake_score("forward", 0.40, 0.0)
+    _expect(late_recenter_yaw(grown, 0.20) == 0.0, "centered slab still yaws", failures)
+    off = _fake_score("yaw_left", 0.40, -0.20)
+    late = late_recenter_yaw(off, -0.05)
+    _expect(0.0 < late <= steer_walk.YAW_RATE_CAP, f"late trim {late}", failures)
+    lost_late = _fake_score("fail", 0.40, -0.20)
+    _expect(late_recenter_yaw(lost_late, 0.11) == 0.11, "lost blob replaced the map yaw", failures)
     yaw = approach_choice(
         left, dx_m=0.20, up_z=0.97, yaw_corrections=0,
         forward_bursts=1, remaining_m=1.00,
@@ -1999,8 +2033,13 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
             f"arrival flag {approach.arrival} does not match the bars "
             f"(yellow {approach.final.yellow_frac:.3f}, remaining {approach.remaining_m:.3f} m)"
         )
-    if approach.stop_kind == "budget" and not (1.00 <= approach.dx_m <= 1.25):
-        problems.append(f"budget stop dx {approach.dx_m:.3f} m is outside 1.00–1.25")
+    if approach.stop_kind == "budget" and not (
+        PROGRESS_STOP_M - 0.05 <= approach.dx_m <= PROGRESS_STOP_M + 0.20
+    ):
+        problems.append(
+            f"budget stop dx {approach.dx_m:.3f} m is outside the "
+            f"{PROGRESS_STOP_M:.2f} m budget band"
+        )
     if approach.stop_kind == "budget" and approach.min_up_z < UP_Z_ABORT:
         problems.append(f"budget stop min up_z {approach.min_up_z:.3f}")
 
@@ -2096,7 +2135,10 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
         for msg in problems:
             print(f"FAIL: {msg}")
         return 1
-    print("[find] PASS  map query last-mile, not arrival")
+    if approach.arrival:
+        print("[find] PASS  both arrival bars on the stop frame")
+    else:
+        print("[find] PASS  map query last-mile, not arrival")
     return 0
 
 
