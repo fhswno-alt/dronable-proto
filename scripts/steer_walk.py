@@ -1182,9 +1182,11 @@ class SteerSession:
             vx = report.applied_vx
             if report.mode == "move" and self._up_z() < 0.90:
                 vx *= 0.55
-            # The tick writes the end-of-interval target. The physics loop
-            # ramps ctrl from the previous command across this 20 ms, the
-            # way a bus servo move-time does. Snapshot before the write.
+            # The tick writes the end-of-interval target. Hip and knee pitch
+            # move at most 0.050 rad from the previous command and from the
+            # measured joint, so a larger gait step spans later ticks. The
+            # physics loop ramps ctrl across this 20 ms. Snapshot before
+            # the write.
             ctrl_from = np.array(self.data.ctrl, dtype=np.float64, copy=True)
             if self.bus.fault:
                 self.lipm.hold_stand()
@@ -1484,12 +1486,13 @@ class SteerSession:
     def _lipm_substep(self, ctrl_from: np.ndarray | None = None) -> None:
         """Integrate the position servos. No root wrench and no foot xfrc.
 
-        ``data.ctrl`` on entry is the 50 Hz target. A kit
+        ``data.ctrl`` on entry is this tick's target. A kit
         ``SERVO_MOVE_TIME_WRITE`` approaches that target over the move
-        time instead of stepping the register. The move time is one
-        control tick (20 ms), applied at the physics rate. The last
-        substep lands on the target. Plant kp, dampratio, forcerange,
-        and armature are untouched.
+        time instead of stepping the register. This tick's piece is 20 ms
+        at the physics rate. Hip and knee targets are already inside one
+        torque-budget step, so a longer pose change is several of these
+        ramps. The last substep lands on this tick's target. Plant kp,
+        dampratio, forcerange, and armature are untouched.
         """
         n = self.steps_per_ctrl
         ctrl_to = np.array(self.data.ctrl, dtype=np.float64, copy=True)

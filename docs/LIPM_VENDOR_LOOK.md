@@ -376,9 +376,44 @@ support. 0.60 s for 24 s stays up, mean vx +3.8 cm/s, sole p90
 0.42 / 0.62 cm, sat_rate 0.34. Both feet are still short of 2 cm and
 the speed is still short of 7 cm/s. Soft-pass is off.
 
-The clips are this ramped 1.00 s row. Forward 8.400 s stays up
-(Δx +18.3 cm, mean vx +2.4 cm/s, pooled sole p90 1.2 cm, min up_z
-0.938, peak torque 2.45 Nm). Close-up 7.600 s stays up through the
-stop (forward Δx +13.7 cm, stop Δx −2.7 cm, min up_z 0.926). A run
-past the clip tips at 10.52 s. Constrained Baseline, yuv420p,
-`+faststart`.
+Those clip files were that 20 ms ramp. The capped row below replaces them.
+
+## Torque-budget command step
+
+Hip and knee pitch no longer take the 0.110 rad HX lead. Each 50 Hz
+tick moves those commands by at most 0.050 rad, and the stored target
+stays within 0.050 rad of the measured joint. `2.45/45 ≈ 0.054` rad is
+the error that spends the whole rail when damping is about zero, so
+0.050 rad leaves `kp·error` at 2.25 Nm. A gait target past that cap
+continues on later ticks. The physics loop still ramps `ctrl` across
+the 20 ms tick. Plant kp, dampratio, forcerange, and armature are
+unchanged. md5 stays `17dc4ff37491c8e61900fd83b5d31f0c`.
+
+On the 1.00 s row the hip and knee rails are clear. Logged every
+0.002 s for 8.4 s, inside the rail the position-minus-damping sum
+matches `actuator_force` to 1e-14 Nm. No hip or knee sample reaches
+±2.45 Nm. The largest right-hip force is +2.03 Nm at 0.580 s, with
+velocity −0.017 rad/s, `kp·error` +2.00 Nm, damping +0.03 Nm. That is
+the same slow, position-dominated shape as the old rail hit, and it
+stops under the clip because the lead is capped. Max `|ctrl−q|` on the
+right hip is 0.050 rad. Peak hip speed is about 0.9 rad/s and peak
+knee speed about 1.2 rad/s. At those peaks the two terms still cancel
+and the applied force is a few tenths of a newton-metre. sat_rate is 0.
+Peak leg torque on the 8.4 s run is 2.03 Nm.
+
+The vendor mid-swing pose does not fit in that budget. Knee travel off
+the stand pose is about 0.26 rad, not 0.62. Soles stay near half a
+centimetre. Speed stays near zero.
+
+| Run | min up_z | Tip | Sole p90 L / R | Mean vx | sat_rate | Peak torque |
+| --- | ---: | --- | --- | ---: | ---: | ---: |
+| 1.00 s, 8.4 s | 0.988 | no | 0.39 / 0.57 cm | +0.7 cm/s | 0 | 2.03 Nm |
+| 1.00 s, 24 s | 0.979 | no | 0.51 / 0.62 cm | −0.2 cm/s | 0 | 2.04 Nm |
+| 0.60 s, 24 s | 0.987 | no | 0.10 / 0.25 cm | +1.2 cm/s | 0 | 2.34 Nm |
+
+Δx on the 1.00 s, 8.4 s run is +7.3 cm. Over 24 s it is −0.9 cm. The
+0.60 s row moves +26 cm in 24 s. Both feet are short of 2 cm. Speed is
+short of 7 cm/s. The body stays upright. Soft-pass is off. This is not
+a kit walk. ±2.45 Nm can keep the position term off the rail when the
+command lead is 0.050 rad, and it does not track the published
+mid-swing knee pose in the swing time.

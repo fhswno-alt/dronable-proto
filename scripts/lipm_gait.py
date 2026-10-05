@@ -3,19 +3,21 @@
 
 Replaces the open-loop CPG as the schedule. CSF50 numbers are not the clock
 and are not swept here. Joint targets go to the existing 50 Hz position
-servos (CTRL_DT 0.02 s). Knee and hip pitch may lead the joint by the
-published HX slew (5.5 rad/s times that tick). Other joints stay inside
-the linear band (|ctrl-q| <= 0.98 * tau / kp). Nothing in
-this file writes the plant: no forcerange, kp, damping, or armature edits,
-and no free-joint wrench. The actuator forcerange still clips force.
+servos (CTRL_DT 0.02 s). Knee and hip pitch may move at most 0.050 rad
+in one tick, inside forcerange/kp so a 20 ms ramp can finish with the
+position term under ±2.45 Nm. A farther gait target continues on later
+ticks. Other joints stay inside the linear band
+(|ctrl-q| <= 0.98 * tau / kp). Nothing in this file writes the plant:
+no forcerange, kp, damping, or armature edits, and no free-joint wrench.
+The actuator forcerange still clips force.
 
 Weight moves onto the stance foot before the swing foot is allowed to rise.
 The swing is a joint-space Bézier measured on this plant: knee flexion for
 about 2 cm of level-sole clearance, hip pitch for a landing at most 2 cm
 ahead. The ankle target is the hip and knee commands actually sent this
 tick (the flat-foot sum), plus a measured-normal trim, so the box does not
-ride a corner. Knee and hip pitch lead by the HX slew. Other commands
-stay inside |ctrl-q| <= 0.98 * tau / kp.
+ride a corner. Knee and hip pitch step by at most HIP_KNEE_TICK_RAD.
+Other commands stay inside |ctrl-q| <= 0.98 * tau / kp.
 """
 from __future__ import annotations
 
@@ -37,10 +39,18 @@ SAT_FRAC = 0.98
 # Hiwonder no-load speed, https://www.hiwonder.com/products/hx-35h
 # HX-35H (knee / leg) 0.18 s/60° at 11.1 V ≈ 5.8 rad/s.
 # HX-35HM (hip) 0.19 s/60° ≈ 5.5 rad/s.
-# Command tick is 50 Hz. 0.98*2.45/45 ≈ 0.053 rad is 2.65 rad/s at that
-# tick, half the kit. Use the slower published rate so the sim does not
-# outrun a real hip servo. Do not exceed ~5.8 rad/s.
+# Command tick is 50 Hz, so that rate is 0.110 rad per tick. A step that
+# large does not settle in 20 ms under ±2.45 Nm at kp 45: the position
+# term spends the whole rail at forcerange/kp = 2.45/45 ≈ 0.054 rad when
+# damping is about zero. Hip and knee commands therefore move at most
+# 0.050 rad per tick (kp·error = 2.25 Nm). A gait target past that
+# continues on later ticks. The published slew stays here as the ceiling
+# this budget is under. Do not exceed ~5.8 rad/s, and do not raise it
+# back over the torque budget.
 HX35_SLEW_RAD_S = 5.5
+HIP_KNEE_TICK_RAD = 0.050
+if HIP_KNEE_TICK_RAD > HX35_SLEW_RAD_S * CTRL_DT + 1e-9:
+    raise RuntimeError("hip/knee tick step exceeds the HX slew")
 # Hiwonder GaitManager look: step height about 2 cm, step length at most 2 cm.
 # These are foothold clips, not CommandBus caps and not a torque change.
 VENDOR_CLEAR_M = 0.020
@@ -290,28 +300,43 @@ class LipmWalker:
         return float(self.data.qpos[self.model.jnt_qposadr[jid]])
 
     def write_clipped(self, jn: str, q_des: float) -> None:
-        """Position target. Knee and hip pitch use the HX slew.
+        """Position target. Knee and hip pitch stay inside the torque budget.
 
-        Those two share the 0.053 rad linear band (kp 45). The lead is
-        5.5 rad/s times the 50 Hz tick, and it does not exceed the HX-35H
-        5.8 rad/s. Other joints stay inside |ctrl-q| <= 0.98 * tau / kp.
-        The value stored here is the end-of-tick target. The physics loop
-        ramps ctrl up to it over the 20 ms move. The plant forcerange is
-        unchanged and still clips force at ±2.45 Nm.
+        Those two share kp 45. One tick may change the command by at most
+        HIP_KNEE_TICK_RAD, and the stored target stays within that same
+        distance of the measured joint. A 0.07 rad gait step therefore
+        takes more than one 20 ms tick. The physics loop still ramps ctrl
+        from the previous command to this target over that tick. Other
+        joints stay inside |ctrl-q| <= 0.98 * tau / kp. The plant
+        forcerange is unchanged and still clips force at ±2.45 Nm.
         """
         act = f"{jn}_pos"
         idx = self.act_idx.get(act)
         if idx is None:
             return
+        q = self.q(jn)
         if jn.endswith(("knee", "hip_pitch")):
-            band = HX35_SLEW_RAD_S * CTRL_DT
+            prev = float(self.data.ctrl[idx])
+            step = HIP_KNEE_TICK_RAD
+            budget_lo = q - step
+            budget_hi = q + step
+            lo = max(budget_lo, prev - step)
+            hi = min(budget_hi, prev + step)
+            if lo > hi:
+                # Previous command is outside the budget. Step it back
+                # toward the joint. One step lands inside, or closer.
+                if prev > q:
+                    anchor = max(budget_lo, prev - step)
+                else:
+                    anchor = min(budget_hi, prev + step)
+                lo = hi = anchor
+            cmd = min(hi, max(lo, q_des))
         else:
             band = self.e_sat.get(act, 0.0)
-        q = self.q(jn)
-        cmd = min(q + band, max(q - band, q_des))
-        lo = float(self.model.actuator_ctrlrange[idx, 0])
-        hi = float(self.model.actuator_ctrlrange[idx, 1])
-        self.data.ctrl[idx] = min(hi, max(lo, cmd))
+            cmd = min(q + band, max(q - band, q_des))
+        lo_lim = float(self.model.actuator_ctrlrange[idx, 0])
+        hi_lim = float(self.model.actuator_ctrlrange[idx, 1])
+        self.data.ctrl[idx] = min(hi_lim, max(lo_lim, cmd))
 
     def hold_stand(self) -> None:
         self.phase = "stand"
@@ -457,7 +482,7 @@ class LipmWalker:
         self._write_unused()
 
     def _write_leg_delta(self, side: Side, flex: float, dhip: float, yaw: float) -> None:
-        """Stand pose plus a Bézier flex and a forward hip. HX slew on pitch.
+        """Stand pose plus a Bézier flex and a forward hip. Torque-budget step on pitch.
 
         Plant axes (md5 17dc4ff3…), verified against a pelvis-fixed step:
         pitch is mirrored (left hip/knee ``0 1 0``, right ``0 -1 0``);
