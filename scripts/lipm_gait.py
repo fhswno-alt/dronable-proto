@@ -357,13 +357,49 @@ class LipmWalker:
         hi_lim = float(self.model.actuator_ctrlrange[idx, 1])
         self.data.ctrl[idx] = min(hi_lim, max(lo_lim, cmd))
 
+    def write_force_limited(self, jn: str, q_des: float) -> None:
+        """Stand target whose predicted servo force stays inside 0.98·τ.
+
+        Hip roll and ankle roll are not on the 20 ms move. A full
+        saturation-band step while the joint is still moving adds the
+        damping term to kp·error and clips at ±2.45 Nm. Knee, hip pitch,
+        and ankle pitch keep the move-time path in ``write_clipped``.
+        """
+        act = f"{jn}_pos"
+        idx = self.act_idx.get(act)
+        if idx is None:
+            return
+        q = self.q(jn)
+        jid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, jn)
+        omega = float(self.data.qvel[int(self.model.jnt_dofadr[jid])])
+        kp = float(self.model.actuator_gainprm[idx, 0])
+        kv = -float(self.model.actuator_biasprm[idx, 2])
+        tau = abs(float(self.model.actuator_forcerange[idx, 1]))
+        limit = SAT_FRAC * tau
+        if kp < 1e-6:
+            cmd = q_des
+        else:
+            # F = kp·(ctrl−q) − kv·ω. Keep that prediction inside ±limit.
+            e_des = q_des - q
+            e_lo = (-limit + kv * omega) / kp
+            e_hi = (limit + kv * omega) / kp
+            if e_lo > e_hi:
+                e_lo, e_hi = e_hi, e_lo
+            cmd = q + min(e_hi, max(e_lo, e_des))
+        lo_lim = float(self.model.actuator_ctrlrange[idx, 0])
+        hi_lim = float(self.model.actuator_ctrlrange[idx, 1])
+        self.data.ctrl[idx] = min(hi_lim, max(lo_lim, cmd))
+
     def hold_stand(self) -> None:
         self.phase = "stand"
         self.phase_t = 0.0
         self.swing_s = 0.0
         self.lat *= 0.8
         for jn, val in self.q_stand.items():
-            self.write_clipped(jn, val)
+            if jn.endswith(("knee", "hip_pitch", "ank_pitch")):
+                self.write_clipped(jn, val)
+            else:
+                self.write_force_limited(jn, val)
 
     def tick(self, vx: float, yaw_rate: float, walking: bool) -> None:
         self.cmd_vx = float(vx)

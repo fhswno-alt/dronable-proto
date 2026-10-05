@@ -1123,16 +1123,48 @@ Those two rows are the torque answer for a faster write. They are not
 the shipped move time. 400 ms was not re-run. The sole amplitude was
 not raised.
 
-The 20 ms sole p90 is 1.5 cm, short of a 2 cm p90. The max reaches
-1.97 cm. Mean vx is above 7 cm/s and min up_z stays above 0.99. Body
+MFG and Hardware locked this sole. The kit swing runs from −0.5 cm to
++1.5 cm, and the floor clip leaves about 1.5 cm of clearance. The
+measured p90 of 1.52 / 1.54 cm already matches. Max sole 1.97 cm is
+the peak of that swing, not a shortfall. Knees on this row sit at
+2.22 / 2.35 Nm, so the headroom to ±2.45 is 0.23 / 0.10 Nm. The lift
+was not raised. Mean vx stays +14.84 cm/s and min up_z 0.992. Body
 speed is the measured speed, not the 5.6 cm/s stick command.
 
-Clips are the 20 ms row. Constrained Baseline, yuv420p, `+faststart`.
+## Stop, without a hip-roll clip
+
+The first close-up stop wrote the stand pose in one tick. Hip roll and
+ankle roll are not on the 20 ms move, so `write_clipped` stepped them
+by the full 0.98·τ/kp band. At 6.000 s the right hip was at +0.145 rad
+with ω +0.95 rad/s, and the stand target is +0.056 rad. That step was
+kp·e = −2.40 Nm plus damping −1.62 Nm, and the actuator clipped at
+−2.450 Nm on the next sample (6.008 s, up_z 0.999).
+
+The stand write for every joint that is not knee, hip pitch, or ankle
+pitch now keeps the predicted force kp·(ctrl−q) − kv·ω inside
+0.98·±2.45 Nm. Knee, hip pitch, and ankle pitch still approach the
+stand goal over the 20 ms move. The walk tick is unchanged.
+
+Same 500 ms / 20 ms row. Physics-step peaks, knee beside hip roll:
+
+| Window | Hip roll R / L | Knee R / L | Ankle roll R / L | min up_z |
+| --- | ---: | ---: | ---: | ---: |
+| Walk, 8.4 s | 2.15 / 2.16 Nm | 2.22 / 2.35 Nm | 1.66 / 1.67 Nm | 0.992 |
+| Stop from 6.00 s | 1.85 / 1.98 Nm | 2.38 / 1.21 Nm | 1.81 / 1.62 Nm | 0.999 |
+
+The walk peaks are the same samples as before (right hip +2.15 Nm at
+3.080 s, left knee −2.35 Nm at 0.942 s). Sole p90 stays 1.52 / 1.54 cm,
+mean vx +14.84 cm/s. Nothing on the stop crosses 2.449 Nm. The right
+hip-roll stop peak is −1.85 Nm at 6.008 s. The right knee stop peak is
++2.38 Nm at 6.018 s. Plant md5 stays
+`17dc4ff37491c8e61900fd83b5d31f0c`.
+
+Clips are this row. Constrained Baseline, yuv420p, `+faststart`.
 Forward 8.400 s stays up (Δx +118.5 cm from 0.50 s, mean body vx
-+14.8 cm/s, min up_z 0.992, peak torque 2.32 Nm on the control samples,
-yaw drift −1.8 deg). Close-up 7.600 s stays up through the stop
-(forward Δx +81.2 cm, mean vx +14.5 cm/s, stop Δx +1.2 cm, min up_z
-0.992 while walking and 0.999 after the stop). The stop command puts
-the right hip roll on −2.450 Nm at 6.008 s while up_z is 0.999. The
-feet leave the floor. The robot stays standing after the stop.
++14.8 cm/s, min up_z 0.992, peak torque 2.32 Nm on the control
+samples, yaw drift −1.8 deg). Close-up 7.600 s stays up through the
+stop (forward Δx +81.2 cm, mean vx +14.5 cm/s, stop Δx +1.1 cm,
+min up_z 0.992 while walking and 0.999 after the stop, stop peak
+2.36 Nm). The feet leave the floor. The robot stays standing after
+the stop.
 
