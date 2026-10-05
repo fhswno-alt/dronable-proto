@@ -423,3 +423,46 @@ The clips are this capped 1.00 s row. Forward 8.400 s stays up
 0.988, peak torque 2.03 Nm, sat_rate 0). Close-up 7.600 s stays up
 through the stop (forward Δx +1.6 cm, stop Δx −1.8 cm, min up_z 0.969,
 peak torque 2.38 Nm). Constrained Baseline, yuv420p, `+faststart`.
+
+## Slower cadence
+
+The 0.050 rad tick and the 20 ms physics ramp stay. The only change in
+this section is the GaitManager period. dsp 0.20, x = z = y_swap 0.02 m,
+pelvis 0, stance hip cap 0.070 rad. Plant md5 stays
+`17dc4ff37491c8e61900fd83b5d31f0c`.
+
+Published swing-foot x travel is 4.07 cm at every period. Two swings
+per cycle, so the foot-travel ceiling is `8.14 cm / period`. Kit speed
+of 7 cm/s needs that ceiling at or above 7, which is a period of
+1.16 s or faster. A period slow enough for the capped knee to finish
+0.62 rad is slower than that.
+
+Knee flex below is the peak off the stand pose while `up_z` is still
+at least 0.95. Sole p90 is the swing foot in that same upright window.
+
+| Period | Upright? | Knee flex L / R | Sole p90 L / R | Mean vx | Foot-travel ceiling | Peak torque |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 1.00 s, 24 s | yes, min up_z 0.979 | 0.26 / 0.25 | 0.51 / 0.62 cm | −0.2 cm/s | 8.1 cm/s | 2.04 Nm |
+| 1.20 s, 24 s | yes, min up_z 0.986 | 0.30 / 0.29 | 1.17 / 1.27 cm | +1.9 cm/s | 6.8 cm/s | 2.01 Nm |
+| 1.35 s, 24 s | yes, min up_z 0.984 | 0.33 / 0.32 | 1.06 / 1.27 cm | +1.7 cm/s | 6.0 cm/s | 1.98 Nm |
+| 1.50 s | tips at 6.46 s | 0.35 / 0.38 | 0.80 / 0.98 cm | +1.2 cm/s | 5.4 cm/s | 2.45 Nm in the fall |
+| 2.00 s | tips at 5.40 s | 0.42 / 0.44 | 1.21 / 1.44 cm | +1.8 cm/s | 4.1 cm/s | 2.45 Nm in the fall |
+| 3.00 s | tips at 4.66 s | 0.56 / 0.56 | 1.56 / 2.35 cm | +1.4 cm/s | 2.7 cm/s | 2.26 Nm |
+| 4.00 s | collapses at 5.50 s | 0.60 / 0.61 | 2.32 / 2.97 cm | +1.0 cm/s | 2.0 cm/s | 2.37 Nm |
+
+At 4.00 s the capped knee does reach about 0.61 rad and both swing
+soles clear about 2 cm while the torso is still upright. The body then
+collapses at 5.50 s. At 3.00 s the right sole p90 is 2.35 cm and the
+knee is 0.56 rad, and the body tips at 4.66 s. The rows that stay up
+for 24 s stop at 1.35 s: knee about 0.33 rad, sole p90 about 1.2 cm.
+
+Swing sat_rate stays 0 on these rows. Hip and knee force stays under
+±2.45 Nm while the body is upright (right hip peak about 2.03 Nm at
+1.50 s before the fall, about 2.36 Nm at 4.00 s). The ±2.45 Nm samples
+on the 1.50 s and 2.00 s rows are ankle roll as the torso is already
+dropping.
+
+Measured speed on every row is about 1–2 cm/s. The 4.00 s row that
+reaches the pose has a foot-travel ceiling of 2.0 cm/s, under the
+7 cm/s kit floor, and it does not stay up. Soft-pass is off. This is
+not a kit walk. The 1.00 s clips were not re-rendered.
