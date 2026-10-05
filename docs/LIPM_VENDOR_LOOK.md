@@ -276,9 +276,8 @@ hip yaw stay on the linear band. Plant `forcerange`, kp, and ±2.45 Nm
 are not changed. md5 `17dc4ff37491c8e61900fd83b5d31f0c`.
 
 The joint does not reach 5.5 rad/s. Knee speed peaks around 2.4–2.6 rad/s.
-Actuator damping on the knee is about 1.46 N·m·s/rad, so ±2.45 Nm cannot
-hold the published no-load speed. Hip pitch force hits ±2.45 Nm first
-(right hip pitch at 0.52 s, left at 0.84 s on the 1.00 s row).
+Hip pitch force hits ±2.45 Nm from the first walking command. The split
+of that force is in the next section.
 
 Same absolute-x map, pelvis 0, stance hip cap 0.070 rad, dsp 0.2, x = z = 0.02 m:
 
@@ -301,3 +300,48 @@ The re-rendered clips are the 1.00 s row with this slew, so the tip is
 in the picture. Forward faults at 4.42 s. Close-up faults at 4.60 s.
 After the fault the body reaches min up_z −1. Constrained Baseline,
 yuv420p, `+faststart`.
+
+## Actuator force split
+
+Same 1.00 s row, logged every physics step (0.002 s). The position
+actuator is `kp·(ctrl−q) − kv·qvel`, then clipped to ±2.45 Nm.
+`kv` is the compiled `dampratio="1"` coefficient (`−biasprm[2]`).
+The unconstrained sum matches `actuator_force` to 1e-15 Nm inside the
+rail. Plant XML was not edited. md5 stays
+`17dc4ff37491c8e61900fd83b5d31f0c`.
+
+| Actuator | kp | kv (N·m·s/rad) | speed where \|kv·v\| = 2.45 |
+| --- | ---: | ---: | ---: |
+| Hip pitch | 45 | 1.810 | 1.35 rad/s |
+| Knee | 45 | 1.457 | 1.68 rad/s |
+
+`2·sqrt(kp·armature)` with armature 0.01 is 1.34. The compiled kv is
+higher because dampratio uses the reflected joint inertia. Passive
+joint damping is 0.08 and is not part of `actuator_force` (0.16 Nm at
+2 rad/s).
+
+On the ±2.45 Nm rail the position term is the large one. Right hip
+pitch first hits the rail at 0.402 s with velocity −0.001 rad/s,
+`kp·error` +3.15 Nm, damping 0.00 Nm, applied +2.45 Nm. Across 239
+saturated hip-pitch samples, `|kp·error|` is larger than `|damping|`
+on every sample (median 3.28 Nm vs 0.57 Nm, median speed 0.31 rad/s).
+The left hip is the same shape at the same instant. The right knee
+first hits the rail at 0.982 s: velocity −0.39 rad/s, position −3.02 Nm,
+damping +0.56 Nm. Position is larger on 96% of saturated knee samples.
+
+| t (s) | Joint | vel (rad/s) | kp·error | damping | raw | applied |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 0.402 | R hip pitch | −0.00 | +3.15 | 0.00 | +3.15 | +2.45 |
+| 0.82 | R hip pitch | +0.42 | −1.77 | −0.76 | −2.53 | −2.45 |
+| 0.94 | R hip pitch | +0.47 | −3.42 | −0.86 | −4.28 | −2.45 |
+| 0.982 | R knee | −0.39 | −3.02 | +0.56 | −2.45 | −2.45 |
+| 2.386 | R hip pitch, peak \|v\| | −2.06 | −3.79 | +3.72 | −0.07 | −0.07 |
+| 1.268 | R knee, peak \|v\| | +2.76 | +4.23 | −4.02 | +0.21 | +0.21 |
+
+At the peak speeds the two terms are both about 4 Nm and they cancel,
+so the applied force is near zero. Hip damping magnitude equals the
+whole ±2.45 Nm at 1.35 rad/s, and knee damping does that at 1.68 rad/s.
+That cancellation is why the joint stops accelerating near 2–2.7 rad/s.
+It is not the sample that puts `actuator_force` on the rail. The rail
+is the position error while the joint is still slow. Dampratio stays
+as it is. Forcerange stays ±2.45 Nm. No clip re-render on this tip.
