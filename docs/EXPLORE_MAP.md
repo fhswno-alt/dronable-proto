@@ -53,4 +53,32 @@ MUJOCO_GL=osmesa python scripts/explore_map.py --self-test
 MUJOCO_GL=osmesa python scripts/explore_map.py --demo
 ```
 
-`--demo` walks the empty plant, the kitchen scene, and the bathroom scene for 12 s each at `vel(+0.028, yaw)`, then stops. It writes `previews/explore_map_summary.json`, kit_cam and map stills, and `previews/explore_map_kitchen.mp4`. The summary is the measurement. This document's measured table is filled from that file. Exit status is non-zero if the plant md5 changes, if `up_z` drops below 0.90, or if a `vx = 0` yaw is sent. A passing exit still prints Prefer FAIL for go-anywhere.
+`--demo` walks the empty plant, the kitchen scene, and the bathroom scene for 12 s each at `vel(+0.028, yaw)`, then stops and settles 1.2 s. It writes `previews/explore_map_summary.json`, kit_cam and map stills, and `previews/explore_map_kitchen.mp4`. Exit status is non-zero if the plant md5 changes, if `up_z` drops below 0.90, or if a `vx = 0` yaw is sent. A passing exit still prints Prefer FAIL for go-anywhere.
+
+## Measured
+
+Plant md5 after the demo: `71b2c86d133ebc603f58b99c53e496f3`. No tip, no fault, end mode stand on every run. Every `vel` was `vx = +0.028`. `vx = 0` yaw sends: 0. The frontier rule sent `yaw_rate = +0.25` from t = 0.60 s to t = 3.10 s, then `yaw_rate = −0.25` until the stop at t = 12.60 s, on all three scenes. The floor fan picks that command. Yellow does not.
+
+Realized heading did not follow the first left command. At the stop the body was about −19 deg. Settle pulled some of that back. Δx below is the settled pose minus the pose after the stand. Δyaw is the same pair. The stop-pose yaw is listed so the settle is visible. min up_z is the whole run, including settle.
+
+| Scene | Δx | Δy | Δyaw settled | Yaw at stop | min up_z | Tip / fault |
+|-------|----|----|--------------|-------------|----------|-------------|
+| Empty plant | +0.156 m | −0.017 m | −12.9 deg | −19.7 deg | 0.993 | no |
+| Kitchen | +0.185 m | −0.028 m | −12.3 deg | −19.1 deg | 0.994 | no |
+| Bathroom | +0.190 m | −0.028 m | −12.0 deg | −18.8 deg | 0.994 | no |
+
+What the map held at the end:
+
+| Scene | Free cells (start → end) | Floor-feature cells | Walked cells | Frontiers (start → end) | Kitchen-like yellow |
+|-------|--------------------------|---------------------|--------------|-------------------------|---------------------|
+| Empty plant | 260 → 430 | 0 | 4 | 55 → 23 | no (fraction 0) |
+| Kitchen | 217 → 280 | 23 → 120 | 5 | 48 → 23 | yes, max fraction 0.079 |
+| Bathroom | 260 → 428 | 0 | 5 | 55 → 23 | no (fraction 0) |
+
+The empty plant is floor and sky. Other chromatic pixels stayed under 0.002 of a frame. Frontiers are the rim of the floor paint. The walk added free cells (260 to 430) and did not add a room.
+
+Kitchen yellow at the opening frame was 0.039. The strongest later frame was 0.079, bearing +0.313 rad, elevation +0.533 rad. That ray does not meet the floor inside 1.80 m, so there is no yellow cell. The 120 floor-feature cells are saturated pixels whose rays do meet the floor plane, including color from furniture that is not a floor mat. They are not a counter outline and they were not used as a goal. The command timeline matches the empty plant.
+
+Bathroom other-chromatic pixels peaked at 0.076 of a frame (the tile and fittings). They are not labeled as a room. None of them passed the yellow test, and none of them painted a floor-feature cell. The map is another floor fan.
+
+Walked cells are 4 or 5 because the body only moved about 0.16–0.19 m. The grid update a person can see is the free fan spreading, not a traversed corridor. This is not go-anywhere.
