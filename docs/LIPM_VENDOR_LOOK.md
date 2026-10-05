@@ -761,5 +761,11 @@ knee as well as the hip, at 0.60 s, either rails the hip pitch or
 leaves the sole near 1 cm. Kit cadence, 300–600 ms, still fails.
 Soft-pass is off.
 
-The clips are this 1.16 s sole row. Constrained Baseline, yuv420p,
-`+faststart`.
+The clips are this 1.16 s sole row. Forward 8.400 s stays up (Δx
++35.5 cm, mean vx +4.4 cm/s, pooled sole p90 2.1 cm, min up_z 0.997,
+peak torque 2.39 Nm, sat_rate 0). Close-up 7.600 s stays up through
+the stop (forward Δx +22.8 cm, mean vx +4.1 cm/s, stop Δx +1.0 cm,
+pooled sole p90 2.1 cm, min up_z 0.997, sat_rate 0.009). The close-up
+peak is 2.45 Nm during the walk, the same left hip-roll rail sample
+as the 24 s row. Hip pitch on that row peaks at 1.95 Nm. Constrained
+Baseline, yuv420p, `+faststart`.
