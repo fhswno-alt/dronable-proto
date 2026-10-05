@@ -142,10 +142,14 @@ X_MAX = 2.60
 Y_MIN = -1.80
 Y_MAX = 1.80
 MIN_RANGE_M = 0.30
-# Floor-plane hits out to the grid edge. 1.80 m left the far fan unknown.
+# Finder paint and frontier ring stay on main. find_kitchen.py calls
+# integrate() and frontier_cells() with these. Do not widen them.
+FINDER_MAX_RANGE_M = 1.80
+FINDER_FRONTIER_MAX_M = 1.60
+# Explore demo only. Floor-plane hits out to the grid edge.
 MAX_RANGE_M = 2.60
 FRONTIER_MIN_M = 0.40
-# Include the outer rim of the longer fan. 1.60 m dropped that rim.
+# Include the outer rim of the longer fan. The finder ring stays 1.60 m.
 FRONTIER_MAX_M = 2.70
 HOLE_FILL_PASSES = 2
 FORWARD_CONE_RAD = 1.20
@@ -369,19 +373,26 @@ class ExploreMap:
             note=note,
         )
 
-    def frontier_cells(self, x: float, y: float) -> tuple[FrontierCell, ...]:
-        """Unknown cells beside free or walked cells, inside the explore ring."""
+    def frontier_cells(self, x: float, y: float, *, dense: bool = False) -> tuple[FrontierCell, ...]:
+        """Unknown cells beside free or walked cells.
+
+        The default is the finder ring from main: 4-connected, 0.40–1.60 m.
+        find_kitchen.py and last_mile_from_map() use that default.
+        dense=True is the explore rim only: 8-connected, out to 2.70 m.
+        """
         known_free = (self.state == FREE) | self.traversed
+        max_m = FRONTIER_MAX_M if dense else FINDER_FRONTIER_MAX_M
+        neighbor = _has_free_neighbor if dense else _has_orthogonal_neighbor
         cells: list[FrontierCell] = []
         for i in range(self.nx):
             for j in range(self.ny):
                 if int(self.state[i, j]) != UNKNOWN or bool(self.traversed[i, j]):
                     continue
-                if not _has_free_neighbor(known_free, i, j):
+                if not neighbor(known_free, i, j):
                     continue
                 cx, cy = self.cell_center(i, j)
                 distance = math.hypot(cx - x, cy - y)
-                if distance < FRONTIER_MIN_M or distance > FRONTIER_MAX_M:
+                if distance < FRONTIER_MIN_M or distance > max_m:
                     continue
                 cells.append(
                     FrontierCell(
@@ -395,11 +406,11 @@ class ExploreMap:
                 )
         return tuple(cells)
 
-    def counts(self, x: float, y: float) -> tuple[int, int, int, int]:
+    def counts(self, x: float, y: float, *, dense: bool = False) -> tuple[int, int, int, int]:
         free = int(np.count_nonzero(self.state == FREE))
         feature = int(np.count_nonzero(self.state == FEATURE))
         walked = int(np.count_nonzero(self.traversed))
-        return free, feature, walked, len(self.frontier_cells(x, y))
+        return free, feature, walked, len(self.frontier_cells(x, y, dense=dense))
 
     def integrate(
         self,
@@ -408,7 +419,15 @@ class ExploreMap:
         cam_pos: np.ndarray,
         cam_mat: np.ndarray,
         fovy_deg: float,
+        *,
+        explore_fan: bool = False,
     ) -> IntegrateResult:
+        """Paint one view.
+
+        explore_fan=False is the finder paint from main: floor rays to 1.80 m,
+        no hole fill, frontier ring 1.60 m. find_kitchen.py calls this default.
+        explore_fan=True is the explore demo only.
+        """
         if frame.shape != (HEIGHT, WIDTH, 3):
             raise RuntimeError(f"kit_cam frame shape {frame.shape}")
         masks = classify_frame(frame)
@@ -417,13 +436,31 @@ class ExploreMap:
         other_frac = float(masks.other.mean())
         low_sat_frac = float(masks.low_sat.mean())
         self.other_chromatic_max = max(self.other_chromatic_max, other_frac)
-        self._remember_yellow(pose, masks.yellow, cam_pos, cam_mat, fovy_deg)
+        max_range = MAX_RANGE_M if explore_fan else FINDER_MAX_RANGE_M
+        self._remember_yellow(
+            pose,
+            masks.yellow,
+            cam_pos,
+            cam_mat,
+            fovy_deg,
+            max_range=max_range,
+            record_soft_goal=explore_fan,
+        )
         self.mark_traversed(pose.x, pose.y)
         free_before = int(np.count_nonzero(self.state == FREE))
         feature_before = int(np.count_nonzero(self.state == FEATURE))
-        self._paint_rays(masks, cam_pos, cam_mat, fovy_deg)
-        self.last_blocked = _lower_center_blocked(masks, cam_pos, cam_mat, fovy_deg)
-        free, feature, walked, frontiers = self.counts(pose.x, pose.y)
+        self._paint_rays(
+            masks,
+            cam_pos,
+            cam_mat,
+            fovy_deg,
+            max_range=max_range,
+            fill_holes=explore_fan,
+        )
+        self.last_blocked = _lower_center_blocked(
+            masks, cam_pos, cam_mat, fovy_deg, max_range=max_range,
+        )
+        free, feature, walked, frontiers = self.counts(pose.x, pose.y, dense=explore_fan)
         return IntegrateResult(
             yellow_frac=yellow_frac,
             sky_frac=sky_frac,
@@ -433,7 +470,9 @@ class ExploreMap:
             feature_cells=feature,
             traversed_cells=walked,
             frontier_cells=frontiers,
-            frontier_gap_rad=_frontier_gap(self.frontier_cells(pose.x, pose.y)),
+            frontier_gap_rad=_frontier_gap(
+                self.frontier_cells(pose.x, pose.y, dense=explore_fan)
+            ),
             blocked=self.last_blocked,
             new_free=free - free_before,
             new_feature=feature - feature_before,
@@ -446,6 +485,9 @@ class ExploreMap:
         cam_pos: np.ndarray,
         cam_mat: np.ndarray,
         fovy_deg: float,
+        *,
+        max_range: float,
+        record_soft_goal: bool,
     ) -> None:
         frac = float(yellow.mean())
         if frac <= self.yellow_max_fraction or frac <= 0.0:
@@ -457,7 +499,7 @@ class ExploreMap:
         bearing = math.atan2(float(direction[1]), float(direction[0]))
         horizontal = math.hypot(float(direction[0]), float(direction[1]))
         elevation = math.atan2(float(direction[2]), horizontal)
-        ground = _ground_point(cam_pos, direction)
+        ground = _ground_point(cam_pos, direction, max_range=max_range)
         cell: tuple[int, int] | None = None
         if ground is not None:
             cell = self.cell_index(ground[0], ground[1])
@@ -465,7 +507,7 @@ class ExploreMap:
         self.yellow_bearing_rad = bearing
         self.yellow_elevation_rad = elevation
         self.yellow_ground_ij = cell
-        if self.soft_goal_xy is None and frac >= MIN_YELLOW_FRAC:
+        if record_soft_goal and self.soft_goal_xy is None and frac >= MIN_YELLOW_FRAC:
             if cell is not None:
                 self.soft_goal_xy = self.cell_center(cell[0], cell[1])
             else:
@@ -481,9 +523,12 @@ class ExploreMap:
         cam_pos: np.ndarray,
         cam_mat: np.ndarray,
         fovy_deg: float,
+        *,
+        max_range: float,
+        fill_holes: bool,
     ) -> None:
         u, v, directions = _strided_directions(fovy_deg, cam_mat, RAY_STRIDE)
-        hit = _ground_points(cam_pos, directions)
+        hit = _ground_points(cam_pos, directions, max_range=max_range)
         sat = masks.sat[v, u]
         yellow = masks.yellow[v, u]
         sky = masks.sky[v, u]
@@ -501,7 +546,8 @@ class ExploreMap:
             if ij is None:
                 continue
             self.state[ij[0], ij[1]] = FEATURE
-        self._fill_floor_holes()
+        if fill_holes:
+            self._fill_floor_holes()
 
     def _fill_floor_holes(self) -> None:
         """Fill unknown cells that already have three or four free neighbors.
@@ -622,22 +668,32 @@ def _strided_directions(
     return u.astype(np.int32), v.astype(np.int32), world
 
 
-def _ground_point(cam_pos: np.ndarray, direction: np.ndarray) -> np.ndarray | None:
+def _ground_point(
+    cam_pos: np.ndarray,
+    direction: np.ndarray,
+    *,
+    max_range: float = FINDER_MAX_RANGE_M,
+) -> np.ndarray | None:
     dz = float(direction[2])
     if dz >= -1e-3:
         return None
     t = -float(cam_pos[2]) / dz
-    if t < MIN_RANGE_M or t > MAX_RANGE_M:
+    if t < MIN_RANGE_M or t > max_range:
         return None
     return cam_pos + t * direction
 
 
-def _ground_points(cam_pos: np.ndarray, directions: np.ndarray) -> np.ndarray:
+def _ground_points(
+    cam_pos: np.ndarray,
+    directions: np.ndarray,
+    *,
+    max_range: float = FINDER_MAX_RANGE_M,
+) -> np.ndarray:
     dz = directions[:, 2]
     t = np.full(dz.shape, np.nan, dtype=np.float64)
     looking_down = dz < -1e-3
     t[looking_down] = -float(cam_pos[2]) / dz[looking_down]
-    ok = (t >= MIN_RANGE_M) & (t <= MAX_RANGE_M)
+    ok = (t >= MIN_RANGE_M) & (t <= max_range)
     points = np.full((directions.shape[0], 2), np.nan, dtype=np.float64)
     points[ok, 0] = cam_pos[0] + t[ok] * directions[ok, 0]
     points[ok, 1] = cam_pos[1] + t[ok] * directions[ok, 1]
@@ -649,10 +705,12 @@ def _lower_center_blocked(
     cam_pos: np.ndarray,
     cam_mat: np.ndarray,
     fovy_deg: float,
+    *,
+    max_range: float = FINDER_MAX_RANGE_M,
 ) -> bool:
     """Saturated floor hits in the lower center, inside 0.80 m."""
     u, v, directions = _strided_directions(fovy_deg, cam_mat, RAY_STRIDE)
-    hit = _ground_points(cam_pos, directions)
+    hit = _ground_points(cam_pos, directions, max_range=max_range)
     in_window = (v >= int(HEIGHT * 0.70)) & (u >= int(WIDTH * 0.30)) & (u < int(WIDTH * 0.70))
     near = np.isfinite(hit[:, 0])
     # Range is already capped; recompute distance from the camera's ground point.
@@ -663,6 +721,18 @@ def _lower_center_blocked(
     sat = masks.sat[v, u]
     blocked = int(((sat >= FEATURE_SAT) & near).sum())
     return (blocked / float(near.sum())) > 0.25
+
+
+def _has_orthogonal_neighbor(known_free: np.ndarray, i: int, j: int) -> bool:
+    """4-connected. This is the finder frontier ring from main."""
+    for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        ni = i + di
+        nj = j + dj
+        if ni < 0 or nj < 0 or ni >= known_free.shape[0] or nj >= known_free.shape[1]:
+            continue
+        if bool(known_free[ni, nj]):
+            return True
+    return False
 
 
 def _has_free_neighbor(known_free: np.ndarray, i: int, j: int) -> bool:
@@ -811,10 +881,12 @@ def last_mile_from_map(
 ) -> VelocityCommand | None:
     """Finder query. None means the map has no kitchen-like yellow yet.
 
-    Always calls query_kitchen_like_yellow() and frontier_cells().
-    The aim is the frontier nearest the logged camera ray when one sits
-    inside the forward cone of that ray. Otherwise the aim is the ray.
-    vx stays at the finder half cap. A pure yaw is not returned.
+    Always calls query_kitchen_like_yellow() and frontier_cells()
+    on the main ring (4-connected, 1.60 m). The soft-XY probe is not
+    this function. The aim is the frontier nearest the logged camera
+    ray when one sits inside the forward cone of that ray. Otherwise
+    the aim is the ray. vx stays at the finder half cap. A pure yaw
+    is not returned.
     """
     yellow = feature_map.query_kitchen_like_yellow()
     frontiers = feature_map.frontier_cells(x, y)
@@ -860,10 +932,11 @@ def soft_goal_velocity(
     y: float,
     yaw: float,
 ) -> VelocityCommand | None:
-    """Half-cap walk-yaw toward the frozen soft XY.
+    """Explore-demo probe only. Not the find-kitchen path.
 
     None when yellow was never logged. The live yellow fraction is not
     read. Yellow >= 0.50 is not success. A pure yaw is not returned.
+    find_kitchen.py does not call this.
     """
     goal = feature_map.soft_goal_xy
     if goal is None:
@@ -1082,7 +1155,9 @@ def run_explore(
         _hold_stand(session, STAND_S, sent)
         start = _pose(session)
         frame, cam_pos, cam_mat, fovy = cam.grab(session.model, session.data)
-        before = feature_map.integrate(start, frame, cam_pos, cam_mat, fovy)
+        before = feature_map.integrate(
+            start, frame, cam_pos, cam_mat, fovy, explore_fan=True,
+        )
         kit_before = frame
         map_before = render_map(feature_map, start, [(start.x, start.y)])
         if record_frames:
@@ -1158,7 +1233,9 @@ def run_explore(
                 break
             if (now - last_look) >= (PERCEPT_S - 1e-9):
                 frame, cam_pos, cam_mat, fovy = cam.grab(session.model, session.data)
-                feature_map.integrate(pose, frame, cam_pos, cam_mat, fovy)
+                feature_map.integrate(
+                    pose, frame, cam_pos, cam_mat, fovy, explore_fan=True,
+                )
                 last_look = now
                 if pose.t >= mid_time and kit_mid is kit_before:
                     kit_mid = frame.copy()
@@ -1188,7 +1265,9 @@ def run_explore(
             session.step()
         end = _pose(session)
         frame, cam_pos, cam_mat, fovy = cam.grab(session.model, session.data)
-        after = feature_map.integrate(end, frame, cam_pos, cam_mat, fovy)
+        after = feature_map.integrate(
+            end, frame, cam_pos, cam_mat, fovy, explore_fan=True,
+        )
         if record_frames:
             frames.append(frame.copy())
         kit_after = frame
@@ -1250,7 +1329,9 @@ def run_soft_goal(hold_s: float, *, record_frames: bool) -> SceneRun:
         _hold_stand(session, STAND_S, sent)
         start = _pose(session)
         frame, cam_pos, cam_mat, fovy = cam.grab(session.model, session.data)
-        before = feature_map.integrate(start, frame, cam_pos, cam_mat, fovy)
+        before = feature_map.integrate(
+            start, frame, cam_pos, cam_mat, fovy, explore_fan=True,
+        )
         kit_before = frame
         map_before = render_map(feature_map, start, [(start.x, start.y)])
         if record_frames:
@@ -1295,7 +1376,9 @@ def run_soft_goal(hold_s: float, *, record_frames: bool) -> SceneRun:
                     break
                 if (now - last_look) >= (PERCEPT_S - 1e-9):
                     frame, cam_pos, cam_mat, fovy = cam.grab(session.model, session.data)
-                    feature_map.integrate(pose, frame, cam_pos, cam_mat, fovy)
+                    feature_map.integrate(
+                    pose, frame, cam_pos, cam_mat, fovy, explore_fan=True,
+                )
                     refreshed = soft_goal_velocity(feature_map, pose.x, pose.y, pose.yaw)
                     if refreshed is not None:
                         command = refreshed
@@ -1336,7 +1419,9 @@ def run_soft_goal(hold_s: float, *, record_frames: bool) -> SceneRun:
             session.step()
         end = _pose(session)
         frame, cam_pos, cam_mat, fovy = cam.grab(session.model, session.data)
-        after = feature_map.integrate(end, frame, cam_pos, cam_mat, fovy)
+        after = feature_map.integrate(
+            end, frame, cam_pos, cam_mat, fovy, explore_fan=True,
+        )
         if record_frames:
             frames.append(frame.copy())
         if kit_mid is kit_before:
@@ -1390,7 +1475,10 @@ def render_map(
     height = feature_map.nx * MAP_PX
     image = Image.new("RGB", (width, height), (24, 26, 30))
     draw = ImageDraw.Draw(image)
-    frontiers = {(cell.i, cell.j) for cell in feature_map.frontier_cells(pose.x, pose.y)}
+    frontiers = {
+        (cell.i, cell.j)
+        for cell in feature_map.frontier_cells(pose.x, pose.y, dense=True)
+    }
     for i in range(feature_map.nx):
         for j in range(feature_map.ny):
             kind = int(feature_map.state[i, j])
@@ -1878,6 +1966,14 @@ def test_last_mile_query() -> list[str]:
     _expect("query_kitchen_like_yellow" in source, "last mile does not query yellow", failures)
     _expect("frontier_cells" in source, "last mile does not query frontiers", failures)
     _expect("waypoint" not in source, "last mile mentions a waypoint", failures)
+    _expect("soft_goal_velocity(" not in source, "last mile calls the soft-XY probe", failures)
+    _expect("dense=True" not in source, "last mile uses the explore frontier rim", failures)
+    finder_source = (_SCRIPTS / "find_kitchen.py").read_text(encoding="utf-8")
+    _expect("soft_goal" not in finder_source, "find_kitchen.py mentions soft_goal", failures)
+    _expect("explore_fan" not in finder_source, "find_kitchen.py opts into the explore fan", failures)
+    _expect("run_soft_goal" not in finder_source, "find_kitchen.py runs the soft probe", failures)
+    _expect(abs(FINDER_MAX_RANGE_M - 1.80) < 1e-9, f"finder range {FINDER_MAX_RANGE_M}", failures)
+    _expect(abs(FINDER_FRONTIER_MAX_M - 1.60) < 1e-9, f"finder frontier {FINDER_FRONTIER_MAX_M}", failures)
     empty = ExploreMap.empty()
     _paint_free_rect(empty, 0.3, 1.2, -0.4, 0.4)
     _expect(last_mile_from_map(empty, 0.2, 0.0, 0.0) is None, "empty map produced a command", failures)

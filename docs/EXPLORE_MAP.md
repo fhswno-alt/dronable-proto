@@ -30,7 +30,9 @@ Sky is the empty-plant blue around rgb (70, 100, 140). Cyan tile fails that test
 
 Frontier cells are unknown cells in the 8-neighborhood of a free cell or a walked cell, between 0.40 m and 2.70 m from the body, inside a ±1.20 rad cone of the current heading. The next `vel` aims at the nearest of those cells. A tie breaks to the left of the heading. Yellow is not an input. If the lower center of the frame is saturated inside 0.80 m, frontiers straight ahead are dropped.
 
-The first time kitchen-like yellow clears the log threshold, a soft XY is frozen 1.50 m along that camera bearing (or on the floor cell, if the ray met the floor). That point is not a waypoint. A separate kitchen probe walks half-cap `vel(+0.028, yaw)` toward it for up to 20 s and stops on a tip, a plant fault, or on reaching within 0.40 m of that guess. Yellow ≥ 0.50 is not the success test and arrival is not claimed.
+`find_kitchen.py` is not edited. It still paints with the main fan, 0.30–1.80 m and no hole fill, and it still calls `frontier_cells()` on the main ring: 4-connected, 0.40–1.60 m. `last_mile_from_map()` does not read a soft XY. The 2.60 m fan, the hole fill, and the 8-connected rim are the explore demo.
+
+The explore demo can freeze a soft XY 1.50 m along the first yellow bearing. A separate probe walks half-cap toward that guess for up to 20 s. That probe is not the kitchen path. Yellow ≥ 0.50 is not the success test and arrival is not claimed. The measured probe is Prefer FAIL against find-kitchen (remaining 0.982 m vs 0.239 m).
 
 The trail is the sim freejoint. In this sim that is odometry. It is not a visual pose.
 
