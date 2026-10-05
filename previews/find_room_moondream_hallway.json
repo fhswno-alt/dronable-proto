@@ -1,0 +1,29 @@
+{
+  "model": "vikhyatk/moondream2",
+  "model_sha": "5d6c926f44e26b07957b0dd315bbedcb4c17a5fe",
+  "prompt": "Which room is this? Answer with one word: kitchen, bathroom, living, bedroom, entrance, or none.",
+  "source": "Hardware draft #48 kit_cam stills, not merged",
+  "expected": "entrance",
+  "plant_md5": "71b2c86d133ebc603f58b99c53e496f3",
+  "gait": false,
+  "vel": false,
+  "arrival": false,
+  "scenes": [
+    {
+      "role": "primary",
+      "file": "previews/moondream_fresh/kit/hallway_front.png",
+      "room": "entrance",
+      "confidence": 0.9455133676528931,
+      "raw": "entrance",
+      "seconds": 5.744134986000063
+    },
+    {
+      "role": "secondary",
+      "file": "previews/moondream_fresh/kit/hallway_front_side.png",
+      "room": "entrance",
+      "confidence": 0.26719585061073303,
+      "raw": "entrance",
+      "seconds": 4.389767778000532
+    }
+  ]
+}

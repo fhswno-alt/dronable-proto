@@ -86,6 +86,8 @@ OWLv2's one iTHOR commit is a bedroom hit. It also commits entrance on kitchen `
 
 Qwen2-VL-2B did not score. `Qwen2VLVideoProcessor requires the Torchvision library.` `torchvision==0.29.1` on torch 2.14.1+cpu then raised `RuntimeError: operator torchvision::nms does not exist`. That wheel was removed.
 
+The iTHOR and Places stills in this file are the set that selected Moondream2. They are not its final score. The fresh score is in `docs/FIND_ROOM_MOONDREAM.md`.
+
 ## Not a walk
 
 Gait is off. Vel is off. Arrival is not claimed. The plant file is not in the diff. md5 stays `71b2c86d133ebc603f58b99c53e496f3`. Kit_cam on the MuJoCo plant stays on `head_tilt_link` at `0.050 0.019 0.007`.
