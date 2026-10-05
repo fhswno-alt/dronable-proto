@@ -15,11 +15,15 @@
   "claimed_left_arc_s": 12.5,
   "claimed_right_arc_s": 11.0,
   "resend_hz": 10.0,
-  "walk_s": 65.5,
+  "walk_s": 73.5,
   "cell_m": 0.1,
   "max_range_m": 2.6,
   "frontier_max_m": 2.7,
   "empty_forward_extend_s": 15.0,
+  "frontier_gap_s": 4.0,
+  "frontier_second_left_s": 8.0,
+  "frontier_right_hold_s": 34.0,
+  "frontier_walk_s": 73.5,
   "soft_goal_range_m": 1.5,
   "soft_goal_hold_s": 20.0,
   "arrival_yellow_frac": 0.5,
@@ -45,15 +49,35 @@
     "kitchen": 7,
     "bathroom": 10
   },
-  "honesty": "Partial kit_cam map. Floor cells are a ground-plane paint out to 2.60 m, with one-cell holes filled. Kitchen-like yellow is a camera-ray bearing, not a waypoint and not arrival. A soft XY is frozen along that bearing the first time yellow is logged. Yellow >= 0.50 is not success. Frontiers are the 8-connected edge of that paint. Pose is the sim freejoint, not SLAM. Explore holds the claimed vel(+0.056, \u00b10.25) windows (left 12.5 s, then right 11 s) and, on the empty plant, one more vel(+0.056, 0) for 15 s. A second yaw hold is not claimable. vx=0 yaw is not used. Not go-anywhere.",
+  "open_loop_free_cells": {
+    "plant": 821,
+    "kitchen": 450,
+    "bathroom": 794
+  },
+  "open_loop_frontier_cells": {
+    "plant": 39,
+    "kitchen": 55,
+    "bathroom": 61
+  },
+  "open_loop_walked_cells": {
+    "plant": 52,
+    "kitchen": 7,
+    "bathroom": 10
+  },
+  "open_loop_min_up_z": {
+    "plant": 0.9491904220657853,
+    "kitchen": 0.9186315495501423,
+    "bathroom": 0.9337887107030065
+  },
+  "honesty": "Partial kit_cam map. Floor cells are a ground-plane paint out to 2.60 m, with one-cell holes filled. Kitchen-like yellow is a camera-ray bearing, not a waypoint and not arrival. A soft XY is frozen along that bearing the first time yellow is logged. Yellow >= 0.50 is not success. Frontiers are the 8-connected edge of that paint. Pose is the sim freejoint, not SLAM. The empty plant holds the claimed left prefix, then a 4 s forward gap and an 8 s left window when the dense rim is still left, then one vel(+0.056, -0.25) for 34 s. A 6 s gap swallows that left window. About 38 s of that right hold crosses up_z 0.90. vx=0 yaw is not used. Not go-anywhere.",
   "prefer_fail_bar": {
-    "tonight": "A real land is not this slice. The map is a ground-plane floor fan from one camera out to 2.60 m, with one-cell holes filled, frontiers on the 8-connected edge of that fan, and a yellow bearing when the backsplash is in frame. A soft XY is frozen along that bearing. Yellow >= 0.50 is not success and arrival is not claimed. The empty plant holds the claimed vel(+0.056, \u00b10.25) windows and then one claimed forward. A second yaw hold is not claimable. Rooms are separate XML files, not one space. Pose is the sim freejoint. vx=0 does not turn. Arrival is still yellow >= 0.50 and torso-to-kitchen <= 0.25 m.",
+    "tonight": "A real land is not this slice. The map is a ground-plane floor fan from one camera out to 2.60 m, with one-cell holes filled, frontiers on the 8-connected edge of that fan, and a yellow bearing when the backsplash is in frame. A soft XY is frozen along that bearing. Yellow >= 0.50 is not success and arrival is not claimed. The empty plant holds the claimed left prefix, then a 4 s forward gap and an 8 s left window when the dense rim is still left, then one vel(+0.056, -0.25) for 34 s. A 6 s gap swallows that left window. About 38 s of the right hold crosses up_z 0.90. Rooms are separate XML files, not one space. Pose is the sim freejoint. vx=0 does not turn. Arrival is still yellow >= 0.50 and torso-to-kitchen <= 0.25 m.",
     "later": "A later land would need one continuous space, metric occupied cells for elevated furniture (depth or parallax, not a floor-plane guess), and a pose that is not the simulator freejoint. The finder can query this interface. That query is not a waypoint and not arrival."
   },
   "runs": [
     {
       "scene": "plant",
-      "stop_reason": "claimed left-then-right plus empty-floor forward",
+      "stop_reason": "frontier left window then one right walk-yaw",
       "prefer_fail": true,
       "go_anywhere": false,
       "arrival_claimed": false,
@@ -69,10 +93,14 @@
       "vs_main_explore_free_cells": 766,
       "vs_main_explore_frontier_cells": 11,
       "vs_main_explore_walked_cells": 41,
-      "dx_m": 1.7360642365439112,
-      "dy_m": 1.7457886846522597,
-      "dyaw_rad": 1.369148578490127,
-      "dyaw_deg": 78.4464350738204,
+      "vs_open_loop_free_cells": 821,
+      "vs_open_loop_frontier_cells": 39,
+      "vs_open_loop_walked_cells": 52,
+      "vs_open_loop_min_up_z": 0.9491904220657853,
+      "dx_m": 1.8986181988683488,
+      "dy_m": 1.2867791536440938,
+      "dyaw_rad": -1.160009723440314,
+      "dyaw_deg": -66.46366134726783,
       "start": {
         "t": 1.0000000000000007,
         "x": 0.0016618489776550022,
@@ -80,18 +108,18 @@
         "yaw": -0.0008237024891998252
       },
       "stop_pose": {
-        "t": 66.50000000002642,
-        "x": 1.7397762433691943,
-        "y": 1.7922619649077125,
-        "yaw": 1.3814891486033658
+        "t": 74.50000000000777,
+        "x": 1.9003015060586685,
+        "y": 1.2657509746310789,
+        "yaw": -1.3152089055038725
       },
       "end": {
-        "t": 67.70000000002362,
-        "x": 1.7377260855215662,
-        "y": 1.7592302015682915,
-        "yaw": 1.3683248760009274
+        "t": 75.70000000000498,
+        "x": 1.9002800478460038,
+        "y": 1.3002206705601256,
+        "yaw": -1.1608334259295137
       },
-      "min_up_z": 0.9491904220657853,
+      "min_up_z": 0.9390232719426665,
       "up_z_abort": 0.9,
       "fault": false,
       "fault_reason": "",
@@ -121,24 +149,24 @@
       },
       "map_after": {
         "yellow_frac": 0.0,
-        "sky_frac": 0.6106282552083333,
-        "other_chromatic_frac": 0.022154947916666667,
-        "low_sat_frac": 0.36720377604166665,
-        "free_cells": 821,
+        "sky_frac": 0.5726822916666666,
+        "other_chromatic_frac": 0.022320963541666666,
+        "low_sat_frac": 0.40473307291666666,
+        "free_cells": 883,
         "feature_cells": 0,
-        "traversed_cells": 52,
-        "frontier_cells": 39,
-        "frontier_gap_rad": 0.02499806983669073,
+        "traversed_cells": 57,
+        "frontier_cells": 41,
+        "frontier_gap_rad": 0.0225633761377102,
         "blocked": false,
-        "new_free": 0,
+        "new_free": 1,
         "new_feature": 0
       },
-      "other_chromatic_max": 0.023727213541666667,
-      "trail_points": 418,
+      "other_chromatic_max": 0.02680013020833333,
+      "trail_points": 408,
       "commands": {
         "stand_sends": 1,
         "stop_sends": 1,
-        "vel_sends": 655,
+        "vel_sends": 735,
         "vx_zero_yaw_sends": 0,
         "vx_values": [
           0.056
@@ -161,14 +189,14 @@
             "yaw_rate": 0.0
           },
           {
-            "t": 34.4999999999962,
+            "t": 32.499999999993754,
             "vx": 0.056,
-            "yaw_rate": -0.25
+            "yaw_rate": 0.25
           },
           {
-            "t": 45.50000000000964,
+            "t": 40.50000000000353,
             "vx": 0.056,
-            "yaw_rate": 0.0
+            "yaw_rate": -0.25
           }
         ]
       },
@@ -181,7 +209,8 @@
           "dx_m": 0.5980582478995232,
           "dy_m": -0.06596907580169596,
           "dyaw_deg": -0.6788095910021027,
-          "tracked": null
+          "tracked": null,
+          "reason": "claimed prefix so the left arc starts at t = 16 s"
         },
         {
           "name": "arc-left",
@@ -191,54 +220,49 @@
           "dx_m": 0.49479349453557286,
           "dy_m": 0.16014359674454012,
           "dyaw_deg": 75.53010619466276,
-          "tracked": true
+          "tracked": true,
+          "reason": "claimed prefix so the left arc starts at t = 16 s"
         },
         {
-          "name": "mid",
+          "name": "frontier-gap",
           "commanded_vx": 0.056,
           "commanded_yaw": 0.0,
-          "duration_s": 6.0000000000011156,
-          "dx_m": 0.08679667203635577,
-          "dy_m": 0.3103591633348194,
-          "dyaw_deg": -2.9547094598610726,
-          "tracked": null
+          "duration_s": 3.9999999999986713,
+          "dx_m": 0.0516558850311879,
+          "dy_m": 0.20276025042956078,
+          "dyaw_deg": -1.9384192779300375,
+          "tracked": null,
+          "reason": "forward gap before a second left; dense rim left 31.3 right 0.0 ahead 0.0 n=57"
+        },
+        {
+          "name": "frontier-left",
+          "commanded_vx": 0.056,
+          "commanded_yaw": 0.25,
+          "duration_s": 8.000000000009777,
+          "dx_m": -0.010094951710675204,
+          "dy_m": 0.3911294545449876,
+          "dyaw_deg": 29.476922804893167,
+          "tracked": true,
+          "reason": "frontier is left; 8 s walk-yaw left; dense rim left 29.3 right 0.0 ahead 0.0 n=57"
         },
         {
           "name": "arc-right",
           "commanded_vx": 0.056,
           "commanded_yaw": -0.25,
-          "duration_s": 11.000000000013443,
-          "dx_m": 0.2383075399287018,
-          "dy_m": 0.4134144558792945,
-          "dyaw_deg": -54.543624540752965,
-          "tracked": true
-        },
-        {
-          "name": "resume",
-          "commanded_vx": 0.056,
-          "commanded_yaw": 0.0,
-          "duration_s": 6.000000000007333,
-          "dx_m": 0.1809170506899096,
-          "dy_m": 0.19790221946192454,
-          "dyaw_deg": 30.77564956751977,
-          "tracked": null
-        },
-        {
-          "name": "extend",
-          "commanded_vx": 0.056,
-          "commanded_yaw": 0.0,
-          "duration_s": 15.000000000009443,
-          "dx_m": 0.13924138930147612,
-          "dy_m": 0.7629700883727981,
-          "dyaw_deg": 31.07208016373346,
-          "tracked": null
+          "duration_s": 34.00000000000424,
+          "dx_m": 0.7642269813254048,
+          "dy_m": 0.5642452317976545,
+          "dyaw_deg": -177.69852491781043,
+          "tracked": true,
+          "reason": "claimed right walk-yaw after the left windows; another left is not this hold; dense rim left 30.4 right 0.0 ahead 0.0 n=52"
         }
       ],
       "yaw_tracked": {
         "arc-left": true,
+        "frontier-left": true,
         "arc-right": true
       },
-      "limit": "Prefer FAIL: empty floor. Vision-free cells 821 (main 766), frontiers 39 (main 11), walked cells 52 (main 41), floor-feature cells 0. No kitchen-like yellow. Frontiers are the edge of that floor paint, not rooms. Not go-anywhere."
+      "limit": "Prefer FAIL: empty floor. Vision-free cells 883 (open-loop 821), frontiers 41 (open-loop 39), walked cells 57 (open-loop 52), floor-feature cells 0. min_up_z 0.939 (open-loop 0.949). No kitchen-like yellow. Frontiers are the edge of that floor paint, not rooms. Not go-anywhere."
     },
     {
       "scene": "kitchen",
@@ -261,6 +285,10 @@
       "vs_main_explore_free_cells": 366,
       "vs_main_explore_frontier_cells": 26,
       "vs_main_explore_walked_cells": 7,
+      "vs_open_loop_free_cells": 450,
+      "vs_open_loop_frontier_cells": 55,
+      "vs_open_loop_walked_cells": 7,
+      "vs_open_loop_min_up_z": 0.9186315495501423,
       "dx_m": 0.33742378354500696,
       "dy_m": -0.2086585640769569,
       "dyaw_rad": -0.9746591936825806,
@@ -353,7 +381,8 @@
           "dx_m": 0.3107947046858354,
           "dy_m": -0.19340319105831816,
           "dyaw_deg": -58.18100910522767,
-          "tracked": true
+          "tracked": true,
+          "reason": ""
         }
       ],
       "yaw_tracked": {
@@ -379,6 +408,10 @@
       "vs_main_explore_free_cells": 531,
       "vs_main_explore_frontier_cells": 28,
       "vs_main_explore_walked_cells": 10,
+      "vs_open_loop_free_cells": 794,
+      "vs_open_loop_frontier_cells": 61,
+      "vs_open_loop_walked_cells": 10,
+      "vs_open_loop_min_up_z": 0.9337887107030065,
       "dx_m": 0.42263763733049803,
       "dy_m": -0.2357542577470043,
       "dyaw_rad": -0.8823351859942905,
@@ -471,7 +504,8 @@
           "dx_m": 0.4093092406358547,
           "dy_m": -0.2325865881259888,
           "dyaw_deg": -56.446968544745275,
-          "tracked": true
+          "tracked": true,
+          "reason": ""
         }
       ],
       "yaw_tracked": {
@@ -500,6 +534,10 @@
       "vs_main_explore_free_cells": null,
       "vs_main_explore_frontier_cells": null,
       "vs_main_explore_walked_cells": null,
+      "vs_open_loop_free_cells": null,
+      "vs_open_loop_frontier_cells": null,
+      "vs_open_loop_walked_cells": null,
+      "vs_open_loop_min_up_z": null,
       "dx_m": 0.33181894043771254,
       "dy_m": -0.025183285318636024,
       "dyaw_rad": 0.04253178214740938,
@@ -612,7 +650,8 @@
           "dx_m": 0.32716440855701484,
           "dy_m": -0.0025331591872443885,
           "dyaw_deg": 2.1389747745635432,
-          "tracked": null
+          "tracked": null,
+          "reason": ""
         }
       ],
       "yaw_tracked": {},
