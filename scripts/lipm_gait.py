@@ -430,7 +430,18 @@ class LipmWalker:
         self._write_unused()
 
     def _write_leg_delta(self, side: Side, flex: float, dhip: float, yaw: float) -> None:
-        """Stand pose plus a Bézier flex and a forward hip. Clipped to tau/kp."""
+        """Stand pose plus a Bézier flex and a forward hip. Clipped to tau/kp.
+
+        Plant axes (md5 17dc4ff3…), verified against a pelvis-fixed step:
+        pitch is mirrored (left hip/knee ``0 1 0``, right ``0 -1 0``);
+        ankle pitch is flipped the other way (left ``0 -1 0``, right ``0 1 0``).
+        Positive ``dhip`` is thigh-forward on both legs (left hip decreases,
+        right hip increases) and moves both feet in +x. Positive ``flex``
+        bends both knees (left knee increases, right knee decreases). With
+        the ankle held at hip+knee, that flex raises both soles the same
+        amount. Roll is not mirrored (hip roll ``-1 0 0`` both, ankle roll
+        ``1 0 0`` both), so a lean uses the same sign on both hips.
+        """
         pref = self.pref(side)
         hip_sign = -1.0 if side == "L" else 1.0
         knee_sign = 1.0 if side == "L" else -1.0

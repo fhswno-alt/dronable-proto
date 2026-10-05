@@ -162,3 +162,35 @@ Shorter periods with the 0.07 rad cap stay upright and lose both
 clearance and forward speed. 0.80 s raw is about 1.2 cm/s with sole
 p90 1.10 cm. The 1.00 s one-sided step is still the fastest upright
 row, and it is still about 4× short of 7 cm/s. Soft-pass is off.
+
+## Joint sign map against the plant axes
+
+The plant file was not edited. Axes below are from
+`ainex_controls_m2_145.xml` (md5 `17dc4ff37491c8e61900fd83b5d31f0c`).
+Pitch is mirrored. Ankle pitch is flipped the other way from hip and
+knee. Roll is not mirrored.
+
+| Joint | Left axis | Right axis | Gait sign for a positive command |
+| --- | --- | --- | --- |
+| Hip roll | `-1 0 0` | `-1 0 0` | same `lat` added to both (not mirrored) |
+| Hip pitch | `0 1 0` | `0 -1 0` | `dhip > 0` decreases left, increases right |
+| Knee | `0 1 0` | `0 -1 0` | `flex > 0` increases left, decreases right |
+| Ankle pitch | `0 -1 0` | `0 1 0` | command is hip+knee, plus a level term |
+| Ankle roll | `1 0 0` | `1 0 0` | same `lat` on both; `+ank_roll` lowers `up[1]` on both |
+
+Pelvis fixed at the stand, ankle held on hip+knee: `flex = 0.62` raises
+the left sole by 2.31 cm and the right sole by 2.31 cm. `dhip = +0.24`
+moves both feet +4.4 cm in x. The same-sign hip-roll step moves both
+feet in −y. `+l_ank_pitch` lowers foot `up[0]`; `+r_ank_pitch` raises
+it, which is what the level term assumes. No pitch sign is backwards,
+and roll is not being mirrored.
+
+The live 1.00 s row still does not use those lifts the same way. At
+the left sole peak, commanded `dhip` is +0.20 (thigh forward) and
+`flex` is +0.31, and the sole is 0.48 cm. At the right sole peak,
+commanded `dhip` is −0.13 (thigh back) and `flex` is +0.30, and the
+sole is 1.96 cm. The clock's body-frame x is positive on the left
+swing and negative on the right swing, and the joint map follows that.
+No swing joint sat on ±2.45 Nm. The left sole stays low because the
+forward hip is the correct sign for a forward target, and that pose
+cuts the clearance the knee has reached. Soft-pass is off.
