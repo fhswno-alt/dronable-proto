@@ -4,8 +4,9 @@
   edit it. Furniture is named scene geometry so a later vision step can
   point at "bedroom". This is not a navigation map, not a planner input,
   and not a mechanism. One camera: the plant's kit_cam.
-  The bedroom body is the bed. Meshes are CC0 textured models
-  (see docs/ROOM_ASSETS.md). Static bodies.
+  The bedroom body is the bed. The bed, nightstand, and dresser are
+  CC BY 4.0 furniture meshes. The lamp is CC0. See docs/ROOM_ASSETS.md.
+  Static bodies.
 -->
 <mujoco model="room_bedroom">
   <include file="ainex_hiwonder/ainex_controls_m2_145.xml"/>
@@ -16,20 +17,18 @@
     <material name="room_wall" texture="room_wall" texrepeat="2 1.2" specular="0.02" emission="0.28"/>
     <texture name="room_ceiling" type="2d" file="assets/rooms/textures/white_plaster.png"/>
     <material name="room_ceiling" texture="room_ceiling" texrepeat="2.4 2.4" specular="0.02" emission="0.62"/>
-    <texture name="room_oak" type="2d" file="assets/rooms/textures/oak_veneer.png"/>
-    <material name="room_oak" texture="room_oak" texrepeat="1 1" specular="0.08"/>
-    <texture name="room_linen" type="2d" file="assets/rooms/textures/rough_linen.png"/>
-    <material name="room_linen" texture="room_linen" texrepeat="1 1" specular="0.04"/>
-    <texture name="room_sheet" type="2d" file="assets/rooms/textures/white_plaster.png"/>
-    <material name="room_sheet" texture="room_sheet" texrepeat="2 2" specular="0.06" emission="0.12"/>
-    <texture name="room_boucle" type="2d" file="assets/rooms/textures/wool_boucle.png"/>
-    <material name="room_boucle" texture="room_boucle" texrepeat="1 1" specular="0.04"/>
-    <texture name="room_night" type="2d" file="assets/rooms/bedroom/nightstand.png"/>
-    <material name="room_night" texture="room_night" specular="0.16"/>
-    <mesh name="room_night" file="assets/rooms/bedroom/nightstand.obj"/>
+    <texture name="room_bed" type="2d" file="assets/rooms/bedroom/platform_bed.png"/>
+    <material name="room_bed" texture="room_bed" specular="0.08"/>
+    <mesh name="room_bed" file="assets/rooms/bedroom/platform_bed.obj" scale="0.92 0.92 0.92"/>
+    <texture name="room_night" type="2d" file="assets/rooms/bedroom/stark_nightstand.png"/>
+    <material name="room_night" texture="room_night" specular="0.12"/>
+    <mesh name="room_night" file="assets/rooms/bedroom/stark_nightstand.obj"/>
     <texture name="room_lamp" type="2d" file="assets/rooms/bedroom/lamp.png"/>
     <material name="room_lamp" texture="room_lamp" specular="0.3"/>
-    <mesh name="room_lamp" file="assets/rooms/bedroom/lamp.obj" scale="0.52 0.52 0.52"/>
+    <mesh name="room_lamp" file="assets/rooms/bedroom/lamp.obj" scale="0.42 0.42 0.42"/>
+    <texture name="room_dresser" type="2d" file="assets/rooms/bedroom/dresser.png"/>
+    <material name="room_dresser" texture="room_dresser" specular="0.10"/>
+    <mesh name="room_dresser" file="assets/rooms/bedroom/dresser.obj" scale="0.92 0.92 0.92"/>
   </asset>
   <worldbody>
     <light name="room_key" pos="0.40 -0.15 2.05" dir="0.65 0.02 -1" diffuse="0.78 0.74 0.68"/>
@@ -42,26 +41,21 @@
     <geom name="room_wall_left" type="box" pos="0.86 1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_wall_right" type="box" pos="0.86 -1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_ceiling" type="box" pos="0.86 0 2.48" size="1.64 1.88 0.04" material="room_ceiling" contype="0" conaffinity="0"/>
-    <!-- Platform bed, long side toward +X, flat headboard at +Y.
-         Poly Haven has no contemporary bed mesh. Authored boxes: recessed
-         oak plinth, linen mattress edge, white duvet, two pillows, boucle
-         slab. No posts. The low frozen camera looks at the near side. -->
-    <body name="bedroom" pos="1.62 -0.10 0">
-      <site name="bedroom" pos="0 0.1 0.50" size="0.015" group="4" rgba="0.75 0.72 0.66 1"/>
-      <geom name="bedroom_plinth" type="box" pos="0.02 0 0.025" size="0.60 0.86 0.025" material="room_oak" contype="0" conaffinity="0"/>
-      <geom name="bedroom_base" type="box" pos="0 0 0.09" size="0.72 0.98 0.035" material="room_oak" contype="0" conaffinity="0"/>
-      <geom name="bedroom_mattress" type="box" pos="0 -0.02 0.245" size="0.64 0.88 0.12" material="room_linen" contype="0" conaffinity="0"/>
-      <geom name="bedroom_duvet" type="box" pos="0 -0.20 0.425" size="0.68 0.64 0.06" material="room_sheet" contype="0" conaffinity="0"/>
-      <geom name="bedroom_fold" type="box" pos="0 0.34 0.50" size="0.66 0.12 0.03" material="room_sheet" contype="0" conaffinity="0"/>
-      <geom name="bedroom_pillow" type="box" pos="-0.30 0.78 0.485" size="0.26 0.09 0.12" material="room_sheet" contype="0" conaffinity="0"/>
-      <geom name="bedroom_pillow_b" type="box" pos="0.30 0.86 0.485" size="0.26 0.08 0.12" material="room_sheet" contype="0" conaffinity="0"/>
-      <geom name="bedroom_pillow_c" type="box" pos="0 0.52 0.53" size="0.48 0.11 0.06" material="room_sheet" contype="0" conaffinity="0"/>
-      <geom name="bedroom_headboard" type="box" pos="0 1.00 0.64" size="0.74 0.04 0.48" material="room_boucle" contype="0" conaffinity="0"/>
+    <!-- York platform bed, long side toward +X, headboard at +Y.
+         Uniform scale 0.92 so the queen, nightstand, and dresser fit
+         the closed shell. The low frozen camera looks at the near side. -->
+    <body name="bedroom" pos="1.50 0.08 0">
+      <site name="bedroom" pos="0 0.55 0.45" size="0.015" group="4" rgba="0.75 0.72 0.66 1"/>
+      <geom name="bedroom_headboard" type="mesh" mesh="room_bed" material="room_bed" contype="0" conaffinity="0"/>
     </body>
-    <body name="nightstand" pos="1.78 1.38 0">
-      <site name="nightstand" pos="0 0 0.5" size="0.012" group="4" rgba="0.40 0.26 0.14 1"/>
-      <geom name="nightstand_top" type="mesh" mesh="room_night" material="room_night" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
-      <geom name="nightstand_lamp" type="mesh" mesh="room_lamp" material="room_lamp" pos="0 -0.02 0.72" quat="0 0 0 1" contype="0" conaffinity="0"/>
+    <body name="nightstand" pos="1.55 1.48 0">
+      <site name="nightstand" pos="0 0 0.45" size="0.012" group="4" rgba="0.40 0.26 0.14 1"/>
+      <geom name="nightstand_top" type="mesh" mesh="room_night" material="room_night" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+      <geom name="nightstand_lamp" type="mesh" mesh="room_lamp" material="room_lamp" pos="0 0.02 0.62" quat="0 0 0 1" contype="0" conaffinity="0"/>
+    </body>
+    <body name="dresser" pos="1.62 -1.42 0">
+      <site name="dresser" pos="0 0.15 0.45" size="0.012" group="4" rgba="0.45 0.32 0.22 1"/>
+      <geom name="dresser_case" type="mesh" mesh="room_dresser" material="room_dresser" quat="0 0 0 1" contype="0" conaffinity="0"/>
     </body>
   </worldbody>
 </mujoco>

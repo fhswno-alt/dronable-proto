@@ -2,7 +2,7 @@
 
 The five `kit_cam` rooms use open meshes and albedo textures under `mujoco/assets/rooms/`. They replace the flat colored boxes. The walk plant `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml` is not edited. Room XML only includes it and adds static bodies. Furniture has no joints.
 
-Every downloaded model and texture below is **CC0 1.0**. No paid asset. Poly Haven asks for credit when the API is used to fetch files; the assets themselves need no permission. Pages: [polyhaven.com/license](https://polyhaven.com/license).
+Poly Haven models and textures in this file are **CC0 1.0**. The bedroom bed, nightstand, and dresser are **CC BY 4.0** furniture meshes from Amazon Berkeley Objects. No paid asset. Poly Haven asks for credit when the API is used to fetch files; the assets themselves need no permission. Pages: [polyhaven.com/license](https://polyhaven.com/license).
 
 ## What is in the repo
 
@@ -31,7 +31,7 @@ The entrance panel file is named `panel.obj` so the loaded MuJoCo name does not 
 | `living/coffee.obj` | Gothic Coffee Table | Ulan Cabanilla | https://polyhaven.com/a/gothic_coffee_table |
 | `living/tv.obj` | Television 01 | Gabriel Radić | https://polyhaven.com/a/Television_01 |
 | `bedroom/bed.obj` | Gothic Bed 01 (not placed) | Kirill Sannikov | https://polyhaven.com/a/GothicBed_01 |
-| `bedroom/nightstand.obj` | Classic Nightstand 01 | Kirill Sannikov | https://polyhaven.com/a/ClassicNightstand_01 |
+| `bedroom/nightstand.obj` | Classic Nightstand 01 (not placed) | Kirill Sannikov | https://polyhaven.com/a/ClassicNightstand_01 |
 | `bedroom/lamp.obj` | Desk Lamp Arm 01 | Kuutti Siitonen (model and texture), Yann Kervran (rigging) | https://polyhaven.com/a/desk_lamp_arm_01 |
 | `bathroom/vanity.obj` | Painted Wooden Cabinet | Kirill Sannikov | https://polyhaven.com/a/painted_wooden_cabinet |
 | `bathroom/mirror.obj` | Ornate Mirror 01 | James Ray Cock | https://polyhaven.com/a/ornate_mirror_01 |
@@ -86,7 +86,19 @@ The ribbed wooden cabinet, the drawer cabinet, the dining table, the dining chai
 
 `kit_cam` stands at about 0.38 m and looks level along +X. That pose is frozen. Countertops at 0.90 m stay above the lens, so the still cannot match a standing-eye photo of the cooktop. The island and stools sit image-right of the lens axis so the cabinet fronts, sink, and stove are in frame. That low-camera gap is a Prefer FAIL. Moving `kit_cam` would be required to see the counter surface the way the reference photo does.
 
-Poly Haven has no contemporary bed. The other bed meshes are Gothic Bed 01, a rusty hospital frame, and a carved daybed. The bedroom scene does not place them. The bed in frame is still authored boxes, not a scan: a recessed oak plinth, a linen mattress edge, a white plaster duvet with a folded cuff, two shams and a front pillow, and a flat wool-boucle headboard with no posts. That photoreal gap is a Prefer FAIL. `kit_cam` stays near 0.38 m and looks level, so the still shows the near side of the stack more than the top of the duvet. The nightstand is still Classic Nightstand 01.
+## Bedroom furniture (Amazon Berkeley Objects, CC BY 4.0)
+
+The placed bedroom bed, nightstand, and dresser are product meshes from [Amazon Berkeley Objects](https://amazon-berkeley-objects.s3.amazonaws.com/index.html). The dataset README licenses the collection under **Creative Commons Attribution 4.0** (`LICENSE-CC-BY-4.0.txt` on that bucket). Commercial use is allowed with attribution. Credit the data to Amazon.com, and credit the dataset to Matthieu Guillaumin, Thomas Dideriksen, Kenan Deng, and Himanshu Arora (Amazon.com) and Jasmine Collins and Jitendra Malik (UC Berkeley).
+
+glTF files were taken from `3dmodels/original/` on the official bucket, rotated from Y-up to Z-up (`x' = x`, `y' = -z`, `z' = y`), floor-centered, and written as one OBJ plus a 1024 px PNG of the base-color texture. MuJoCo scale `0.92` on the bed and the dresser is uniform, so the queen, the nightstand, and the dresser fit the closed shell.
+
+| Repo file | Product | Source id | Page |
+|-----------|---------|-----------|------|
+| `bedroom/platform_bed.obj` | Rivet York Modern Extended Platform Queen Bed, grey | `B075QFCHM9` | https://amazon-berkeley-objects.s3.amazonaws.com/3dmodels/original/9/B075QFCHM9.glb |
+| `bedroom/stark_nightstand.obj` | Rivet Mid-Century Stark 2-Drawer Nightstand, walnut | `B075YZ16V4` | https://amazon-berkeley-objects.s3.amazonaws.com/3dmodels/original/4/B075YZ16V4.glb |
+| `bedroom/dresser.obj` | Rivet Jonathan Mid-Century Modern Wood Bedroom Dresser, walnut | `B07B4SBZDV` | https://amazon-berkeley-objects.s3.amazonaws.com/3dmodels/original/V/B07B4SBZDV.glb |
+
+Poly Haven still has no contemporary bed. Its bed meshes are Gothic Bed 01 (kept, not placed), a rusty hospital frame, and a carved daybed. Sketchfab has CC-BY modern beds (ArchVibe 3D “Modern bed”, dbasfi92 “Double Bed - Modern contemporary”, renviros “Modern Bed”) but the download button requires a login. Those files were not taken. Quaternius, Kenney, and KayKit publish CC0 beds that read as low-poly blocks, so they are not placed. The York mesh is the bed in frame: grey upholstered platform, mattress, pillows, and a low headboard, long side toward +X. `kit_cam` stays near 0.38 m and looks level, so the still shows the near side of the mattress more than the top of the duvet. That low-camera gap is a Prefer FAIL. The lamp is still Desk Lamp Arm 01. Classic Nightstand 01 is not placed.
 
 Poly Haven has no bathtub. The tub is from Isa Lousberg's **Tiny Treats — Bubbly Bathroom** set, licensed **CC0**:
 
@@ -104,4 +116,4 @@ There is no CC0 coat in this set. The shoes cue is the boots, and the hall table
 
 ## Scene names
 
-Body and site names stay `kitchen`, `table`, `chair`, `bathroom`, `sink`, `toilet`, `living`, `tv`, `bedroom`, `nightstand`, `entrance`, `mat`. Later passes add `bathtub`, `shoes`, `coffee`, and `console`. Each room adds a floor texture, side walls, a back wall, and a ceiling as extra worldbody geoms, using the CC0 textures above. The plant's checker plane is still in the included file. Furniture stays static. The entrance panel is still a visual frame: no hinge, no lever, no latch.
+Body and site names stay `kitchen`, `table`, `chair`, `bathroom`, `sink`, `toilet`, `living`, `tv`, `bedroom`, `nightstand`, `entrance`, `mat`. Later passes add `bathtub`, `shoes`, `coffee`, `console`, and `dresser`. Each room adds a floor texture, side walls, a back wall, and a ceiling as extra worldbody geoms, using the CC0 textures above. The plant's checker plane is still in the included file. Furniture stays static. The entrance panel is still a visual frame: no hinge, no lever, no latch.
