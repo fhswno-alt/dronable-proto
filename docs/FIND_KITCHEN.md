@@ -30,6 +30,8 @@ From the stand pose the blob is already centered (`|bias| ≤ 0.08`, measured bi
 
 The trim is not a heading setpoint. Full yaw cap is used only when `|bias|` reaches 0.35. `vx = 0` yaw does not change heading on this plant, so a correction is a walking turn at the soft forward speed.
 
+While yellow is still at least 0.015 but has fallen below 75% of a peak that reached 0.05, forward-only stops sooner. `|bias|` above 0.04 gets `vel(+0.028, yaw trim)` instead of waiting for 0.08. The yaw gain is unchanged. This is a recenter while the blob is still visible, not a search after it is gone.
+
 The `up_z` Prefer FAIL bar stays **0.90**. It is not lowered. A full-cap slice run on the same bar stopped at end x +0.394 m when `up_z` hit 0.894. Shorter slices with a stand between them were tried and did not get past that distance:
 
 | Trial | Result |
@@ -44,7 +46,7 @@ The world-x budget on this draft is **1.10 m**. That is still a stop, not a coun
 
 Without a reacquire, the same half-cap walk stopped at end x +0.938 m when the yellow fraction fell to 0.004 with the kitchen body still in frame (remaining 0.377 m, min up_z 0.981). `vx = 0` yaw does not change heading on this plant, so a yaw-only reacquire is not used. This draft instead keeps half-cap `vel(+0.028, yaw trim)` toward the last bias for at most two tries of 2.0 s. The normal approach resumes only if yellow returns to at least 0.015 and the score is usable (`forward`, `yaw_left`, or `yaw_right`). A blob that stays lost, a kitchen that leaves the frame, `up_z` under 0.90, or the end of that budget is Prefer FAIL and sends no further `vel`.
 
-Measured phrase, "go to the kitchen", room scene, after stand:
+Baseline on main, before the fade recenter, "go to the kitchen", room scene, after stand:
 
 | | |
 |--|--|
@@ -57,7 +59,9 @@ Measured phrase, "go to the kitchen", room scene, after stand:
 | Reacquires | 2. Every phrase command was `vx = +0.028` (yaw trim up to +0.250). `vx = 0` was not sent. |
 | Arrival | **false** |
 
-111 centered slices and 50 walking yaw trims were sent at `vx = +0.028`, including the slices after yellow briefly returned. The mid still is the first frame after Δx crossed 0.55 m (yellow 0.105, bias −0.078). 0.000 of the frame is not half, and 0.291 m is still outside the 0.25 m gap. Soft walk-yaw did not keep the backsplash.
+111 centered slices and 50 walking yaw trims were sent at `vx = +0.028`, including the slices after yellow briefly returned. The mid still is the first frame after Δx crossed 0.55 m (yellow 0.105, bias −0.078). That bias is inside the 0.08 forward-only band, so the walk kept going straight while the backsplash later fell to 0.000. 0.291 m is still outside the 0.25 m gap.
+
+This draft recenters with soft walk-yaw once yellow is fading and `|bias|` leaves 0.04, before the fraction hits zero. The room measurement is compared with that main stop.
 
 ## What would count as arrival
 
@@ -81,7 +85,7 @@ No further `vel` is sent when:
 - the phrase is bathroom, or any other room
 - the loaded scene is the empty walk plant
 - the kitchen body is outside the frame (including turned away)
-- the backsplash fraction is below 0.015 and the soft walk-yaw reacquire does not keep it usable (two tries of `vel(+0.028, yaw trim)`, then stop)
+- the backsplash fraction is below 0.015 and the soft walk-yaw reacquire does not keep it usable (two tries of `vel(+0.028, yaw trim)`, then stop), including after a fade recenter while yellow was still visible
 - the yellow is split across the left and right of the frame
 - the centroid does not sit on the kitchen body
 - `up_z` drops below 0.90
