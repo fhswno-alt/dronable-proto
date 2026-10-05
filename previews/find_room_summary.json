@@ -1,0 +1,107 @@
+{
+  "model": "google/owlvit-base-patch32",
+  "model_rev": "cbc355fb364588351c5d51c7f74465e8e7ec6f72",
+  "score_min": 0.1,
+  "labels": [
+    "a kitchen",
+    "a bathroom",
+    "a living room",
+    "a bedroom",
+    "an entrance"
+  ],
+  "arrival_frac": 0.5,
+  "arrival_gap_m": 0.25,
+  "progress_m": 2.0,
+  "approach_vx": 0.028,
+  "plant_md5": "71b2c86d133ebc603f58b99c53e496f3",
+  "stand_top": {
+    "kitchen": "living",
+    "bathroom": "bathroom",
+    "living": "living",
+    "bedroom": "living",
+    "entrance": "living",
+    "plant": null
+  },
+  "walks": [
+    {
+      "room": "kitchen",
+      "stop_kind": "no_cue",
+      "note": "Prefer FAIL: open-vocab cue did not select this room; no vel",
+      "arrival": false,
+      "stand_saturated": false,
+      "stand_room": "living",
+      "stand_score": 0.356277734041214,
+      "stand_frac": 0.9874798107922312,
+      "stand_bias": 0.005360811948776245,
+      "stand_scores": {
+        "kitchen": 0.09529313445091248,
+        "bathroom": 0.09926461428403854,
+        "living": 0.356277734041214,
+        "bedroom": 0.23510856926441193,
+        "entrance": 0.022012658417224884
+      },
+      "settled_room": "living",
+      "settled_frac": 0.9853496062219446,
+      "settled_score": 0.3459143340587616,
+      "remaining_m": 1.2089457268619777,
+      "min_up_z": 0.9977857612909345,
+      "dx_m": -0.00010009463834259624,
+      "end_x_m": 0.0018814494975548997,
+      "end_y_m": 0.012347890781433238,
+      "end_yaw_rad": -0.0008256262544281517,
+      "n_commands": 0,
+      "commands": []
+    },
+    {
+      "room": "bathroom",
+      "stop_kind": "lost",
+      "note": "Prefer FAIL: open-vocab cue left this room; no further vel",
+      "arrival": false,
+      "stand_saturated": true,
+      "stand_room": "bathroom",
+      "stand_score": 0.30785539746284485,
+      "stand_frac": 0.9902223448156443,
+      "stand_bias": 0.0041922926902771,
+      "stand_scores": {
+        "kitchen": 0.09207199513912201,
+        "bathroom": 0.30785539746284485,
+        "living": 0.16803763806819916,
+        "bedroom": 0.12485321611166,
+        "entrance": 0.011028086766600609
+      },
+      "settled_room": "bathroom",
+      "settled_frac": 0.9812868199147184,
+      "settled_score": 0.15605631470680237,
+      "remaining_m": 0.8177232776606026,
+      "min_up_z": 0.939272688585316,
+      "dx_m": 1.1313581392516878,
+      "end_x_m": 1.1333396833875853,
+      "end_y_m": -0.26535198289542344,
+      "end_yaw_rad": -1.0995676165831783,
+      "n_commands": 808,
+      "commands": [
+        {
+          "t0": 0.6000000000000004,
+          "t1": 77.70000000000032,
+          "vx": 0.028,
+          "yaw_rate": 0.0,
+          "resends": 772
+        },
+        {
+          "t0": 77.80000000000008,
+          "t1": 78.09999999999938,
+          "vx": 0.028,
+          "yaw_rate": 0.12142852374485562,
+          "resends": 4
+        },
+        {
+          "t0": 78.19999999999915,
+          "t1": 81.29999999999193,
+          "vx": 0.028,
+          "yaw_rate": 0.0,
+          "resends": 32
+        }
+      ]
+    }
+  ]
+}
