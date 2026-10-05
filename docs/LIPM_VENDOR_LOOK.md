@@ -1360,8 +1360,16 @@ From 4 s to 8 s, `vel(+0.150, +0.25)` yaws at +0.217 rad/s and
 `vel(+0.150, −0.25)` yaws at −0.221 rad/s. The magnitudes differ by
 2.0%. Straight walk over that same span is −0.003 rad/s. Knees sit on
 2.330 Nm. The worst other leg sample is hip pitch at 2.401 Nm.
-`vel(0, +0.25)` yaws at +0.213 rad/s. On nav-left the 6 s
-resume `vel(+0.150, 0)` still gains +12.4°: +6.8° while `applied_yaw`
-slews from +0.25 to 0 in 0.68 s (command integral +5.2°), and +5.6°
-after that command and the step angle are already 0.
+`vel(0, +0.25)` yaws at +0.213 rad/s.
+
+Nav-left resume heading (Prefer FAIL). Scenario: 1 s stand, 15 s
+forward, 12.5 s `vel(+0.150, +0.25)`, then 6 s `vel(+0.150, 0)`.
+Resume Δyaw ≈ +12.41°. Plant md5
+`207f3d5e9c6a72e16f7aa0c8d224f75e` unchanged. Split: (1) 0–0.68 s
+`applied_yaw` still slewing +0.25→0 at 0.40 rad/s² after the 100 ms
+resend clears the target → body +6.81° (command integral ~+5.22°);
+(2) 0.68–6.0 s `applied_yaw` and the step angle are already 0 →
+leftover left curve +5.60° (body yaw rate +0.034→+0.009 rad/s). That
+is ~half ramp-out, ~half steady leftover curve under `vel(+0.150, 0)`
+— not “turn still commanded.” Soft-pass is off.
 

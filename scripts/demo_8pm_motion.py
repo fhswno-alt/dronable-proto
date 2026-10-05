@@ -10,6 +10,17 @@ resume 6 s, stop hold 2.5 s). Caps stay vx_fwd 0.056, vx_back 0.032,
 yaw_rate ±0.25. Soft-pass is off. The plant file is not opened for write.
 Numbers will not match the previous +0.598 m / +75.7 deg basin.
 
+Locked-kit resume on that same window (Prefer FAIL), vel(+0.150, …) on
+--bus-kit, not this 0.056 clip. Scenario: 1 s stand, 15 s forward,
+12.5 s vel(+0.150, +0.25), then 6 s vel(+0.150, 0). Resume Δyaw ≈
++12.41°. Plant md5 207f3d5e9c6a72e16f7aa0c8d224f75e unchanged. Split:
+(1) 0–0.68 s applied_yaw still slewing +0.25→0 at 0.40 rad/s² after
+the 100 ms resend clears the target → body +6.81° (command integral
+~+5.22°); (2) 0.68–6.0 s applied_yaw and the step angle are already 0
+→ leftover left curve +5.60° (body yaw rate +0.034→+0.009 rad/s).
+That is ~half ramp-out, ~half steady leftover curve under
+vel(+0.150, 0) — not “turn still commanded.”
+
 A second clip is a short reverse (stand → vel(-vx_back, 0) for 5.5 s →
 stop). It is not chained onto the turn. If that snippet tips, the JSON
 says so and the clip is not kept.

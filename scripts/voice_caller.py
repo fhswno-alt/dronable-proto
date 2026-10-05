@@ -18,6 +18,18 @@ stand, walk forward, turn left, walk forward, stop. Same times, same
 vel(+0.056, 0) and vel(+0.056, +0.25). It is not a second arc and not
 a room crossing. Half-cap vel(+0.028, yaw) is the finder trim, not this arc.
 
+Locked-kit resume on the same window shape (Prefer FAIL), commanded as
+vel(+0.150, …) on --bus-kit, not by the phrases in this file. Scenario:
+1 s stand, 15 s forward, 12.5 s vel(+0.150, +0.25), then 6 s
+vel(+0.150, 0). Resume Δyaw ≈ +12.41°. Plant md5
+207f3d5e9c6a72e16f7aa0c8d224f75e unchanged. Split: (1) 0–0.68 s
+applied_yaw still slewing +0.25→0 at 0.40 rad/s² after the 100 ms
+resend clears the target → body +6.81° (command integral ~+5.22°);
+(2) 0.68–6.0 s applied_yaw and the step angle are already 0 → leftover
+left curve +5.60° (body yaw rate +0.034→+0.009 rad/s). That is ~half
+ramp-out, ~half steady leftover curve under vel(+0.150, 0) — not
+“turn still commanded.” Soft-pass is off.
+
 Go to the kitchen, the bathroom, anywhere, SLAM, a map, a waypoint, or
 a strafe is refused. Kitchen and bathroom finders are other scripts.
 Tonight is voice → bus motion only.

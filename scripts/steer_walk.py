@@ -118,6 +118,17 @@ Run:
 +0.005 m per foot) through this bus. `--view` uses that same row.
 The forward clamp is the measured kit body speed, 0.150 m/s.
 Yaw stays ±0.25 rad/s and maps into the OP3 step angle.
+
+Nav-left resume heading on that kit row (Prefer FAIL). Scenario: 1 s
+stand, 15 s forward, 12.5 s vel(+0.150, +0.25), then 6 s vel(+0.150, 0).
+Resume Δyaw ≈ +12.41°. Plant md5 207f3d5e9c6a72e16f7aa0c8d224f75e
+unchanged. Split: (1) 0–0.68 s applied_yaw still slewing +0.25→0 at
+0.40 rad/s² after the 100 ms resend clears the target → body +6.81°
+(command integral ~+5.22°); (2) 0.68–6.0 s applied_yaw and the step
+angle are already 0 → leftover left curve +5.60° (body yaw rate
++0.034→+0.009 rad/s). That is ~half ramp-out, ~half steady leftover
+curve under vel(+0.150, 0) — not “turn still commanded.” Soft-pass
+is off.
 """
 from __future__ import annotations
 
