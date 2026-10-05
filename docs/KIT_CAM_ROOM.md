@@ -18,4 +18,6 @@ MUJOCO_GL=osmesa python scripts/render_kit_cam_room.py
 
 That stands the robot with the same quiet pose as `scripts/steer_walk.py`, renders `kit_cam`, and writes `previews/kit_cam_room.png`. It exits non-zero if that frame is still the empty checkerboard, or if `kitchen` / `table` / `chair` do not fall inside the image.
 
-`scripts/steer_walk.py` still loads only the frozen plant. Voice can already steer stand / forward / reverse / left / right / left-then-right on that empty checkerboard. "Go to the kitchen" is still refused. This room does not add a goal command, a map, or an autonomous go-to-kitchen claim.
+`scripts/steer_walk.py` still loads only the frozen plant by default. Voice can already steer stand / forward / reverse / left / right / left-then-right on that empty checkerboard.
+
+`scripts/find_kitchen.py` is the Prefer FAIL finder for this room. "Go to the kitchen" and "go to kitchen" call it only when `room_kitchen.xml` is loaded. It scores the current `kit_cam` frame (yellow backsplash blob, plus a named-body check that the blob sits on `kitchen` and not on `table` or `chair`). A centered blob gets a brief `vel` forward. A blob on one side gets one short yaw toward it, then a brief forward only if that second frame is centered. Caps are the same CommandBus caps. Bathroom, the empty plant, a kitchen that is not in frame, and a split blob send no `vel`. This is vision-reactive steer. It is not a map, not SLAM, and not an arrival. See `docs/FIND_KITCHEN.md`.
