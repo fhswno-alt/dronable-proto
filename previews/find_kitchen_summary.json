@@ -21,17 +21,18 @@
   "arrival_remaining_m": 0.25,
   "arrival": false,
   "stop_kind": "blob",
-  "note": "Prefer FAIL: kit_cam pixels do not show the backsplash; no motion",
-  "forward_bursts": 110,
-  "yaw_corrections": 38,
+  "note": "Prefer FAIL: soft walk-yaw reacquire lost the backsplash; no further vel",
+  "forward_bursts": 111,
+  "yaw_corrections": 50,
+  "reacquires": 2,
   "x0_m": 0.001981544135897496,
-  "end_x_m": 0.9383524255666542,
-  "end_y_m": 0.014371551574410297,
-  "end_yaw_rad": 0.08327424538408476,
-  "dx_m": 0.9363708814307568,
-  "remaining_m": 0.3766524638170805,
+  "end_x_m": 1.0242697128198621,
+  "end_y_m": 0.052477123558255956,
+  "end_yaw_rad": 0.22933036186280162,
+  "dx_m": 1.0222881686839647,
+  "remaining_m": 0.29070069619520333,
   "near_face_x_m": 1.3150000000000002,
-  "min_up_z": 0.9814734070969803,
+  "min_up_z": 0.9803747742144832,
   "initial": {
     "decision": "forward",
     "reason": "backsplash is in the center of the frame",
@@ -56,13 +57,13 @@
   },
   "final": {
     "decision": "fail",
-    "reason": "backsplash fraction below the visible bar",
+    "reason": "no backsplash pixels",
     "line": "Prefer FAIL: kit_cam pixels do not show the backsplash; no motion",
     "needs_map": false,
-    "bias": -0.8887871908809892,
-    "yellow_frac": 0.0042122395833333335,
-    "centroid_u": 35.58809891808346,
-    "centroid_v": 14.034003091190108,
+    "bias": 0.0,
+    "yellow_frac": 0.0,
+    "centroid_u": null,
+    "centroid_v": null,
     "kitchen_in_frame": true
   },
   "commands": [
@@ -478,6 +479,90 @@
       "vx": 0.028,
       "yaw_rate": 0.13314325052270096,
       "resends": 4
+    },
+    {
+      "t0": 59.80000000002712,
+      "t1": 60.100000000027485,
+      "vx": 0.028,
+      "yaw_rate": 0.25,
+      "resends": 4
+    },
+    {
+      "t0": 60.20000000002761,
+      "t1": 60.500000000027974,
+      "vx": 0.028,
+      "yaw_rate": 0.0,
+      "resends": 4
+    },
+    {
+      "t0": 60.600000000028096,
+      "t1": 61.70000000002944,
+      "vx": 0.028,
+      "yaw_rate": 0.25,
+      "resends": 12
+    },
+    {
+      "t0": 61.80000000002956,
+      "t1": 62.10000000002993,
+      "vx": 0.028,
+      "yaw_rate": 0.14218731403036106,
+      "resends": 4
+    },
+    {
+      "t0": 62.20000000003005,
+      "t1": 62.50000000003042,
+      "vx": 0.028,
+      "yaw_rate": 0.22736979456292056,
+      "resends": 4
+    },
+    {
+      "t0": 62.60000000003054,
+      "t1": 62.90000000003091,
+      "vx": 0.028,
+      "yaw_rate": 0.25,
+      "resends": 4
+    },
+    {
+      "t0": 63.00000000003103,
+      "t1": 63.300000000031396,
+      "vx": 0.028,
+      "yaw_rate": 0.17219434860139493,
+      "resends": 4
+    },
+    {
+      "t0": 63.40000000003152,
+      "t1": 63.700000000031885,
+      "vx": 0.028,
+      "yaw_rate": 0.25,
+      "resends": 4
+    },
+    {
+      "t0": 63.80000000003201,
+      "t1": 64.10000000003201,
+      "vx": 0.028,
+      "yaw_rate": 0.22044390323243396,
+      "resends": 4
+    },
+    {
+      "t0": 64.20000000003178,
+      "t1": 64.50000000003108,
+      "vx": 0.028,
+      "yaw_rate": 0.25,
+      "resends": 4
+    },
+    {
+      "t0": 64.60000000003085,
+      "t1": 64.90000000003015,
+      "vx": 0.028,
+      "yaw_rate": 0.1567411839134371,
+      "resends": 4
+    },
+    {
+      "t0": 65.00000000002991,
+      "t1": 65.70000000002828,
+      "vx": 0.028,
+      "yaw_rate": 0.25,
+      "resends": 8
     }
   ],
   "prefer_fail_empty_plant": {
