@@ -51,27 +51,27 @@ Without a reacquire, the same half-cap walk stopped at end x +0.938 m when the y
 
 On main, two walk-yaw tries resumed once and then lost the blob again: end x +1.024 m, Δx +1.022 m, remaining 0.291 m, min up_z 0.980, settled yellow 0.000, arrival false. This draft tries to keep yellow usable across that last part of the gap. The 0.25 m bar is not lowered. A stop inside 0.25 m with yellow still under 0.50 is Prefer FAIL `close`, not arrival.
 
-Baseline on main, before the close-range protect, "go to the kitchen", room scene, after stand:
+Measured phrase, "go to the kitchen", room scene, after stand:
 
 | | |
 |--|--|
-| Stop | Prefer FAIL, `stop_kind` blob. Two soft walk-yaw tries. Yellow came back above 0.015 and the normal half-cap loop resumed, then the blob was lost again. The two-try budget blocked a third try. No further `vel`. |
-| End x | **+1.024 m** (start x +0.002 m, Δx **+1.022 m**) |
-| End y, yaw | +0.052 m, +0.229 rad |
-| min up_z | **0.980** (bar 0.90, not crossed) |
-| Remaining | **0.291 m** from the torso to the kitchen geom (near face x = 1.315 m) |
+| Stop | Prefer FAIL, `stop_kind` blob. Four soft walk-yaw tries inside the 0.40 m gap. Yellow did not stay usable. No further `vel`. |
+| End x | **+1.013 m** (start x +0.002 m, Δx **+1.011 m**) |
+| End y, yaw | +0.057 m, +0.155 rad |
+| min up_z | **0.982** (bar 0.90, not crossed) |
+| Remaining | **0.302 m** from the torso to the kitchen geom (near face x = 1.315 m) |
 | Final blob | yellow fraction **0.000** on the settled frame. Kitchen body still in frame. |
-| Reacquires | 2. Every phrase command was `vx = +0.028` (yaw trim up to +0.250). `vx = 0` was not sent. |
+| Reacquires | 4. Every phrase command was `vx = +0.028` (yaw trim up to +0.250). `vx = 0` was not sent. |
 | Arrival | **false** |
 
-111 centered slices and 50 walking yaw trims were sent at `vx = +0.028`, including the slices after yellow briefly returned. The mid still is the first frame after Δx crossed 0.55 m (yellow 0.105, bias −0.078). 0.000 of the frame is not half, and 0.291 m is still outside the 0.25 m gap. Soft walk-yaw did not keep the backsplash.
+111 centered slices and 60 walking yaw trims were sent at `vx = +0.028`. The mid still is the first frame after Δx crossed 0.55 m (yellow 0.105, bias −0.078). 0.000 of the frame is not half, and 0.302 m is still outside the 0.25 m gap. Shorter slices, the stronger trim, and two extra walk-yaw tries did not keep the backsplash. The gap is 0.011 m larger than the main stop at 0.291 m. That is the Prefer FAIL.
 
 ## What would count as arrival
 
 Both bars, on the settled stop frame:
 
 1. Yellow fraction ≥ 0.50. Half the frame is "most of the frame". Stand is 0.039 and this stop is 0.000, so the counter does not fill the frame.
-2. Torso-to-kitchen horizontal gap ≤ 0.25 m. That is contact range for this torso, not a room crossing. 0.291 m is still outside that bar.
+2. Torso-to-kitchen horizontal gap ≤ 0.25 m. That is contact range for this torso, not a room crossing. 0.302 m is still outside that bar.
 
 Either bar alone is not arrival. A stop inside 0.25 m with the backsplash still small would be Prefer FAIL (`close`), not arrival. The gap is read from the kitchen geom boxes so the summary can state the remaining distance. It does not choose left versus right and it is not a waypoint.
 
