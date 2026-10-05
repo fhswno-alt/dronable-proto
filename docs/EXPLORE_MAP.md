@@ -16,19 +16,21 @@ Furnished scenes do not get that chain. A full-cap approach in the kitchen cross
 
 ## What the map is
 
-The grid is 0.10 m cells in the world frame, from x −0.80..2.60 m and y −1.80..1.80 m. A cell is painted only from `kit_cam` rays that meet the floor plane between 0.30 m and 1.80 m:
+The grid is 0.10 m cells in the world frame, from x −0.80..2.60 m and y −1.80..1.80 m. A cell is painted only from `kit_cam` rays that meet the floor plane between 0.30 m and 2.60 m. After each view, an unknown cell with three or four orthogonal free neighbors is filled. A frontier rim cell has one free neighbor and stays unknown.
 
 | Paint | Pixel test |
 |-------|------------|
 | Free | Low saturation (checker floor). Saturation under 12. |
 | Feature | Saturated and not sky, and the ray meets the floor. The entrance mat is this case. |
-| Not a cell | Elevated color. The ray misses the floor inside 1.80 m. Stored as a bearing only. |
+| Not a cell | Elevated color. The ray misses the floor inside 2.60 m. Stored as a bearing only. |
 
 The kitchen backsplash is the elevated case. The yellow test is the same pixel rule as `scripts/find_kitchen.py` (red and green high, blue low). At the stand pose that blob is about 0.039 of the frame and the ray does not meet the floor, so `ground_cell_ij` stays empty. The bearing is the camera ray. It is not a waypoint and it is not passed to `choose_velocity`.
 
 Sky is the empty-plant blue around rgb (70, 100, 140). Cyan tile fails that test (not enough red) and is counted as other chromatic color. Other chromatic pixels are not given a room name.
 
-Frontier cells are unknown cells next to a free cell or a walked cell, between 0.40 m and 1.60 m from the body, inside a ±1.20 rad cone of the current heading. The next `vel` aims at the nearest of those cells. A tie breaks to the left of the heading. Yellow is not an input. If the lower center of the frame is saturated inside 0.80 m, frontiers straight ahead are dropped.
+Frontier cells are unknown cells in the 8-neighborhood of a free cell or a walked cell, between 0.40 m and 2.70 m from the body, inside a ±1.20 rad cone of the current heading. The next `vel` aims at the nearest of those cells. A tie breaks to the left of the heading. Yellow is not an input. If the lower center of the frame is saturated inside 0.80 m, frontiers straight ahead are dropped.
+
+The first time kitchen-like yellow clears the log threshold, a soft XY is frozen 1.50 m along that camera bearing (or on the floor cell, if the ray met the floor). That point is not a waypoint. A separate kitchen probe walks half-cap `vel(+0.028, yaw)` toward it for up to 20 s and stops on a tip, a plant fault, or on reaching within 0.40 m of that guess. Yellow ≥ 0.50 is not the success test and arrival is not claimed.
 
 The trail is the sim freejoint. In this sim that is odometry. It is not a visual pose.
 
@@ -48,7 +50,7 @@ All of these, together:
 
 ## Tonight's limit
 
-The empty plant now walks the claimed chain, so the floor fan is longer and the body yaws. Furnished scenes only take the 8 s right-first window, because the claimed windows cross `up_z` 0.90 there. The paint is still a fan from one camera. A yellow bearing is logged when the backsplash is in frame. Frontiers are the edge of the paint. White and gray furniture can fail the saturation test and never become a cell. That is a partial feature map of whatever was in view. It is not go-anywhere.
+The empty plant walks the claimed chain, then one more claimed forward window: `vel(+0.056, 0)` for 15 s. A second left hold does not yaw and then tips. A second right hold tips. Those are not this schedule. Furnished scenes only take the 8 s right-first window, because the claimed yaw windows cross `up_z` 0.90 there. The paint is still a fan from one camera, now out to 2.60 m with one-cell holes filled. A yellow bearing is logged when the backsplash is in frame, and a soft XY is frozen along it. Frontiers are the 8-connected edge of the paint. White and gray furniture can fail the saturation test and never become a cell. That is a partial feature map of whatever was in view. It is not go-anywhere.
 
 The empty plant is the honest miss: floor cells, no yellow, no room label.
 
@@ -61,7 +63,7 @@ MUJOCO_GL=osmesa python scripts/explore_map.py --demo
 
 ## Measured
 
-Plant md5 after the demo: `71b2c86d133ebc603f58b99c53e496f3`. No tip, no fault, end mode stand on every run. `vx = 0` yaw sends: 0. Every moving command was `vx = +0.056`.
+The table below is the previous main run (the claimed chain, 1.80 m fan). This draft's demo replaces it. The plant md5 on that run was `71b2c86d133ebc603f58b99c53e496f3`. No tip, no fault, end mode stand on every run. `vx = 0` yaw sends: 0. Every moving command was `vx = +0.056`.
 
 The empty plant followed the claimed chain. Left arc **+75.5 deg** on `yaw_rate +0.25`. Chained right arc **−54.5 deg** on `yaw_rate −0.25`. Both are on the commanded side (the track bar used here is 20 deg; the swallowed run was about −12 deg on a left command). The resume then drifts **+30.8 deg**, which is the same drift the nav-multi clip already reports. It is not a second left command.
 
