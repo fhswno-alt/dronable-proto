@@ -52,7 +52,8 @@ OBJECT_BONUS = 0.03
 OBJECT_BONUS_CAP = 0.06
 # Bedroom only, after a straight pose stays undecided. Positive yaw faces
 # the head of the bed. Negative yaw faces the dresser. Scripted looks.
-# No vel. Wardrobe and rug stay off the map. Nightstand scored on the door.
+# No vel. Wardrobe and rug stay off the map. Headboard scored on the door
+# and on the kitchen, so it is not a prompt.
 RELOOK_YAW = (0.55, 0.90, -0.75, -1.05)
 # Object text, then the room it votes for. Room-name labels are not used.
 # Cupboard is the cabinet hit on this kit_cam. Fridge, oven, stove, and
@@ -68,9 +69,8 @@ OBJECTS: tuple[tuple[str, str], ...] = (
     ("bathroom sink", "bathroom"),
     ("bed", "bedroom"),
     ("pillow", "bedroom"),
-    ("headboard", "bedroom"),
-    ("duvet", "bedroom"),
-    ("bedside lamp", "bedroom"),
+    ("mattress", "bedroom"),
+    ("upholstered bed", "bedroom"),
     ("sofa", "living"),
     ("TV", "living"),
     ("couch", "living"),
@@ -493,7 +493,7 @@ def test_phrases() -> list[str]:
     _expect(vote.room is None, f"thin bedroom lead committed {vote}", failures)
     stack = {name: 0.0 for name, _room in OBJECTS}
     stack["door"] = 0.16
-    for name in ("bed", "pillow", "headboard", "duvet"):
+    for name in ("bed", "pillow", "mattress", "upholstered bed"):
         stack[name] = 0.08
     vote = decide_window([_frame(stack)])
     _expect(vote.room != "bedroom", f"label stack outvoted the door {vote}", failures)
