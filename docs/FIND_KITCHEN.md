@@ -38,28 +38,30 @@ The `up_z` Prefer FAIL bar stays **0.90**. It is not lowered. A full-cap slice r
 | 0.25 s vel, 0.15 s stand | Δx −0.029 m, min up_z 0.999. Same stall. |
 | 0.20 s vel, 0.30 s stand | Kitchen left the frame at Δx +0.082 m (yaw +0.79 rad), min up_z 0.956. |
 
-Half the forward cap, with no stand between slices, is the duty that stayed upright. There is still a 0.60 m world-x budget. That budget is a stop, not a counter pose.
+Half the forward cap, with no stand between slices, is the duty that stayed upright. At a 0.60 m world-x budget that duty stopped on the budget: end x +0.610 m, Δx +0.608 m, min up_z 0.989, remaining 0.705 m, yellow fraction 0.131, arrival false.
+
+The world-x budget on this draft is **1.10 m**. That is still a stop, not a counter pose. The `up_z` bar, the half-cap command, and both arrival bars are unchanged. The 1.10 m stop was not reached.
 
 Measured phrase, "go to the kitchen", room scene, after stand:
 
 | | |
 |--|--|
-| Stop | 0.60 m world-x budget, mode stand |
-| End x | **+0.610 m** (start x +0.002 m, Δx **+0.608 m**) |
-| End y, yaw | +0.010 m, −0.020 rad |
-| min up_z | **0.989** (bar 0.90, not crossed) |
-| Remaining | **0.705 m** from the torso to the kitchen geom (near face x = 1.315 m) |
-| Final blob | yellow fraction **0.131**, bias −0.028, still centered, still in frame |
+| Stop | Prefer FAIL: yellow fraction fell to 0.004, below 0.015. The kitchen body still projects into the frame. The backsplash does not. No further `vel`. |
+| End x | **+0.938 m** (start x +0.002 m, Δx **+0.936 m**) |
+| End y, yaw | +0.014 m, +0.083 rad |
+| min up_z | **0.981** (bar 0.90, not crossed) |
+| Remaining | **0.377 m** from the torso to the kitchen geom (near face x = 1.315 m) |
+| Final blob | yellow fraction **0.004**, bias −0.889, left edge |
 | Arrival | **false** |
 
-79 centered slices and 12 yaw trims were sent, all at `vx = +0.028`. The mid still is the first frame after Δx crossed 0.30 m (yellow 0.066, bias −0.042). The counter is larger than at the start. 0.131 of the frame is not half.
+110 centered slices and 38 yaw trims were sent, all at `vx = +0.028`. Near the end the trim reached the yaw cap and the backsplash slid off the left of the frame. The finder did not keep turning to search. The mid still is the first frame after Δx crossed 0.55 m (yellow 0.105, bias −0.078). 0.004 of the frame is not half, and 0.377 m is still outside the 0.25 m gap.
 
 ## What would count as arrival
 
 Both bars, on the settled stop frame:
 
-1. Yellow fraction ≥ 0.50. Half the frame is "most of the frame". Stand is 0.039 and this stop is 0.131, so the counter does not fill the frame.
-2. Torso-to-kitchen horizontal gap ≤ 0.25 m. That is contact range for this torso, not a room crossing. 0.705 m is still well outside that bar.
+1. Yellow fraction ≥ 0.50. Half the frame is "most of the frame". Stand is 0.039 and this stop is 0.004, so the counter does not fill the frame.
+2. Torso-to-kitchen horizontal gap ≤ 0.25 m. That is contact range for this torso, not a room crossing. 0.377 m is still outside that bar.
 
 Either bar alone is not arrival. A stop inside 0.25 m with the backsplash still small would be Prefer FAIL (`close`), not arrival. The gap is read from the kitchen geom boxes so the summary can state the remaining distance. It does not choose left versus right and it is not a waypoint.
 
