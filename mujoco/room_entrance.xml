@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Vision room for kit_cam. Includes the frozen walk plant and does not
+  edit it. Named scene geometry so a later vision step can point at
+  "entrance". This is not a navigation map and not a planner input.
+  One camera: the plant's kit_cam.
+  The entrance body is a visual doorframe: jambs, lintel, white inner
+  trim, and side walls, plus a floor mat. Visual geometry only.
+  No hinge, no joint, no lever, no latch, and no swinging panel.
+-->
+<mujoco model="room_entrance">
+  <include file="ainex_hiwonder/ainex_controls_m2_145.xml"/>
+  <worldbody>
+    <!-- Frame faces the robot (+X is kit_cam look). Static bodies, no joints. -->
+    <body name="entrance" pos="1.28 0.00 0">
+      <site name="entrance" pos="0 0.46 0.70" size="0.015" group="4" rgba="0.93 0.94 0.95 1"/>
+      <geom name="entrance_jamb_left" type="box" size="0.07 0.09 0.62" pos="0 0.46 0.62" rgba="0.12 0.10 0.09 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+      <geom name="entrance_jamb_right" type="box" size="0.07 0.09 0.62" pos="0 -0.46 0.62" rgba="0.12 0.10 0.09 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+      <geom name="entrance_lintel" type="box" size="0.07 0.55 0.07" pos="0 0 1.26" rgba="0.12 0.10 0.09 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+      <geom name="entrance_trim_left" type="box" size="0.02 0.025 0.58" pos="-0.06 0.36 0.62" rgba="0.93 0.94 0.95 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+      <geom name="entrance_trim_right" type="box" size="0.02 0.025 0.58" pos="-0.06 -0.36 0.62" rgba="0.93 0.94 0.95 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+      <geom name="entrance_wall_left" type="box" size="0.06 0.42 0.68" pos="0 0.98 0.68" rgba="0.08 0.36 0.44 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+      <geom name="entrance_wall_right" type="box" size="0.06 0.42 0.68" pos="0 -0.98 0.68" rgba="0.08 0.36 0.44 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+    </body>
+    <body name="mat" pos="0.72 0.00 0">
+      <site name="mat" pos="0 0 0.02" size="0.012" group="4" rgba="0.55 0.12 0.78 1"/>
+      <geom name="mat_rug" type="box" size="0.32 0.24 0.01" pos="0 0 0.01" rgba="0.55 0.12 0.78 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+    </body>
+  </worldbody>
+</mujoco>

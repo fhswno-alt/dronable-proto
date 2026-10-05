@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Vision room for kit_cam. Includes the frozen walk plant and does not
+  edit it. Furniture is named scene geometry so a later vision step can
+  point at "bathroom". This is not a navigation map, not a planner input,
+  and not a door. One camera: the plant's kit_cam.
+  Cyan tile, white porcelain, a violet faucet, and a magenta seat are
+  the cues. They are not the kitchen's yellow backsplash.
+-->
+<mujoco model="room_bathroom">
+  <include file="ainex_hiwonder/ainex_controls_m2_145.xml"/>
+  <worldbody>
+    <!-- Wall and vanity face the robot (+X is kit_cam look). Static bodies, no joints. -->
+    <body name="bathroom" pos="1.62 0.05 0">
+      <site name="bathroom" pos="0.22 0 1.10" size="0.015" group="4" rgba="0.05 0.78 0.82 1"/>
+      <geom name="bathroom_tile" type="box" size="0.025 0.95 0.58" pos="0.22 0 1.08" rgba="0.05 0.78 0.82 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+      <geom name="bathroom_vanity" type="box" size="0.24 0.40 0.38" pos="-0.04 0.12 0.38" rgba="0.94 0.95 0.97 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+      <geom name="bathroom_towel" type="box" size="0.015 0.10 0.16" pos="-0.08 0.50 0.62" rgba="0.72 0.08 0.48 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+    </body>
+    <body name="sink" pos="1.08 0.20 0">
+      <site name="sink" pos="0 0 0.84" size="0.012" group="4" rgba="0.52 0.16 0.86 1"/>
+      <geom name="sink_pedestal" type="box" size="0.12 0.14 0.36" pos="0 0 0.36" rgba="0.93 0.94 0.96 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+      <geom name="sink_basin" type="box" size="0.16 0.20 0.045" pos="0.02 0 0.76" rgba="0.97 0.98 0.99 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+      <geom name="sink_faucet" type="box" size="0.03 0.03 0.09" pos="-0.06 0 0.88" rgba="0.52 0.16 0.86 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+    </body>
+    <body name="toilet" pos="0.98 -0.78 0">
+      <site name="toilet" pos="0 0 0.42" size="0.012" group="4" rgba="0.84 0.08 0.42 1"/>
+      <geom name="toilet_bowl" type="box" size="0.18 0.16 0.18" pos="0.02 0 0.22" rgba="0.95 0.96 0.97 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+      <geom name="toilet_tank" type="box" size="0.07 0.15 0.18" pos="-0.16 0 0.50" rgba="0.90 0.92 0.94 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+      <geom name="toilet_seat" type="box" size="0.16 0.14 0.02" pos="0.04 0 0.42" rgba="0.84 0.08 0.42 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+    </body>
+  </worldbody>
+</mujoco>
