@@ -30,7 +30,7 @@ The grid is 0.10 m cells in the world frame, from x −0.80..2.60 m and y −1.8
 | Feature | Saturated and not sky, and the ray meets the floor. On the previous box entrance the violet mat was this case. The current mat is hessian, and this script was not retuned. |
 | Not a cell | Elevated color. The ray misses the floor inside 2.60 m. Stored as a bearing only. |
 
-The cabinet grain is the elevated case. The pixel test is the same mask as `scripts/find_kitchen.py` (15 px luminance std and a dark warm band). On the closed kitchen the stand frame is about 0.021 of the image and the ray does not meet the floor, so `ground_cell_ij` stays empty. The bearing is the camera ray. It is not a waypoint and it is not passed to `choose_velocity`. The 0.039 figure below is the previous flat backsplash.
+The cabinet grain is the elevated case. The pixel test is the same mask as `scripts/find_kitchen.py` (15 px luminance std and a dark warm band). On the merged kitchen the stand frame is about 0.002 of the image, under the log bar, so no bearing is stored. The bearing, when a cue is logged, is the camera ray. It is not a waypoint and it is not passed to `choose_velocity`. The 0.039 figure below is the previous flat backsplash.
 
 Sky is the empty-plant blue around rgb (70, 100, 140). Cyan tile fails that test (not enough red) and is counted as other chromatic color. Other chromatic pixels are not given a room name.
 
@@ -58,7 +58,7 @@ All of these, together:
 
 ## Tonight's limit
 
-The empty plant walks the claimed left prefix, then the frontier windows above: 4 s forward, 8 s left, and one 34 s right. Furnished scenes only take the 8 s right-first window, because the claimed yaw windows cross `up_z` 0.90 there. The paint is still a fan from one camera, out to 2.60 m with one-cell holes filled. A bearing is logged when cabinet grain is in frame, and a soft XY is frozen along it. Frontiers are the 8-connected edge of free cells. The closed entrance floor is saturated hessian, so a stand paint is feature cells only and the finder ring has no frontier there. White and gray furniture can fail the saturation test and never become a cell. That is a partial feature map of whatever was in view. It is not go-anywhere.
+The empty plant walks the claimed left prefix, then the frontier windows above: 4 s forward, 8 s left, and one 34 s right. Furnished scenes only take the 8 s right-first window, because the claimed yaw windows cross `up_z` 0.90 there. The paint is still a fan from one camera, out to 2.60 m with one-cell holes filled. A bearing is logged when cabinet grain is in frame, and a soft XY is frozen along it. Frontiers are the 8-connected edge of free cells. The merged entrance stand paints feature cells and one free cell, so the finder ring has a frontier there. White and gray furniture can fail the saturation test and never become a cell. That is a partial feature map of whatever was in view. It is not go-anywhere.
 
 The empty plant is the honest miss: floor cells, no yellow, no room label.
 

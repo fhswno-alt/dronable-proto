@@ -199,10 +199,12 @@ FEATURE_SAT = 18
 MIN_YELLOW_FRAC = 0.015
 MAP_PX = 14
 
-# Photoreal cabinet wood, from kit_cam RGB. A 15 px luminance std plus a
+# Dark cabinet wood, from kit_cam RGB. A 15 px luminance std plus a
 # dark warm band. The flat yellow backsplash is gone; that HSV test is
 # not this mask. find_kitchen.backsplash_mask calls cabinet_grain_mask.
-# A bearing, not a room id. Arrival is still fraction >= 0.50.
+# The merged kitchen is white plaster and light oak, so this band does
+# not log that stand. A bearing, not a room id. Arrival is still
+# fraction >= 0.50. The band is not widened to chase the new paint.
 CABINET_GRAIN_RAD = 7
 CABINET_GRAIN_STD = 15.0
 CABINET_R_LO = 16
@@ -671,10 +673,10 @@ def luminance_std(frame: np.ndarray, radius: int = CABINET_GRAIN_RAD) -> np.ndar
 def cabinet_grain_mask(frame: np.ndarray) -> np.ndarray:
     """Dark warm wood with 15 px grain. Flat yellow does not pass.
 
-    Measured on settled kit_cam: the photoreal counter is this band.
-    Bathroom marble, the empty checkerboard, and a yaw that hides the
-    cabinet stay under the 0.015 log bar. The same mask does not fill
-    half the frame at a 0.25 m torso gap.
+    The merged kitchen stand is white plaster and light oak, so this
+    band stays under the 0.015 log bar there. Bathroom, the empty
+    checkerboard, and the other rooms stay under that bar too. The
+    same mask does not fill half the frame at a 0.25 m torso gap.
     """
     red = frame[:, :, 0].astype(np.int16)
     green = frame[:, :, 1].astype(np.int16)
@@ -2179,25 +2181,16 @@ def test_stand_scenes() -> list[str]:
             failures,
         )
         if scene == "kitchen":
-            _expect(yellow.seen, f"kitchen yellow not seen ({yellow.max_fraction:.4f})", failures)
-            _expect(0.02 <= yellow.max_fraction <= 0.12, f"kitchen yellow frac {yellow.max_fraction:.4f}", failures)
-            _expect(yellow.ground_cell_ij is None, f"kitchen yellow painted a cell {yellow.ground_cell_ij}", failures)
-            _expect(yellow.bearing_rad is not None and abs(yellow.bearing_rad) < 0.35, f"kitchen bearing {yellow.bearing_rad}", failures)
+            # White plaster and light oak do not pass the dark grain band.
+            _expect(not yellow.seen, f"kitchen yellow seen {yellow.max_fraction:.4f}", failures)
+            _expect(yellow.max_fraction < MIN_YELLOW_FRAC, f"kitchen yellow frac {yellow.max_fraction:.4f}", failures)
         else:
             _expect(not yellow.seen, f"{scene} yellow seen {yellow.max_fraction:.4f}", failures)
         if scene == "plant":
             _expect(result.feature_cells == 0, f"plant feature cells {result.feature_cells}", failures)
         if scene == "entrance":
             _expect(result.feature_cells > 0, f"entrance mat did not paint a feature cell ({result.feature_cells})", failures)
-            # Closed hessian floor is saturated, so the stand paint is feature
-            # cells only. A frontier needs a free neighbor. Grain and the
-            # retired yellow mask both measure zero frontiers here.
-            _expect(
-                result.free_cells == 0 and result.frontier_cells == 0,
-                f"entrance free {result.free_cells} frontiers {result.frontier_cells}",
-                failures,
-            )
-        elif result.free_cells > 0:
+        if result.free_cells > 0:
             _expect(result.frontier_cells > 0, f"{scene} has free cells but no frontiers", failures)
     return failures
 
