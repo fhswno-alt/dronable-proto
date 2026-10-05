@@ -1,37 +1,37 @@
 # Find kitchen (Prefer FAIL)
 
-The steer cue is cabinet wood grain on the photoreal kitchen, not the old flat-yellow HSV test. Arrival bars are unchanged: cue fraction ≥ 0.50 and torso-to-kitchen ≤ 0.25 m. Both are required. This run meets the gap and misses the fraction. That is Prefer FAIL. Not go-anywhere.
+The steer cue is cabinet wood grain on the closed photoreal kitchen, not the old flat-yellow HSV test. Arrival bars are unchanged: cue fraction ≥ 0.50 and torso-to-kitchen ≤ 0.25 m. Both are required. This run misses both. That is Prefer FAIL. Not go-anywhere.
 
 `scripts/find_kitchen.py` is a last-mile steer on the frozen walk plant. The phrase path paints `kit_cam` into the explore map and commands from `query_kitchen_like_yellow()` and `frontier_cells()`. The yellow log stores the grain cue. It is not SLAM and not an arrival. If that log has no cabinet grain, it sends no vel.
 
-## Mesh kitchen, this run
+## Closed kitchen, this run
 
-`mujoco/room_kitchen.xml` includes the frozen plant (md5 `71b2c86d133ebc603f58b99c53e496f3`). `kit_cam` stays at `0.050 0.019 0.007`. The command is half-cap `vel(+0.028, yaw)` inside yaw ±0.25. `vx = 0` yaw is not sent. Phrase "go to the kitchen", after stand:
+Rebased onto the closed-room tip `9ddc0f2`. The counter and stove face +X. `mujoco/room_kitchen.xml` includes the frozen plant (md5 `71b2c86d133ebc603f58b99c53e496f3`). `kit_cam` stays at `0.050 0.019 0.007`. The command is half-cap `vel(+0.028, yaw)` inside yaw ±0.25. `vx = 0` yaw is not sent. Phrase "go to the kitchen", after stand:
 
 | | Cabinet grain (steer) | Old HSV yellow (reported, not the steer) |
 |--|--|--|
-| Stand | **0.030**, bias **+0.002**, logged | **0.129** |
-| Map peak | **0.077** at bearing **+0.484 rad** | |
-| Walked stop | **0.035** | **0.003** |
-| Squared-up pose, gap **0.241 m** | **0.093** | **0.056** |
-| Bathroom stand | **0.0009** | **0.0036** |
+| Stand | **0.021**, bias **−0.050**, logged | **0.138** |
+| Map peak | **0.122** at bearing **+0.232 rad** | |
+| Walked stop | **0.121** | **0.133** |
+| y = 0 pose inside the gap bar, gap **0.248 m** | **0.152** | **0.161** |
+| Bathroom stand | **0.0003** | **0.0205** |
 | Empty plant | **0.000** | **0.000** |
-| Living / bedroom / entrance stand | **0.0022 / 0.0136 / 0.0019** | **0.243 / 0.201 / 0.216** |
+| Living / bedroom / entrance stand | **0.0028 / 0.0110 / 0.0011** | **0.189 / 0.163 / 0.207** |
 
-Old yellow does not false-trigger the bathroom or the empty plant. Both are under the 0.015 log bar. It does false-trigger the living, bedroom, and entrance wood floors. The grain cue stays under 0.015 on those stands.
+The grain cue stays under the 0.015 log bar off the kitchen. The empty plant is 0 for both cues. The retired HSV test now logs **0.0205** of the closed bathroom, above that log bar, and it still false-triggers the living, bedroom, and entrance floors. It is not the steer.
 
 | | |
 |--|--|
-| Stop | Prefer FAIL, `stop_kind` close. The torso gap is inside 0.25 m and the grain does not fill half the frame. Not arrival. |
-| End x | **+1.002 m** (Δx **+1.000 m**) |
-| End y, yaw | −0.103 m, −0.518 rad |
-| min up_z | **0.978** (bar 0.90, not crossed) |
-| Remaining | **0.250 m** |
-| Commands | 9 forward slices and 139 walk-yaw slices, every one `vx = +0.028`, yaw inside ±0.25. `vx = 0` was not sent. |
-| Map | Grain was logged. `map_command_source` is `map`. **297** queries. |
+| Stop | Prefer FAIL, `stop_kind` budget. The 1.10 m world-x budget fired first. Not arrival. |
+| End x | **+1.110 m** (Δx **+1.108 m**) |
+| End y, yaw | +0.173 m, +0.436 rad |
+| min up_z | **0.955** (bar 0.90, not crossed) |
+| Remaining | **0.282 m** |
+| Commands | 16 forward slices and 141 walk-yaw slices, every one `vx = +0.028`, yaw inside ±0.25. `vx = 0` was not sent. |
+| Map | Grain was logged. `map_command_source` is `map`. **315** queries. |
 | Arrival | **false** |
 
-0.250 m meets the gap bar. Settled grain is 0.035, not 0.50. The squared-up pose, torso 0.241 m from the cabinet and still facing it, is grain 0.093 and old yellow 0.056. The counter mesh does fill most of that frame, but a color box wide enough to mark half the pixels also marks the other rooms. The 15 px grain band does not. The 0.50 bar was not lowered.
+0.282 m misses the 0.25 m gap. Settled grain is 0.121, not 0.50. A y = 0 pose with the torso 0.248 m from the kitchen geom reaches grain 0.152 and old yellow 0.161. Neither cue fills half the frame inside the gap bar. The bars were not lowered. An earlier open-room grain walk (remaining 0.250 m, settled grain 0.035) was the previous layout and is not this stop.
 
 ## Previous colored-box run
 
@@ -113,8 +113,8 @@ This phrase queries the map. Measured "go to the kitchen", room scene, after sta
 
 Both bars, on the settled stop frame:
 
-1. Cabinet-grain fraction ≥ 0.50. Half the frame is "most of the frame". Stand is 0.030, the squared-up pose at 0.241 m is 0.093, and this stop is 0.035.
-2. Torso-to-kitchen horizontal gap ≤ 0.25 m. That is contact range for this torso, not a room crossing. This stop is 0.250 m, inside that bar, and still not arrival without the fraction bar.
+1. Cabinet-grain fraction ≥ 0.50. Half the frame is "most of the frame". Stand is 0.021, the y = 0 pose at gap 0.248 m is 0.152, and this stop is 0.121.
+2. Torso-to-kitchen horizontal gap ≤ 0.25 m. That is contact range for this torso, not a room crossing. This stop is 0.282 m, outside that bar.
 
 Either bar alone is not arrival. A stop inside 0.25 m with the grain still small is Prefer FAIL (`close`), not arrival. The gap is read from the kitchen geom boxes so the summary can state the remaining distance. It does not choose left versus right and it is not a waypoint.
 
@@ -122,7 +122,7 @@ Either bar alone is not arrival. A stop inside 0.25 m with the grain still small
 
 `--self-test` still runs one short hop. The sequence is twelve resends of `vel(+0.056, 0)` from t=0.60 s to t=1.70 s, then stop. Measured end x **+0.035 m**, mode stand. Stopping there is not arrival.
 
-If the blob is off to one side, that self-test uses one `vx = 0` yaw hold (1.0 s, or sooner if the blob reaches the center). Forward comes next only when the new frame is a clear center. A base yaw of −18° (the freejoint, not a camera move) puts the cabinet grain on the left, bias about −0.30. The self-test sends ten resends of `vel(0, +0.25)` and then stops with no forward. The phrase path does not use that `vx = 0` hold.
+If the blob is off to one side, that self-test uses one `vx = 0` yaw hold (1.0 s, or sooner if the blob reaches the center). Forward comes next only when the new frame is a clear center. A base yaw of −18° (the freejoint, not a camera move) puts the cabinet grain on the left, bias about −0.38. The self-test sends ten resends of `vel(0, +0.25)` and then stops with no forward. The phrase path does not use that `vx = 0` hold.
 
 ## Prefer FAIL
 

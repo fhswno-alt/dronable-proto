@@ -2189,7 +2189,16 @@ def test_stand_scenes() -> list[str]:
             _expect(result.feature_cells == 0, f"plant feature cells {result.feature_cells}", failures)
         if scene == "entrance":
             _expect(result.feature_cells > 0, f"entrance mat did not paint a feature cell ({result.feature_cells})", failures)
-        _expect(result.frontier_cells > 0, f"{scene} has no frontiers", failures)
+            # Closed hessian floor is saturated, so the stand paint is feature
+            # cells only. A frontier needs a free neighbor. Grain and the
+            # retired yellow mask both measure zero frontiers here.
+            _expect(
+                result.free_cells == 0 and result.frontier_cells == 0,
+                f"entrance free {result.free_cells} frontiers {result.frontier_cells}",
+                failures,
+            )
+        elif result.free_cells > 0:
+            _expect(result.frontier_cells > 0, f"{scene} has free cells but no frontiers", failures)
     return failures
 
 

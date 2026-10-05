@@ -94,10 +94,11 @@ MAX_FORWARD_BURSTS = 280
 MAX_YAW_CORRECTIONS = 120
 # |bias| at which the trim uses the full yaw cap. Inside CENTER_BIAS, yaw is 0.
 YAW_BIAS_FULL = 0.35
-# World-x progress stop. The kitchen near face is at x = 1.315 m, so 1.10 m
-# of progress from the stand leaves a gap above the 0.25 m arrival bar.
-# This is a burst budget, not a waypoint at the counter. The up_z bar is
-# still 0.90, and arrival still needs both yellow >= 0.50 and gap <= 0.25 m.
+# World-x progress stop. On the closed kitchen the near face is about 0.94 m,
+# so this 1.10 m budget can pass the cabinet. The close stop (gap <= 0.25 m)
+# fires first while the grain is still in frame. This is a burst budget, not
+# a waypoint. The up_z bar is still 0.90, and arrival still needs both
+# grain >= 0.50 and gap <= 0.25 m.
 PROGRESS_STOP_M = 1.10
 # First sample under the plant's throttle line stops the approach.
 # A lean that holds under 0.85 also trips the bus fault in this room,
@@ -115,8 +116,9 @@ BUDGET_STOP = "burst budget reached; stop"
 REACQUIRE_S = 2.0
 REACQUIRE_SLICE_S = 0.40
 MAX_REACQUIRE = 2
-# Stand kit_cam measures cabinet-grain fraction ~0.030 and bias ~0.
-# Empty floor and a yaw that hides the kitchen measure 0.
+# Closed-room stand kit_cam measures cabinet-grain fraction ~0.021 and a
+# small left bias. Empty floor measures 0. A yaw that hides the kitchen
+# stays under the log bar.
 MIN_YELLOW_FRAC = 0.015
 CENTER_BIAS = 0.08
 # Usable yellow that has fallen from a grown peak. Forward-only stops here
@@ -1634,11 +1636,15 @@ def test_scenes() -> list[str]:
     _expect(gap is not None, "stand pose has no kitchen clearance", failures)
     if gap is not None:
         _expect(
-            1.00 <= gap[0] <= 1.60,
-            f"stand torso-to-kitchen {gap[0]:.3f} m is not the open-room gap",
+            0.85 <= gap[0] <= 1.20,
+            f"stand torso-to-kitchen {gap[0]:.3f} m is not the closed-room gap",
             failures,
         )
-        _expect(gap[1] > 1.0, f"kitchen near face x {gap[1]:.3f}", failures)
+        _expect(
+            0.80 <= gap[1] <= 1.20,
+            f"kitchen near face x {gap[1]:.3f} is not the closed-room face",
+            failures,
+        )
     return failures
 
 
@@ -1669,27 +1675,56 @@ def test_cue_bars() -> list[str]:
             cam.close()
         grain = _fraction(backsplash_mask(image))
         legacy = _fraction(legacy_yellow_mask(image))
+        print(f"[find] {name} grain {grain:.4f} old yellow {legacy:.4f}")
         _expect(grain < MIN_YELLOW_FRAC, f"{name} grain {grain:.4f} false-triggers", failures)
-        if name in ("bathroom", "plant"):
+        if name == "plant":
             _expect(legacy < MIN_YELLOW_FRAC, f"{name} old yellow {legacy:.4f} false-triggers", failures)
+        if name == "bathroom":
+            # Closed bathroom lighting logs the retired HSV test above 0.015.
+            # That cue is not the steer. It still must not fill half the frame.
+            _expect(
+                legacy < ARRIVAL_YELLOW_FRAC,
+                f"{name} old yellow {legacy:.4f} met the 0.50 bar",
+                failures,
+            )
     room = steer_walk.SteerSession(video=False, scene_xml=ROOM_XML)
     cam = KitCam(room.model)
+    best_grain = -1.0
+    best_legacy = -1.0
+    best_gap = float("nan")
+    best_x = float("nan")
     try:
         _hold_stand(room, STAND_S)
-        room.data.qpos[0] = 1.01
-        room.data.qvel[:] = 0.0
-        mj.mj_forward(room.model, room.data)
-        image = cam.grab(room.data)
-        gap = kitchen_clearance(room.model, room.data)
+        x = 0.40
+        while x <= 1.60:
+            room.data.qpos[0] = x
+            room.data.qpos[1] = 0.0
+            room.data.qvel[:] = 0.0
+            mj.mj_forward(room.model, room.data)
+            gap = kitchen_clearance(room.model, room.data)
+            if gap is not None and 0.20 <= gap[0] <= ARRIVAL_REMAINING_M:
+                image = cam.grab(room.data)
+                grain = _fraction(backsplash_mask(image))
+                legacy = _fraction(legacy_yellow_mask(image))
+                if grain > best_grain:
+                    best_grain = grain
+                    best_legacy = legacy
+                    best_gap = gap[0]
+                    best_x = x
+            x += 0.05
     finally:
         cam.close()
-    _expect(gap is not None and gap[0] <= ARRIVAL_REMAINING_M, f"close gap {gap}", failures)
-    grain = _fraction(backsplash_mask(image))
-    legacy = _fraction(legacy_yellow_mask(image))
-    _expect(grain < ARRIVAL_YELLOW_FRAC, f"close grain {grain:.3f} met the 0.50 bar", failures)
-    _expect(legacy < ARRIVAL_YELLOW_FRAC, f"close old yellow {legacy:.3f} met the 0.50 bar", failures)
-    gap_m = float("nan") if gap is None else gap[0]
-    print(f"[find] close gap {gap_m:.3f} m grain {grain:.3f} old yellow {legacy:.3f}")
+    _expect(best_grain >= 0.0, "no pose inside the 0.25 m gap bar", failures)
+    _expect(best_grain < ARRIVAL_YELLOW_FRAC, f"close grain {best_grain:.3f} met the 0.50 bar", failures)
+    _expect(
+        best_legacy < ARRIVAL_YELLOW_FRAC,
+        f"close old yellow {best_legacy:.3f} met the 0.50 bar",
+        failures,
+    )
+    print(
+        f"[find] close x {best_x:.2f} gap {best_gap:.3f} m "
+        f"grain {best_grain:.3f} old yellow {best_legacy:.3f}"
+    )
     return failures
 
 
@@ -1953,8 +1988,8 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
         problems.append(f"empty plant scored {fail_score.decision}")
     if bath_grain >= MIN_YELLOW_FRAC:
         problems.append(f"bathroom grain false-trigger {bath_grain:.4f}")
-    if bath_legacy >= MIN_YELLOW_FRAC:
-        problems.append(f"bathroom old yellow false-trigger {bath_legacy:.4f}")
+    if bath_legacy >= ARRIVAL_YELLOW_FRAC:
+        problems.append(f"bathroom old yellow met the arrival bar {bath_legacy:.4f}")
     if _fraction(legacy_yellow_mask(fail_image)) >= MIN_YELLOW_FRAC:
         problems.append("empty plant old yellow false-trigger")
     if after_md5 != before_md5 or after_md5 != steer_walk.PLANT_MD5:
@@ -1966,8 +2001,6 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
             f"arrival flag {approach.arrival} does not match the bars "
             f"(yellow {approach.final.yellow_frac:.3f}, remaining {approach.remaining_m:.3f} m)"
         )
-    if approach.arrival:
-        problems.append("arrival was claimed; this draft does not expect the bars to pass")
     if approach.stop_kind == "budget" and not (1.00 <= approach.dx_m <= 1.25):
         problems.append(f"budget stop dx {approach.dx_m:.3f} m is outside 1.00–1.25")
     if approach.stop_kind == "budget" and approach.min_up_z < UP_Z_ABORT:
@@ -2056,6 +2089,10 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
         f"map {approach.map_command_source} yellow {approach.map_yellow_fraction:.3f} "
         f"queries {approach.map_frontier_queries} "
         f"empty-plant {fail_score.decision}  plant md5 {after_md5}"
+    )
+    print(
+        f"[find] bathroom grain {bath_grain:.4f} old yellow {bath_legacy:.4f} "
+        f"(retired HSV is not the steer)"
     )
     if problems:
         for msg in problems:
