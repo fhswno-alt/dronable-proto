@@ -24,6 +24,8 @@ from typing import Literal
 import mujoco as mj
 import numpy as np
 
+import gait_manager_traj as gm
+
 CTRL_DT = 0.02
 G = 9.81
 LEG_TAU = 2.45
@@ -98,6 +100,30 @@ class LipmConfig:
     arm_amp: float = 0.22
     unload_n: float = 5.0
     inside_margin_m: float = 0.008
+    # "lipm" is the joint Bézier. "gait_manager" is the published Hiwonder
+    # / ROBOTIS schedule (period, 2 cm, x amplitude) into the same servos.
+    schedule: Literal["lipm", "gait_manager"] = "lipm"
+    gm_period_s: float = gm.GM_PERIOD_S
+    gm_dsp: float = gm.GM_DSP
+    gm_y_swap_m: float = gm.GM_Y_SWAP_M
+    gm_x_m: float = gm.GM_X_M
+    gm_z_m: float = gm.GM_Z_M
+    gm_z_swap_m: float = gm.GM_Z_SWAP_M
+    gm_step_fb: float = gm.GM_STEP_FB
+    gm_pelvis_deg: float = gm.GM_PELVIS_DEG
+    gm_arm_deg: float = gm.GM_ARM_DEG
+    # A loaded swing foot is not dragged along x. The z target still rises.
+    gm_drag_gate: bool = False
+    # Hold the published step height through the first half of single support
+    # so the servo can arrive. The sine peaks for one sample and the knee
+    # never gets there. Off is the raw wSin track.
+    gm_z_hold: bool = False
+    # Fraction of single support that holds the step height before descent.
+    gm_hold_u: float = 0.55
+    # Stance hip from the published x. 0.070 rad is the largest extension
+    # that stayed upright for 24 s on this plant. A larger value is the
+    # unclipped vendor x and it is allowed to tip so the number is visible.
+    gm_stance_max: float = 0.48
 
 
 @dataclass
@@ -232,6 +258,16 @@ class LipmWalker:
         for name, kp in expected.items():
             if abs(self._kp.get(name, -1.0) - kp) > 1e-6:
                 raise RuntimeError(f"frozen kp changed for {name}")
+        self.gm_clock = gm.GaitManagerClock(
+            period_s=cfg.gm_period_s,
+            dsp=cfg.gm_dsp,
+            y_swap=cfg.gm_y_swap_m,
+            z_move=cfg.gm_z_m,
+            z_swap=cfg.gm_z_swap_m,
+            step_fb=cfg.gm_step_fb,
+            pelvis_deg=cfg.gm_pelvis_deg,
+        )
+        self._gm_swing: Side | None = None
 
     def other(self, side: Side) -> Side:
         return "R" if side == "L" else "L"
@@ -267,6 +303,9 @@ class LipmWalker:
     def tick(self, vx: float, yaw_rate: float, walking: bool) -> None:
         self.cmd_vx = float(vx)
         self.cmd_yaw = float(yaw_rate)
+        if self.cfg.schedule == "gait_manager":
+            self._tick_gait_manager(walking)
+            return
         if not walking:
             self.hold_stand()
             self.z_cmd = float(self.data.geom_xpos[self.gid["L"]][2])
@@ -281,6 +320,151 @@ class LipmWalker:
             self._tick_swing(yaw_rate)
         self._write_arms()
         self._write_unused()
+
+    def _tick_gait_manager(self, walking: bool) -> None:
+        """Published GaitManager endpoints, same 50 Hz position servos.
+
+        Foot height is the swing-minus-stance gap (about 2 cm on the demo
+        preset), not a 2 cm cartesian lift of one foot from the floor. Lateral
+        sway is hip roll. The 15 deg hip-pitch offset is their init pose and
+        is not stacked on this stand.
+        """
+        clock = self.gm_clock
+        if not walking:
+            clock.set_command(0.0, 0.0, 0.0)
+            clock.time = 0.0
+            clock.previous_x = 0.0
+            clock._update_movement()
+            clock._capture_zero()
+            self._gm_swing = None
+            self.hold_stand()
+            return
+        x_amp = 0.0
+        if abs(self.cmd_vx) > 1e-4:
+            x_amp = math.copysign(self.cfg.gm_x_m, self.cmd_vx)
+        yaw_deg = 0.0
+        if abs(self.cmd_yaw) > 1e-4:
+            yaw_deg = math.copysign(
+                min(10.0, abs(math.degrees(self.cmd_yaw)) / 0.25 * 10.0),
+                self.cmd_yaw,
+            )
+        clock.set_command(x_amp, 0.0, yaw_deg)
+        left, right, phase = clock.advance(CTRL_DT)
+        shifts = {"L": left, "R": right}
+        if phase == "L":
+            swing: Side = "L"
+            self.phase = "swing"
+            self.stance = "R"
+        elif phase == "R":
+            swing = "R"
+            self.phase = "swing"
+            self.stance = "L"
+        else:
+            swing = self.stance
+            self.phase = "shift"
+        if self._gm_swing != (swing if phase in ("L", "R") else None) and phase in ("L", "R"):
+            self.lifts.append(
+                LiftRecord(
+                    t=float(self.data.time),
+                    stance=self.stance,
+                    cop_margin_m=self.cop_margin(self.stance),
+                    swing_fn_n=self.foot_normal(swing),
+                    com_inside=self.com_inside_foot(self.stance, self.cfg.inside_margin_m),
+                    clear_cmd_m=self.cfg.gm_z_m,
+                    z_budget_m=0.0,
+                )
+            )
+        self._gm_swing = swing if phase in ("L", "R") else None
+        dy = 0.5 * (left.y + right.y)
+        # +y puts both feet to the left of the pelvis, so the pelvis sits
+        # over the right foot. lat > 0 is the measured lean onto the left.
+        lat = max(-1.0, min(1.0, (-dy / 0.22) / SHIFT_HIP_L))
+        self.lat = lat
+        # The published z is a foot-to-foot gap. Map that gap through the
+        # joint Bézier measured on this plant (0.62 rad knee clears ~2 cm)
+        # instead of a cartesian target the stance foot cannot follow
+        # through the floor. x maps through the same hip scale (0.24 rad
+        # per 2 cm). A loaded swing foot keeps its current x.
+        z_floor = min(left.z, right.z)
+        for side in ("L", "R"):
+            shift = shifts[side]
+            lift = max(0.0, shift.z - z_floor)
+            if self.cfg.gm_z_hold and phase == side:
+                if phase == "L":
+                    u = (clock.time - clock.l_ssp_start) / max(1e-3, clock.l_ssp_end - clock.l_ssp_start)
+                else:
+                    u = (clock.time - clock.r_ssp_start) / max(1e-3, clock.r_ssp_end - clock.r_ssp_start)
+                hold_u = min(0.92, max(0.2, self.cfg.gm_hold_u))
+                if u < hold_u:
+                    lift = self.cfg.gm_z_m
+                else:
+                    lift = self.cfg.gm_z_m * max(0.0, (1.0 - u) / max(1e-3, 1.0 - hold_u))
+            use_x = shift.x
+            if (
+                self.cfg.gm_drag_gate
+                and phase == side
+                and self.foot_normal(side) > self.cfg.unload_n
+            ):
+                use_x = 0.0
+            scale_h = lift / VENDOR_CLEAR_M
+            scale_x = use_x / VENDOR_STEP_M
+            flex = max(0.0, scale_h) * FLEX_PEAK
+            dhip = scale_x * HIP_LAND + max(0.0, scale_h) * HIP_RISE
+            if phase != side:
+                dhip = max(-self.cfg.gm_stance_max, min(self.cfg.gm_stance_max, dhip))
+                flex = 0.0
+            self._write_leg_delta(side, flex, dhip, shifts[side].yaw)
+        sl = self.q_stand.get("l_hip_roll", -0.05)
+        sr = self.q_stand.get("r_hip_roll", 0.05)
+        al = self.q_stand.get("l_ank_roll", 0.0)
+        ar = self.q_stand.get("r_ank_roll", 0.0)
+        self.write_clipped("l_hip_roll", sl + SHIFT_HIP_L * lat + left.pelvis_roll)
+        self.write_clipped("r_hip_roll", sr + SHIFT_HIP_R * lat + right.pelvis_roll)
+        self.write_clipped("l_ank_roll", al + SHIFT_ANK * lat)
+        self.write_clipped("r_ank_roll", ar + SHIFT_ANK * lat)
+        if phase in ("L", "R"):
+            self._level_swing_roll(swing)
+        self.z_bez = float(shifts[swing].z - shifts[self.stance].z) if phase in ("L", "R") else 0.0
+        self.z_cmd = self.z_bez
+        self._write_gm_arms(x_amp)
+        self._write_unused()
+
+    def _write_leg_delta(self, side: Side, flex: float, dhip: float, yaw: float) -> None:
+        """Stand pose plus a Bézier flex and a forward hip. Clipped to tau/kp."""
+        pref = self.pref(side)
+        hip_sign = -1.0 if side == "L" else 1.0
+        knee_sign = 1.0 if side == "L" else -1.0
+        hip0 = self.q_stand.get(pref + "hip_pitch", 0.0)
+        knee0 = self.q_stand.get(pref + "knee", 0.0)
+        self.write_clipped(pref + "hip_pitch", hip0 + hip_sign * dhip)
+        self.write_clipped(pref + "knee", knee0 + knee_sign * flex)
+        hip_c = float(self.data.ctrl[self.act_idx[pref + "hip_pitch_pos"]])
+        knee_c = float(self.data.ctrl[self.act_idx[pref + "knee_pos"]])
+        ank = hip_c + knee_c
+        up = self.data.xmat[self.bid[side]].reshape(3, 3)[:, 2]
+        sign = 1.0 if side == "L" else -1.0
+        ank += sign * float(up[0])
+        self.write_clipped(pref + "ank_pitch", ank)
+        self.write_clipped(pref + "hip_yaw", self.q_stand.get(pref + "hip_yaw", 0.0) + yaw)
+
+    def _write_gm_arms(self, x_amp: float) -> None:
+        for jn in (
+            "l_sho_roll", "r_sho_roll", "l_el_pitch", "r_el_pitch",
+            "l_el_yaw", "r_el_yaw", "l_gripper", "r_gripper",
+            "l_sho_pitch", "r_sho_pitch",
+        ):
+            self.write_clipped(jn, self.q_stand.get(jn, 0.0))
+        if not self.cfg.arms or abs(x_amp) < 1e-6:
+            return
+        # set_step stores arm_swing_gain = radians(arm_swap). The OP2 arm
+        # formula then scales by x_move * gain * 1000 * deg2rad.
+        gain = math.radians(self.cfg.gm_arm_deg)
+        period = max(self.gm_clock.period, 1e-3)
+        mag = x_amp * gain * 1000.0 * (math.pi / 180.0)
+        right = gm.wsin(self.gm_clock.time, period, math.pi * 1.5, -mag, 0.0)
+        left = gm.wsin(self.gm_clock.time, period, math.pi * 1.5, mag, 0.0)
+        self.write_clipped("r_sho_pitch", self.q_stand.get("r_sho_pitch", 0.0) + right)
+        self.write_clipped("l_sho_pitch", self.q_stand.get("l_sho_pitch", 0.0) - left)
 
     def _begin_shift(self) -> None:
         self.phase = "shift"
@@ -1093,7 +1277,12 @@ def score_lipm(walker: LipmWalker) -> dict[str, float | int | bool | str]:
     n_move = sum(1 for phase in tr.phase if phase != "stand")
     return {
         "name": walker.cfg.name,
+        "schedule": walker.cfg.schedule,
         "clear_cmd_m": walker.cfg.clear_m,
+        "gm_period_s": walker.cfg.gm_period_s,
+        "gm_x_m": walker.cfg.gm_x_m,
+        "gm_z_m": walker.cfg.gm_z_m,
+        "gm_dsp": walker.cfg.gm_dsp,
         "arms": walker.cfg.arms,
         "n_ticks": len(tr.t),
         "n_swing_ticks": n_swing,

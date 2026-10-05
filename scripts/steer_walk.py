@@ -1921,11 +1921,25 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
         honesty += f" FAULT: {session.bus.fault_reason}."
     if session.lipm is not None:
         sc = session.lipm.score()
-        honesty = (
-            "LIPM/ZMP schedule with a joint-space Bézier into the 50 Hz "
-            "position servos. Not the open-loop CPG. No root wrench. "
-            f"Row {session.lipm.cfg.name}, clear command {session.lipm.cfg.clear_m:.3f} m, "
-            f"arms={session.lipm.cfg.arms}. "
+        if session.lipm.cfg.schedule == "gait_manager":
+            lead = (
+                "Hiwonder GaitManager wSin schedule into the same 50 Hz "
+                "position servos. Not the open-loop CPG. No root wrench. "
+                f"Row {session.lipm.cfg.name}, period {session.lipm.cfg.gm_period_s:.3f} s, "
+                f"dsp {session.lipm.cfg.gm_dsp:.2f}, x {session.lipm.cfg.gm_x_m:.3f} m, "
+                f"z {session.lipm.cfg.gm_z_m:.3f} m, y_swap {session.lipm.cfg.gm_y_swap_m:.3f} m, "
+                f"pelvis {session.lipm.cfg.gm_pelvis_deg:.0f} deg, "
+                f"stance hip cap {session.lipm.cfg.gm_stance_max:.3f} rad, "
+                f"z_hold={session.lipm.cfg.gm_z_hold}. "
+            )
+        else:
+            lead = (
+                "LIPM/ZMP schedule with a joint-space Bézier into the 50 Hz "
+                "position servos. Not the open-loop CPG. No root wrench. "
+                f"Row {session.lipm.cfg.name}, clear command {session.lipm.cfg.clear_m:.3f} m, "
+                f"arms={session.lipm.cfg.arms}. "
+            )
+        honesty = lead + (
             f"Swing sole median {float(sc['sole_median_m']):.3f} m, "
             f"p90 {float(sc['sole_p90_m']):.3f} m, "
             f"swing contact {float(sc['swing_contact_frac']):.3f}, "

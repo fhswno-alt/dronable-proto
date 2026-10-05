@@ -1228,6 +1228,7 @@ def _encode_mp4_ffmpeg(frame_dir: Path, out_mp4: Path, fps: int = 25) -> None:
         "-bf", "0",
         "-preset", "veryfast",
         "-crf", "18",
+        "-movflags", "+faststart",
         str(out_mp4),
     ]
     print(f"[ainex] ffmpeg: {' '.join(cmd)}")

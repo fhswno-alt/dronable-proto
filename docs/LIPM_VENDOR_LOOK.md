@@ -82,3 +82,57 @@ creep is short of.
 No further plant change is in this PR. Stall torque 3.43 Nm is not the
 request. The foot box is already the 135×76 box from #43. This is a
 Prefer FAIL.
+
+## Published GaitManager clock on the same plant
+
+The trajectory is the Hiwonder / ROBOTIS `wSin` schedule
+(`scripts/gait_manager_traj.py`), not a new set of amplitudes.
+`walking_param.yaml` and `gait_control_demo.py` use period 400 ms,
+`dsp_ratio` 0.2, `step_fb_ratio` 0.028, step height 0.02 m, x amplitude
+0.02 m, y swap 0.02 m, z swap 0.006 m, pelvis offset 5 deg.
+`gait_manager.py` also lists 300 / 400 / 500 ms at dsp 0.2 and y swap
+0.02 m, and 600 ms at dsp 0.1 and y swap 0.04 m. The straight-walk gears
+in `ainex_controller.py` use x = 0.012 m at 300 ms (z = 0.015 m),
+0.013 m at 400 ms, and 0.015 m at 500 and 600 ms. One period is a left
+step plus a right step. The 2 cm figure is the swing-foot height minus
+the stance-foot height. `hip_pitch_offset` 15 deg is their offset from
+a different init pose and is not added on this stand.
+
+The knee that clears 2 cm needs about 0.62 rad from this stand. The
+position servo clips at about 0.053 rad per 20 ms tick, so the rise
+alone is about 0.23 s before the leg can come back down. A 400 ms
+cycle with dsp 0.2 gives each foot 0.16 s in the air. That is shorter
+than the rise.
+
+8.4 s, `vel(+0.056, 0)`, published amplitudes, pelvis 5 deg left on,
+stance hip left at the full x map (about 0.24 rad per 2 cm):
+
+| Clock | min up_z | Sole p90 | Sole max | Slip | Δx | Note |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| 300 ms, x 0.012 m | 0.984 | 0.11 cm | 0.27 cm | 2.34 cm/s | −3.3 cm | no lift, skate |
+| 400 ms demo, x 0.02 m | 0.896 | 0.48 cm | 1.47 cm | 1.49 cm/s | −1.1 cm | tips at 2.6 s |
+| 400 ms gear, x 0.013 m | 0.972 | 0.17 cm | 0.33 cm | 2.07 cm/s | −9.3 cm | no lift |
+| 600 ms gear, x 0.015 m | 0.892 | 1.00 cm | 2.02 cm | 1.34 cm/s | +1.0 cm | tips at 3.1 s |
+| 600 ms table, dsp 0.1 | 0.896 | 0.17 cm | 0.31 cm | 0.72 cm/s | +2.7 cm | tips at 1.6 s |
+
+300–600 ms does not clear about 2 cm and stay upright. The 5 deg pelvis
+offset, added on top of the y-swap roll in this joint convention, is
+what tips the longer clocks. Turning that offset off and clipping the
+stance hip to the 0.070 rad that already survived 24 s is the closest
+stable row. The waveform is otherwise the published sine. Period is
+1.00 s, which is the shortest raw sine that still reaches a 2 cm sole.
+
+That row, 24 s, `vel(+0.056, 0)`: min up_z 0.992, no fault, sole p90
+1.98 cm, stance slip 0.31 cm/s, sat_rate 0, shoulder 0.21 rad, Δx
++46.6 cm. Mean speed is about 1.9 cm/s. The kit range is 7–21 cm/s.
+The period is still about 1.7× the slowest published preset and about
+2.5× the 400 ms demo. A 0.90 s cycle reaches the same sole only if the
+2 cm target is held through 70% of single support instead of tracking
+the sine peak. That hold also stays upright for 24 s (Δx +52.4 cm,
+slip 0.41 cm/s) and is not the published shape.
+
+The clips of this 1.00 s row are `previews/gm_forward.mp4` and
+`previews/gm_step_closeup.mp4`. Forward window Δx +15.5 cm, mean body
+vx +1.9 cm/s, sole p90 2.0 cm, min up_z 0.992, peak torque 2.10 Nm.
+Close-up forward Δx +11.3 cm, then stop. It is still a Prefer FAIL
+against a 300–600 ms kit walk. Soft-pass is off.
