@@ -4,8 +4,8 @@
 Drawing only. Does not modify the MuJoCo plant, kit cameras, or any quote.
 
 Solids are millimetres in the ankle-roll link frame (the same frame as
-``l_ank_roll_link.STL`` / ``r_ank_roll_link.STL``). The right solid is the
-left solid mirrored through the XZ plane, so its centre sits at local y = -14 mm.
+``l_ank_roll_link.STL`` / ``r_ank_roll_link.STL``). Each pocket is cut from
+that foot's own mesh. The right solid is not a mirror of the left.
 
 Plant source (do not edit): commit 921f5941,
 ``mujoco/ainex_hiwonder/ainex_controls_m2_145.xml``
@@ -15,6 +15,7 @@ md5 207f3d5e9c6a72e16f7aa0c8d224f75e.
 from __future__ import annotations
 
 import math
+import re
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -66,14 +67,22 @@ URDF_XACRO = (
 
 # Design assumptions (not taken from the URDF).
 CLEARANCE_PER_SIDE_MM = 0.3
+WALL_MM = 1.2
+WALL_LIFT_MM = 0.5  # wall underside above the lug-tip plane
+CHAMFER_MM = 0.4
 FLOOR_THICKNESS_MM = 1.2  # pocket floor web; must stay >= 1.0
-POCKET_DEPTH_MM = 2.5  # cleat height above the pocket floor
+POCKET_DEPTH_MM = 2.5  # wall height above the pocket floor
 SOLE_HULL_Z_MAX_MM = -16.5  # vertices below this are the sole plate
 BORDER_MM = 2.0
 GROOVE_WIDTH_MM = 1.6
 GROOVE_PITCH_MM = 6.4
 CORNER_PLINTH_MM = 8.0
 MIN_LUG_MM = 1.0
+SHELF_OVERLAP_MM = 0.05
+# Kit stance: each ankle origin moves this far outboard, sole kept level.
+KIT_STANCE_OUTWARD_M = 0.005
+LEFT_CHAIN = ("l_hip_yaw", "l_hip_roll", "l_hip_pitch", "l_knee", "l_ank_pitch", "l_ank_roll")
+RIGHT_CHAIN = ("r_hip_yaw", "r_hip_roll", "r_hip_pitch", "r_knee", "r_ank_pitch", "r_ank_roll")
 
 Side = Literal["left", "right"]
 FloatArray = NDArray[np.float64]
@@ -112,10 +121,43 @@ class MeshMeasure:
 
 
 @dataclass(frozen=True)
+class Rect:
+    """Axis-aligned rectangle in the ankle-roll frame, millimetres."""
+
+    xmin: float
+    xmax: float
+    ymin: float
+    ymax: float
+
+    @property
+    def size_x(self) -> float:
+        return self.xmax - self.xmin
+
+    @property
+    def size_y(self) -> float:
+        return self.ymax - self.ymin
+
+    def expanded(self, margin: float) -> Rect:
+        return Rect(
+            self.xmin - margin,
+            self.xmax + margin,
+            self.ymin - margin,
+            self.ymax + margin,
+        )
+
+    def contains(self, x: float, y: float, tol: float = 0.0) -> bool:
+        return (
+            self.xmin - tol <= x <= self.xmax + tol
+            and self.ymin - tol <= y <= self.ymax + tol
+        )
+
+
+@dataclass(frozen=True)
 class Stack:
     """Vertical stack in the ankle-roll frame, millimetres."""
 
     z_ground: float
+    z_wall_bottom: float
     z_groove: float
     z_floor: float
     z_top: float
@@ -128,15 +170,53 @@ class Stack:
     def rubber_under_plate(self) -> float:
         return self.z_floor - self.z_ground
 
+    @property
+    def wall_lift(self) -> float:
+        return self.z_wall_bottom - self.z_ground
+
+
+@dataclass(frozen=True)
+class FootSolid:
+    """One foot's measured pocket, wall outline, and solid."""
+
+    side: Side
+    mesh: MeshMeasure
+    stack: Stack
+    pocket: Rect
+    outline: Rect
+    plant: Rect
+    solid: cq.Solid
+    clearance_mm: dict[str, float]
+
 
 @dataclass(frozen=True)
 class BuiltPair:
-    left: cq.Solid
-    right: cq.Solid
-    stack: Stack
-    left_mesh: MeshMeasure
-    right_mesh: MeshMeasure
-    pocket_hull: tuple[tuple[float, float], ...]
+    left_foot: FootSolid
+    right_foot: FootSolid
+    ankle_y_left_mm: float
+    ankle_y_right_mm: float
+    gap_zero_mm: float
+    gap_kit_mm: float
+
+    @property
+    def left(self) -> cq.Solid:
+        return self.left_foot.solid
+
+    @property
+    def right(self) -> cq.Solid:
+        return self.right_foot.solid
+
+    @property
+    def stack(self) -> Stack:
+        return self.left_foot.stack
+
+    @property
+    def left_mesh(self) -> MeshMeasure:
+        return self.left_foot.mesh
+
+    @property
+    def right_mesh(self) -> MeshMeasure:
+        return self.right_foot.mesh
 
 
 def load_stl_vertices(path: Path) -> tuple[FloatArray, int]:
@@ -253,8 +333,10 @@ def make_stack(mesh_zmin: float) -> Stack:
         )
     z_groove = z_floor - FLOOR_THICKNESS_MM
     z_top = z_floor + POCKET_DEPTH_MM
+    z_wall_bottom = Z_GROUND_MM + WALL_LIFT_MM
     return Stack(
         z_ground=Z_GROUND_MM,
+        z_wall_bottom=z_wall_bottom,
         z_groove=z_groove,
         z_floor=z_floor,
         z_top=z_top,
@@ -296,13 +378,13 @@ def _subtract_interval(
     return segments
 
 
-def tread_groove_boxes(stack: Stack) -> list[cq.Solid]:
-    """Block-tread grooves. Corner plinths and the perimeter rail stay solid."""
+def tread_groove_boxes(plant: Rect, stack: Stack) -> list[cq.Solid]:
+    """Block-tread grooves inside the plant rectangle only."""
 
-    x_min = CENTER_X_MM - OUTER_X_MM / 2.0
-    x_max = CENTER_X_MM + OUTER_X_MM / 2.0
-    y_min = CENTER_Y_LEFT_MM - OUTER_Y_MM / 2.0
-    y_max = CENTER_Y_LEFT_MM + OUTER_Y_MM / 2.0
+    x_min = plant.xmin
+    x_max = plant.xmax
+    y_min = plant.ymin
+    y_max = plant.ymax
     inner = (
         x_min + BORDER_MM,
         x_max - BORDER_MM,
@@ -368,46 +450,163 @@ def _fuse(solids: Sequence[cq.Solid]) -> cq.Shape:
     return fused
 
 
-def build_left(mesh: MeshMeasure | None = None) -> tuple[cq.Solid, Stack, MeshMeasure, tuple[tuple[float, float], ...]]:
-    left_mesh = mesh if mesh is not None else measure_mesh(LEFT_MESH, "left")
-    stack = make_stack(left_mesh.zmin)
-    hull = np.array(left_mesh.hull, dtype=np.float64)
-    pocket = offset_convex_polygon(hull, CLEARANCE_PER_SIDE_MM)
-    base = _rect_solid(
-        CENTER_X_MM,
-        CENTER_Y_LEFT_MM,
-        OUTER_X_MM,
-        OUTER_Y_MM,
-        stack.z_ground,
-        stack.total_thickness,
-    )
-    pocket_wire = cq.Workplane("XY").workplane(offset=stack.z_floor)
-    pocket_cut = pocket_wire.polyline([(float(p[0]), float(p[1])) for p in pocket]).close().extrude(
-        stack.pocket_depth + 0.5
-    )
-    grooves = _fuse(tread_groove_boxes(stack))
-    cut = base.cut(pocket_cut.val()).cut(grooves)
-    solids = cut.Solids() if isinstance(cut, cq.Compound) else [cut]
+def _one_solid(shape: cq.Shape, label: str) -> cq.Solid:
+    solids = shape.Solids() if isinstance(shape, cq.Compound) else [shape]
     if len(solids) != 1 or not isinstance(solids[0], cq.Solid):
-        raise ValueError(f"outsole boolean produced {len(solids)} solids")
-    ring = tuple((float(point[0]), float(point[1])) for point in pocket)
-    return solids[0], stack, left_mesh, ring
+        raise ValueError(f"{label} produced {len(solids)} solids")
+    return solids[0]
+
+
+def _box_rect(rect: Rect, z0: float, height: float) -> cq.Solid:
+    return _rect_solid(
+        0.5 * (rect.xmin + rect.xmax),
+        0.5 * (rect.ymin + rect.ymax),
+        rect.size_x,
+        rect.size_y,
+        z0,
+        height,
+    )
+
+
+def plant_rect(side: Side) -> Rect:
+    """135 x 76 mm contact box in this ankle-roll frame."""
+
+    centre_y = CENTER_Y_LEFT_MM if side == "left" else CENTER_Y_RIGHT_MM
+    return Rect(
+        CENTER_X_MM - OUTER_X_MM / 2.0,
+        CENTER_X_MM + OUTER_X_MM / 2.0,
+        centre_y - OUTER_Y_MM / 2.0,
+        centre_y + OUTER_Y_MM / 2.0,
+    )
+
+
+def mesh_rect(mesh: MeshMeasure) -> Rect:
+    return Rect(mesh.xmin, mesh.xmax, mesh.ymin, mesh.ymax)
+
+
+def mesh_xy(path: Path) -> FloatArray:
+    vertices, _count = load_stl_vertices(path)
+    return vertices.reshape(-1, 3)[:, :2]
+
+
+def side_clearance_mm(points: FloatArray, pocket: Rect, side: Side) -> dict[str, float]:
+    """Minimum axis clearance of every mesh vertex to each pocket wall."""
+
+    heel = float(np.min(points[:, 0] - pocket.xmin))
+    toe = float(np.min(pocket.xmax - points[:, 0]))
+    toward_min_y = float(np.min(points[:, 1] - pocket.ymin))
+    toward_max_y = float(np.min(pocket.ymax - points[:, 1]))
+    if side == "left":
+        return {
+            "heel": heel,
+            "toe": toe,
+            "inboard": toward_min_y,
+            "outboard": toward_max_y,
+        }
+    return {
+        "heel": heel,
+        "toe": toe,
+        "inboard": toward_max_y,
+        "outboard": toward_min_y,
+    }
+
+
+def joint_origin(name: str) -> tuple[float, float, float]:
+    """URDF joint origin xyz in metres. All leg origins used here have rpy 0."""
+
+    text = URDF_XACRO.read_text(encoding="utf-8")
+    match = re.search(
+        rf'name="{re.escape(name)}"\s+type="revolute">\s*<origin\s+xyz="([^"]+)"\s+rpy="([^"]+)"',
+        text,
+    )
+    if match is None:
+        raise ValueError(f"joint {name} origin not found in {URDF_XACRO.name}")
+    rpy = tuple(float(part) for part in match.group(2).split())
+    if rpy != (0.0, 0.0, 0.0):
+        raise ValueError(f"joint {name} rpy is {rpy}; zero-stance sum assumes identity")
+    xyz = tuple(float(part) for part in match.group(1).split())
+    if len(xyz) != 3:
+        raise ValueError(f"joint {name} xyz is {xyz}")
+    return xyz
+
+
+def ankle_y_m(chain: Sequence[str]) -> float:
+    """Body-frame ankle-roll origin Y at every leg joint angle = 0."""
+
+    return sum(joint_origin(name)[1] for name in chain)
+
+
+def inner_gap_mm(pair_left: FootSolid, pair_right: FootSolid, outward_m: float) -> tuple[float, float, float]:
+    """Gap between inner outline edges. Returns (gap, left ankle y, right ankle y) in mm.
+
+    Zero stance is the URDF with every revolute at 0, so the frames stay aligned
+    and the ankle Y values add. Kit stance shifts each ankle  ``outward_m``
+    further outboard and leaves the sole level (local Y still world Y).
+    """
+
+    ankle_left = ankle_y_m(LEFT_CHAIN) + outward_m
+    ankle_right = ankle_y_m(RIGHT_CHAIN) - outward_m
+    left_inner = ankle_left * 1000.0 + pair_left.outline.ymin
+    right_inner = ankle_right * 1000.0 + pair_right.outline.ymax
+    return left_inner - right_inner, ankle_left * 1000.0, ankle_right * 1000.0
+
+
+def build_foot(side: Side, mesh: MeshMeasure) -> FootSolid:
+    """Pocket from this plate's AABB, then a 1.2 mm wall, tread only in the plant box."""
+
+    stack = make_stack(mesh.zmin)
+    pocket = mesh_rect(mesh).expanded(CLEARANCE_PER_SIDE_MM)
+    outline = pocket.expanded(WALL_MM)
+    plant = plant_rect(side)
+    points = mesh_xy(mesh.path)
+    clearance = side_clearance_mm(points, pocket, side)
+    short = {name: value for name, value in clearance.items() if value < CLEARANCE_PER_SIDE_MM - 1e-6}
+    if short:
+        raise ValueError(f"{side} pocket clearance under {CLEARANCE_PER_SIDE_MM} mm: {short}")
+
+    outer = _box_rect(outline, stack.z_wall_bottom, stack.z_top - stack.z_wall_bottom)
+    void = _box_rect(
+        pocket,
+        stack.z_wall_bottom - 0.2,
+        (stack.z_top - stack.z_wall_bottom) + 0.4,
+    )
+    ring = _one_solid(outer.cut(void), f"{side} wall")
+    chamfered = cq.Workplane(obj=ring).edges("<Z").chamfer(CHAMFER_MM)
+    ring = _one_solid(chamfered.val(), f"{side} wall chamfer")
+
+    shelf = _box_rect(
+        pocket.expanded(SHELF_OVERLAP_MM),
+        stack.z_groove,
+        stack.floor_thickness,
+    )
+    tread = _box_rect(plant, stack.z_ground, (stack.z_groove - stack.z_ground) + SHELF_OVERLAP_MM)
+    grooves = _fuse(tread_groove_boxes(plant, stack))
+    tread = _one_solid(tread.cut(grooves), f"{side} tread")
+    solid = _one_solid(ring.fuse(shelf).fuse(tread), f"{side} outsole")
+    return FootSolid(
+        side=side,
+        mesh=mesh,
+        stack=stack,
+        pocket=pocket,
+        outline=outline,
+        plant=plant,
+        solid=solid,
+        clearance_mm=clearance,
+    )
 
 
 def build_pair() -> BuiltPair:
-    left, stack, left_mesh, pocket = build_left()
-    mirrored = left.mirror("XZ")
-    right_solids = mirrored.Solids() if isinstance(mirrored, cq.Compound) else [mirrored]
-    if len(right_solids) != 1 or not isinstance(right_solids[0], cq.Solid):
-        raise ValueError("mirrored outsole is not a single solid")
-    right_mesh = measure_mesh(RIGHT_MESH, "right")
+    left = build_foot("left", measure_mesh(LEFT_MESH, "left"))
+    right = build_foot("right", measure_mesh(RIGHT_MESH, "right"))
+    gap_zero, ankle_left, ankle_right = inner_gap_mm(left, right, 0.0)
+    gap_kit, _, _ = inner_gap_mm(left, right, KIT_STANCE_OUTWARD_M)
     return BuiltPair(
-        left=left,
-        right=right_solids[0],
-        stack=stack,
-        left_mesh=left_mesh,
-        right_mesh=right_mesh,
-        pocket_hull=pocket,
+        left_foot=left,
+        right_foot=right,
+        ankle_y_left_mm=ankle_left,
+        ankle_y_right_mm=ankle_right,
+        gap_zero_mm=gap_zero,
+        gap_kit_mm=gap_kit,
     )
 
 
@@ -512,34 +711,50 @@ def edge_overhang_mm(mesh: MeshMeasure) -> dict[str, float]:
     }
 
 
+def _format_clearance(foot: FootSolid) -> str:
+    parts = ", ".join(f"{name} {value:.3f} mm" for name, value in foot.clearance_mm.items())
+    return (
+        f"{foot.side} outline {foot.outline.size_x:.3f} x {foot.outline.size_y:.3f} mm "
+        f"pocket {foot.pocket.size_x:.3f} x {foot.pocket.size_y:.3f} mm "
+        f"floor z {foot.stack.z_floor:.3f} wall bottom z {foot.stack.z_wall_bottom:.3f} "
+        f"clearance [{parts}]"
+    )
+
+
 def format_report(pair: BuiltPair) -> str:
     stack = pair.stack
     left = pair.left_mesh
     right = pair.right_mesh
-    overhang = edge_overhang_mm(left)
     contact = contact_area_mm2(pair.left, stack.z_ground)
     planform = OUTER_X_MM * OUTER_Y_MM
     lines = [
         f"plant {PLANT_XML} @ {PLANT_COMMIT} md5 {PLANT_MD5}",
-        f"outer {OUTER_X_MM:.3f} x {OUTER_Y_MM:.3f} mm centered ({CENTER_X_MM:.3f}, {CENTER_Y_LEFT_MM:.3f}) left",
-        f"right centre y {CENTER_Y_RIGHT_MM:.3f} mm (mirror of left through XZ)",
+        f"plant tread box {OUTER_X_MM:.3f} x {OUTER_Y_MM:.3f} mm "
+        f"centred ({CENTER_X_MM:.3f}, {CENTER_Y_LEFT_MM:.3f}) left / "
+        f"({CENTER_X_MM:.3f}, {CENTER_Y_RIGHT_MM:.3f}) right",
         f"plant box z [{Z_GROUND_MM:.3f}, {Z_BOX_TOP_MM:.3f}] height {BOX_HEIGHT_MM:.3f} mm",
-        f"stack ground {stack.z_ground:.3f} groove {stack.z_groove:.3f} "
-        f"floor {stack.z_floor:.3f} cleat {stack.z_top:.3f}",
-        f"floor {stack.floor_thickness:.3f} mm  lug {stack.lug_height:.3f} mm  "
-        f"pocket {stack.pocket_depth:.3f} mm  total {stack.total_thickness:.3f} mm",
-        f"rubber under plate {stack.rubber_under_plate:.3f} mm "
-        f"(plant box is {BOX_HEIGHT_MM:.1f} mm; mismatch {BOX_HEIGHT_MM - stack.total_thickness:.3f} mm)",
-        f"left mesh AABB {left.size_x:.3f} x {left.size_y:.3f} x {left.zmax - left.zmin:.3f} mm "
-        f"center ({left.center_x:.3f}, {left.center_y:.3f}, {(left.zmin + left.zmax) / 2:.3f}) "
-        f"zmin {left.zmin:.4f} tris {left.triangle_count}",
-        f"right mesh AABB {right.size_x:.3f} x {right.size_y:.3f} "
-        f"center ({right.center_x:.3f}, {right.center_y:.3f}) zmin {right.zmin:.4f}",
-        "left mesh overhang vs 135x76 plant rect (positive = mesh outside): "
-        + ", ".join(f"{name} {value:.3f} mm" for name, value in overhang.items()),
-        f"clearance {CLEARANCE_PER_SIDE_MM:.3f} mm outside the sole convex hull",
+        _format_clearance(pair.left_foot),
+        _format_clearance(pair.right_foot),
+        f"left stack ground {stack.z_ground:.3f} wall {stack.z_wall_bottom:.3f} "
+        f"groove {stack.z_groove:.3f} floor {stack.z_floor:.3f} wall top {stack.z_top:.3f}",
+        f"left floor {stack.floor_thickness:.3f} mm  lug {stack.lug_height:.3f} mm  "
+        f"wall {WALL_MM:.3f} mm  wall lift {stack.wall_lift:.3f} mm  "
+        f"part height {stack.total_thickness:.3f} mm",
+        f"right floor z {pair.right_foot.stack.z_floor:.3f} "
+        f"lug {pair.right_foot.stack.lug_height:.3f} mm "
+        f"part height {pair.right_foot.stack.total_thickness:.3f} mm",
+        f"rubber under left plate {stack.rubber_under_plate:.3f} mm "
+        f"(plant box is {BOX_HEIGHT_MM:.1f} mm; height gap "
+        f"{BOX_HEIGHT_MM - stack.total_thickness:.3f} mm)",
+        f"left mesh AABB {left.size_x:.3f} x {left.size_y:.3f} mm "
+        f"centre ({left.center_x:.3f}, {left.center_y:.3f}) zmin {left.zmin:.4f}",
+        f"right mesh AABB {right.size_x:.3f} x {right.size_y:.3f} mm "
+        f"centre ({right.center_x:.3f}, {right.center_y:.3f}) zmin {right.zmin:.4f}",
+        f"ankle Y zero stance L {pair.ankle_y_left_mm:.4f} mm  R {pair.ankle_y_right_mm:.4f} mm",
+        f"inner gap zero stance {pair.gap_zero_mm:.4f} mm",
+        f"inner gap kit stance +{KIT_STANCE_OUTWARD_M * 1000:.1f} mm/side {pair.gap_kit_mm:.4f} mm",
         f"ground contact area {contact:.1f} mm^2 / {planform:.1f} mm^2 "
-        f"({100.0 * contact / planform:.1f}%)",
+        f"({100.0 * contact / planform:.1f}% of the plant box)",
         f"friction cited {PLANT_FRICTION_SLIDE:.1f} (plant), material TPU 95A",
     ]
     return "\n".join(lines)
@@ -585,16 +800,16 @@ def _vtk_render(stl_path: Path, png_path: Path, view: str) -> None:
     if view == "top":
         camera.SetPosition(cx + 50.0, cy - 170.0, cz + 55.0)
         camera.SetViewUp(0.0, 1.0, 0.0)
-        caption = "Left outsole, top. Pocket floor with four corner cleats. Ankle-roll frame, mm."
+        caption = "Left outsole, top. 1.2 mm pocket wall. Ankle-roll frame, mm."
     elif view == "bottom":
         camera.SetPosition(cx + 35.0, cy - 150.0, bounds[4] - 70.0)
         camera.SetViewUp(0.0, 1.0, 0.0)
-        caption = "Left outsole, ground face. Block tread, perimeter rail, solid corner plinths."
+        caption = "Left outsole, ground face. Tread only inside the 135 x 76 plant box."
     elif view == "iso":
         camera.SetPosition(cx + 160.0, cy - 190.0, cz + 120.0)
         camera.SetViewUp(0.0, 0.0, 1.0)
         camera.ParallelProjectionOff()
-        caption = "Left outsole, isometric. +X toe, +Y outboard, +Z up."
+        caption = "Left outsole, isometric. Wall skirt sits above the lug tips."
     else:
         raise ValueError(view)
     renderer.ResetCamera()
@@ -641,29 +856,55 @@ def _render_overlay(pair: BuiltPair, png_path: Path) -> None:
             zorder=1,
         )
 
-    x_min = CENTER_X_MM - OUTER_X_MM / 2.0
-    y_min = CENTER_Y_LEFT_MM - OUTER_Y_MM / 2.0
-    outer = np.array(
+    foot = pair.left_foot
+    outline = np.array(
         [
-            [x_min, y_min],
-            [x_min + OUTER_X_MM, y_min],
-            [x_min + OUTER_X_MM, y_min + OUTER_Y_MM],
-            [x_min, y_min + OUTER_Y_MM],
+            [foot.outline.xmin, foot.outline.ymin],
+            [foot.outline.xmax, foot.outline.ymin],
+            [foot.outline.xmax, foot.outline.ymax],
+            [foot.outline.xmin, foot.outline.ymax],
+        ]
+    )
+    plant = np.array(
+        [
+            [foot.plant.xmin, foot.plant.ymin],
+            [foot.plant.xmax, foot.plant.ymin],
+            [foot.plant.xmax, foot.plant.ymax],
+            [foot.plant.xmin, foot.plant.ymax],
+        ]
+    )
+    pocket = np.array(
+        [
+            [foot.pocket.xmin, foot.pocket.ymin],
+            [foot.pocket.xmax, foot.pocket.ymin],
+            [foot.pocket.xmax, foot.pocket.ymax],
+            [foot.pocket.xmin, foot.pocket.ymax],
         ]
     )
     ax.add_patch(
         MplPolygon(
-            outer,
+            outline,
             closed=True,
             facecolor="#c46a1a",
             edgecolor="#6b3208",
             linewidth=1.4,
-            alpha=0.55,
+            alpha=0.45,
             zorder=2,
-            label="outsole 135 x 76 mm",
+            label=f"outline {foot.outline.size_x:.1f} x {foot.outline.size_y:.1f} mm",
         )
     )
-    pocket = np.array(pair.pocket_hull)
+    ax.add_patch(
+        MplPolygon(
+            plant,
+            closed=True,
+            facecolor="#e8b56a",
+            edgecolor="#8a4b08",
+            linewidth=1.1,
+            alpha=0.55,
+            zorder=3,
+            label="plant tread 135 x 76 mm",
+        )
+    )
     ax.add_patch(
         MplPolygon(
             pocket,
@@ -672,8 +913,8 @@ def _render_overlay(pair: BuiltPair, png_path: Path) -> None:
             edgecolor="#1f4b99",
             linewidth=1.2,
             linestyle="--",
-            zorder=3,
-            label="pocket = sole hull + 0.3 mm",
+            zorder=4,
+            label="pocket = this plate AABB + 0.3 mm",
         )
     )
     hull = np.array(pair.left_mesh.hull)
@@ -688,7 +929,7 @@ def _render_overlay(pair: BuiltPair, png_path: Path) -> None:
 
     ax.axhline(0.0, color="#111111", linewidth=1.0, linestyle=":", zorder=5)
     ax.axhline(CENTER_Y_LEFT_MM, color="#6b3208", linewidth=1.0, zorder=5)
-    dim_x = -52.0
+    dim_x = foot.outline.xmin - 12.0
     ax.annotate(
         "",
         xy=(dim_x, CENTER_Y_LEFT_MM),
@@ -718,7 +959,7 @@ def _render_overlay(pair: BuiltPair, png_path: Path) -> None:
         zorder=6,
     )
     ax.annotate(
-        "outsole centre (30, +14)",
+        "plant tread centre (30, +14)",
         xy=(CENTER_X_MM, CENTER_Y_LEFT_MM),
         xytext=(CENTER_X_MM + 18.0, CENTER_Y_LEFT_MM + 16.0),
         fontsize=8,
@@ -740,11 +981,112 @@ def _render_overlay(pair: BuiltPair, png_path: Path) -> None:
     ax.set_ylabel("y mm  (left outboard is +y)")
     ax.set_title(
         "Left foot overlay, ankle-roll frame\n"
-        "Outsole centred on the plant contact box, 14 mm outboard of the ankle-roll axis"
+        "Wider wall outline around this plate. Tread centre stays 14 mm outboard of the ankle-roll axis."
     )
     ax.legend(loc="upper right", frameon=True, fontsize=8)
-    ax.set_xlim(-68.0, 112.0)
-    ax.set_ylim(-36.0, 64.0)
+    ax.set_xlim(foot.outline.xmin - 28.0, foot.outline.xmax + 16.0)
+    ax.set_ylim(foot.outline.ymin - 14.0, foot.outline.ymax + 14.0)
+    fig.tight_layout()
+    fig.savefig(png_path)
+    plt.close(fig)
+
+
+def _section_loops(stl_path: Path, cut_x: float) -> list[FloatArray]:
+    """Closed YZ loops where the STL crosses the plane x = cut_x."""
+
+    import vtk
+
+    reader = vtk.vtkSTLReader()
+    reader.SetFileName(str(stl_path))
+    reader.Update()
+    plane = vtk.vtkPlane()
+    plane.SetOrigin(cut_x, 0.0, 0.0)
+    plane.SetNormal(1.0, 0.0, 0.0)
+    cutter = vtk.vtkCutter()
+    cutter.SetCutFunction(plane)
+    cutter.SetInputConnection(reader.GetOutputPort())
+    stripper = vtk.vtkStripper()
+    stripper.SetInputConnection(cutter.GetOutputPort())
+    stripper.JoinContiguousSegmentsOn()
+    stripper.Update()
+    poly = stripper.GetOutput()
+    loops: list[FloatArray] = []
+    for cell_index in range(poly.GetNumberOfCells()):
+        cell = poly.GetCell(cell_index)
+        count = cell.GetNumberOfPoints()
+        if count < 3:
+            continue
+        pts = np.zeros((count, 2), dtype=np.float64)
+        for point_index in range(count):
+            point = cell.GetPoints().GetPoint(point_index)
+            pts[point_index, 0] = point[1]
+            pts[point_index, 1] = point[2]
+        loops.append(pts)
+    if not loops:
+        raise ValueError(f"section at x={cut_x} produced no loops")
+    return loops
+
+
+def _render_section(stl_path: Path, png_path: Path, foot: FootSolid) -> None:
+    """YZ section through the tread, with a zoom on the lifted wall."""
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Polygon as MplPolygon
+
+    cut_x = CENTER_X_MM
+    loops = _section_loops(stl_path, cut_x)
+    fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.2), dpi=140)
+    full, zoom = axes
+    for loop in loops:
+        patch = MplPolygon(loop, closed=True, facecolor="#c46a1a", edgecolor="#3d220c", linewidth=0.6)
+        full.add_patch(patch)
+        zoom.add_patch(
+            MplPolygon(loop, closed=True, facecolor="#c46a1a", edgecolor="#3d220c", linewidth=0.8)
+        )
+    for axis in (full, zoom):
+        axis.axhline(Z_GROUND_MM, color="#1b4f72", linewidth=1.0, linestyle="--")
+        axis.axhline(foot.stack.z_wall_bottom, color="#6b3208", linewidth=0.9, linestyle=":")
+        axis.set_aspect("equal")
+        axis.set_facecolor("#f7f6f3")
+        axis.set_xlabel("y mm")
+        axis.set_ylabel("z mm")
+    full.set_title(f"Section x = {cut_x:.0f} mm  (looking toward the toe)")
+    full.set_xlim(foot.outline.ymin - 3.0, foot.outline.ymax + 3.0)
+    full.set_ylim(Z_GROUND_MM - 1.5, foot.stack.z_top + 1.2)
+    full.text(
+        foot.outline.ymin + 2.0,
+        Z_GROUND_MM - 1.15,
+        "lug tips  z = -26",
+        color="#1b4f72",
+        fontsize=8,
+    )
+    # Zoom on the outboard wall (positive Y for the left foot).
+    zoom_y = foot.outline.ymax
+    zoom.set_xlim(zoom_y - 4.2, zoom_y + 1.2)
+    zoom.set_ylim(Z_GROUND_MM - 0.8, foot.stack.z_wall_bottom + 2.4)
+    zoom.set_title("Outboard wall, lifted off the ground")
+    zoom.annotate(
+        "",
+        xy=(zoom_y + 0.55, foot.stack.z_wall_bottom),
+        xytext=(zoom_y + 0.55, Z_GROUND_MM),
+        arrowprops={"arrowstyle": "<->", "color": "#111111", "lw": 1.0},
+    )
+    zoom.text(
+        zoom_y + 0.7,
+        0.5 * (Z_GROUND_MM + foot.stack.z_wall_bottom),
+        f"{foot.stack.wall_lift:.1f} mm",
+        va="center",
+        fontsize=8,
+        color="#111111",
+    )
+    fig.suptitle(
+        "Left outsole. The perimeter wall bottom is above the lug-tip plane. "
+        "Only the centre tread reaches z = -26 mm.",
+        fontsize=11,
+    )
     fig.tight_layout()
     fig.savefig(png_path)
     plt.close(fig)
@@ -756,11 +1098,13 @@ def render_pngs(pair: BuiltPair, stl_path: Path) -> dict[str, Path]:
         "bottom": OUT_DIR / "outsole_bottom.png",
         "iso": OUT_DIR / "outsole_iso.png",
         "overlay": OUT_DIR / "outsole_overlay.png",
+        "section": OUT_DIR / "outsole_section.png",
     }
     _vtk_render(stl_path, paths["top"], "top")
     _vtk_render(stl_path, paths["bottom"], "bottom")
     _vtk_render(stl_path, paths["iso"], "iso")
     _render_overlay(pair, paths["overlay"])
+    _render_section(stl_path, paths["section"], pair.left_foot)
     return paths
 
 

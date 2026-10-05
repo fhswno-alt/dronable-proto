@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""Assert the AiNex outsole pair against the locked plant dimensions.
+"""Assert the AiNex outsole pair against the locked plant and the wall spec.
 
 Checks the exported STEP files and a fresh build:
-- left/right are mirrors through the ankle-roll XZ plane
-- each footprint is 135 x 76 mm
-- centres are y = +14 mm and y = -14 mm (x = 30 mm)
+- wall underside is at least 0.5 mm above the lug tips
+- ground contact stays inside the 135 x 76 mm plant box
+- each plate has at least 0.3 mm clearance on every side of its own pocket
+- inner foot-to-foot gap is positive at zero stance and at the kit stance
 - pocket floor web is at least 1.0 mm
-
-Also confirms the plant blob at commit 921f5941 still hashes to
-207f3d5e9c6a72e16f7aa0c8d224f75e and that this script does not dirty it.
+- plant blob at commit 921f5941 still hashes to 207f3d5e9c6a72e16f7aa0c8d224f75e
 """
 
 from __future__ import annotations
@@ -19,7 +18,6 @@ import sys
 from pathlib import Path
 
 import cadquery as cq
-import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -56,24 +54,19 @@ def load_step(path: Path) -> cq.Solid:
     return as_solid(cq.importers.importStep(str(path)))
 
 
-def centre(bounds: tuple[float, float, float, float, float, float]) -> tuple[float, float, float]:
-    xmin, xmax, ymin, ymax, zmin, zmax = bounds
-    return (0.5 * (xmin + xmax), 0.5 * (ymin + ymax), 0.5 * (zmin + zmax))
-
-
-def assert_footprint(solid: cq.Solid, centre_y: float, label: str) -> None:
+def assert_outline(solid: cq.Solid, foot: outsole.FootSolid) -> None:
     bounds = outsole.bbox_tuple(solid)
     xmin, xmax, ymin, ymax, zmin, zmax = bounds
-    cx, cy, _cz = centre(bounds)
-    require(abs((xmax - xmin) - outsole.OUTER_X_MM) < TOL_MM, f"{label} x size {xmax - xmin:.4f}")
-    require(abs((ymax - ymin) - outsole.OUTER_Y_MM) < TOL_MM, f"{label} y size {ymax - ymin:.4f}")
-    require(abs(cx - outsole.CENTER_X_MM) < TOL_MM, f"{label} centre x {cx:.4f}")
-    require(abs(cy - centre_y) < TOL_MM, f"{label} centre y {cy:.4f}")
-    require(abs(zmin - outsole.Z_GROUND_MM) < TOL_MM, f"{label} ground z {zmin:.4f}")
-    require(zmax - zmin < outsole.BOX_HEIGHT_MM - 1.0, f"{label} thickness fills the 16 mm box")
+    require(abs((xmax - xmin) - foot.outline.size_x) < TOL_MM, f"{foot.side} outline x {xmax - xmin:.4f}")
+    require(abs((ymax - ymin) - foot.outline.size_y) < TOL_MM, f"{foot.side} outline y {ymax - ymin:.4f}")
+    require(abs(zmin - outsole.Z_GROUND_MM) < TOL_MM, f"{foot.side} ground z {zmin:.4f}")
+    expected = foot.mesh.size_x + 2.0 * (outsole.CLEARANCE_PER_SIDE_MM + outsole.WALL_MM)
+    require(abs(foot.outline.size_x - expected) < 1e-4, f"{foot.side} length is not mesh + wall")
+    expected_y = foot.mesh.size_y + 2.0 * (outsole.CLEARANCE_PER_SIDE_MM + outsole.WALL_MM)
+    require(abs(foot.outline.size_y - expected_y) < 1e-4, f"{foot.side} width is not mesh + wall")
     print(
-        f"OK {label} footprint {xmax - xmin:.3f} x {ymax - ymin:.3f} mm "
-        f"centre ({cx:.3f}, {cy:.3f}) z [{zmin:.3f}, {zmax:.3f}]"
+        f"OK {foot.side} outline {xmax - xmin:.3f} x {ymax - ymin:.3f} mm "
+        f"z [{zmin:.3f}, {zmax:.3f}]"
     )
 
 
@@ -94,66 +87,86 @@ def assert_floor(solid: cq.Solid, label: str) -> float:
     return thickness
 
 
-def assert_features(solid: cq.Solid, centre_y: float, stack: outsole.Stack) -> None:
-    z_cleat = 0.5 * (stack.z_floor + stack.z_top)
-    x_min = outsole.CENTER_X_MM - outsole.OUTER_X_MM / 2.0
-    x_max = outsole.CENTER_X_MM + outsole.OUTER_X_MM / 2.0
-    y_min = centre_y - outsole.OUTER_Y_MM / 2.0
-    y_max = centre_y + outsole.OUTER_Y_MM / 2.0
-    corners = (
-        (x_min + 0.4, y_min + 0.4),
-        (x_min + 0.4, y_max - 0.4),
-        (x_max - 0.4, y_min + 0.4),
-        (x_max - 0.4, y_max - 0.4),
-    )
-    for x_value, y_value in corners:
-        require(
-            solid.isInside((x_value, y_value, z_cleat)),
-            f"corner cleat missing at ({x_value:.2f}, {y_value:.2f})",
-        )
-    openings = (
-        (outsole.CENTER_X_MM, y_max - 0.4),
-        (outsole.CENTER_X_MM, y_min + 0.4),
-        (x_max - 0.4, centre_y),
-        (x_min + 0.4, centre_y),
-    )
-    for x_value, y_value in openings:
-        require(
-            not solid.isInside((x_value, y_value, z_cleat)),
-            f"pocket wall still closes ({x_value:.2f}, {y_value:.2f}); plate cannot drop in",
-        )
+def assert_wall_and_ground(solid: cq.Solid, foot: outsole.FootSolid) -> None:
+    """Wall bottom stays above the lugs, and only the plant box touches z = -26."""
+
+    plant = foot.plant
+    stack = foot.stack
+    outside_floor = outsole.Z_GROUND_MM + outsole.WALL_LIFT_MM
+    lowest_outside = 1e9
+    saw_ground = False
+    for vertex in solid.Vertices():
+        point = vertex.Center()
+        x_value = float(point.x)
+        y_value = float(point.y)
+        z_value = float(point.z)
+        outside = not plant.contains(x_value, y_value, tol=0.2)
+        if z_value < outside_floor - 0.02:
+            require(
+                plant.contains(x_value, y_value, tol=0.08),
+                f"{foot.side} ground vertex ({x_value:.3f}, {y_value:.3f}, {z_value:.3f}) "
+                "is outside the 135x76 plant box",
+            )
+            saw_ground = True
+        if outside:
+            lowest_outside = min(lowest_outside, z_value)
+    require(saw_ground, f"{foot.side} has no lug-tip vertices")
     require(
-        solid.isInside((outsole.CENTER_X_MM, centre_y, stack.z_floor - 0.4)),
-        "pocket floor is missing under the centre",
+        lowest_outside >= outside_floor - 0.02,
+        f"{foot.side} material outside the plant box reaches z {lowest_outside:.3f}, "
+        f"under the {outsole.WALL_LIFT_MM:.1f} mm wall lift",
+    )
+    wall_y = foot.outline.ymax - outsole.WALL_MM / 2.0
+    wall_z = stack.z_wall_bottom + 0.2
+    require(
+        solid.isInside((outsole.CENTER_X_MM, wall_y, wall_z)),
+        f"{foot.side} outboard wall is missing above its underside",
     )
     require(
-        not solid.isInside((outsole.CENTER_X_MM, centre_y, stack.z_floor + 0.4)),
-        "pocket void is filled at the centre",
+        not solid.isInside((outsole.CENTER_X_MM, wall_y, outsole.Z_GROUND_MM + 0.1)),
+        f"{foot.side} wall touches the lug-tip plane",
     )
-    print("OK corner cleats present and the four flats are open so the plate can drop in")
+    pocket_y = 0.5 * (foot.pocket.ymin + foot.pocket.ymax)
+    require(
+        solid.isInside((outsole.CENTER_X_MM, pocket_y, stack.z_floor - 0.3)),
+        f"{foot.side} pocket floor is missing",
+    )
+    require(
+        not solid.isInside((outsole.CENTER_X_MM, pocket_y, stack.z_floor + 0.4)),
+        f"{foot.side} pocket is filled",
+    )
+    print(
+        f"OK {foot.side} wall bottom z {lowest_outside:.3f} "
+        f"({lowest_outside - outsole.Z_GROUND_MM:.3f} mm above the lugs); "
+        "ground contact stays inside 135x76"
+    )
 
 
-def assert_mirror(left: cq.Solid, right: cq.Solid, stack: outsole.Stack) -> None:
-    require(abs(left.Volume() - right.Volume()) < 1e-3, "left/right volumes differ")
-    mismatches = 0
-    checked = 0
-    z_values = (
-        stack.z_ground + 0.4,
-        stack.z_groove + 0.3,
-        stack.z_floor - 0.3,
-        stack.z_floor + 0.6,
-        stack.z_top - 0.3,
+def assert_clearance(pair: outsole.BuiltPair) -> None:
+    for foot in (pair.left_foot, pair.right_foot):
+        for name, value in foot.clearance_mm.items():
+            require(
+                value + 1e-6 >= outsole.CLEARANCE_PER_SIDE_MM,
+                f"{foot.side} {name} clearance {value:.4f} mm",
+            )
+        print(
+            f"OK {foot.side} clearance "
+            + ", ".join(f"{name} {value:.3f} mm" for name, value in foot.clearance_mm.items())
+        )
+
+
+def assert_gaps(pair: outsole.BuiltPair) -> None:
+    require(pair.gap_zero_mm > 0.0, f"zero-stance gap {pair.gap_zero_mm:.4f} mm")
+    require(pair.gap_kit_mm > 0.0, f"kit-stance gap {pair.gap_kit_mm:.4f} mm")
+    require(
+        pair.gap_kit_mm > pair.gap_zero_mm,
+        "kit stance does not open the inner gap",
     )
-    for x_value in np.arange(-30.0, 95.0, 10.0):
-        for y_value in np.arange(-20.0, 50.0, 8.0):
-            for z_value in z_values:
-                left_in = bool(left.isInside((float(x_value), float(y_value), float(z_value))))
-                right_in = bool(right.isInside((float(x_value), float(-y_value), float(z_value))))
-                checked += 1
-                if left_in != right_in:
-                    mismatches += 1
-    require(mismatches == 0, f"mirror mismatch on {mismatches} of {checked} sample points")
-    print(f"OK mirror through XZ on {checked} sample points, volumes match")
+    print(f"OK inner gap zero stance {pair.gap_zero_mm:.4f} mm")
+    print(
+        f"OK inner gap kit stance +{outsole.KIT_STANCE_OUTWARD_M * 1000:.1f} mm/side "
+        f"{pair.gap_kit_mm:.4f} mm"
+    )
 
 
 def assert_plant_untouched() -> None:
@@ -190,28 +203,6 @@ def assert_urdf_citations() -> None:
     print("OK URDF foot meshes cited at lines 372 and 714")
 
 
-def assert_clearance(pair: outsole.BuiltPair) -> None:
-    pocket = np.array(pair.pocket_hull, dtype=np.float64)
-    left_hull = np.array(pair.left_mesh.hull, dtype=np.float64)
-    left_gap = outsole.signed_clearance_mm(left_hull, pocket)
-    require(float(left_gap.min()) > 0.29, f"left hull clearance {float(left_gap.min()):.3f} mm")
-    mirrored = pocket.copy()
-    mirrored[:, 1] *= -1.0
-    right_hull = np.array(pair.right_mesh.hull, dtype=np.float64)
-    right_gap = outsole.signed_clearance_mm(right_hull, mirrored)
-    require(float(right_gap.min()) > 0.0, f"right hull intersects the pocket ({float(right_gap.min()):.3f} mm)")
-    overhang = outsole.edge_overhang_mm(pair.left_mesh)
-    require(overhang["heel_min_x"] > 0.2, "left heel no longer overhangs the 135 mm plant box")
-    print(
-        f"OK left hull clearance {float(left_gap.min()):.3f} mm; "
-        f"right hull minimum {float(right_gap.min()):.3f} mm (mesh is not an exact mirror)"
-    )
-    print(
-        "OK left mesh overhang vs plant rect: "
-        + ", ".join(f"{name} {value:.3f} mm" for name, value in overhang.items())
-    )
-
-
 def main() -> None:
     assert_plant_untouched()
     assert_urdf_citations()
@@ -223,14 +214,14 @@ def main() -> None:
         ("right", right_step, pair.right),
     ):
         require(abs(exported.Volume() - built.Volume()) < 1.0, f"{label} STEP volume drifted from the script")
-    assert_footprint(left_step, outsole.CENTER_Y_LEFT_MM, "left STEP")
-    assert_footprint(right_step, outsole.CENTER_Y_RIGHT_MM, "right STEP")
+    assert_outline(left_step, pair.left_foot)
+    assert_outline(right_step, pair.right_foot)
     assert_floor(left_step, "left STEP")
     assert_floor(right_step, "right STEP")
-    assert_features(left_step, outsole.CENTER_Y_LEFT_MM, pair.stack)
-    assert_features(right_step, outsole.CENTER_Y_RIGHT_MM, pair.stack)
-    assert_mirror(left_step, right_step, pair.stack)
+    assert_wall_and_ground(left_step, pair.left_foot)
+    assert_wall_and_ground(right_step, pair.right_foot)
     assert_clearance(pair)
+    assert_gaps(pair)
     contact = outsole.contact_area_mm2(left_step, pair.stack.z_ground)
     planform = outsole.OUTER_X_MM * outsole.OUTER_Y_MM
     ratio = contact / planform
