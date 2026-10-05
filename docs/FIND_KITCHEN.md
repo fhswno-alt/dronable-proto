@@ -42,29 +42,29 @@ Half the forward cap, with no stand between slices, is the duty that stayed upri
 
 The world-x budget on this draft is **1.10 m**. That is still a stop, not a counter pose. The `up_z` bar, the half-cap command, and both arrival bars are unchanged.
 
-Without a reacquire, the same half-cap walk stopped at end x +0.938 m when the yellow fraction fell to 0.004 with the kitchen body still in frame (remaining 0.377 m, min up_z 0.981). This draft then tries a yaw-only reacquire: `vx = 0`, yaw trim toward the last bias, at most two tries of 2.0 s. Half-cap `vel(+0.028, yaw)` resumes only if yellow returns to at least 0.015 and the blob is in the center band (`|bias| ≤ 0.08`). `vx = 0` still runs the plant's reduced forward step, so a little +X during the yaw is the existing gait, not a path.
+Without a reacquire, the same half-cap walk stopped at end x +0.938 m when the yellow fraction fell to 0.004 with the kitchen body still in frame (remaining 0.377 m, min up_z 0.981). `vx = 0` yaw does not change heading on this plant, so a yaw-only reacquire is not used. This draft instead keeps half-cap `vel(+0.028, yaw trim)` toward the last bias for at most two tries of 2.0 s. The normal approach resumes only if yellow returns to at least 0.015 and the score is usable (`forward`, `yaw_left`, or `yaw_right`). A blob that stays lost, a kitchen that leaves the frame, `up_z` under 0.90, or the end of that budget is Prefer FAIL and sends no further `vel`.
 
 Measured phrase, "go to the kitchen", room scene, after stand:
 
 | | |
 |--|--|
-| Stop | Prefer FAIL, `stop_kind` blob. One yaw-only reacquire. The weak blob came back inside the center band while yellow stayed under 0.015, so yaw-only cannot recover it. No further `vel`. |
-| End x | **+1.031 m** (start x +0.002 m, Δx **+1.029 m**) |
-| End y, yaw | −0.008 m, +0.124 rad |
-| min up_z | **0.930** (bar 0.90, not crossed) |
-| Remaining | **0.283 m** from the torso to the kitchen geom (near face x = 1.315 m) |
+| Stop | Prefer FAIL, `stop_kind` blob. Two soft walk-yaw tries. Yellow came back above 0.015 and the normal half-cap loop resumed, then the blob was lost again. The two-try budget blocked a third try. No further `vel`. |
+| End x | **+1.024 m** (start x +0.002 m, Δx **+1.022 m**) |
+| End y, yaw | +0.052 m, +0.229 rad |
+| min up_z | **0.980** (bar 0.90, not crossed) |
+| Remaining | **0.291 m** from the torso to the kitchen geom (near face x = 1.315 m) |
 | Final blob | yellow fraction **0.000** on the settled frame. Kitchen body still in frame. |
-| Reacquires | 1 (commands `vel(0, +0.206…+0.250)`, no half-cap resume) |
+| Reacquires | 2. Every phrase command was `vx = +0.028` (yaw trim up to +0.250). `vx = 0` was not sent. |
 | Arrival | **false** |
 
-110 centered slices and 38 walking yaw trims were sent at `vx = +0.028` before the reacquire. The mid still is the first frame after Δx crossed 0.55 m (yellow 0.105, bias −0.078). 0.000 of the frame is not half, and 0.283 m is still outside the 0.25 m gap.
+111 centered slices and 50 walking yaw trims were sent at `vx = +0.028`, including the slices after yellow briefly returned. The mid still is the first frame after Δx crossed 0.55 m (yellow 0.105, bias −0.078). 0.000 of the frame is not half, and 0.291 m is still outside the 0.25 m gap. Soft walk-yaw did not keep the backsplash.
 
 ## What would count as arrival
 
 Both bars, on the settled stop frame:
 
 1. Yellow fraction ≥ 0.50. Half the frame is "most of the frame". Stand is 0.039 and this stop is 0.000, so the counter does not fill the frame.
-2. Torso-to-kitchen horizontal gap ≤ 0.25 m. That is contact range for this torso, not a room crossing. 0.283 m is still outside that bar.
+2. Torso-to-kitchen horizontal gap ≤ 0.25 m. That is contact range for this torso, not a room crossing. 0.291 m is still outside that bar.
 
 Either bar alone is not arrival. A stop inside 0.25 m with the backsplash still small would be Prefer FAIL (`close`), not arrival. The gap is read from the kitchen geom boxes so the summary can state the remaining distance. It does not choose left versus right and it is not a waypoint.
 
@@ -81,7 +81,7 @@ No further `vel` is sent when:
 - the phrase is bathroom, or any other room
 - the loaded scene is the empty walk plant
 - the kitchen body is outside the frame (including turned away)
-- the backsplash fraction is below 0.015 and the yaw-only reacquire does not bring it back to the center band
+- the backsplash fraction is below 0.015 and the soft walk-yaw reacquire does not keep it usable (two tries of `vel(+0.028, yaw trim)`, then stop)
 - the yellow is split across the left and right of the frame
 - the centroid does not sit on the kitchen body
 - `up_z` drops below 0.90

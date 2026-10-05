@@ -21,12 +21,14 @@ near +0.39 m, and the pauses never got past ~0.1 m. The up_z bar stays
 0.90. The 1.2 s hop stays in --self-test at the full forward cap. The
 world-x budget is 1.10 m, a stop, not a goal pose. If the yellow fraction
 falls below 0.015 while the kitchen body is still in frame, up to two
-yaw-only tries (vx=0, trim toward the last bias, 2 s each) may run.
-Half-cap forward resumes only if yellow returns to at least 0.015 and the
-blob is in the center band. Otherwise that is a Prefer FAIL and no further
-vel. Arrival is claimed only when the backsplash fills at least half the
-frame and the torso is within 0.25 m of the kitchen geom. Otherwise the
-summary reports end x and the remaining gap and does not say arrived.
+soft walk-yaw tries (vel(+0.028, trim toward the last bias), 2 s each)
+may run. vx=0 yaw does not change heading on this plant, so it is not
+the reacquire. Normal half-cap steering resumes only if yellow returns
+to at least 0.015 and the score is usable. Otherwise that is a Prefer
+FAIL and no further vel. Arrival is claimed only when the backsplash
+fills at least half the frame and the torso is within 0.25 m of the
+kitchen geom. Otherwise the summary reports end x and the remaining
+gap and does not say arrived.
 
 The visible signal under this lighting is the yellow backsplash. The wood
 counter's lit face does not separate from the blue cabinet, and the red
@@ -110,8 +112,9 @@ ARRIVAL_YELLOW_FRAC = 0.50
 ARRIVAL_REMAINING_M = 0.25
 PERCEPT_S = 0.40
 BUDGET_STOP = "burst budget reached; stop"
-# Dim backsplash, kitchen body still in frame. vx=0 yaw toward the last bias.
-# Not a search: two tries, 2 s each, then stop if yellow is not centered again.
+# Dim backsplash, kitchen body still in frame. Half-cap walk-yaw toward the
+# last bias. vx=0 yaw does not change heading here, so it is not used.
+# Not a search: two tries, 2 s each, then stop if yellow is still not usable.
 REACQUIRE_S = 2.0
 REACQUIRE_SLICE_S = 0.40
 MAX_REACQUIRE = 2
@@ -151,6 +154,9 @@ UNKNOWN_LINE = "refused: not a find-kitchen phrase"
 EMPTY_PHRASE_LINE = "refused: empty phrase"
 NOT_IN_FRAME_LINE = "Prefer FAIL: kitchen is not in the kit_cam frame; no motion"
 NO_PIXELS_LINE = "Prefer FAIL: kit_cam pixels do not show the backsplash; no motion"
+REACQUIRE_LOST = (
+    "Prefer FAIL: soft walk-yaw reacquire lost the backsplash; no further vel"
+)
 AMBIGUOUS_LINE = "Prefer FAIL: kitchen blob is ambiguous; no motion"
 BLOCKED_LINE = "Prefer FAIL: backsplash fills the lower center; no forward"
 HONESTY = (
@@ -621,8 +627,22 @@ def can_reacquire(score: KitchenScore) -> bool:
 
 
 def reacquire_yaw(bias: float) -> float:
-    """vx=0 yaw trim toward the last known side. Zero if that side is centered."""
+    """Yaw trim toward the last known side. Zero if that side is centered."""
     return trim_yaw(bias)
+
+
+def reacquire_command(bias: float) -> tuple[float, float]:
+    """Soft walk-yaw. Same half-cap forward as the approach, plus the trim."""
+    return (SOFT_VX, reacquire_yaw(bias))
+
+
+def yellow_usable(score: KitchenScore) -> bool:
+    """Yellow is back at the visible bar and the normal steer can use it."""
+    return (
+        score.kitchen_in_frame
+        and score.yellow_frac >= MIN_YELLOW_FRAC
+        and score.decision in ("forward", "yaw_left", "yaw_right")
+    )
 
 
 def _remember_bias(score: KitchenScore, last_bias: float) -> float:
@@ -799,12 +819,11 @@ def _hold_vel(
             last_look = now
             live = score_frame(session.model, session.data, cam.grab(session.data))
             if live.decision == "fail":
-                dim = (
-                    allow_dim
-                    and can_reacquire(live)
-                )
+                dim = allow_dim and can_reacquire(live)
                 if not dim:
                     return live.line
+            elif allow_dim and yellow_usable(live):
+                return None
             if stop_when_centered and live.decision == "forward":
                 return None
             if stop_when_centered and (
@@ -935,10 +954,11 @@ def _reacquire(
     last_bias: float,
     x0: float,
 ) -> tuple[KitchenScore, str | None]:
-    """Yaw only, toward the last bias, until yellow is centered or the budget ends.
+    """Half-cap walk-yaw toward the last bias until yellow is usable or the budget ends.
 
-    Success is yellow >= 0.015 and a center-band forward score. Anything else
-    is a Prefer FAIL and the caller sends no further vel.
+    Success resumes the normal approach. A lost blob, a kitchen that leaves
+    the frame, up_z under 0.90, or the end of the 2 s budget is a Prefer FAIL.
+    vx=0 is not used: it does not change heading on this plant.
     """
     deadline = float(session.data.time) + REACQUIRE_S
     while float(session.data.time) < deadline - 1e-9:
@@ -947,51 +967,45 @@ def _reacquire(
             return score, f"Prefer FAIL: up_z {up_z:.3f} during reacquire; stop"
         if not score.kitchen_in_frame:
             return score, "Prefer FAIL: kitchen left the frame during reacquire; no further vel"
-        if score.yellow_frac >= MIN_YELLOW_FRAC and score.decision == "forward":
+        if yellow_usable(score):
             return score, None
         if score.decision == "fail" and not can_reacquire(score):
             return score, score.line
         bias = score.bias if score.centroid_u is not None else last_bias
-        yaw = reacquire_yaw(bias)
-        if abs(yaw) < 1e-9:
-            return score, (
-                "Prefer FAIL: backsplash is centered but below the visible bar; "
-                "yaw-only cannot recover it; no further vel"
-            )
+        command = reacquire_command(bias)
         slice_s = min(REACQUIRE_SLICE_S, deadline - float(session.data.time))
         if slice_s <= 1e-6:
             break
         abort = _hold_vel(
-            session, cam, 0.0, yaw, slice_s, sent,
-            stop_when_centered=True,
+            session, cam, command[0], command[1], slice_s, sent,
+            stop_when_centered=False,
             progress_x0=x0,
             progress_cap_m=PROGRESS_STOP_M,
             allow_dim=True,
         )
         score = score_frame(session.model, session.data, cam.grab(session.data))
-        if score.yellow_frac >= MIN_YELLOW_FRAC and score.decision == "forward":
+        if yellow_usable(score):
             return score, None
         if abort == BUDGET_STOP:
             return score, abort
         if abort and (
             abort.startswith("fault:")
             or "up_z" in abort
-            or "crossed" in abort
             or not score.kitchen_in_frame
         ):
             return score, abort
         if abort and score.decision == "fail" and not can_reacquire(score):
             return score, abort
     return score, (
-        "Prefer FAIL: yaw-only reacquire budget exhausted; "
-        "yellow did not return centered; no further vel"
+        "Prefer FAIL: walk-yaw reacquire budget exhausted; "
+        "yellow did not return; no further vel"
     )
 
 
 def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
     """Half-cap slices while the backsplash stays valid, with a yaw trim if it drifts.
 
-    A dim yellow with the kitchen still in frame gets a short vx=0 reacquire.
+    A dim yellow with the kitchen still in frame gets a short half-cap walk-yaw.
     The gait stays in move across a forward slice. Stop is the budget, a failed
     reacquire, or another Prefer FAIL. up_z under 0.90 stops. That bar is not lowered.
     """
@@ -1040,7 +1054,10 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
                     stop_kind = _abort_kind(fail)
                     break
                 continue
-            note = choice.line
+            if choice.kind == "blob" and can_reacquire(score) and reacquires >= MAX_REACQUIRE:
+                note = REACQUIRE_LOST
+            else:
+                note = choice.line
             stop_kind = choice.kind
             break
         command = correction_command(score)
@@ -1076,7 +1093,10 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
                 break
             continue
         if abort:
-            note = abort
+            if can_reacquire(score) and reacquires >= MAX_REACQUIRE:
+                note = REACQUIRE_LOST
+            else:
+                note = abort
             stop_kind = _abort_kind(abort)
             break
     if mid_image is None and (forward_bursts + yaw_corrections) > 1:
@@ -1222,10 +1242,8 @@ def _commands_legal(sent: list[SentVel], *, allow_walk_yaw: bool = False) -> str
         if command.vx < 0.0:
             return "finder sent reverse"
         if allow_walk_yaw:
-            half = abs(command.vx - SOFT_VX) <= 1e-9
-            yaw_only = abs(command.vx) <= 1e-9 and abs(command.yaw_rate) > 1e-9
-            if not half and not yaw_only:
-                return "approach vel is half-cap forward or a yaw-only reacquire"
+            if abs(command.vx - SOFT_VX) > 1e-9:
+                return "approach forward is half the bus cap"
             continue
         if command.vx != 0.0 and command.yaw_rate != 0.0:
             return "yaw and forward were sent together"
@@ -1331,6 +1349,14 @@ def test_approach_policy() -> list[str]:
     _expect(reacquire_yaw(-0.80) > 0.0, "left bias yaws left", failures)
     _expect(reacquire_yaw(0.80) < 0.0, "right bias yaws right", failures)
     _expect(reacquire_yaw(0.0) == 0.0, "centered dim has no yaw side", failures)
+    left_cmd = reacquire_command(-0.80)
+    _expect(
+        abs(left_cmd[0] - SOFT_VX) < 1e-9 and left_cmd[1] > 0.0,
+        f"reacquire is half-cap walk-yaw {left_cmd}",
+        failures,
+    )
+    _expect(yellow_usable(centered), "centered yellow is usable", failures)
+    _expect(not yellow_usable(dim), "dim yellow is not usable", failures)
     # Half the frame but still far: not arrival, keep steering.
     far_fill = approach_choice(
         full, dx_m=0.20, up_z=0.97, yaw_corrections=0,
