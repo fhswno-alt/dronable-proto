@@ -73,7 +73,9 @@ Clamps (what we actually apply — not the raw request):
 Gait: scripts/walk_gait_ainex.py gait_targets. Forward uses a shorter cadence
 than Gate D CSF50 (that basin crawled at ~1 cm/s): T=0.55 s, hip amp 0.24 rad,
 DS=0.1375 s, stance-slip damper 25 N/(m/s) instead of CSF50's 115. Lateral
-COM shift is 0.16 rad (was 0.275) so the torso does not waddle as hard.
+COM shift is 0.10 rad on straight and left. Reverse, and a right yaw in
+the first 12 s, stay at 0.16 rad. 0.10 on those two tips the cold right
+turn and puts the long retreat under up_z 0.90.
 Forward swing adds LOOK_KNEE_LIFT at mid-swing. While yaw is near zero the
 contralateral shoulder is slewed up to LOOK_ARM_SCALE_STRAIGHT; a yaw command
 slews it back to LOOK_ARM_SCALE. Both stay inside the existing ±0.7 Nm clip.
@@ -212,9 +214,19 @@ TURN_STEP_ASYM_ESTABLISHED = 0.24
 TURN_RIGHT_SWING_YAW_SCALE = 0.60
 # Forward step look. Reverse does not take the knee lift or the arm scale:
 # shortening DS or raising swing dorsiflex tipped the retreat under up_z 0.90.
-# COM shift was 0.275 rad and read as a toy waddle. 0.16 rad still unweights
-# the swing leg enough for the extra knee flexion to clear the sole.
+# COM shift was 0.275 rad and read as a toy waddle. 0.16 rad is the shift
+# that keeps a cold right turn and the long retreat upright. Straight-walk
+# roll at 0.16 is still about 18 deg peak-to-peak. 0.10 rad drops that to
+# about 11 deg on a straight walk and keeps cold left / nav-left upright,
+# but 0.10 on every step tips the cold right turn (min up_z −1) and the
+# long retreat falls to min up_z 0.890. Straight, left, and a right arc
+# after the first 12 s use 0.10 immediately. A right yaw in that first
+# 12 s, and reverse, stay at 0.16. Slewing 0.16 down through the approach
+# tipped nav-left. 0.12 does not cut the roll. 0.11 and 0.08 tip. Stance
+# slip on the 0.10 walk is higher (median about 0.024 m/s versus 0.016).
+# Sole median falls to about 2.0 cm; that is not a clearance claim.
 LOOK_COM_SHIFT = 0.16
+LOOK_COM_SHIFT_EASY = 0.10
 # Added at mid-swing on top of KNEE_SWING, forward only. Ankle pitch moves
 # with the knee so the sole stays roughly flat while the leg shortens.
 LOOK_KNEE_LIFT = 0.38
@@ -236,6 +248,20 @@ LOOK_TOE_RIGHT = 0.12
 # airborne toe and can spin past the support box. A shorter right step keeps
 # the cold-start right arc and the post-straight right arc upright.
 LOOK_RIGHT_STEP_ASYM = 0.10
+# Shoulder cosine. Same peak as the hip-locked arm, so the scale-11 / 3.4
+# slew still sets the size. Left off: mix 0.5 keeps cold left and nav-left
+# upright (arc +61.5 / +75.5) but nav-multi's chained right goes to about
+# −144 deg and tips. Mix 1.0 stretches the approach to about +1.14 m.
+# Reverse does not take it.
+LOOK_ARM_SMOOTH = False
+LOOK_ARM_PHASE = 0.0
+# 0 keeps the hip-locked shoulder. 1 is the cosine.
+LOOK_ARM_MIX = 0.50
+# Blend the hip/ankle pitch toward a same-amplitude cosine. 0 keeps the
+# piecewise CPG. 0.15 stays upright on a single left arc (+48 deg cold,
+# +57 deg nav-left) and does not cut torso roll. Not stacked on the 0.10
+# shift. Reverse does not take it.
+LOOK_HIP_BLEND = 0.0
 # vx=0 and yaw!=0: reduced forward CPG so a step exists to yaw on.
 INPLACE_YAW_AMP = 0.35
 # Swing residual. Forward only, after CP swing and stance VIK. Defaults off.
@@ -789,23 +815,67 @@ def gait_amp_and_dir(report: TickReport) -> tuple[float, int]:
     return 0.0, 0
 
 
+def _smooth_shoulders(qdes: dict[str, float], phi: float, amp: float) -> None:
+    """Mix the hip-locked shoulder toward a same-peak cosine.
+
+    Peak matches gait_targets' -0.22 * (fwd - bias) at this amplitude, so
+    LOOK_ARM_SCALE and the straight-walk slew still set the size. Mix 0 is
+    the piecewise arm. Mix 1 drops the double-support freeze.
+    """
+    mix = max(0.0, min(1.0, LOOK_ARM_MIX))
+    piece_l = qdes.get("l_sho_pitch", 0.0) * LOOK_ARM_SCALE
+    piece_r = qdes.get("r_sho_pitch", 0.0) * LOOK_ARM_SCALE
+    raw = 0.22 * float(wg.HIP_PITCH_AMP) * max(0.0, amp)
+    c = math.cos(2.0 * math.pi * (phi + LOOK_ARM_PHASE))
+    cos_l = -raw * c * LOOK_ARM_SCALE
+    cos_r = raw * c * LOOK_ARM_SCALE
+    qdes["l_sho_pitch"] = (1.0 - mix) * piece_l + mix * cos_l
+    qdes["r_sho_pitch"] = (1.0 - mix) * piece_r + mix * cos_r
+
+
+def _blend_hip_timing(qdes: dict[str, float], phi: float, amp: float) -> None:
+    """Pull hip and ankle pitch a fraction of the way toward a cosine.
+
+    Ankle moves with the hip so the sole attitude stays the one the CPG
+    already commanded. Knee is left for the swing lift.
+    """
+    if LOOK_HIP_BLEND <= 0.0 or amp <= 0.0:
+        return
+    blend = max(0.0, min(1.0, LOOK_HIP_BLEND))
+    amp_hip = float(wg.HIP_PITCH_AMP) * amp
+    for side, pref, hip_sign in (("L", "l_", -1.0), ("R", "r_", 1.0)):
+        leg_phase = wg.phase_leg(phi, side)
+        sine_fwd = float(wg.HIP_BIAS_FWD) + amp_hip * math.cos(2.0 * math.pi * leg_phase)
+        hip_key = f"{pref}hip_pitch"
+        cur_fwd = hip_sign * qdes.get(hip_key, 0.0)
+        delta = blend * (sine_fwd - cur_fwd)
+        qdes[hip_key] = _clamp(qdes.get(hip_key, 0.0) + hip_sign * delta, -1.5, 1.5)
+        ank_key = f"{pref}ank_pitch"
+        qdes[ank_key] = _clamp(qdes.get(ank_key, 0.0) + hip_sign * delta, -1.2, 1.2)
+
+
 def style_forward_step(
-    qdes: dict[str, float], gait_t: float, yaw_rate: float,
+    qdes: dict[str, float], gait_t: float, yaw_rate: float, amp: float = 0.70,
 ) -> None:
     """Forward-only step look. Does not run on reverse or on stand.
 
-    Knee lift shortens the swing leg. Shoulder scale is the contralateral
-    term already in gait_targets. Hip yaw is 0 on the planted foot and toes
+    Knee lift shortens the swing leg. Shoulders are a cosine at the same
+    peak as the contralateral hip term when LOOK_ARM_SMOOTH is set, otherwise
+    that term scaled in place. Hip yaw is 0 on the planted foot and toes
     the airborne foot into the turn, then holds that angle into touchdown.
     """
-    qdes["l_sho_pitch"] = qdes.get("l_sho_pitch", 0.0) * LOOK_ARM_SCALE
-    qdes["r_sho_pitch"] = qdes.get("r_sho_pitch", 0.0) * LOOK_ARM_SCALE
+    phi = (gait_t / max(float(wg.GAIT_T), 1e-6)) % 1.0
+    _blend_hip_timing(qdes, phi, amp)
+    if LOOK_ARM_SMOOTH:
+        _smooth_shoulders(qdes, phi, amp)
+    else:
+        qdes["l_sho_pitch"] = qdes.get("l_sho_pitch", 0.0) * LOOK_ARM_SCALE
+        qdes["r_sho_pitch"] = qdes.get("r_sho_pitch", 0.0) * LOOK_ARM_SCALE
     qdes["l_el_pitch"] = 0.32 + 0.10 * abs(qdes["l_sho_pitch"])
     qdes["r_el_pitch"] = 0.32 + 0.10 * abs(qdes["r_sho_pitch"])
     ds_frac = max(0.08, min(0.55, float(wg.DS_S) / max(float(wg.GAIT_T), 1e-3)))
     ds_end = 0.50 + ds_frac
     swing_len = max(0.18, 1.0 - ds_end)
-    phi = (gait_t / max(float(wg.GAIT_T), 1e-6)) % 1.0
     if LOOK_KNEE_LIFT > 0.0:
         for side, knee_sign, ank_sign in (("L", 1.0, 1.0), ("R", -1.0, -1.0)):
             leg_phase = wg.phase_leg(phi, side)
@@ -1103,6 +1173,7 @@ class SteerSession:
         self.q_stand = wg.gait_targets(0.0, False, 0.0)
         self.gait_t = 0.0
         self._arm_scale = LOOK_ARM_SCALE
+        self._com_amp = LOOK_COM_SHIFT
         self._gait_live = False
         self._blend = 0.0
         self._q_live: dict[str, float] | None = None
@@ -1220,6 +1291,7 @@ class SteerSession:
                 self._gait_live = True
             else:
                 self.gait_t += CTRL_DT
+            self._slew_com_shift(direction, yaw_rate)
             qdes = wg.gait_targets(self.gait_t, True, amp)
             step_asym = TURN_STEP_ASYM
             if yaw_rate < -1e-3:
@@ -1234,6 +1306,8 @@ class SteerSession:
             self._blend = 1.0
         else:
             self._gait_live = False
+            self._com_amp = LOOK_COM_SHIFT
+            wg.COM_SHIFT_AMP = LOOK_COM_SHIFT
             qdes = self._settle_targets()
         yaw_cmd = self._hip_yaw(yaw_rate)
         if yaw_rate > 1e-3 and direction >= 0:
@@ -1246,11 +1320,27 @@ class SteerSession:
             scale = swing_hip_yaw_scale(yaw_rate, direction, wg.phase_leg(phi, side))
             qdes[name] = qdes.get(name, 0.0) + scale * yaw_cmd
         if direction > 0 and amp > 0.02:
-            style_forward_step(qdes, self.gait_t, yaw_rate)
+            style_forward_step(qdes, self.gait_t, yaw_rate, amp)
             self._slew_arm_scale(qdes, yaw_rate)
         else:
             self._arm_scale = LOOK_ARM_SCALE
         return qdes
+
+    def _slew_com_shift(self, direction: int, yaw_rate: float) -> None:
+        """Less lateral lean except where 0.10 already failed.
+
+        Straight, left, and a right arc after the walk is established stay
+        at 0.10 (nav-right and nav-multi did). A right yaw in the first
+        ESTABLISHED_GAIT_S, and every reverse step, stay at 0.16. Slewing
+        0.16 down to 0.10 through the approach tipped nav-left, so the
+        choice is immediate. Not a torque change.
+        """
+        cold_right = yaw_rate < -1e-3 and self.gait_t < ESTABLISHED_GAIT_S
+        if direction < 0 or cold_right:
+            self._com_amp = LOOK_COM_SHIFT
+        else:
+            self._com_amp = LOOK_COM_SHIFT_EASY
+        wg.COM_SHIFT_AMP = self._com_amp
 
     def _slew_arm_scale(self, qdes: dict[str, float], yaw_rate: float) -> None:
         """Larger contralateral swing while going straight. Yaw keeps 3.4.
@@ -1851,7 +1941,9 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
         f"Forward swing adds {LOOK_KNEE_LIFT:.2f} rad of knee flexion at mid-swing "
         f"and scales contralateral shoulder pitch by {LOOK_ARM_SCALE_STRAIGHT:.1f} "
         f"while going straight, slewed back to {LOOK_ARM_SCALE:.1f} while yaw is commanded. "
-        f"Lateral COM shift is {LOOK_COM_SHIFT:.2f} rad. "
+        f"Lateral COM shift is {LOOK_COM_SHIFT_EASY:.2f} rad on straight and left, "
+        f"and {LOOK_COM_SHIFT:.2f} rad on reverse and on a right yaw in the first "
+        f"{ESTABLISHED_GAIT_S:.0f} s. "
         "Reverse does not take the knee lift or the arm scale. "
         f"Measured motion Δx={dx_fwd:+.3f} m, mean body vx={mean_vx:+.3f} m/s "
         f"(not the command). Straight-forward net yaw drift="
@@ -2185,6 +2277,11 @@ def test_bus() -> list[str]:
     _expect(report.mode == "fault" and report.applied_vx == 0.0, "fault tick not zero", failures)
     apply_frozen_forward_gait()
     _expect(wg.COM_SHIFT_AMP == LOOK_COM_SHIFT, "forward COM shift left the look basin", failures)
+    _expect(
+        0.0 < LOOK_COM_SHIFT_EASY < LOOK_COM_SHIFT,
+        "easy COM shift is not below the right/reverse shift",
+        failures,
+    )
     _expect(wg.DS_S == 0.1375 and wg.KNEE_SWING == 0.80, "reverse-safe knee/DS moved", failures)
     _expect(VX_FWD_CAP == 0.056 and VX_BACK_CAP == 0.032 and YAW_RATE_CAP == 0.25, "caps moved", failures)
     gait_t = 0.85 * float(wg.GAIT_T)
