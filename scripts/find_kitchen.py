@@ -7,30 +7,22 @@ kitchen. The steer is stand / stop / vel on the CommandBus in
 scripts/steer_walk.py. Caps stay +0.056 / -0.032 m/s and yaw ±0.25 rad/s.
 vel is resent at 10 Hz. 200 ms of silence stands.
 
-This is not a map, not SLAM, and not an arrival. The pixel blob picks yaw
-left, yaw right, or a forward burst. Named kitchen / table / chair boxes
-are a sim honesty check that the blob sits on the kitchen. They are not
-waypoints and they are not given to a planner. If the backsplash is missing,
-split, or off the kitchen body, the finder sends no vel.
+This is not SLAM and not an arrival. The phrase path paints kit_cam into
+the explore map and steers from query_kitchen_like_yellow() and
+frontier_cells(). If that log has no kitchen-like yellow, it sends no
+vel. A live blob is the arrival fraction, not the command. Named
+kitchen / table / chair boxes stay a sim honesty check. They are not
+waypoints and they are not given to the map query.
 
-The phrase path re-scores kit_cam every 0.40 s and walks at half the
-forward cap (0.028 m/s). A centered blob is that vx with yaw 0. A side blob
-adds a yaw trim scaled by the bias. Full-cap slices and short slices with
-stand pauses between them are not this path: the first crossed up_z 0.90
-near +0.39 m, and the pauses never got past ~0.1 m. The up_z bar stays
-0.90. The 1.2 s hop stays in --self-test at the full forward cap. The
-world-x budget is 1.10 m, a stop, not a goal pose. While yellow is still
-usable but has fallen from its peak toward 0.015, forward-only slices
-stop at |bias| 0.04 instead of 0.08. The command is still half-cap
-walk-yaw, vel(+0.028, trim), so the blob is recentered before it hits
-zero. vx=0 yaw does not change heading on this plant. If yellow then
-falls below 0.015 while the kitchen body is still in frame, up to two
-soft walk-yaw tries (2 s each) may run. Normal steering resumes only if
-yellow returns to at least 0.015 and the score is usable. Otherwise
-that is a Prefer FAIL and no further vel. Arrival is claimed only when
-the backsplash fills at least half the frame and the torso is within
-0.25 m of the kitchen geom. Otherwise the summary reports end x and
-the remaining gap and does not say arrived.
+The last-mile walks at half the forward cap (0.028 m/s), because a
+full-cap finder burst crossed up_z 0.90. Yaw comes from the logged
+camera ray or the frontier nearest that ray, inside ±0.25. vx=0 yaw
+does not change heading on this plant and is not sent. The up_z bar
+stays 0.90. The 1.2 s hop stays in --self-test at the full forward cap.
+The world-x budget is 1.10 m, a stop, not a goal pose. Arrival is
+claimed only when the backsplash fills at least half the frame and the
+torso is within 0.25 m of the kitchen geom. Otherwise the summary
+reports end x and the remaining gap and does not say arrived.
 
 The visible signal under this lighting is the yellow backsplash. The wood
 counter's lit face does not separate from the blue cabinet, and the red
@@ -69,6 +61,7 @@ _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
+import explore_map  # noqa: E402
 import steer_walk  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -164,18 +157,22 @@ UNKNOWN_LINE = "refused: not a find-kitchen phrase"
 EMPTY_PHRASE_LINE = "refused: empty phrase"
 NOT_IN_FRAME_LINE = "Prefer FAIL: kitchen is not in the kit_cam frame; no motion"
 NO_PIXELS_LINE = "Prefer FAIL: kit_cam pixels do not show the backsplash; no motion"
+MAP_NO_YELLOW = (
+    "Prefer FAIL: explore map has no kitchen-like yellow yet; no motion"
+)
 REACQUIRE_LOST = (
     "Prefer FAIL: soft walk-yaw reacquire lost the backsplash; no further vel"
 )
 AMBIGUOUS_LINE = "Prefer FAIL: kitchen blob is ambiguous; no motion"
 BLOCKED_LINE = "Prefer FAIL: backsplash fills the lower center; no forward"
 HONESTY = (
-    "Vision-reactive bursts from kit_cam. Not SLAM, not a map, "
-    "not a waypoint planner, and not an arrival unless the backsplash "
-    "fills at least half the frame and the torso is within 0.25 m of the "
-    "kitchen geom. The yellow blob picks yaw and forward. "
-    "The kitchen geom distance is only the arrival bar and the reported gap. "
-    "A miss, a split blob, a tip, or an empty floor stops with no further vel."
+    "Last-mile steer from the explore map query. Not SLAM, not a waypoint, "
+    "and not an arrival unless the backsplash fills at least half the frame "
+    "and the torso is within 0.25 m of the kitchen geom. "
+    "query_kitchen_like_yellow() and frontier_cells() pick the half-cap vel. "
+    "A live blob is the arrival fraction, not the command. "
+    "No yellow in the map log sends no vel. "
+    "The kitchen geom distance is only the arrival bar and the reported gap."
 )
 
 
@@ -269,6 +266,11 @@ class Approach:
     yaw_corrections: int
     reacquires: int
     fade_recenters: int
+    map_yellow_seen: bool = False
+    map_yellow_fraction: float = 0.0
+    map_bearing_rad: float | None = None
+    map_frontier_queries: int = 0
+    map_command_source: str = "none"
 
 
 def _md5(path: Path) -> str:
@@ -691,7 +693,7 @@ def correction_command(
 
 
 BurstAction = Literal["forward", "yaw_left", "yaw_right", "stop"]
-BurstKind = Literal["steer", "budget", "tip", "blob", "yaw_limit", "close", "arrival"]
+BurstKind = Literal["steer", "budget", "tip", "blob", "yaw_limit", "close", "arrival", "no_yellow"]
 
 
 @dataclass(frozen=True)
@@ -784,6 +786,9 @@ def _within_caps(vx: float, yaw_rate: float) -> bool:
 class KitCam:
     def __init__(self, model: mj.MjModel) -> None:
         self.renderer = mj.Renderer(model, height=HEIGHT, width=WIDTH)
+        self.cam_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_CAMERA, "kit_cam")
+        if self.cam_id < 0:
+            raise RuntimeError("missing kit_cam")
 
     def grab(self, data: mj.MjData) -> np.ndarray:
         self.renderer.update_scene(data, camera="kit_cam")
@@ -791,6 +796,17 @@ class KitCam:
         if frame.shape != (HEIGHT, WIDTH, 3):
             raise RuntimeError(f"kit_cam frame shape {frame.shape}")
         return frame
+
+    def grab_view(
+        self,
+        model: mj.MjModel,
+        data: mj.MjData,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+        frame = self.grab(data)
+        cam_pos = np.asarray(data.cam_xpos[self.cam_id], dtype=np.float64).copy()
+        cam_mat = np.asarray(data.cam_xmat[self.cam_id], dtype=np.float64).reshape(3, 3).copy()
+        fovy = float(model.cam_fovy[self.cam_id])
+        return frame, cam_pos, cam_mat, fovy
 
     def close(self) -> None:
         self.renderer.close()
@@ -815,6 +831,7 @@ def _hold_vel(
     progress_x0: float | None = None,
     progress_cap_m: float | None = None,
     allow_dim: bool = False,
+    ignore_blob: bool = False,
 ) -> str | None:
     """Resend one vel at 10 Hz. Stop early if the kitchen leaves the frame.
 
@@ -850,7 +867,7 @@ def _hold_vel(
         if (now - last_look) >= PERCEPT_S:
             last_look = now
             live = score_frame(session.model, session.data, cam.grab(session.data))
-            if live.decision == "fail":
+            if live.decision == "fail" and not ignore_blob:
                 dim = allow_dim and can_reacquire(live)
                 if not dim:
                     return live.line
@@ -1034,17 +1051,86 @@ def _reacquire(
     )
 
 
-def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
-    """Half-cap slices while the backsplash stays valid, with a yaw trim if it drifts.
+def _robot_pose(session: steer_walk.SteerSession) -> explore_map.RobotPose:
+    return explore_map.RobotPose(
+        t=float(session.data.time),
+        x=float(session.data.qpos[0]),
+        y=float(session.data.qpos[1]),
+        yaw=session.yaw(),
+    )
 
-    A dim yellow with the kitchen still in frame gets a short half-cap walk-yaw.
-    Before that, a usable yellow that is falling from its peak recenters with
-    the same walk-yaw as soon as |bias| leaves 0.04. The gait stays in move
-    across a forward slice. Stop is the budget, a failed reacquire, or another
-    Prefer FAIL. up_z under 0.90 stops. That bar is not lowered.
+
+def _integrate_view(
+    feature_map: explore_map.ExploreMap,
+    session: steer_walk.SteerSession,
+    cam: KitCam,
+) -> tuple[np.ndarray, explore_map.YellowQuery, int]:
+    frame, cam_pos, cam_mat, fovy = cam.grab_view(session.model, session.data)
+    pose = _robot_pose(session)
+    feature_map.integrate(pose, frame, cam_pos, cam_mat, fovy)
+    yellow = feature_map.query_kitchen_like_yellow()
+    frontiers = feature_map.frontier_cells(pose.x, pose.y)
+    return frame, yellow, len(frontiers)
+
+
+def _last_mile_stop(
+    score: KitchenScore,
+    *,
+    dx_m: float,
+    up_z: float,
+    forward_bursts: int,
+    remaining_m: float,
+) -> ApproachChoice | None:
+    """Safety stops. The live blob does not choose left versus right."""
+    if up_z < UP_Z_ABORT:
+        return ApproachChoice(
+            "stop",
+            "tip",
+            f"Prefer FAIL: up_z {up_z:.3f} is below {UP_Z_ABORT:.2f}; stop",
+        )
+    if arrival_bars(score.yellow_frac, remaining_m):
+        return ApproachChoice(
+            "stop",
+            "arrival",
+            (
+                "arrival bars met: backsplash fills at least half the frame "
+                f"and torso-to-kitchen is {remaining_m:.3f} m"
+            ),
+        )
+    if remaining_m <= ARRIVAL_REMAINING_M:
+        return ApproachChoice(
+            "stop",
+            "close",
+            (
+                "Prefer FAIL: torso is within "
+                f"{ARRIVAL_REMAINING_M:.2f} m of the kitchen geom "
+                "but the backsplash does not fill the frame; not arrival"
+            ),
+        )
+    if dx_m >= PROGRESS_STOP_M or forward_bursts >= MAX_FORWARD_BURSTS:
+        return ApproachChoice(
+            "stop",
+            "budget",
+            (
+                f"burst budget {dx_m:.3f} m reached; stop; "
+                "this is not a counter pose and not arrival"
+            ),
+        )
+    return None
+
+
+def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
+    """Half-cap slices from the explore-map query.
+
+    The stand frame is painted into the map. If query_kitchen_like_yellow()
+    is false, this is Prefer FAIL and no vel is sent. If yellow was logged,
+    each slice calls that query and frontier_cells() and sends the result.
+    A lost live blob does not replace that command. Arrival still needs the
+    live yellow fraction and the torso gap. up_z under 0.90 stops.
     """
+    feature_map = explore_map.ExploreMap.empty()
     _hold_stand(session, STAND_S)
-    before = cam.grab(session.data)
+    before, yellow, _frontier_count = _integrate_view(feature_map, session, cam)
     score = score_frame(session.model, session.data, before)
     stand_score = score
     x0 = float(session.data.qpos[0])
@@ -1055,91 +1141,61 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
     yaw_corrections = 0
     reacquires = 0
     fade_recenters = 0
-    last_bias = stand_score.bias
-    peak_yellow = stand_score.yellow_frac
-    note = stand_score.line
-    stop_kind: BurstKind = "blob"
-    if stand_score.decision == "fail":
+    map_queries = 1
+    note = MAP_NO_YELLOW if not yellow.seen else yellow.note
+    stop_kind: BurstKind = "no_yellow"
+    if not yellow.seen:
         return _approach_result(
             session, cam, before, before, stand_score, stand_score, sent, note,
             stop_kind, x0, forward_bursts, yaw_corrections, False, reacquires,
-            fade_recenters,
+            fade_recenters, yellow, map_queries,
         )
     while True:
         dx = float(session.data.qpos[0]) - x0
         up_z = session.samples[-1].up_z if session.samples else 1.0
         remaining, _near = _gap(session.model, session.data)
-        choice = approach_choice(
+        choice = _last_mile_stop(
             score,
             dx_m=dx,
             up_z=up_z,
-            yaw_corrections=yaw_corrections,
             forward_bursts=forward_bursts,
             remaining_m=remaining,
         )
-        if choice.action == "stop":
-            if (
-                choice.kind == "blob"
-                and can_reacquire(score)
-                and reacquires < MAX_REACQUIRE
-            ):
-                reacquires += 1
-                score, fail = _reacquire(session, cam, sent, score, last_bias, x0)
-                last_bias = _remember_bias(score, last_bias)
-                peak_yellow = max(peak_yellow, score.yellow_frac)
-                if fail:
-                    note = fail
-                    stop_kind = _abort_kind(fail)
-                    break
-                continue
-            if choice.kind == "blob" and can_reacquire(score) and reacquires >= MAX_REACQUIRE:
-                note = REACQUIRE_LOST
-            else:
-                note = choice.line
+        if choice is not None:
+            note = choice.line
             stop_kind = choice.kind
             break
-        fading = yellow_usable(score) and yellow_fading(score.yellow_frac, peak_yellow)
-        command = correction_command(score, center_bias=center_bias_for(score.yellow_frac, peak_yellow))
+        pose = _robot_pose(session)
+        command = explore_map.last_mile_from_map(feature_map, pose.x, pose.y, pose.yaw)
+        map_queries += 1
         if command is None:
-            note = "Prefer FAIL: no bus command for this score"
-            stop_kind = "blob"
+            note = MAP_NO_YELLOW
+            stop_kind = "no_yellow"
             break
-        if abs(command[1]) > 1e-9:
+        if abs(command.yaw_rate) > 1e-9:
             yaw_corrections += 1
-            if fading:
-                fade_recenters += 1
-            hold_s = BURST_YAW_S
         else:
             forward_bursts += 1
-            hold_s = BURST_FORWARD_S
         abort = _hold_vel(
-            session, cam, command[0], command[1], hold_s, sent,
+            session, cam, command.vx, command.yaw_rate, BURST_FORWARD_S, sent,
             stop_when_centered=False,
             progress_x0=x0,
             progress_cap_m=PROGRESS_STOP_M,
+            ignore_blob=True,
         )
-        score = score_frame(session.model, session.data, cam.grab(session.data))
-        last_bias = _remember_bias(score, last_bias)
-        peak_yellow = max(peak_yellow, score.yellow_frac)
+        _frame, yellow, _frontiers = _integrate_view(feature_map, session, cam)
+        map_queries += 1
+        score = score_frame(session.model, session.data, _frame)
         moved = float(session.data.qpos[0]) - x0
         if mid_image is None and moved >= (PROGRESS_STOP_M * 0.5):
-            mid_image = cam.grab(session.data)
+            mid_image = _frame
             mid_score = score
-        if abort and can_reacquire(score) and reacquires < MAX_REACQUIRE:
-            reacquires += 1
-            score, fail = _reacquire(session, cam, sent, score, last_bias, x0)
-            last_bias = _remember_bias(score, last_bias)
-            peak_yellow = max(peak_yellow, score.yellow_frac)
-            if fail:
-                note = fail
-                stop_kind = _abort_kind(fail)
-                break
-            continue
-        if abort:
-            if can_reacquire(score) and reacquires >= MAX_REACQUIRE:
-                note = REACQUIRE_LOST
-            else:
-                note = abort
+        if abort == BUDGET_STOP:
+            note = abort
+            stop_kind = "budget"
+            break
+        if abort and (abort.startswith("fault:") or "up_z" in abort):
+            note = abort
             stop_kind = _abort_kind(abort)
             break
     if mid_image is None and (forward_bursts + yaw_corrections) > 1:
@@ -1151,7 +1207,7 @@ def run_approach(session: steer_walk.SteerSession, cam: KitCam) -> Approach:
     return _approach_result(
         session, cam, before, mid_image, stand_score, mid_score, sent, note,
         stop_kind, x0, forward_bursts, yaw_corrections, stop_kind == "arrival",
-        reacquires, fade_recenters,
+        reacquires, fade_recenters, yellow, map_queries,
     )
 
 
@@ -1171,6 +1227,8 @@ def _approach_result(
     arrival_candidate: bool,
     reacquires: int,
     fade_recenters: int,
+    yellow: explore_map.YellowQuery,
+    map_queries: int,
 ) -> Approach:
     session.bus.stop(float(session.data.time))
     _hold_stand(session, SETTLE_S)
@@ -1222,6 +1280,11 @@ def _approach_result(
         yaw_corrections=yaw_corrections,
         reacquires=reacquires,
         fade_recenters=fade_recenters,
+        map_yellow_seen=yellow.seen,
+        map_yellow_fraction=yellow.max_fraction,
+        map_bearing_rad=yellow.bearing_rad,
+        map_frontier_queries=map_queries,
+        map_command_source="map" if yellow.seen else "none",
     )
 
 
@@ -1640,6 +1703,57 @@ def test_biased_yaw() -> list[str]:
     return failures
 
 
+def test_map_query() -> list[str]:
+    """Logged yellow is steered from the map. No yellow is Prefer FAIL with no vel."""
+    failures: list[str] = []
+    empty = explore_map.ExploreMap.empty()
+    _expect(
+        explore_map.last_mile_from_map(empty, 0.0, 0.0, 0.0) is None,
+        "empty map produced a last-mile command",
+        failures,
+    )
+    logged = explore_map.ExploreMap.empty()
+    logged.yellow_max_fraction = 0.08
+    logged.yellow_bearing_rad = 0.20
+    logged.yellow_elevation_rad = 0.40
+    command = explore_map.last_mile_from_map(logged, 0.0, 0.0, 0.0)
+    _expect(command is not None, "previously logged yellow produced no command", failures)
+    if command is not None:
+        _expect(abs(command.vx - SOFT_VX) < 1e-9, f"map command vx {command.vx}", failures)
+        _expect(command.yaw_rate > 0.0, f"bearing +0.20 should yaw left, got {command.yaw_rate}", failures)
+        _expect(abs(command.vx) > 1e-9, "map command was vx=0 yaw", failures)
+    plant = steer_walk.SteerSession(video=False)
+    plant_cam = KitCam(plant.model)
+    try:
+        missed = run_approach(plant, plant_cam)
+    finally:
+        plant_cam.close()
+    _expect(not missed.sent, f"plant sent vel {missed.sent[:1]}", failures)
+    _expect(missed.stop_kind == "no_yellow", f"plant stop {missed.stop_kind} {missed.note}", failures)
+    _expect(not missed.map_yellow_seen, "plant map logged yellow", failures)
+    _expect(not missed.arrival, "plant claimed arrival", failures)
+    room = steer_walk.SteerSession(video=False, scene_xml=ROOM_XML)
+    room_cam = KitCam(room.model)
+    try:
+        _hold_stand(room, STAND_S)
+        frame, cam_pos, cam_mat, fovy = room_cam.grab_view(room.model, room.data)
+        feature_map = explore_map.ExploreMap.empty()
+        pose = _robot_pose(room)
+        feature_map.integrate(pose, frame, cam_pos, cam_mat, fovy)
+        yellow = feature_map.query_kitchen_like_yellow()
+        frontiers = feature_map.frontier_cells(pose.x, pose.y)
+        aimed = explore_map.last_mile_from_map(feature_map, pose.x, pose.y, pose.yaw)
+    finally:
+        room_cam.close()
+    _expect(yellow.seen, f"kitchen stand yellow not logged ({yellow.max_fraction:.4f})", failures)
+    _expect(len(frontiers) > 0, "kitchen stand has no frontiers", failures)
+    _expect(aimed is not None, "kitchen stand map query returned no command", failures)
+    if aimed is not None:
+        _expect(abs(aimed.vx - SOFT_VX) < 1e-9, f"kitchen map vx {aimed.vx}", failures)
+        _expect(abs(aimed.yaw_rate) <= steer_walk.YAW_RATE_CAP + 1e-9, "kitchen map yaw cap", failures)
+    return failures
+
+
 def self_test() -> int:
     failures: list[str] = []
     failures.extend(test_pixels())
@@ -1650,6 +1764,7 @@ def self_test() -> int:
             print(f"FAIL {msg}")
         return 1
     failures.extend(test_scenes())
+    failures.extend(test_map_query())
     failures.extend(test_short_hop())
     failures.extend(test_biased_yaw())
     digest = _md5(PLANT_XML)
@@ -1735,6 +1850,13 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
     problems: list[str] = []
     if approach.initial.decision == "fail":
         problems.append(f"stand pose refused: {approach.initial.line}")
+    if not approach.map_yellow_seen or approach.map_command_source != "map":
+        problems.append(
+            f"finder did not query a logged yellow "
+            f"(seen={approach.map_yellow_seen} source={approach.map_command_source})"
+        )
+    if approach.map_frontier_queries < 1:
+        problems.append("finder did not query the map interface")
     if approach.fault:
         problems.append(f"steer fault: {approach.note}")
     if illegal:
@@ -1783,6 +1905,11 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
         "yaw_corrections": approach.yaw_corrections,
         "reacquires": approach.reacquires,
         "fade_recenters": approach.fade_recenters,
+        "map_yellow_seen": approach.map_yellow_seen,
+        "map_yellow_fraction": approach.map_yellow_fraction,
+        "map_bearing_rad": approach.map_bearing_rad,
+        "map_queries": approach.map_frontier_queries,
+        "map_command_source": approach.map_command_source,
         "fade_center_bias": FADE_CENTER_BIAS,
         "fade_drop": FADE_DROP,
         "x0_m": approach.x0_m,
@@ -1828,13 +1955,15 @@ def run_phrase(phrase: str, scene: SceneName) -> int:
         f"dx {approach.dx_m:+.3f} m end x {approach.end_x_m:+.3f} m "
         f"remaining {approach.remaining_m:.3f} m "
         f"arrival {approach.arrival} "
+        f"map {approach.map_command_source} yellow {approach.map_yellow_fraction:.3f} "
+        f"queries {approach.map_frontier_queries} "
         f"empty-plant {fail_score.decision}  plant md5 {after_md5}"
     )
     if problems:
         for msg in problems:
             print(f"FAIL: {msg}")
         return 1
-    print("[find] PASS  vision-reactive steer, not a map, not arrival")
+    print("[find] PASS  map query last-mile, not arrival")
     return 0
 
 

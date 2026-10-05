@@ -8,7 +8,11 @@ Voice still refuses "explore", "build a map", and "go anywhere" (`scripts/voice_
 
 The walk plant is `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml`, md5 `71b2c86d133ebc603f58b99c53e496f3`. This slice does not edit that file, the gait, the tip check, `CommandBus`, or the `kit_cam` mount. The camera stays on `head_tilt_link` at `0.050 0.019 0.007`, fovy 104.82. One camera. No lidar. No second camera. No GPU and no paid API.
 
-Commands are only `stand`, `stop`, and `vel(vx, yaw_rate)` on `CommandBus` in `scripts/steer_walk.py`. Resend is 10 Hz. 200 ms of silence stands. Caps stay **+0.056 / −0.032** m/s and yaw **±0.25** rad/s. Every moving command is soft walk-yaw: `vel(+0.028, yaw)` with yaw inside the cap. `vx = 0` yaw does not change heading on this plant, and this script does not send it.
+Commands are only `stand`, `stop`, and `vel(vx, yaw_rate)` on `CommandBus` in `scripts/steer_walk.py`. Resend is 10 Hz. 200 ms of silence stands. Caps stay **+0.056 / −0.032** m/s and yaw **±0.25** rad/s. `vx = 0` yaw does not change heading on this plant, and this script does not send it.
+
+The empty-plant walk is the claimed nav-multi chain, not a 0.40 s frontier replan. Stand is **1.0 s** so the left arc starts at t = 16 s. Then `vel(+0.056, 0)` for 15 s, `vel(+0.056, +0.25)` for 12.5 s, `vel(+0.056, 0)` for 6 s, `vel(+0.056, −0.25)` for 11 s, and `vel(+0.056, 0)` for 6 s. A 0.6 s stand starts that left arc 0.4 s early, and the same 12.5 s hold then only reached about **+35 deg**. Half-cap `vel(+0.028, +0.25)` is upright, and a short left command on it is swallowed.
+
+Furnished scenes do not get that chain. A full-cap approach in the kitchen crosses `up_z` 0.90 near **+0.39 m**. An 11 s `vel(+0.056, −0.25)` reached `up_z` **0.899** in the kitchen and **0.889** in the bathroom. A cold left hold stayed near **+5 to +11 deg** and then leaned. Those windows are not the room schedule. The room walk is the same right command for **8 s** (`vel(+0.056, −0.25)`). That hold stayed at `up_z` **0.919** (kitchen) and **0.934** (bathroom). It is not the claimed 11 s window and it is not a new cap.
 
 ## What the map is
 
@@ -37,14 +41,14 @@ All of these, together:
 1. One continuous space, not a separate XML per room.
 2. Metric occupied cells for elevated furniture, from depth or parallax. A floor-plane guess of a backsplash is not that.
 3. A pose that is not the simulator freejoint.
-4. A last-mile finder that queries `query_kitchen_like_yellow()` and `frontier_cells()` and then steers, without a pre-placed waypoint.
+4. The last-mile finder in `scripts/find_kitchen.py` now queries `query_kitchen_like_yellow()` and `frontier_cells()` and steers from that. It still has no pre-placed waypoint. A query is not this land by itself.
 5. Arrival still belongs to the finder (backsplash fills half the frame and the torso is within 0.25 m). This loop does not claim it.
 
 `vx = 0` yaw still does not turn. A turn-in-place gait would be a different controls change. It is not this slice.
 
 ## Tonight's limit
 
-A short soft walk paints a fan of floor in front of `kit_cam`, shifts that fan a little as the body moves, and logs a yellow bearing when the backsplash is already in the opening frame. Frontiers are the edge of the paint. White and gray furniture can fail the saturation test and never become a cell. That is a partial feature map of whatever was in view. It is not go-anywhere.
+The empty plant now walks the claimed chain, so the floor fan is longer and the body yaws. Furnished scenes only take the 8 s right-first window, because the claimed windows cross `up_z` 0.90 there. The paint is still a fan from one camera. A yellow bearing is logged when the backsplash is in frame. Frontiers are the edge of the paint. White and gray furniture can fail the saturation test and never become a cell. That is a partial feature map of whatever was in view. It is not go-anywhere.
 
 The empty plant is the honest miss: floor cells, no yellow, no room label.
 
@@ -53,32 +57,36 @@ MUJOCO_GL=osmesa python scripts/explore_map.py --self-test
 MUJOCO_GL=osmesa python scripts/explore_map.py --demo
 ```
 
-`--demo` walks the empty plant, the kitchen scene, and the bathroom scene for 12 s each at `vel(+0.028, yaw)`, then stops and settles 1.2 s. It writes `previews/explore_map_summary.json`, kit_cam and map stills, and `previews/explore_map_kitchen.mp4`. Exit status is non-zero if the plant md5 changes, if `up_z` drops below 0.90, or if a `vx = 0` yaw is sent. A passing exit still prints Prefer FAIL for go-anywhere.
+`--demo` walks the empty plant on the claimed chain, and the kitchen and bathroom on the 8 s right-first window, then stops and settles 1.2 s. It writes `previews/explore_map_summary.json`, kit_cam and map stills, and `previews/explore_map_kitchen.mp4`. Exit status is non-zero if the plant md5 changes, if `up_z` drops below 0.90, or if a `vx = 0` yaw is sent. A passing exit still prints Prefer FAIL for go-anywhere.
 
 ## Measured
 
-Plant md5 after the demo: `71b2c86d133ebc603f58b99c53e496f3`. No tip, no fault, end mode stand on every run. Every `vel` was `vx = +0.028`. `vx = 0` yaw sends: 0. The frontier rule sent `yaw_rate = +0.25` from t = 0.60 s to t = 3.10 s, then `yaw_rate = −0.25` until the stop at t = 12.60 s, on all three scenes. The floor fan picks that command. Yellow does not.
+Plant md5 after the demo: `71b2c86d133ebc603f58b99c53e496f3`. No tip, no fault, end mode stand on every run. `vx = 0` yaw sends: 0. Every moving command was `vx = +0.056`.
 
-Realized heading did not follow the first left command. At the stop the body was about −19 deg. Settle pulled some of that back. Δx below is the settled pose minus the pose after the stand. Δyaw is the same pair. The stop-pose yaw is listed so the settle is visible. min up_z is the whole run, including settle.
+The empty plant followed the claimed chain. Left arc **+75.5 deg** on `yaw_rate +0.25`. Chained right arc **−54.5 deg** on `yaw_rate −0.25`. Both are on the commanded side (the track bar used here is 20 deg; the swallowed run was about −12 deg on a left command). The resume then drifts **+30.8 deg**, which is the same drift the nav-multi clip already reports. It is not a second left command.
 
-| Scene | Δx | Δy | Δyaw settled | Yaw at stop | min up_z | Tip / fault |
-|-------|----|----|--------------|-------------|----------|-------------|
-| Empty plant | +0.156 m | −0.017 m | −12.9 deg | −19.7 deg | 0.993 | no |
-| Kitchen | +0.185 m | −0.028 m | −12.3 deg | −19.1 deg | 0.994 | no |
-| Bathroom | +0.190 m | −0.028 m | −12.0 deg | −18.8 deg | 0.994 | no |
+Δx below is the settled pose minus the pose after the stand. Δyaw is the same pair. min up_z is the whole run, including settle.
+
+| Scene | Command | Δx | Δy | Δyaw settled | Arc Δyaw | min up_z | Tip / fault |
+|-------|---------|----|----|--------------|----------|----------|-------------|
+| Empty plant | claimed chain | +1.569 m | +1.022 m | +52.7 deg | left +75.5, right −54.5 | 0.954 | no |
+| Kitchen | 8 s right | +0.337 m | −0.209 m | −55.8 deg | −58.2 | 0.919 | no |
+| Bathroom | 8 s right | +0.423 m | −0.236 m | −50.6 deg | −56.4 | 0.934 | no |
+
+The previous 12 s `vel(+0.028, yaw)` run moved **+0.156 / +0.185 / +0.190 m** and settled about **−12 deg** while commanding left. This run is longer on every scene, and each yaw arc moves the heading to the commanded side.
 
 What the map held at the end:
 
 | Scene | Free cells (start → end) | Floor-feature cells | Walked cells | Frontiers (start → end) | Kitchen-like yellow |
 |-------|--------------------------|---------------------|--------------|-------------------------|---------------------|
-| Empty plant | 260 → 430 | 0 | 4 | 55 → 23 | no (fraction 0) |
-| Kitchen | 217 → 280 | 23 → 120 | 5 | 48 → 23 | yes, max fraction 0.079 |
-| Bathroom | 260 → 428 | 0 | 5 | 55 → 23 | no (fraction 0) |
+| Empty plant | 266 → 766 | 0 | 41 | 55 → 11 | no (fraction 0) |
+| Kitchen | 221 → 366 | 25 → 150 | 7 | 45 → 26 | yes, max fraction 0.071 |
+| Bathroom | 266 → 531 | 0 | 10 | 55 → 28 | no (fraction 0) |
 
-The empty plant is floor and sky. Other chromatic pixels stayed under 0.002 of a frame. Frontiers are the rim of the floor paint. The walk added free cells (260 to 430) and did not add a room.
+The empty plant is floor and sky. Frontiers are the rim of the floor paint. Walked cells went from 4–5 on the short run to 41 here because the body actually traveled. That is still not a house and not go-anywhere.
 
-Kitchen yellow at the opening frame was 0.039. The strongest later frame was 0.079, bearing +0.313 rad, elevation +0.533 rad. That ray does not meet the floor inside 1.80 m, so there is no yellow cell. The 120 floor-feature cells are saturated pixels whose rays do meet the floor plane, including color from furniture that is not a floor mat. They are not a counter outline and they were not used as a goal. The command timeline matches the empty plant.
+Kitchen yellow peaked at fraction **0.071**, bearing **+0.303 rad**, elevation **+0.526 rad**. That ray does not meet the floor inside 1.80 m, so there is no yellow cell. The 150 floor-feature cells are saturated pixels whose rays do meet the floor plane. They are not a counter outline and they were not the aim of the walk. The walk command is the right-first window, not the yellow bearing.
 
-Bathroom other-chromatic pixels peaked at 0.076 of a frame (the tile and fittings). They are not labeled as a room. None of them passed the yellow test, and none of them painted a floor-feature cell. The map is another floor fan.
+Bathroom other-chromatic pixels peaked at **0.128** of a frame. They are not labeled as a room. None of them passed the yellow test. The map is another floor fan, swung to the right.
 
-Walked cells are 4 or 5 because the body only moved about 0.16–0.19 m. The grid update a person can see is the free fan spreading, not a traversed corridor. This is not go-anywhere.
+This is not go-anywhere. The finder may query the yellow log and the frontiers. Arrival stays on the finder's bars.

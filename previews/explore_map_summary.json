@@ -10,45 +10,48 @@
   "vx_fwd_cap": 0.056,
   "vx_back_cap": 0.032,
   "yaw_rate_cap": 0.25,
-  "soft_vx": 0.028,
+  "explore_vx": 0.056,
+  "finder_half_vx": 0.028,
+  "claimed_left_arc_s": 12.5,
+  "claimed_right_arc_s": 11.0,
   "resend_hz": 10.0,
-  "walk_s": 12.0,
+  "walk_s": 50.5,
   "cell_m": 0.1,
-  "honesty": "Partial kit_cam map. Floor cells are a ground-plane paint. Kitchen-like yellow is a camera-ray bearing, not a waypoint and not arrival. Frontiers are the edge of that paint. Pose is the sim freejoint, not SLAM. vx=0 yaw is not used. Not go-anywhere.",
+  "honesty": "Partial kit_cam map. Floor cells are a ground-plane paint. Kitchen-like yellow is a camera-ray bearing, not a waypoint and not arrival. Frontiers are the edge of that paint. Pose is the sim freejoint, not SLAM. Explore holds the claimed vel(+0.056, \u00b10.25) windows (left 12.5 s, then right 11 s). vx=0 yaw is not used. Not go-anywhere.",
   "prefer_fail_bar": {
-    "tonight": "A real land is not this slice. Tonight the map is a ground-plane floor fan from one camera, frontiers on the edge of that fan, and a yellow bearing when the backsplash is in frame. Rooms are separate XML files, not one space. Pose is the sim freejoint. vx=0 does not turn.",
-    "later": "A later land would need one continuous space, metric occupied cells for elevated furniture (depth or parallax, not a floor-plane guess), a pose that is not the simulator freejoint, and a last-mile finder that queries this interface without a pre-placed waypoint. Arrival is still the finder's bars, not this explore loop."
+    "tonight": "A real land is not this slice. The map is a ground-plane floor fan from one camera, frontiers on the edge of that fan, and a yellow bearing when the backsplash is in frame. The walk holds the claimed vel(+0.056, \u00b10.25) windows so the body can yaw. Rooms are separate XML files, not one space. Pose is the sim freejoint. vx=0 does not turn. Arrival is still yellow >= 0.50 and torso-to-kitchen <= 0.25 m.",
+    "later": "A later land would need one continuous space, metric occupied cells for elevated furniture (depth or parallax, not a floor-plane guess), and a pose that is not the simulator freejoint. The finder can query this interface. That query is not a waypoint and not arrival."
   },
   "runs": [
     {
       "scene": "plant",
-      "stop_reason": "walk budget",
+      "stop_reason": "claimed walk-yaw schedule",
       "prefer_fail": true,
       "go_anywhere": false,
       "arrival_claimed": false,
-      "dx_m": 0.15609584994565198,
-      "dy_m": -0.0173014553170113,
-      "dyaw_rad": -0.22488411813586717,
-      "dyaw_deg": -12.884910848706603,
+      "dx_m": 1.5687110591415039,
+      "dy_m": 1.0220322831668174,
+      "dyaw_rad": 0.9194661024678341,
+      "dyaw_deg": 52.68152707675018,
       "start": {
-        "t": 0.6000000000000004,
-        "x": 0.001981544135897496,
-        "y": 0.00420864406159492,
-        "yaw": -0.00028328117616760576
+        "t": 1.0000000000000007,
+        "x": 0.0016618489776550022,
+        "y": 0.013441516916031827,
+        "yaw": -0.0008237024891998252
       },
       "stop_pose": {
-        "t": 12.600000000000877,
-        "x": 0.1726075183722354,
-        "y": -0.008402264205002678,
-        "yaw": -0.3437867387668297
+        "t": 51.500000000016975,
+        "x": 1.6005348540677182,
+        "y": 1.0292918765349144,
+        "yaw": 0.8391790443025984
       },
       "end": {
-        "t": 13.800000000001278,
-        "x": 0.15807739408154947,
-        "y": -0.013092811255416378,
-        "yaw": -0.22516739931203492
+        "t": 52.70000000001844,
+        "x": 1.5703729081191589,
+        "y": 1.0354738000828492,
+        "yaw": 0.9186423999786345
       },
-      "min_up_z": 0.9930075742222151,
+      "min_up_z": 0.9541741213512263,
       "up_z_abort": 0.9,
       "fault": false,
       "fault_reason": "",
@@ -64,85 +67,156 @@
       },
       "map_before": {
         "yellow_frac": 0.0,
-        "sky_frac": 0.5518782552083333,
-        "other_chromatic_frac": 0.0010384114583333332,
-        "low_sat_frac": 0.44674479166666664,
-        "free_cells": 260,
+        "sky_frac": 0.552607421875,
+        "other_chromatic_frac": 0.0010319010416666666,
+        "low_sat_frac": 0.4459993489583333,
+        "free_cells": 266,
         "feature_cells": 0,
         "traversed_cells": 1,
         "frontier_cells": 55,
         "blocked": false,
-        "new_free": 260,
+        "new_free": 266,
         "new_feature": 0
       },
       "map_after": {
         "yellow_frac": 0.0,
-        "sky_frac": 0.5565201822916667,
-        "other_chromatic_frac": 0.0010546875,
-        "low_sat_frac": 0.4421028645833333,
-        "free_cells": 430,
+        "sky_frac": 0.6064811197916666,
+        "other_chromatic_frac": 0.009290364583333334,
+        "low_sat_frac": 0.384169921875,
+        "free_cells": 766,
         "feature_cells": 0,
-        "traversed_cells": 4,
-        "frontier_cells": 23,
+        "traversed_cells": 41,
+        "frontier_cells": 11,
         "blocked": false,
-        "new_free": 1,
+        "new_free": 0,
         "new_feature": 0
       },
-      "other_chromatic_max": 0.0017350260416666666,
-      "trail_points": 13,
+      "other_chromatic_max": 0.012744140625,
+      "trail_points": 316,
       "commands": {
         "stand_sends": 1,
         "stop_sends": 1,
-        "vel_sends": 120,
+        "vel_sends": 505,
         "vx_zero_yaw_sends": 0,
         "vx_values": [
-          0.028
+          0.056
         ],
         "max_abs_yaw_command": 0.25,
         "replans": [
           {
-            "t": 0.6000000000000004,
-            "vx": 0.028,
+            "t": 1.0000000000000007,
+            "vx": 0.056,
+            "yaw_rate": 0.0
+          },
+          {
+            "t": 16.00000000000201,
+            "vx": 0.056,
             "yaw_rate": 0.25
           },
           {
-            "t": 3.09999999999988,
-            "vx": 0.028,
+            "t": 28.499999999995083,
+            "vx": 0.056,
+            "yaw_rate": 0.0
+          },
+          {
+            "t": 34.4999999999962,
+            "vx": 0.056,
             "yaw_rate": -0.25
+          },
+          {
+            "t": 45.50000000000964,
+            "vx": 0.056,
+            "yaw_rate": 0.0
           }
         ]
       },
-      "limit": "Prefer FAIL: empty floor. Vision-free cells 430, floor-feature cells 0, walked cells 4. No kitchen-like yellow. Frontiers are the edge of that floor paint, not rooms. Not go-anywhere."
+      "phases": [
+        {
+          "name": "approach",
+          "commanded_vx": 0.056,
+          "commanded_yaw": 0.0,
+          "duration_s": 15.00000000000201,
+          "dx_m": 0.5980582478995232,
+          "dy_m": -0.06596907580169596,
+          "dyaw_deg": -0.6788095910021027,
+          "tracked": null
+        },
+        {
+          "name": "arc-left",
+          "commanded_vx": 0.056,
+          "commanded_yaw": 0.25,
+          "duration_s": 12.499999999993072,
+          "dx_m": 0.49479349453557286,
+          "dy_m": 0.16014359674454012,
+          "dyaw_deg": 75.53010619466276,
+          "tracked": true
+        },
+        {
+          "name": "mid",
+          "commanded_vx": 0.056,
+          "commanded_yaw": 0.0,
+          "duration_s": 6.0000000000011156,
+          "dx_m": 0.08679667203635577,
+          "dy_m": 0.3103591633348194,
+          "dyaw_deg": -2.9547094598610726,
+          "tracked": null
+        },
+        {
+          "name": "arc-right",
+          "commanded_vx": 0.056,
+          "commanded_yaw": -0.25,
+          "duration_s": 11.000000000013443,
+          "dx_m": 0.2383075399287018,
+          "dy_m": 0.4134144558792945,
+          "dyaw_deg": -54.543624540752965,
+          "tracked": true
+        },
+        {
+          "name": "resume",
+          "commanded_vx": 0.056,
+          "commanded_yaw": 0.0,
+          "duration_s": 6.000000000007333,
+          "dx_m": 0.1809170506899096,
+          "dy_m": 0.19790221946192454,
+          "dyaw_deg": 30.77564956751977,
+          "tracked": null
+        }
+      ],
+      "yaw_tracked": {
+        "arc-left": true,
+        "arc-right": true
+      },
+      "limit": "Prefer FAIL: empty floor. Vision-free cells 766, floor-feature cells 0, walked cells 41. No kitchen-like yellow. Frontiers are the edge of that floor paint, not rooms. Not go-anywhere."
     },
     {
       "scene": "kitchen",
-      "stop_reason": "walk budget",
+      "stop_reason": "furnished right-first window",
       "prefer_fail": true,
       "go_anywhere": false,
       "arrival_claimed": false,
-      "dx_m": 0.1851268844326169,
-      "dy_m": -0.028429983297194386,
-      "dyaw_rad": -0.21481063573675208,
-      "dyaw_deg": -12.307742822237989,
+      "dx_m": 0.33742378354500696,
+      "dy_m": -0.2086585640769569,
+      "dyaw_rad": -0.9746591936825806,
+      "dyaw_deg": -55.84385826163574,
       "start": {
-        "t": 0.6000000000000004,
-        "x": 0.001981544135897496,
-        "y": 0.00420864406159492,
-        "yaw": -0.00028328117616760576
+        "t": 1.0000000000000007,
+        "x": 0.0016618489776550022,
+        "y": 0.013441516916031827,
+        "yaw": -0.0008237024891998252
       },
       "stop_pose": {
-        "t": 12.600000000000877,
-        "x": 0.1991716632220809,
-        "y": -0.021097335226097913,
-        "yaw": -0.3331226481800843
+        "t": 8.999999999999675,
+        "x": 0.3124565536634904,
+        "y": -0.17996167414228634,
+        "yaw": -1.0162738735082226
       },
       "end": {
-        "t": 13.800000000001278,
-        "x": 0.1871084285685144,
-        "y": -0.024221339235599465,
-        "yaw": -0.21509391691291954
+        "t": 10.200000000000076,
+        "x": 0.33908563252266194,
+        "y": -0.19521704716092508,
+        "yaw": -0.9754828961717805
       },
-      "min_up_z": 0.9936598317678702,
+      "min_up_z": 0.9186315495501423,
       "up_z_abort": 0.9,
       "fault": false,
       "fault_reason": "",
@@ -150,93 +224,103 @@
       "end_mode": "stand",
       "yellow": {
         "seen": true,
-        "max_fraction": 0.07858072916666667,
-        "bearing_rad": 0.312828604056728,
-        "elevation_rad": 0.5331011078833625,
+        "max_fraction": 0.07149739583333334,
+        "bearing_rad": 0.30290111582638063,
+        "elevation_rad": 0.5257593372319648,
         "ground_cell_ij": null,
         "note": "kitchen-like yellow is in the kit_cam log. bearing_rad is the camera ray, not a waypoint. ground_cell_ij is set only if that ray met the floor inside 1.80 m."
       },
       "map_before": {
-        "yellow_frac": 0.038603515625,
-        "sky_frac": 0.433486328125,
-        "other_chromatic_frac": 0.09626627604166667,
-        "low_sat_frac": 0.42914713541666666,
-        "free_cells": 217,
-        "feature_cells": 23,
+        "yellow_frac": 0.03791015625,
+        "sky_frac": 0.43573567708333333,
+        "other_chromatic_frac": 0.09586263020833333,
+        "low_sat_frac": 0.4280598958333333,
+        "free_cells": 221,
+        "feature_cells": 25,
         "traversed_cells": 1,
-        "frontier_cells": 48,
+        "frontier_cells": 45,
         "blocked": false,
-        "new_free": 217,
-        "new_feature": 23
+        "new_free": 221,
+        "new_feature": 25
       },
       "map_after": {
-        "yellow_frac": 0.06259114583333333,
-        "sky_frac": 0.4382552083333333,
-        "other_chromatic_frac": 0.08327799479166667,
-        "low_sat_frac": 0.4056315104166667,
-        "free_cells": 280,
-        "feature_cells": 120,
-        "traversed_cells": 5,
-        "frontier_cells": 23,
+        "yellow_frac": 0.0,
+        "sky_frac": 0.3533430989583333,
+        "other_chromatic_frac": 0.252548828125,
+        "low_sat_frac": 0.39208658854166667,
+        "free_cells": 366,
+        "feature_cells": 150,
+        "traversed_cells": 7,
+        "frontier_cells": 26,
         "blocked": false,
-        "new_free": 0,
-        "new_feature": 2
+        "new_free": 5,
+        "new_feature": 3
       },
-      "other_chromatic_max": 0.14421875,
-      "trail_points": 14,
+      "other_chromatic_max": 0.30181966145833333,
+      "trail_points": 53,
       "commands": {
         "stand_sends": 1,
         "stop_sends": 1,
-        "vel_sends": 120,
+        "vel_sends": 80,
         "vx_zero_yaw_sends": 0,
         "vx_values": [
-          0.028
+          0.056
         ],
         "max_abs_yaw_command": 0.25,
         "replans": [
           {
-            "t": 0.6000000000000004,
-            "vx": 0.028,
-            "yaw_rate": 0.25
-          },
-          {
-            "t": 3.09999999999988,
-            "vx": 0.028,
+            "t": 1.0000000000000007,
+            "vx": 0.056,
             "yaw_rate": -0.25
           }
         ]
       },
-      "limit": "Prefer FAIL: kitchen-like yellow fraction 0.079 at bearing 0.313 rad, elevation 0.533 rad. The ray does not meet the floor in range, so there is no yellow cell and no waypoint. Vision-free cells 280, floor-feature cells 120. Not arrival and not go-anywhere."
+      "phases": [
+        {
+          "name": "arc-right",
+          "commanded_vx": 0.056,
+          "commanded_yaw": -0.25,
+          "duration_s": 7.999999999999674,
+          "dx_m": 0.3107947046858354,
+          "dy_m": -0.19340319105831816,
+          "dyaw_deg": -58.18100910522767,
+          "tracked": true
+        }
+      ],
+      "yaw_tracked": {
+        "arc-right": true
+      },
+      "limit": "Prefer FAIL: kitchen-like yellow fraction 0.071 at bearing 0.303 rad, elevation 0.526 rad. The ray does not meet the floor in range, so there is no yellow cell and no waypoint. Vision-free cells 366, floor-feature cells 150. Not arrival and not go-anywhere."
     },
     {
       "scene": "bathroom",
-      "stop_reason": "walk budget",
+      "stop_reason": "furnished right-first window",
       "prefer_fail": true,
       "go_anywhere": false,
       "arrival_claimed": false,
-      "dx_m": 0.19016938814464884,
-      "dy_m": -0.028402278544929875,
-      "dyaw_rad": -0.20907198072632527,
-      "dyaw_deg": -11.978942110058929,
+      "dx_m": 0.42263763733049803,
+      "dy_m": -0.2357542577470043,
+      "dyaw_rad": -0.8823351859942905,
+      "dyaw_deg": -50.55408227336335,
       "start": {
-        "t": 0.6000000000000004,
-        "x": 0.001981544135897496,
-        "y": 0.00420864406159492,
-        "yaw": -0.00028328117616760576
+        "t": 1.0000000000000007,
+        "x": 0.0016618489776550022,
+        "y": 0.013441516916031827,
+        "yaw": -0.0008237024891998252
       },
       "stop_pose": {
-        "t": 12.600000000000877,
-        "x": 0.2037078824688917,
-        "y": -0.020939970082203534,
-        "yaw": -0.3277612981655563
+        "t": 8.999999999999675,
+        "x": 0.4109710896135097,
+        "y": -0.219145071209957,
+        "yaw": -0.986009156364677
       },
       "end": {
-        "t": 13.800000000001278,
-        "x": 0.19215093228054633,
-        "y": -0.024193634483334954,
-        "yaw": -0.20935526190249287
+        "t": 10.200000000000076,
+        "x": 0.424299486308153,
+        "y": -0.22231274083097247,
+        "yaw": -0.8831588884834901
       },
-      "min_up_z": 0.9936594527262836,
+      "min_up_z": 0.9337887107030065,
       "up_z_abort": 0.9,
       "fault": false,
       "fault_reason": "",
@@ -252,55 +336,65 @@
       },
       "map_before": {
         "yellow_frac": 0.0,
-        "sky_frac": 0.41888671875,
-        "other_chromatic_frac": 0.05576822916666667,
-        "low_sat_frac": 0.5248697916666667,
-        "free_cells": 260,
+        "sky_frac": 0.419365234375,
+        "other_chromatic_frac": 0.05591145833333333,
+        "low_sat_frac": 0.5242057291666666,
+        "free_cells": 266,
         "feature_cells": 0,
         "traversed_cells": 1,
         "frontier_cells": 55,
         "blocked": false,
-        "new_free": 260,
+        "new_free": 266,
         "new_feature": 0
       },
       "map_after": {
         "yellow_frac": 0.0,
-        "sky_frac": 0.380966796875,
-        "other_chromatic_frac": 0.06765950520833333,
-        "low_sat_frac": 0.5509114583333333,
-        "free_cells": 428,
+        "sky_frac": 0.3510384114583333,
+        "other_chromatic_frac": 0.12826822916666666,
+        "low_sat_frac": 0.5203059895833333,
+        "free_cells": 531,
         "feature_cells": 0,
-        "traversed_cells": 5,
-        "frontier_cells": 23,
+        "traversed_cells": 10,
+        "frontier_cells": 28,
         "blocked": false,
-        "new_free": 3,
+        "new_free": 14,
         "new_feature": 0
       },
-      "other_chromatic_max": 0.076494140625,
-      "trail_points": 14,
+      "other_chromatic_max": 0.12826822916666666,
+      "trail_points": 51,
       "commands": {
         "stand_sends": 1,
         "stop_sends": 1,
-        "vel_sends": 120,
+        "vel_sends": 80,
         "vx_zero_yaw_sends": 0,
         "vx_values": [
-          0.028
+          0.056
         ],
         "max_abs_yaw_command": 0.25,
         "replans": [
           {
-            "t": 0.6000000000000004,
-            "vx": 0.028,
-            "yaw_rate": 0.25
-          },
-          {
-            "t": 3.09999999999988,
-            "vx": 0.028,
+            "t": 1.0000000000000007,
+            "vx": 0.056,
             "yaw_rate": -0.25
           }
         ]
       },
-      "limit": "Prefer FAIL: no kitchen-like yellow. Other chromatic fraction peaked at 0.076 and is not labeled as a room. Vision-free cells 428, floor-feature cells 0, walked cells 5. Not go-anywhere."
+      "phases": [
+        {
+          "name": "arc-right",
+          "commanded_vx": 0.056,
+          "commanded_yaw": -0.25,
+          "duration_s": 7.999999999999674,
+          "dx_m": 0.4093092406358547,
+          "dy_m": -0.2325865881259888,
+          "dyaw_deg": -56.446968544745275,
+          "tracked": true
+        }
+      ],
+      "yaw_tracked": {
+        "arc-right": true
+      },
+      "limit": "Prefer FAIL: no kitchen-like yellow. Other chromatic fraction peaked at 0.128 and is not labeled as a room. Vision-free cells 531, floor-feature cells 0, walked cells 10. Not go-anywhere."
     }
   ]
 }
