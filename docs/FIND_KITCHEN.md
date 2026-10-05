@@ -81,11 +81,11 @@ No further `vel` is sent when:
 - the phrase is bathroom, or any other room
 - the loaded scene is the empty walk plant
 - the kitchen body is outside the frame (including turned away)
-- the backsplash fraction is below 0.015
+- the backsplash fraction is below 0.015 and the yaw-only reacquire does not bring it back to the center band
 - the yellow is split across the left and right of the frame
 - the centroid does not sit on the kitchen body
 - `up_z` drops below 0.90
-- the 0.60 m budget is reached, or the slice caps are exhausted
+- the 1.10 m budget is reached, or the slice caps are exhausted
 - the stop frame does not meet both arrival bars
 
 ```bash
