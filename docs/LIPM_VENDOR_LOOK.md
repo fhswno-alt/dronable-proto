@@ -298,4 +298,6 @@ That is still short of 7–21 cm/s and short of 2 cm on both feet.
 Soft-pass is off.
 
 The re-rendered clips are the 1.00 s row with this slew, so the tip is
-in the picture. Constrained Baseline, yuv420p, `+faststart`.
+in the picture. Forward faults at 4.42 s. Close-up faults at 4.60 s.
+After the fault the body reaches min up_z −1. Constrained Baseline,
+yuv420p, `+faststart`.
