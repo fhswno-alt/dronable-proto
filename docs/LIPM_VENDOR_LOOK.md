@@ -375,3 +375,10 @@ left and 1.07 cm right, mean vx +2.4 cm/s, sat_rate 0.25, peak torque
 support. 0.60 s for 24 s stays up, mean vx +3.8 cm/s, sole p90
 0.42 / 0.62 cm, sat_rate 0.34. Both feet are still short of 2 cm and
 the speed is still short of 7 cm/s. Soft-pass is off.
+
+The clips are this ramped 1.00 s row. Forward 8.400 s stays up
+(Δx +18.3 cm, mean vx +2.4 cm/s, pooled sole p90 1.2 cm, min up_z
+0.938, peak torque 2.45 Nm). Close-up 7.600 s stays up through the
+stop (forward Δx +13.7 cm, stop Δx −2.7 cm, min up_z 0.926). A run
+past the clip tips at 10.52 s. Constrained Baseline, yuv420p,
+`+faststart`.
