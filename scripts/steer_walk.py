@@ -107,6 +107,7 @@ Run:
   MUJOCO_GL=osmesa python scripts/steer_walk.py --no-video
   MUJOCO_GL=glfw  python scripts/steer_walk.py --view
   python scripts/steer_walk.py --self-test
+  MUJOCO_GL=osmesa python scripts/demo_8pm_motion.py
 """
 from __future__ import annotations
 
@@ -1697,6 +1698,8 @@ def run_demo(
     log_path: Path | None,
     summary_path: Path | None,
     script: tuple[DemoSegment, ...] = DEMO_SCRIPT,
+    overlay_title: str = "Day-1 steer",
+    overlay_footer: str = "W/S vx  A/D yaw  space stop  |  voice uses the same bus",
 ) -> RunSummary:
     video = out_mp4 is not None
     session = SteerSession(video=video)
@@ -1735,10 +1738,10 @@ def run_demo(
             last_mode = report.mode
         if session.renderer is not None and (len(session.samples) % 2 == 0):
             lines = [
-                f"Day-1 steer  {seg.label}  M145 frozen  no door",
+                f"{overlay_title}  {seg.label}  M145 frozen  no door",
                 report.line(),
                 f"t={now:.2f}s  x={session.data.qpos[0]:+.3f}  yaw={math.degrees(session.yaw()):+.1f} deg",
-                "W/S vx  A/D yaw  space stop  |  voice uses the same bus",
+                overlay_footer,
             ]
             frames.append(session.render(lines))
         if session.bus.fault and float(session.data.time) > now + 0.4:
