@@ -28,7 +28,9 @@ outside the corridor is not a near-floor leg, and the flag is cleared.
 A later in-corridor hit is dropped when that stance already has a
 floor point from the same gait phase and the new point is farther
 than the body has walked since then, plus a small margin. The first
-sighting, with no prior point, is emitted. Controls latches Day-1
+sighting, with no prior point, is emitted only when that column goes
+low-chroma within 64 px of the contact. A brown texture column is
+not a leg. Width and span are not tightened. Controls latches Day-1
 ``stop`` on the flag that remains. This module does not send ``stop``.
 
 Moondream's room ask does not return a pixel. It is not called here.
@@ -86,6 +88,14 @@ PHASE_DRIFT_MARGIN_M = 0.08
 # Third 8 ms tick of a shift bout. That is the steady one-foot sample.
 # The both-feet exchange is a different pitch and is not this sample.
 PHASE_SAMPLE_TICK = 3
+# A real leg goes gray or black near the contact. The stool is gray at
+# the pixel. The coffee leg is dark 14 px up. The apron rail is dark
+# by 39 px. The bedroom-left texture stays chroma ~42 (no dark pixel,
+# or the first one 234 px up). 64 covers the apron and still misses
+# that texture. This is not a width, span, or height cut.
+LEG_CORE_RISE_PX = 64
+LEG_CORE_CHROMA = 16
+LEG_CORE_LUM = 40
 SOURCE = "rgb_wood_leg"
 
 
@@ -266,6 +276,63 @@ def find_hazard_cues(rgb: np.ndarray) -> tuple[HazardCue, ...]:
     return tuple(cues)
 
 
+def column_has_leg_core(
+    rgb: np.ndarray,
+    dark: np.ndarray,
+    column: int,
+    contact_row: int,
+) -> bool:
+    """True when the column goes gray or black within ``LEG_CORE_RISE_PX``.
+
+    The walk stays on the contiguous leg pixels above the contact. A
+    brown run that ends, or that stays brown for the whole window, is
+    not a core. The contact pixel itself counts.
+    """
+    image = np.asarray(rgb)
+    height = int(dark.shape[0])
+    width = int(dark.shape[1])
+    col = int(column)
+    row = min(int(contact_row), height - 1)
+    if col < 0 or col >= width or row < 0:
+        return False
+    for back in range(LEG_CORE_RISE_PX):
+        rr = row - back
+        if rr < 0 or not bool(dark[rr, col]):
+            return False
+        pix = image[rr, col]
+        red = int(pix[0])
+        green = int(pix[1])
+        blue = int(pix[2])
+        chroma = max(red, green, blue) - min(red, green, blue)
+        lum = (red + green + blue) // 3
+        if chroma < LEG_CORE_CHROMA and lum < LEG_CORE_LUM:
+            return True
+    return False
+
+
+def confirm_leg_columns(
+    cues: tuple[HazardCue, ...],
+    rgb: np.ndarray,
+) -> tuple[HazardCue, ...]:
+    """Drop a column that stays brown above the contact.
+
+    Used on a first sighting, before a same-stance point is stored.
+    The coffee leg, the stool, and the apron rail each go low-chroma
+    inside 64 px. The bedroom-left texture does not. Width, span, and
+    the apron height are not read. This does not send ``stop``.
+    """
+    if not cues:
+        return ()
+    image = np.asarray(rgb)
+    dark = leg_mask(image, wood_mask(image))
+    kept = [
+        cue
+        for cue in cues
+        if column_has_leg_core(image, dark, cue.column, cue.contact_row)
+    ]
+    return tuple(kept)
+
+
 def corridor_gate_cues(
     cues: tuple[HazardCue, ...],
     *,
@@ -322,7 +389,8 @@ class SamePhaseFloor:
 
     The ray already applies this frame's pitch, roll, and head tilt.
     Memory is the in-corridor hits from the third tick of a shift bout,
-    keyed by stance. A stance with no stored point emits every cue.
+    keyed by stance. A stance with no stored point emits every cue that
+    reached it. The caller drops a brown column before that first emit.
     A hit farther than the body has walked since the last sample of
     that stance, plus ``PHASE_DRIFT_MARGIN_M``, is not emitted and is
     not written back. The sample anchor moves on every sample, including
@@ -337,6 +405,10 @@ class SamePhaseFloor:
         self._anchor: dict[str, tuple[float, float]] = {}
         self._in_shift = False
         self._shift_ticks = 0
+
+    def has_prior(self, stance: str) -> bool:
+        """True once this stance has stored an in-corridor floor point."""
+        return bool(self._hits.get(stance))
 
     def apply(
         self,
@@ -629,6 +701,9 @@ def self_check() -> None:
         raise SystemExit("self_check dropped a tall near-floor leg")
     if abs(near.v - 474.5) > 1e-6:
         raise SystemExit(f"self_check near v {near.v}")
+    if not confirm_leg_columns((near,), tall):
+        raise SystemExit("self_check dropped a gray leg column")
+    _check_leg_core()
     wrapped = estimate_finder_hazard(
         clipped,
         cam=cam, body=body,
@@ -662,6 +737,45 @@ def self_check() -> None:
     _check_same_phase_floor(cam, body)
 
 
+def _paint_brown(rgb: np.ndarray, column0: int, column1: int, row0: int, row1: int) -> None:
+    rgb[row0:row1, column0:column1, 0] = 84
+    rgb[row0:row1, column0:column1, 1] = 62
+    rgb[row0:row1, column0:column1, 2] = 42
+
+
+def _check_leg_core() -> None:
+    """A brown texture column is not a first-sighting leg. A dark core is."""
+    brown = _blank()
+    _paint_floor(brown, 300)
+    _paint_brown(brown, 260, 272, 200, rc.HEIGHT)
+    raw = find_hazard_cues(brown)
+    if not raw or not raw[0].too_close:
+        raise SystemExit("self_check brown clip was not a cue")
+    if confirm_leg_columns(raw, brown):
+        raise SystemExit("self_check kept a brown texture column")
+    mixed = _blank()
+    _paint_floor(mixed, 400)
+    _paint_leg(mixed, 260, 272, 200, 400)
+    _paint_brown(mixed, 260, 272, 386, 400)
+    kept = confirm_leg_columns(find_hazard_cues(mixed), mixed)
+    if not kept:
+        raise SystemExit("self_check dropped a leg dark 14 px above the contact")
+    late = _blank()
+    _paint_floor(late, 400)
+    _paint_leg(late, 260, 272, 200, 400)
+    _paint_brown(late, 260, 272, 320, 400)
+    if confirm_leg_columns(find_hazard_cues(late), late):
+        raise SystemExit("self_check kept a column dark only past 64 px")
+    apron = _blank()
+    _paint_floor(apron, 446)
+    _paint_leg(apron, 410, 418, 100, 446)
+    apron[407:446, 410:418, 0] = 71
+    apron[407:446, 410:418, 1] = 55
+    apron[407:446, 410:418, 2] = 41
+    if not confirm_leg_columns(find_hazard_cues(apron), apron):
+        raise SystemExit("self_check dropped a column dark by 39 px")
+
+
 def _check_same_phase_floor(cam: rc.KitCamPose, body: rc.BodyFrame) -> None:
     """First sighting stays. A 0.22 m jump against a walked body does not."""
     common = dict(
@@ -693,6 +807,8 @@ def _check_same_phase_floor(cam: rc.KitCamPose, body: rc.BodyFrame) -> None:
         raise SystemExit("self_check phase floor found no 0.22 m pixel")
     origin = (0.0, 0.0)
     gate = SamePhaseFloor()
+    if gate.has_prior("L"):
+        raise SystemExit("self_check invented a stored floor point")
     for _tick in range(2):
         out = gate.apply((near,), phase="shift", stance="L", body_xy=origin, **common)
         if out != (near,):
@@ -704,6 +820,8 @@ def _check_same_phase_floor(cam: rc.KitCamPose, body: rc.BodyFrame) -> None:
         out = gate.apply((near,), phase="shift", stance="L", body_xy=origin, **common)
         if out != (near,):
             raise SystemExit("self_check dropped the sample that stores the first hit")
+    if not gate.has_prior("L"):
+        raise SystemExit("self_check did not store the first sighting")
     walked = (0.08, 0.0)
     out = gate.apply((near,), phase="swing", stance="L", body_xy=walked, **common)
     if out != (near,):
@@ -766,5 +884,6 @@ if __name__ == "__main__":
     self_check()
     print(
         f"self_check ok source={SOURCE} pad={rc.HAZARD_PAD_M:.3f} "
-        f"wood=R>{WOOD_R_MIN:.0f} leg_lum<{LEG_LUM_MAX}"
+        f"wood=R>{WOOD_R_MIN:.0f} leg_lum<{LEG_LUM_MAX} "
+        f"core_rise={LEG_CORE_RISE_PX}"
     )

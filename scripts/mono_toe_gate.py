@@ -1204,6 +1204,8 @@ def walk_finder(
                     step_off_m=step_off, head_pan_rad=pan,
                 )
                 if session.lipm is not None:
+                    if not phase_floor.has_prior(session.lipm.stance):
+                        cues = hf.confirm_leg_columns(cues, rgb)
                     cues = phase_floor.apply(
                         cues,
                         phase=session.lipm.phase,
