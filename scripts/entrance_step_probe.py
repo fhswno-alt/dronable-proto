@@ -59,8 +59,9 @@ _WALK_KNEE_RATE = 1.75
 _WALK_HIP_PITCH_RATE = 1.90
 # Loaded knee only, from toe-off through this single-support fraction.
 # Mid-stance stays on _WALK_KNEE_RATE. DSP and the stop stay off this rate.
-_WALK_EARLY_KNEE_RATE = 1.50
+_WALK_EARLY_KNEE_RATE = 1.55
 _WALK_EARLY_FRAC = 0.13
+_WALK_EARLY_LOG_FRAC = 0.115
 # Locked 1.55 copy, no hip slew, CoM tick 2.200 s: stance corner −2.564 mm.
 # A mid-stance tick more than 1 mm past that is a new dig.
 _STANCE_DIG_M = -0.003564
@@ -14367,6 +14368,7 @@ def score_mid_swing() -> None:
     stance_mid: dict[str, tuple] = {}
     stance_early: dict[str, tuple] = {}
     stance_dsp: dict[str, tuple] = {}
+    early_at: dict[str, tuple[float, tuple]] = {}
     if isinstance(asks, list):
         for item in asks:
             jn = str(item[1])
@@ -14403,6 +14405,11 @@ def score_mid_swing() -> None:
                     jn.endswith("knee") or jn.endswith("hip_pitch")
                 ):
                     stance_early[jn] = _keep_ask(stance_early.get(jn), item)
+                    if jn.endswith("knee"):
+                        dist = abs(frac - _WALK_EARLY_LOG_FRAC)
+                        held_at = early_at.get(jn)
+                        if held_at is None or dist < held_at[0]:
+                            early_at[jn] = (dist, item)
                 if loaded and 0.25 - 1e-9 <= frac <= 0.75 + 1e-9:
                     stance_mid[jn] = _keep_ask(stance_mid.get(jn), item)
 
@@ -14579,6 +14586,45 @@ def score_mid_swing() -> None:
             low_z = min(float(z) for _label, z in corners)
             if side == stance_side and low_z < _STANCE_DIG_M:
                 early_ok = False
+    for jn in ("r_knee", "l_knee"):
+        held_at = early_at.get(jn)
+        if held_at is None:
+            print(f"PRED {name} early_frac_{_WALK_EARLY_LOG_FRAC:.3f} {jn} missing")
+            continue
+        _dist, tick_item = held_at
+        t_key = round(float(tick_item[0]), 5)
+        row = by_lat.get(t_key)
+        frac_e = float("nan")
+        fn_e = float("nan")
+        fn_sw = float("nan")
+        if row is not None:
+            phase_e = str(row["phase"])
+            frac_e = _swing_frac(phase_e, float(row["pose"]))
+            if phase_e == "L":
+                fn_e = float(row["fn_r"])
+                fn_sw = float(row["fn_l"])
+            elif phase_e == "R":
+                fn_e = float(row["fn_l"])
+                fn_sw = float(row["fn_r"])
+        loaded = fn_e > _SOLE_FLAT_LOAD_N and fn_sw <= _SOLE_FLAT_LOAD_N
+        over = abs(float(tick_item[3])) > KNEE_NM + 1e-9
+        print(
+            f"PRED {name} early_frac_{_WALK_EARLY_LOG_FRAC:.3f} {jn} "
+            f"{float(tick_item[3]):+.4f} t {float(tick_item[0]):.3f} "
+            f"frac {frac_e:.3f} fn {fn_e:.2f} N fn_swing {fn_sw:.2f} N "
+            f"loaded {int(loaded)} ge_2.33 {int(over)}"
+        )
+        surf = by_surf.get(t_key)
+        for side in ("L", "R"):
+            plane = surf.get(side) if isinstance(surf, dict) else None
+            plane_d = plane if isinstance(plane, dict) else None
+            _print_corners(
+                f"early_frac_{_WALK_EARLY_LOG_FRAC:.3f}_{jn}",
+                side,
+                t_key,
+                frac_e,
+                plane_d,
+            )
     ssp_frac = float("nan")
     if knee_worst is not None:
         ssp_row = by_lat.get(round(float(knee_worst[0]), 5))
