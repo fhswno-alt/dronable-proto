@@ -1882,6 +1882,396 @@ def _joint_qcf(session: sw.SteerSession, name: str) -> tuple[float, float, float
     return q, float(data.ctrl[idx]), float(data.actuator_force[idx])
 
 
+# Hardware's stated position-loop gains. The print reads the compiled
+# model and only uses these as a comparison. They are not written back.
+_STATED_KP_KV: dict[str, tuple[float, float]] = {
+    "hip_roll": (40.0, 1.538),
+    "hip_pitch": (45.0, 1.551),
+}
+_CTRL_EQ_RAD = 1e-4
+_DAMP_EQ_RAD_S = 0.05
+
+
+def _install_ik_track(session: sw.SteerSession, *, hips_only: bool = False) -> None:
+    """Write the kinematic target straight into ``data.ctrl``.
+
+    On the gait-manager clock the active approach is ``gm_move_s`` (20 ms)
+    plus the 5.5 rad/s cap, on hip pitch, knee, and ankle pitch.
+    ``HIP_KNEE_MOVE_S`` (150 ms) is the Bézier clock and is not this path.
+    Hip roll is outside that approach. ``write_clipped`` holds it inside
+    ``0.98 * forcerange / kp`` of q. This copy stores the kinematic target
+    and holds ctrl there for the physics steps. ``hips_only`` does that
+    for hip roll and hip pitch, and leaves the knee and ankle approach.
+    kp, kv, dampratio, and forcerange stay.
+    """
+    lipm = session.lipm
+    if lipm is None:
+        return
+    full_suffix = ("hip_roll", "hip_pitch") if hips_only else (
+        "hip_roll", "hip_pitch", "knee", "ank_pitch",
+    )
+    orig_write = lipm.write_clipped
+
+    def write_full(jn: str, q_des: float) -> None:
+        if jn.endswith(full_suffix):
+            act = f"{jn}_pos"
+            idx = lipm.act_idx.get(act)
+            if idx is None:
+                return
+            lo = float(session.model.actuator_ctrlrange[idx, 0])
+            hi = float(session.model.actuator_ctrlrange[idx, 1])
+            session.data.ctrl[idx] = min(hi, max(lo, float(q_des)))
+            return
+        orig_write(jn, q_des)
+
+    lipm.write_clipped = write_full  # type: ignore[method-assign]
+    if hips_only:
+        session._move_ctrl_idx = [
+            idx
+            for name, idx in session.act_idx.items()
+            if name.endswith(("knee_pos", "ank_pitch_pos"))
+        ]
+        return
+    orig_sub = session._lipm_substep
+
+    def substep(ctrl_from: np.ndarray | None = None) -> None:
+        walking = lipm.phase != "stand"
+        if not walking:
+            orig_sub(ctrl_from)
+            return
+        n = session.steps_per_ctrl
+        ctrl_to = np.array(session.data.ctrl, dtype=np.float64, copy=True)
+        for _i in range(n):
+            session.data.ctrl[:] = ctrl_to
+            session.data.qfrc_applied[:] = 0.0
+            session.data.xfrc_applied[:] = 0.0
+            mj.mj_step(session.model, session.data)
+
+    session._lipm_substep = substep  # type: ignore[method-assign]
+
+
+def _prior_lead_lines(span_s: float) -> list[str]:
+    """What the scored ±lead / 8 ms / 12 ms copies actually moved.
+
+    Both are a time shift of the foot-z bump. Neither adds kv/kp seconds
+    onto the swing-hip command. ``lead_s`` is seconds. ``lead_frac`` is
+    a fraction of this swing's SSP window, which is 0.200 s here.
+    """
+    ms_per = span_s * 1000.0
+    return [
+        (
+            "prior ±lead / 8 ms / 12 ms copies move the foot-z bump earlier. "
+            "They do not advance hip_roll or hip_pitch ctrl. "
+            f"This walker's single-support window is {span_s:.3f} s "
+            f"(r_ssp_end - r_ssp_start). Both swings in the 0.500 s period "
+            "add to 0.400 s; the bump does not use that sum. "
+            "lead_s is clamped at 0, so there is no later lead."
+        ),
+        (
+            "20 ms and 30 ms copies: _install_phase_lift lead_frac on the 12 mm "
+            f"@ 20% parabola. Seconds early = lead_frac * {span_s:.3f} s. "
+            f"30 ms on this window is lead_frac {0.030 / span_s:.4f}. "
+            f"20 ms is lead_frac {0.020 / span_s:.4f}. "
+            "A lead_frac taken from a 0.400 s span (0.075 for 30 ms, 0.050 for 20 ms) "
+            f"is only {0.075 * ms_per:.1f} ms and {0.050 * ms_per:.1f} ms here. "
+            "The call argument is not stored. The scored writeup called them "
+            "30 ms and 20 ms before toe-off: toe +0.508 mm and x 0.820 m at 30 ms; "
+            "20 ms railed left hip pitch -2.45 Nm, right hip pitch +2.45 Nm, "
+            "right knee +2.45 Nm, min up_z 0.631."
+        ),
+        (
+            "8 ms and 12 ms copies: _install_slow_rise lead_s 0.008 and 0.012 "
+            "on the 8 mm smoothstep. Those arguments are seconds before toe-off, "
+            "not a fraction of the swing. Toes -2.10 mm and -2.04 mm, x 1.031 m. "
+            "Not a kv/kp advance of the swing hips."
+        ),
+    ]
+
+
+def _servo_filter(
+    ik: float,
+    published: float,
+    written: float,
+    ctrl: float,
+) -> str:
+    parts: list[str] = []
+    if abs(published - ik) > _CTRL_EQ_RAD:
+        parts.append("lead_morph")
+    if abs(written - published) > _CTRL_EQ_RAD:
+        parts.append("write_clipped_band")
+    if abs(ctrl - written) > _CTRL_EQ_RAD:
+        parts.append("move_slew")
+    if not parts:
+        return "none" if abs(ctrl - ik) <= _CTRL_EQ_RAD else "unattributed"
+    return "+".join(parts)
+
+
+def measure_hip_servo(
+    *,
+    track_ik: bool = False,
+    hips_only: bool = False,
+    t_end: float = 3.05,
+) -> None:
+    """Print swing-hip IK, ctrl, q, qd, and force at 2.872 s on 12 mm @ 20%.
+
+    Force is the value MuJoCo computed at the start of the last physics
+    step, so the damping check uses that same q and qd. The post-step
+    q at data.time 2.872 is printed beside it. ``track_ik`` drops the
+    gait-manager approach and the hip-roll band so ctrl can equal IK.
+    """
+    import op3_walk
+
+    cfg = sw.locked_kit_config()
+    session = sw.SteerSession(video=False, scene_xml=Path(SCENE), lipm=cfg)
+    _install_phase_lift(session, 0.012, 0.20, 0.0)
+    if track_ik:
+        _install_ik_track(session, hips_only=hips_only)
+    lipm = session.lipm
+    if lipm is None or lipm.op3 is None:
+        raise RuntimeError("gait manager walker missing")
+    walker = lipm.op3
+    span = float(walker.r_ssp_end - walker.r_ssp_start)
+    import lipm_gait
+    if lipm.cfg.schedule == "gait_manager":
+        move_s = max(float(lipm.cfg.gm_move_s), float(session.ctrl_dt))
+    else:
+        move_s = max(float(lipm_gait.HIP_KNEE_MOVE_S), float(session.ctrl_dt))
+    driver = sw.ScriptedDriver((
+        sw.DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+        sw.DemoSegment(t_end, "vel", sw.VX_FWD_CAP, 0.0, "forward"),
+    ))
+    joints_watch = ("r_hip_roll", "r_hip_pitch", "l_hip_roll", "l_hip_pitch")
+    published: dict[str, float] = {}
+    lead_bleed = False
+    lead_err = 0.0
+    written = np.zeros(session.model.nu, dtype=np.float64)
+    ctrl_from = np.zeros(session.model.nu, dtype=np.float64)
+    have_write = False
+
+    orig_walker_step = walker.step
+
+    def _step(dt: float) -> tuple[dict[str, float] | None, op3_walk.StepInfo]:
+        nonlocal lead_bleed, lead_err
+        joints, info = orig_walker_step(dt)
+        lead_bleed = bool(walker.lead_blend_tick)
+        err = walker._lead_err
+        lead_err = 0.0 if err is None else max(abs(float(v)) for v in err.values())
+        published.clear()
+        if joints is not None:
+            for name, val in joints.items():
+                published[name] = float(val)
+        return joints, info
+
+    walker.step = _step  # type: ignore[method-assign]
+    orig_sub = session._lipm_substep
+
+    def _sub(ctrl_src: np.ndarray | None = None) -> None:
+        nonlocal have_write
+        written[:] = np.array(session.data.ctrl, dtype=np.float64, copy=True)
+        if ctrl_src is None:
+            ctrl_from[:] = written
+        else:
+            ctrl_from[:] = np.array(ctrl_src, dtype=np.float64, copy=True)
+        have_write = True
+        orig_sub(ctrl_src)
+
+    session._lipm_substep = _sub  # type: ignore[method-assign]
+
+    @dataclass
+    class _Pre:
+        t_pre: float
+        q: float
+        qd: float
+        ctrl: float
+
+    pre: dict[str, _Pre] = {}
+    real_step = mj.mj_step
+
+    def _hook(model: mj.MjModel, data: mj.MjData) -> None:
+        for jn in joints_watch:
+            jid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, jn)
+            idx = session.act_idx[jn + "_pos"]
+            pre[jn] = _Pre(
+                t_pre=float(data.time),
+                q=float(data.qpos[int(model.jnt_qposadr[jid])]),
+                qd=float(data.qvel[int(model.jnt_dofadr[jid])]),
+                ctrl=float(data.ctrl[idx]),
+            )
+        real_step(model, data)
+
+    mj.mj_step = _hook
+    rows: list[Tick] = []
+    leg8 = {name: (0.0, 0.0) for name in LEG8}
+    up_7560 = float("nan")
+    margin_7560 = float("nan")
+    first_fault_t: float | None = None
+    first_fault = ""
+    servo_at: dict[float, str] = {}
+    try:
+        while float(session.data.time) < t_end - 1e-9:
+            driver.publish(session.bus, float(session.data.time))
+            session.step()
+            t = float(session.data.time)
+            swing = lipm._gm_swing if lipm._gm_swing in ("L", "R") else None
+            toe_z = _leading_toe_z(session, swing) if swing in ("L", "R") else None
+            if not session.bus.fault:
+                for name in leg8:
+                    idx = session.act_idx[name]
+                    tau = float(session.data.actuator_force[idx])
+                    prev, _when = leg8[name]
+                    if abs(tau) > abs(prev):
+                        leg8[name] = (tau, t)
+            if abs(t - T_BAR) <= session.ctrl_dt * 0.51:
+                up_7560 = float(session._up_z())
+                margin_7560 = float(session._support_margin())
+            if session.bus.fault and first_fault_t is None:
+                first_fault_t = t
+                first_fault = session.bus.fault_reason or ""
+            rows.append(Tick(
+                t, swing if swing in ("L", "R") else None, toe_z, 0.0, first_fault,
+            ))
+            want = abs(t - 2.872) <= session.ctrl_dt * 0.51 or t_end >= T_BAR
+            if want:
+                servo_at[t] = _format_servo_tick(
+                    session, walker, t, swing, toe_z, published, written, ctrl_from,
+                    have_write, pre, lead_bleed, lead_err, move_s, track_ik,
+                )
+    finally:
+        mj.mj_step = real_step
+    print(
+        f"HIP_SERVO track_ik {int(track_ik)} hips_only {int(hips_only)} "
+        f"schedule {lipm.cfg.schedule}"
+    )
+    print(
+        f"HIP_SERVO move_s {move_s:.3f} bezier_move_s {lipm_gait.HIP_KNEE_MOVE_S:.3f} "
+        f"hx_slew {lipm_gait.HX35_SLEW_RAD_S:.1f} ctrl_dt {session.ctrl_dt:.3f} "
+        f"gm_move_s {lipm.cfg.gm_move_s:.3f}"
+    )
+    for line in _prior_lead_lines(span):
+        print(f"HIP_SERVO {line}")
+    at_2872 = min(servo_at, key=lambda key: abs(key - 2.872), default=None)
+    if at_2872 is None or abs(at_2872 - 2.872) > session.ctrl_dt:
+        print("HIP_SERVO missed 2.872")
+    elif t_end < T_BAR:
+        print(servo_at[at_2872])
+    if t_end >= T_BAR:
+        toe_min, toe_t, _p90, n_mid, n_cyc, toe_frac, toe_side = _mid_swing(rows)
+        over = [name for name, (tau, _when) in leg8.items() if abs(tau) >= KNEE_NM]
+        rail = [name for name, (tau, _when) in leg8.items() if abs(tau) >= PLANT_NM - 1e-3]
+        print(
+            f"HIP_SERVO score toe {toe_min * 1000:.3f} mm t {toe_t:.3f} "
+            f"frac {toe_frac:.3f} side {toe_side} n_mid {n_mid} n_cyc {n_cyc} "
+            f"x {float(session.data.qpos[0]):.3f} fault {first_fault_t} {first_fault} "
+            f"up7560 {up_7560:.4f} margin7560 {margin_7560:.4f} "
+            f"min_up {float(session.min_up_z):.4f}"
+        )
+        for name, (tau, when) in leg8.items():
+            print(f"HIP_SERVO leg {name} {tau:+.4f} t {when:.3f}")
+        print(f"HIP_SERVO over_2_33 {over} rail {rail}")
+        if at_2872 is not None and abs(at_2872 - 2.872) <= session.ctrl_dt:
+            print("HIP_SERVO sample 2.872")
+            print(servo_at[at_2872])
+        if servo_at:
+            at_toe = min(servo_at, key=lambda key: abs(key - toe_t))
+            if abs(at_toe - toe_t) <= session.ctrl_dt and abs(at_toe - 2.872) > session.ctrl_dt:
+                print(f"HIP_SERVO sample min-toe {at_toe:.3f}")
+                print(servo_at[at_toe])
+    session.assert_plant_unchanged()
+
+
+def _format_servo_tick(
+    session: sw.SteerSession,
+    walker: object,
+    t: float,
+    swing: str | None,
+    toe_z: float | None,
+    published: dict[str, float],
+    written: np.ndarray,
+    ctrl_from: np.ndarray,
+    have_write: bool,
+    pre: dict[str, object],
+    lead_bleed: bool,
+    lead_err: float,
+    move_s: float,
+    track_ik: bool,
+) -> str:
+    import lipm_gait
+
+    saved_t = float(walker.time)  # type: ignore[attr-defined]
+    walker.time = _cmd_time(walker)  # type: ignore[attr-defined]
+    joints, _info = walker.joints_now()  # type: ignore[attr-defined]
+    walker.time = saved_t  # type: ignore[attr-defined]
+    frac = min(1.0, float(session.ctrl_dt) / move_s)
+    slew = float(lipm_gait.HX35_SLEW_RAD_S) * float(session.ctrl_dt)
+    toe_mm = float("nan") if toe_z is None else toe_z * 1000.0
+    lines = [
+        (
+            f"HIP_SERVO t {t:.3f} swing {swing} toe {toe_mm:.3f} mm "
+            f"track_ik {int(track_ik)} lead_bleed {int(lead_bleed)} lead_err {lead_err:.5f} "
+            f"have_write {int(have_write)}"
+        ),
+    ]
+    if joints is None:
+        lines.append("HIP_SERVO ik missing")
+        return "\n".join(lines)
+    for jn in ("r_hip_roll", "r_hip_pitch", "l_hip_roll", "l_hip_pitch"):
+        kind = "hip_roll" if jn.endswith("hip_roll") else "hip_pitch"
+        idx = session.act_idx[jn + "_pos"]
+        ik = float(joints[jn])
+        pub = float(published.get(jn, float("nan")))
+        wrote = float(written[idx]) if have_write else float("nan")
+        src = float(ctrl_from[idx]) if have_write else float("nan")
+        q_post, ctrl, force = _joint_qcf(session, jn)
+        jid = mj.mj_name2id(session.model, mj.mjtObj.mjOBJ_JOINT, jn)
+        qd_post = float(session.data.qvel[int(session.model.jnt_dofadr[jid])])
+        sample = pre.get(jn)
+        t_pre = q_force = qd_force = ctrl_force = float("nan")
+        if sample is not None and hasattr(sample, "q"):
+            t_pre = float(sample.t_pre)  # type: ignore[attr-defined]
+            q_force = float(sample.q)  # type: ignore[attr-defined]
+            qd_force = float(sample.qd)  # type: ignore[attr-defined]
+            ctrl_force = float(sample.ctrl)  # type: ignore[attr-defined]
+        kp = float(session.model.actuator_gainprm[idx, 0])
+        bias0 = float(session.model.actuator_biasprm[idx, 0])
+        bias1 = float(session.model.actuator_biasprm[idx, 1])
+        kv = -float(session.model.actuator_biasprm[idx, 2])
+        stated_kp, stated_kv = _STATED_KP_KV[kind]
+        in_slew = idx in session._move_ctrl_idx
+        e_sat = float(session.lipm.e_sat.get(jn + "_pos", float("nan"))) if session.lipm is not None else float("nan")
+        delta = wrote - src
+        step = delta * frac
+        if step > slew:
+            step = slew
+        elif step < -slew:
+            step = -slew
+        expected = src + step if in_slew else wrote
+        ident = (kp * (ctrl_force - q_force) - force) / kv if abs(kv) > 1e-9 else float("nan")
+        ident_post = (kp * (ctrl - q_post) - force) / kv if abs(kv) > 1e-9 else float("nan")
+        ctrl_eq = abs(ctrl - ik) <= _CTRL_EQ_RAD
+        ident_ok = abs(ident - qd_force) <= _DAMP_EQ_RAD_S
+        filt = _servo_filter(ik, pub, wrote, ctrl)
+        clip = " CLIP" if abs(force) >= PLANT_NM - 0.01 else ""
+        lines.append(
+            f"HIP_SERVO {jn} ik {ik:.6f} published {pub:.6f} written {wrote:.6f} "
+            f"ctrl {ctrl:.6f} ctrl_at_force {ctrl_force:.6f} "
+            f"q_at_force {q_force:.6f} qd_at_force {qd_force:.6f} "
+            f"q {q_post:.6f} qd {qd_post:.6f} force {force:.6f}{clip} "
+            f"t_force {t_pre:.3f}"
+        )
+        lines.append(
+            f"HIP_SERVO {jn} kp {kp:.4f} kv {kv:.4f} bias0 {bias0:.4f} bias1 {bias1:.4f} "
+            f"stated_kp {stated_kp:.3f} stated_kv {stated_kv:.3f} "
+            f"kp_match {int(abs(kp - stated_kp) <= 1e-3)} kv_match {int(abs(kv - stated_kv) <= 1e-3)} "
+            f"in_move_slew {int(in_slew)} e_sat {e_sat:.6f} "
+            f"ctrl_from {src:.6f} slew_expected {expected:.6f} "
+            f"ctrl_eq_ik {int(ctrl_eq)} filter {filt} "
+            f"ctrl_minus_ik {ctrl - ik:.6f} "
+            f"ident_qd {ident:.6f} qd_at_force {qd_force:.6f} ident_ok {int(ident_ok)} "
+            f"ident_post {ident_post:.6f} qd_post {qd_post:.6f}"
+        )
+    return "\n".join(lines)
+
+
 def _print_stance_roll(rows: list[tuple[float, float, float, float, float, float, float]]) -> None:
     if not rows:
         print("STANCE_ROLL empty")
