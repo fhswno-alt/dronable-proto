@@ -79,6 +79,12 @@ _WALK_HIP_PITCH_RATE = 1.90
 _WALK_EARLY_KNEE_RATE = 1.55
 _WALK_EARLY_FRAC = 0.13
 _WALK_EARLY_LOG_FRAC = 0.115
+# Stop-bout early-knee pull ends at the stop command. The descent stays
+# on the 1.90 rad/s slew.
+_STOP_KNEE_LOCAL_END = 8.20
+# Loaded ankle pull covers the pre-steady tick and the steady reopen.
+# Later stance ankles stay on the slew that already cleared them.
+_STOP_ANK_LOCAL_END = 2.60
 # Locked 1.55 copy, no hip slew, CoM tick 2.200 s: stance corner −2.564 mm.
 # A mid-stance tick more than 1 mm past that is a new dig.
 _STANCE_DIG_M = -0.003564
@@ -12043,6 +12049,34 @@ def _install_sagittal_slew(
             return False
         return frac <= _WALK_EARLY_FRAC + 1e-9
 
+    def _stop_knee_local(jn: str) -> bool:
+        """Loaded early stance on the stop bout, through the stop command.
+
+        The over sits in the first quarter of that stance and in the
+        double support that enters it. The write is pulled onto 2.33 Nm.
+        The slew memory stays on the 1.90 rad/s path. The descent after
+        the stop command stays on that slew.
+        """
+        if not jn.endswith("knee"):
+            return False
+        if float(lipm.data.time) > _STOP_KNEE_LOCAL_END + 1e-9:
+            return False
+        t_cmd = _cmd_time(walker)
+        l0 = float(walker.l_ssp_start)
+        l1 = float(walker.l_ssp_end)
+        r0 = float(walker.r_ssp_start)
+        r1 = float(walker.r_ssp_end)
+        if jn.startswith("r_") and l0 < t_cmd <= l1:
+            span = l1 - l0
+            frac = 0.0 if span <= 1e-9 else (t_cmd - l0) / span
+            return frac <= 0.25 + 1e-9
+        if jn.startswith("l_") and r0 < t_cmd <= r1:
+            span = r1 - r0
+            frac = 0.0 if span <= 1e-9 else (t_cmd - r0) / span
+            return frac <= 0.25 + 1e-9
+        in_ssp = (l0 < t_cmd <= l1) or (r0 < t_cmd <= r1)
+        return not in_ssp
+
     def _hold_inside(jn: str, proposed: float) -> tuple[float, float, float, int]:
         """Pull q_des onto |kp*err| + |kv*omega| <= 2.33. Direction stays put."""
         q = float(lipm.q(jn))
@@ -12691,6 +12725,31 @@ def _install_sagittal_slew(
                             slew_stats["early_clip"] = float(slew_stats["early_clip"]) + 1.0
                         elif walk_stance and jn.endswith("knee"):
                             slew_stats["knee_clip"] = float(slew_stats["knee_clip"]) + 1.0
+                knee_slew = None
+                if (
+                    not walk_stance
+                    and getattr(session, "_sag_stop_installed", False)
+                    and not getattr(session, "_sag_torque_cap", False)
+                    and _stop_knee_local(jn)
+                    and _side_loaded(jn)
+                ):
+                    # First fifth of stance, and the double support that
+                    # enters it. The write sits on 2.33 Nm. The slew
+                    # memory stays on the 1.90 path, so the next tick is
+                    # not left a step behind. This is not a freeze.
+                    ask_k, q_now_k = _ask_at(jn, float(q_des))
+                    if abs(ask_k) > KNEE_NM + 1e-9:
+                        jid_k = mj.mj_name2id(lipm.model, mj.mjtObj.mjOBJ_JOINT, jn)
+                        omega_k = float(lipm.data.qvel[int(lipm.model.jnt_dofadr[jid_k])])
+                        idx_k = lipm.act_idx[jn + "_pos"]
+                        kp_k = float(lipm.model.actuator_gainprm[idx_k, 0])
+                        kv_k = -float(lipm.model.actuator_biasprm[idx_k, 2])
+                        if kp_k > 1e-6 and abs(kv_k * omega_k) < KNEE_NM:
+                            sign_k = 1.0 if ask_k > 0.0 else -1.0
+                            solved = q_now_k + (sign_k * KNEE_NM + kv_k * omega_k) / kp_k
+                            if abs(solved - q_now_k) + 1e-9 < abs(float(q_des) - q_now_k):
+                                knee_slew = float(q_des)
+                                q_des = float(solved)
                 if (
                     jn == "l_ank_pitch"
                     and not walk_stance
@@ -12719,6 +12778,30 @@ def _install_sagittal_slew(
                                 q_des = held_cmd - step
                             else:
                                 q_des = held_cmd + step
+                if (
+                    not walk_stance
+                    and jn.endswith("ank_pitch")
+                    and getattr(session, "_sag_stop_installed", False)
+                    and not getattr(session, "_sag_torque_cap", False)
+                    and 1.40 - 1e-9 <= float(lipm.data.time) <= _STOP_ANK_LOCAL_END + 1e-9
+                    and _side_loaded(jn)
+                ):
+                    # Loaded stance ankle after the landing catch. If the
+                    # nearer step is still over 2.33 Nm, pull only until
+                    # the ask sits on that line. Airborne ankles stay on
+                    # their slew.
+                    ask_a, q_now_a = _ask_at(jn, float(q_des))
+                    if abs(ask_a) > KNEE_NM + 1e-9:
+                        jid_a = mj.mj_name2id(lipm.model, mj.mjtObj.mjOBJ_JOINT, jn)
+                        omega_a = float(lipm.data.qvel[int(lipm.model.jnt_dofadr[jid_a])])
+                        idx_a = lipm.act_idx[jn + "_pos"]
+                        kp_a = float(lipm.model.actuator_gainprm[idx_a, 0])
+                        kv_a = -float(lipm.model.actuator_biasprm[idx_a, 2])
+                        if kp_a > 1e-6 and abs(kv_a * omega_a) < KNEE_NM:
+                            sign_a = 1.0 if ask_a > 0.0 else -1.0
+                            solved_a = q_now_a + (sign_a * KNEE_NM + kv_a * omega_a) / kp_a
+                            if abs(solved_a - q_now_a) + 1e-9 < abs(float(q_des) - q_now_a):
+                                q_des = float(solved_a)
                 if walk_stance and jn.endswith("ank_pitch"):
                     t_now = float(lipm.data.time)
                     if t_now >= _WALK_STEADY_S - 1e-9:
@@ -12743,7 +12826,7 @@ def _install_sagittal_slew(
                                 q_des = held_cmd - step
                             else:
                                 q_des = held_cmd + step
-                prev[jn] = float(q_des)
+                prev[jn] = float(knee_slew) if knee_slew is not None else float(q_des)
             elif (
                 getattr(session, "_walk_z_stretch", False)
                 and not getattr(session, "_sag_stop_installed", False)
@@ -14501,6 +14584,11 @@ def score_sag_stop() -> None:
             "On a loaded hip, a step that would put the ask over 2.33 Nm "
             "is not taken. A raw gait jump is cut to one stance step. "
             "An airborne hip is not that hold. "
+            "On a loaded knee, through the stop command, the write is pulled "
+            "toward the live joint in the first quarter of stance and the "
+            "double support that enters it, until the ask sits on 2.33 Nm. "
+            "The slew memory stays on the 1.90 rad/s path. The descent after "
+            "the stop command stays on that slew. "
         "z stays live. That catch is not a swing stretch. "
         "Before the stop, the approach swing-z is time-stretched on its own "
         "rate so the airborne knee can track. That delta is off from the "
