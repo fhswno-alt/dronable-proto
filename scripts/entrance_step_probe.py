@@ -4724,27 +4724,60 @@ def _install_inflight_stop(
             swing = str(state.get("swing", ""))
             pref = "l_" if swing == "L" else "r_"
             cur = _swing_ik_at(swing, now)
-            nxt = _swing_ik_at(swing, proposed)
             cap = 1.90 * float(ow.OP3_CTRL_S)
-            caught = False
-            if cur is not None and nxt is not None:
-                knee_cmd = _swing_cmd(pref + "knee")
-                ank_cmd = _swing_cmd(pref + "ank_pitch")
-                step_ok = (
-                    abs(float(nxt[0]) - float(cur[0])) <= cap + 1e-6
-                    and abs(float(nxt[1]) - float(cur[1])) <= cap + 1e-6
+            knee_cmd = _swing_cmd(pref + "knee")
+            ank_cmd = _swing_cmd(pref + "ank_pitch")
+
+            def _near(sample: tuple[float, float, float] | None) -> bool:
+                if cur is None or sample is None:
+                    return False
+                return (
+                    abs(float(sample[0]) - float(cur[0])) <= cap + 1e-6
+                    and abs(float(sample[1]) - float(cur[1])) <= cap + 1e-6
                 )
-                caught = (
-                    step_ok
-                    and knee_cmd is not None
-                    and ank_cmd is not None
-                    and abs(knee_cmd - float(cur[0])) <= cap + 1e-6
-                    and abs(ank_cmd - float(cur[1])) <= cap + 1e-6
-                )
-            if caught:
-                walker.time = proposed
+
+            cmd_ok = (
+                cur is not None
+                and knee_cmd is not None
+                and ank_cmd is not None
+                and abs(float(knee_cmd) - float(cur[0])) <= cap + 1e-6
+                and abs(float(ank_cmd) - float(cur[1])) <= cap + 1e-6
+            )
+            nxt = _swing_ik_at(swing, proposed) if cmd_ok else None
+            if cmd_ok and not _near(nxt) and proposed > now + 1e-9:
+                # The nominal stretch step still outruns the slew here.
+                # Shorten it. Holding the clock forever leaves the foot up.
+                lo = 0.0
+                hi = float(proposed - now)
+                for _ in range(12):
+                    mid = 0.5 * (lo + hi)
+                    trial = _swing_ik_at(swing, now + mid)
+                    if _near(trial):
+                        lo = mid
+                    else:
+                        hi = mid
+                if lo >= 1e-5:
+                    proposed = now + lo
+                    nxt = _swing_ik_at(swing, proposed)
+                else:
+                    nxt = None
+            if cmd_ok and _near(nxt):
+                walker.time = float(proposed)
             else:
                 state["z_wait_n"] = int(state.get("z_wait_n", 0)) + 1
+                edge["z_miss_knee_cmd"] = (
+                    float("nan") if knee_cmd is None else float(knee_cmd)
+                )
+                edge["z_miss_ank_cmd"] = (
+                    float("nan") if ank_cmd is None else float(ank_cmd)
+                )
+                edge["z_miss_knee_ik"] = (
+                    float("nan") if cur is None else float(cur[0])
+                )
+                edge["z_miss_ank_ik"] = (
+                    float("nan") if cur is None else float(cur[1])
+                )
+                edge["z_miss_cmd_ok"] = int(cmd_ok)
             edge["z_waits"] = int(state["z_wait_n"])
             edge["z_gait_now"] = float(walker.time)
             return
@@ -13540,6 +13573,11 @@ def score_sag_stop() -> None:
             f"R {float(edge.get('load_r_last', float('nan'))):.2f} "
             f"swing_min {float(edge.get('swing_load_min', float('nan'))):.2f} "
             f"t {float(edge.get('swing_load_min_t', float('nan'))):.3f} "
+            f"miss_cmd_ok {int(edge.get('z_miss_cmd_ok', 0))} "
+            f"knee_cmd {float(edge.get('z_miss_knee_cmd', float('nan'))):+.5f} "
+            f"knee_ik {float(edge.get('z_miss_knee_ik', float('nan'))):+.5f} "
+            f"ank_cmd {float(edge.get('z_miss_ank_cmd', float('nan'))):+.5f} "
+            f"ank_ik {float(edge.get('z_miss_ank_ik', float('nan'))):+.5f} "
             f"peak_rate {float(edge.get('z_peak_rate', float('nan'))):.3f} "
             f"knee_rate {float(edge.get('z_knee_rate', float('nan'))):.3f} "
             f"ank_rate {float(edge.get('z_ank_rate', float('nan'))):.3f} "
