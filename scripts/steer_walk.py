@@ -181,21 +181,17 @@ phase. The bus is stood on the next 8 ms tick. Body settle, T_stop, is
 toe-gap stop is 0.842 s, and that longer sample is the T_stop in
 d_min. Clear distance stays d_min = v × (T_detect + T_stop) with
 v = 0.150 m/s, compared as toe_gap = eye_range − toe_offset.
-toe_offset is the further-ahead sole minus kit_cam along body
-forward: −0.016 m at stand (cam_z 0.335 m), +0.006 m / −0.037 m
-(leading / swing) at t = 5.90 s (cam_z 0.332 m). The range uses that
-live camera height, horizontal from the point under the eye, then
-subtracts toe_offset. T_detect is not filled in. The 0.342 ms RGB
-compute and a 33 ms frame are not kit T_detect, and 0.1263 m at
-T_detect = 0 is not a locked margin. Camera world pitch is IMU torso
-pitch plus head_tilt at the frame, not head_tilt alone. The kitchen
-gate on T_detect = 0 stops at 6.200 s by dead-reckon after the floor
-leaves the frame, with 0 prop contacts and a stop peak of −2.280 Nm.
-A −10° head-down walk is not enabled: that near edge is 0.077 m at
-cam_z 0.326 m, inside the toe zone, and the swing foot would sit in
-the bottom of the frame. Restoring the head for a room ask is a
-session joint, not a Day-1 bus key. The row is a sim projection.
-Not go-anywhere. Soft-pass is off.
+The gate offset is the furthest either toe reaches during the walk,
++0.017 m on the right foot, not the sole at one frame. The compare is
+(eye_range − step_off − buffer) against d_min, with buffer 0.03 m or
+0.05 m. 0.1263 m at T_detect = 0 is the floor, not a safe gap.
+T_detect 0.033 s and 0.100 s are placeholders, not kit measurements.
+The 0.342 ms RGB compute is not kit T_detect. Those six stops have 0
+prop contacts and a stop peak of −2.280 Nm. They fire on an off-axis
+stool leg whose eye range reads about 0.18 m short, so the clearance
+is not a calibrated toe gap. Not kit-safe. A −10° head-down walk is
+not enabled. The row is a sim projection. Not go-anywhere. Soft-pass
+is off.
 """
 from __future__ import annotations
 

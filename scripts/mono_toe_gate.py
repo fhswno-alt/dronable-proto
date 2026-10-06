@@ -6,44 +6,31 @@ row, the live camera height and position, and the live world pitch.
 World pitch is the torso IMU pitch plus head_tilt at that frame.
 Height is kit_cam world z. The floor plane is z = 0.
 
-The compare is the leading-toe gap, not the eye gap. On this plant the
-sole is not ahead of the eye at stand: both feet measure −0.016 m
-along body forward (the lean puts the eye ahead of the sole). At
-t = 5.90 s the further-ahead sole is +0.006 m and the swing sole is
-−0.037 m. The gate uses the further-ahead sole. Camera height at that
-sample is 0.332 m, not the 0.335 m stand figure.
+The compare uses the furthest toe either foot reaches during the
+walk, not the sole at one frame. On this kitchen walk that high
+water is +0.017 m (right foot, t = 3.056 s). A full gait period is
+0.400 s. After the gait is up the right toe peaks near +0.015 m and
+the left near +0.013 m. Stand is −0.016 m. The unstopped hit is the
+left ankle, so a single-frame planted sole is the wrong offset.
 
     cam_z = kit_cam world z at the frame (floor plane z = 0)
     eye_range = cam_z / tan(depression(row, IMU + head_tilt))
-    near_edge = cam_z / tan(depression(last row, IMU + head_tilt))
-    toe_offset = (leading sole bottom − cam_xy) · body_forward
-    toe_gap = eye_range − toe_offset
-    near_toe = near_edge − toe_offset
+    step_off = max forward toe offset of either foot since t = 1 s
+    toe_gap = eye_range − step_off
+    compare (toe_gap − buffer) with d_min
+    buffer in {0.03, 0.05}
     d_min = 0.150 * (T_detect + T_stop)
 
-near_edge is the horizontal distance from the point under the eye.
-The compare is still the toe gap, so near_toe and toe_gap both
-subtract toe_offset before they are checked against d_min. A stool-leg
-row in the bottom 32 pixels also stops when toe_gap is within
-(eye_range − near_edge) of d_min. That is the same check as
-near_toe <= d_min, and it is only armed when the row is a stool leg.
-The robot's own feet are not a contact. After that band leaves the
-frame, dead-reckon subtracts body travel along the latched forward.
+0.1263 m at T_detect = 0 is the floor, not a safe gap. The buffer is
+a fixed slip allowance. It is not a measured kit odometry error.
+T_detect 0.033 s is one 30 fps frame and 0.100 s is the blind-zone
+warning. Neither is a kit measurement. 0.342 ms is not plugged in.
 
-Height is not frozen at 0.335 m. That figure is the stand eye height
-on this plant. A −10° head_tilt walk is not enabled: its near edge is
-inside the toe zone, so the swing foot sits in the bottom of the
-frame, and a wood-color rule on that frame can see the feet. The
-stills that keep the room name are a stand plus a head hold, not a
-walk. Restoring the head for a room ask is a session joint, not a
-Day-1 bus key.
-
-T_stop is 0.842 s. The empty-plant grid peaked at 0.832 s. The
-live-height kitchen stop settled in 0.842 s, and that is the longer
-one. T_detect stays a parameter. 0.1263 m at T_detect = 0 is not a
-locked margin.
-The pixel row in this probe is the sim projection of a group-3
-stool-leg bottom. It is not an RGB finder. The head is not tilted.
+The row model ignores the column. The buffered stops fire on
+col_chair_stool_b_leg_0, whose eye range reads about 0.18 m short of
+the true camera-to-floor gap. That early trip is not a calibrated
+toe gap. Near the center, leg_2 at t = 5.824 s reads 0.015 m short.
+The head is not tilted. A −10° walk stays off.
 """
 from __future__ import annotations
 
@@ -63,6 +50,7 @@ if str(_SCRIPTS) not in sys.path:
 import mujoco as mj
 import numpy as np
 
+import gait_manager_traj as gm
 import steer_walk as sw
 
 SCENE = Path("/tmp/m62/mujoco/room_kitchen.xml")
@@ -77,6 +65,12 @@ V_MPS = 0.150
 # The live-height kitchen dead-reckon stop settled in 0.842 s. The
 # gate uses the longer one. Updated again if a rerun settles later.
 T_STOP_S = 0.842
+# One left-plus-right cycle. The toe offset is the furthest either foot
+# reaches ahead of kit_cam during that cycle, not the sole at one frame.
+GAIT_PERIOD_S = gm.GM_PERIOD_S
+# MFG slip buffer. 0.126 m is the T_detect=0 floor, not a safe gap.
+# 0.03 m is about one commanded step. 0.05 m is the larger trial.
+BUFFERS_M = (0.03, 0.05)
 # Bottom band. A contact here is about to leave the floor of the frame.
 NEAR_PX = 32
 LEG_TOKS = ("hip_", "knee", "ank_")
@@ -86,6 +80,47 @@ HOLD_S = 0.20
 
 def d_min(t_detect_s: float, t_stop_s: float = T_STOP_S) -> float:
     return V_MPS * (float(t_detect_s) + float(t_stop_s))
+
+
+def _high_water(samples: list[tuple[float, float, float]]) -> tuple[float, str, float]:
+    """Furthest toe ahead of the camera since the walk started.
+
+    Each sample is (t, left offset, right offset). Positive is ahead.
+    """
+    best = -1.0e9
+    side = "?"
+    when = 0.0
+    for t, left, right in samples:
+        if left > best:
+            best, side, when = left, "L", t
+        if right > best:
+            best, side, when = right, "R", t
+    if best < -1.0e8:
+        return 0.0, "?", 0.0
+    return best, side, when
+
+
+def _period_lines(samples: list[tuple[float, float, float]]) -> list[str]:
+    """Max toe offset in each gait period after the walk starts."""
+    if not samples:
+        return []
+    t0 = 1.0
+    last = samples[-1][0]
+    lines: list[str] = []
+    while t0 <= last + 1e-9:
+        t1 = t0 + GAIT_PERIOD_S
+        window = [row for row in samples if t0 - 1e-9 <= row[0] < t1]
+        if window:
+            left = max(row[1] for row in window)
+            right = max(row[2] for row in window)
+            either = max(left, right)
+            side = "L" if left >= right else "R"
+            lines.append(
+                f"period {t0:.2f}-{t1:.2f} L={left:+.3f} R={right:+.3f} "
+                f"max={either:+.3f} {side}"
+            )
+        t0 = t1
+    return lines
 
 
 def _fy() -> float:
@@ -240,9 +275,19 @@ class Sight:
     body_xy: tuple[float, float]
     fwd: tuple[float, float]
     in_near_band: bool
+    t: float
+    gt_eye_m: float
+    gt_toe_m: float
+    offset_m: float
+    cam_z: float
 
 
-def walk(t_detect: float, t_end: float = 9.0, arm: bool = True) -> dict[str, object]:
+def walk(
+    t_detect: float,
+    t_end: float = 9.0,
+    arm: bool = True,
+    buffer_m: float = 0.0,
+) -> dict[str, object]:
     session = sw.SteerSession(video=False, scene_xml=SCENE, lipm=sw.locked_kit_config())
     model = session.model
     cid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_CAMERA, "kit_cam")
@@ -296,13 +341,17 @@ def walk(t_detect: float, t_end: float = 9.0, arm: bool = True) -> dict[str, obj
     reason = ""
     min_foot_leg = 1e9
     latched: dict[str, Sight] = {}
+    bias_log: list[str] = []
+    reach: list[tuple[float, float, float]] = []
     gate = d_min(t_detect)
     try:
         while float(session.data.time) < t_end - 1e-9:
             now = float(session.data.time)
-            if issued is None and arm and now >= 1.0 - 1e-9:
-                choice = _decide(session, cid, jid, latched, gate)
-                if choice is not None:
+            if issued is None and now >= 1.0 - 1e-9:
+                choice = _decide(
+                    session, cid, jid, latched, gate, bias_log, reach, buffer_m,
+                )
+                if arm and choice is not None:
                     session.bus.stop(now)
                     issued = now
                     issued_xy = (float(session.data.qpos[0]), float(session.data.qpos[1]))
@@ -310,6 +359,15 @@ def walk(t_detect: float, t_end: float = 9.0, arm: bool = True) -> dict[str, obj
                     reason = choice
                     logs.append(f"STOP t={now:.3f} {choice}")
                     logs.append(_pose_line(session, cid, jid))
+                    for lname, sight in latched.items():
+                        if lname not in choice:
+                            continue
+                        logs.append(
+                            f"stop_bias {lname} eye={sight.eye_m:.3f} "
+                            f"eye_gt={sight.gt_eye_m:.3f} "
+                            f"eye_bias={sight.eye_m - sight.gt_eye_m:+.3f} "
+                            f"cmp={sight.toe_gap_m:.3f} true_min={sight.gt_toe_m:.3f}"
+                        )
             if issued is None:
                 driver.publish(session.bus, now)
             session.step()
@@ -359,7 +417,23 @@ def walk(t_detect: float, t_end: float = 9.0, arm: bool = True) -> dict[str, obj
         "stop_over": stop_over,
         "gate_m": gate,
         "logs": logs,
+        "bias": bias_log,
+        "latched": {
+            name: (
+                f"latch t={sight.t:.3f} {name} row={sight.row:.0f} "
+                f"eye={sight.eye_m:.3f} eye_gt={sight.gt_eye_m:.3f} "
+                f"eye_bias={sight.eye_m - sight.gt_eye_m:+.3f} "
+                f"toe={sight.toe_gap_m:.3f} toe_gt={sight.gt_toe_m:.3f} "
+                f"toe_bias={sight.toe_gap_m - sight.gt_toe_m:+.3f} "
+                f"off={sight.offset_m:+.3f} cam_z={sight.cam_z:.3f} "
+                f"near={int(sight.in_near_band)}"
+            )
+            for name, sight in latched.items()
+        },
         "plant": sw._md5(sw.PLANT_XML),
+        "buffer_m": buffer_m,
+        "step_off": _high_water(reach),
+        "periods": _period_lines(reach),
     }
 
 
@@ -377,6 +451,9 @@ def _decide(
     jid: int,
     latched: dict[str, Sight],
     gate: float,
+    bias_log: list[str],
+    reach: list[tuple[float, float, float]],
+    buffer_m: float,
 ) -> str | None:
     data = session.data
     model = session.model
@@ -384,7 +461,14 @@ def _decide(
     pitch = torso_pitch(data, session.bid_body) + tilt
     cam_z = float(data.cam_xpos[cid][2])
     toes = toe_samples(session, cid)
-    # The toe that sits furthest ahead. The swing foot is often behind the eye.
+    now = float(data.time)
+    if now >= 1.0 - 1e-9:
+        left = next(row.offset_m for row in toes if row.side == "L")
+        right = next(row.offset_m for row in toes if row.side == "R")
+        reach.append((now, left, right))
+    step_off, step_side, _step_t = _high_water(reach)
+    # Instantaneous furthest sole. The swing foot is often behind the eye.
+    # The gate does not use it. The compare uses the gait-period high water.
     toe = max(toes, key=lambda row: row.offset_m)
     fwd = body_forward_xy(data, session.bid_body)
     seen: set[str] = set()
@@ -401,26 +485,58 @@ def _decide(
         if eye is None:
             continue
         seen.add(name)
-        gap = eye - toe.offset_m
+        # eye_range minus the furthest toe this gait has reached, minus the
+        # fixed slip buffer. Compared with d_min.
+        gap = eye - step_off - buffer_m
         near = v >= (HEIGHT - NEAR_PX)
         margin = 0.0
         if near and edge is not None:
             margin = max(0.0, eye - edge)
         body_xy = (float(data.qpos[0]), float(data.qpos[1]))
+        cam = np.asarray(data.cam_xpos[cid], dtype=np.float64)
+        gt_eye = float(math.hypot(point[0] - cam[0], point[1] - cam[1]))
+        gt_toe = min(
+            float(math.hypot(point[0] - row.toe_xy[0], point[1] - row.toe_xy[1]))
+            for row in toes
+        )
         sight = Sight(
             name, v, eye, gap, body_xy, (float(fwd[0]), float(fwd[1])), near,
+            float(data.time), gt_eye, gt_toe, step_off, cam_z,
         )
+        prev = latched.get(name)
         latched[name] = sight
+        if near and (prev is None or not prev.in_near_band or sight.t - prev.t >= 0.04):
+            inst_gap = eye - toe.offset_m
+            inst_gt = float(math.hypot(
+                point[0] - toe.toe_xy[0], point[1] - toe.toe_xy[1],
+            ))
+            bias_log.append(
+                f"bias t={sight.t:.3f} {name} row={v:.0f} "
+                f"eye={eye:.3f} eye_gt={gt_eye:.3f} eye_bias={eye - gt_eye:+.3f} "
+                f"inst_toe={inst_gap:.3f} inst_gt={inst_gt:.3f} "
+                f"inst_bias={inst_gap - inst_gt:+.3f} "
+                f"step_off={step_off:+.3f} {step_side} buf={buffer_m:.3f} "
+                f"cmp={gap:.3f} true_min={gt_toe:.3f} cam_z={cam_z:.3f}"
+            )
         trigger = gap
         why = "toe_gap"
         if near and gap <= gate + margin and gap > gate:
             trigger = gap
             why = "near_edge"
             if best is None or trigger < best[0]:
-                best = (trigger, f"{why} {name} toe_gap={gap:.3f} margin={margin:.3f} eye={eye:.3f} cam_z={cam_z:.3f} off={toe.offset_m:+.3f} {toe.side}{' swing' if toe.swing else ''}")
+                best = (
+                    trigger,
+                    f"{why} {name} cmp={gap:.3f} margin={margin:.3f} "
+                    f"eye={eye:.3f} cam_z={cam_z:.3f} step_off={step_off:+.3f} "
+                    f"{step_side} buf={buffer_m:.3f}",
+                )
             continue
         if gap <= gate and (best is None or gap < best[0]):
-            best = (gap, f"{why} {name} toe_gap={gap:.3f} eye={eye:.3f} cam_z={cam_z:.3f} off={toe.offset_m:+.3f} row={v:.0f} {toe.side}{' swing' if toe.swing else ''}")
+            best = (
+                gap,
+                f"{why} {name} cmp={gap:.3f} eye={eye:.3f} cam_z={cam_z:.3f} "
+                f"step_off={step_off:+.3f} {step_side} buf={buffer_m:.3f} row={v:.0f}",
+            )
     for name, sight in list(latched.items()):
         if name in seen or not sight.in_near_band:
             continue
@@ -429,9 +545,14 @@ def _decide(
             np.array(body_xy, dtype=np.float64) - np.array(sight.body_xy, dtype=np.float64),
             np.array(sight.fwd, dtype=np.float64),
         ))
-        dr = sight.toe_gap_m - advance
+        dr = sight.eye_m - step_off - buffer_m - advance
         if dr <= gate and (best is None or dr < best[0]):
-            best = (dr, f"dead_reckon {name} toe_gap={dr:.3f} advance={advance:.3f} cam_z={cam_z:.3f} off={toe.offset_m:+.3f}")
+            best = (
+                dr,
+                f"dead_reckon {name} cmp={dr:.3f} advance={advance:.3f} "
+                f"cam_z={cam_z:.3f} step_off={step_off:+.3f} {step_side} "
+                f"buf={buffer_m:.3f}",
+            )
     if best is None:
         return None
     return best[1]
@@ -535,24 +656,49 @@ def _settle(hist: list[tuple[float, float, float, float]], issued: float | None)
     return None
 
 
-def main() -> None:
-    mode = sys.argv[1] if len(sys.argv) > 1 else "gate"
-    t_detect = 0.0 if len(sys.argv) < 3 else float(sys.argv[2])
-    arm = mode != "log"
-    result = walk(t_detect, arm=arm)
+def _print_result(result: dict[str, object], t_detect: float, mode: str) -> None:
+    step = result["step_off"]
+    assert isinstance(step, tuple)
     print(
         f"plant {result['plant']} mode={mode} T_detect={t_detect} "
-        f"d_min={result['gate_m']:.4f} issued={result['issued']} reason={result['reason']} "
+        f"buffer={result['buffer_m']} d_min={result['gate_m']:.4f} "
+        f"step_off={step[0]:+.3f} {step[1]} t={step[2]:.3f} "
+        f"issued={result['issued']} reason={result['reason']} "
         f"contact={result['contact']} T_stop_run={result['t_stop']} "
         f"min_up_z={result['min_up_z']:.3f} yaw={result['yaw']:+.1f} "
         f"xy={result['xy']} issued_xy={result['issued_xy']} "
         f"min_foot_leg={result['min_foot_leg']} fault={result['fault']} "
         f"stop_worst={result['stop_worst']} stop_over={len(result['stop_over'])}"
     )
+    periods = result["periods"]
+    assert isinstance(periods, list)
+    for line in periods:
+        print(line)
     logs = result["logs"]
     assert isinstance(logs, list)
     for line in logs:
         print(line)
+    bias = result["bias"]
+    assert isinstance(bias, list)
+    for line in bias:
+        print(line)
+
+
+def main() -> None:
+    mode = sys.argv[1] if len(sys.argv) > 1 else "gate"
+    if mode == "stress":
+        for t_detect in (0.0, 0.033, 0.100):
+            for buffer_m in BUFFERS_M:
+                result = walk(t_detect, arm=True, buffer_m=buffer_m)
+                _print_result(result, t_detect, mode)
+                print("---")
+        return
+    t_detect = 0.0 if len(sys.argv) < 3 else float(sys.argv[2])
+    buffer_m = 0.0 if len(sys.argv) < 4 else float(sys.argv[3])
+    arm = mode != "reach"
+    t_end = 6.6 if mode == "reach" else 9.0
+    result = walk(t_detect, t_end=t_end, arm=arm, buffer_m=buffer_m)
+    _print_result(result, t_detect, mode)
 
 
 if __name__ == "__main__":

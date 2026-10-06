@@ -1563,49 +1563,68 @@ and `cam_z` is 0.335 m: the lean puts the eye 1.6 cm ahead of the
 sole. The near edge, from under the eye, is 0.141 m, and the toe gap
 of that edge is 0.158 m. At t = 5.90 s `cam_z` is 0.332 m, the left
 sole (not swinging) is +0.006 m, and the right swing sole is −0.037 m.
-The near edge is 0.141 m and the toe gap of that edge is 0.135 m. The
-gate uses the further-ahead sole. The foot that hit was the one that
-was not swinging.
+The near edge is 0.141 m and the toe gap of that edge is 0.135 m.
+That single-frame sole is not the gate offset. The unstopped contact
+is the left ankle on `col_chair_stool_b_leg_2`. The offset is the
+furthest either toe reaches over a gait period.
+
+Over the 0.400 s gait period, both feet, on this walk with no stop:
+the high water is **+0.017 m** on the right foot at t = 3.056 s.
+Once the gait is up, a period peaks near +0.015 m on the right and
++0.013 m on the left. The commanded step length is 0.020 m. A stop
+that used the sole at one frame and no buffer, issued at 6.200 s,
+left the closest foot 0.133 m from a leg floor against a 0.1263 m
+floor. That is about 7 mm. It is not kit-safe.
 
     cam_z = kit_cam world z at the frame
     eye_range = cam_z / tan(depression(row, IMU + head_tilt))
-    near_edge = cam_z / tan(depression(last row, IMU + head_tilt))
-    toe_gap = eye_range − toe_offset
-    near_toe = near_edge − toe_offset
+    step_off = max forward toe offset of either foot since the walk
+    toe_gap = eye_range − step_off
+    compare (toe_gap − buffer) with d_min
     d_min = 0.150 × (T_detect + 0.842)
 
-`T_detect` stays open. 0.1263 m is `v × T_stop` at `T_detect` = 0. It
-is not a locked margin. `near_edge` is the horizontal distance from
-the point under the eye. The compare subtracts `toe_offset` before it
-meets `d_min`. If a stool-leg row is in the bottom 32 pixels, the
-compare also fires when `toe_gap` is within `(eye_range − near_edge)`
-of `d_min`, which is the same check as `near_toe ≤ d_min`. The
-robot's own feet are not that row. After a leg last seen in that band
-leaves the frame, the gate dead-reckons: latched `toe_gap` minus body
-travel along the latched forward. Day-1 `stop` only. The head is not
-tilted down. `head_tilt` stays at the stand angle.
+`buffer` is 0.03 m or 0.05 m, a fixed slip allowance. 0.03 m is a bit
+more than the 0.020 m commanded step. 0.1263 m stays the floor at
+`T_detect` = 0. It is not a safe gap. `T_detect` of 0.033 s is one
+30 fps frame, and 0.100 s is the blind-zone warning. Neither is a
+kit measurement. The 0.342 ms RGB compute is not plugged in.
 
-On `T_detect` = 0 the in-frame `toe_gap` does not cross `d_min`. A
-negative offset makes `toe_gap` larger than the eye range, so the
-in-frame compare is later, not earlier. The dead-reckon fires. Stop
-is issued at 6.200 s on `col_chair_stool_b_leg_2` (`toe_gap` 0.126 m,
-advance 0.028 m, `cam_z` 0.329 m, offset −0.003 m). Prop contacts are
-0. min up_z is 0.934. End xy is +0.532, −0.426, yaw −58.1°. The
-closest foot-to-leg-floor after the stop is 0.133 m. At the stop pose
-the closest foot to that leg's floor is 0.145 m, so the estimate is
-about 2 cm short. The stop peak is −2.280 Nm on the left knee. No
-stop-window leg joint crosses 2.33 Nm. This run's body-COM settle is
-0.842 s, which is the `T_stop` above. The row is still the sim
-projection of the group-3 leg bottom, not an RGB finder.
+All six of those stops have 0 prop contacts. min up_z is 0.934. Every
+stop-window leg joint peaks at 2.280 Nm. None crosses 2.33 Nm.
+
+| `T_detect` | buffer | stop | `d_min` | compare | post-stop foot–leg | settle |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0 | 0.03 m | 5.680 s | 0.1263 m | 0.123 m | 0.207 m | 0.788 s |
+| 0 | 0.05 m | 5.640 s | 0.1263 m | 0.123 m | 0.207 m | 0.668 s |
+| 0.033 s | 0.03 m | 5.664 s | 0.1313 m | 0.131 m | 0.206 m | 0.764 s |
+| 0.033 s | 0.05 m | 5.624 s | 0.1313 m | 0.129 m | 0.209 m | 0.668 s |
+| 0.100 s | 0.03 m | 5.648 s | 0.1413 m | 0.139 m | 0.206 m | 0.666 s |
+| 0.100 s | 0.05 m | 5.176 s | 0.1413 m | 0.139 m | 0.284 m | 0.836 s |
+
+These settles run 0.666–0.836 s. They do not raise the 0.842 s worst,
+so `T_stop` in the formula stays 0.842 s.
+
+Every one of those stops is on `col_chair_stool_b_leg_0`, not the leg
+the ankle hits. The row model ignores the column. At the 0.03 m /
+`T_detect` = 0 stop the eye range is 0.170 m and the true
+camera-to-floor gap is 0.351 m, short by 0.181 m. The compare is
+0.123 m. The closest toe to that leg's floor is 0.316 m. The same
+pattern holds for the other five: the eye is 0.17–0.20 m short. The
+early stop is that off-axis read, plus the buffer and the 0.017 m
+offset. It is not a calibrated toe gap. On the unarmed walk,
+`col_chair_stool_b_leg_2` at t = 5.824 s (row 449) has eye 0.182 m
+against a true gap of 0.197 m, short by 0.015 m. The buffered stops
+happen before that frame. The post-stop clearance above is real, and
+it is not a measured 3 cm of kit margin. Not kit-safe.
 
 A −10° `head_tilt` walk is not enabled. On that pose the near edge is
-0.077 m at `cam_z` 0.326 m, inside `d_min` and inside the toe zone, so
-the swing foot sits in the bottom of the frame. A wood-color rule on
-a walk frame can see the feet and must not treat them as a prop. The
-stills that keep the room name are a stand plus a head hold, not a
-walk. Putting the head back to +0.25 rad for a room ask is a session
-joint. It is not a Day-1 bus key. This gate does not command
-`head_tilt`.
+0.077 m at `cam_z` 0.326 m. #67 checked the wood rule at that session
+tilt: the foot contact boxes project to rows 643–749, below the
+480-row frame, and `foot_wood_px` is 0. The kitchen fires in that
+check are the stool only. That does not turn the tilt on for this
+gate. This gate does not command `head_tilt`. Putting the head back
+to +0.25 rad for a room ask remains a session joint, not a Day-1 bus
+key.
 
 A Day-1 stop at the cue (issued at 1.904 s) has 0 prop contacts,
 min up_z 0.934, end xy +0.088, −0.005, yaw −5.9°, and a stop peak of
