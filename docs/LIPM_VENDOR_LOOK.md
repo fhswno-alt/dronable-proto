@@ -1428,3 +1428,5 @@ peel. After the straight resume the leftover is +2.1° on the left and
 −0.5° on the right. Knees on the walks stay on 2.330 Nm. First-step
 knees stay under 2.33 Nm. Soft-pass is off.
 
+Head-tilt ask-pose is not adopted. Joint `head_tilt` / actuator `head_tilt_pos` exists. A 0.20 s stand hold at **+0.25 rad** (near-level look, camera pitch −0.99 deg versus −14.84 deg at the quiet stand) still answers kitchen, bathroom, and bedroom as living. The bus was not given a joint command. The plant file was not edited. Controls does not own an ask-pose from this probe.
+
