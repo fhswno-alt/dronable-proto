@@ -16,7 +16,7 @@
     "d_min_m": 0.1263,
     "false_stop": "A #71 stop whose floor point lies on the speckled shadow patch in front of the kitchen or bathroom doorway, with no furniture prop in the kit_cam frame. That stop is not a #71 pass. Walls are not props.",
     "yes_no": "Per asked room: 'Is there a {room} through the doorway ahead?' yes or no. Not an open-set room name. Moondream yes is logged against the 1% kit_cam gate. A yes under that fraction is refused and the search continues. It does not publish forward vel. A yes under that fraction that still commits forward vel is a wrong yes.",
-    "search": "Spawn yaw is the door-facing yaw plus or minus 90 degrees. After the stand, vel(0, +0.25) turns in place. No forward vel until a correct yes. Every 20 degrees the turn stops (yaw 0) and the body settles for 0.70 s. The room question is asked only when the doorway opening is actually in kit_cam. Otherwise the body turns in place at yaw +0.25, and that applied yaw is logged on the search. The picture is still taken after yaw has settled to 0. Moondream detects a doorway pixel only on that gated frame. The logged heading is the heading at capture, not the heading when the answer returns. The search turn sign is not taken from the door bearing. A correct yes yaws in place toward the doorway pixel, settles until applied yaw is 0, then walks at +0.056 m/s with yaw 0. Yaw is not commanded while walking. It re-points the same way after each 1.00 s stop-settle-capture. kit_cam is not moved. A floor/wall image row is ranged with the live camera. The floor-edge latch fires only when the forward ray hits the same wall the row ranged. A prop or a different wall is logged and is not added to the latch. latch_extra 0.04087 m is the median of 17 errors on wall_hall_w_2 with the sim gap under 0.40 m. wall_hall_e_1 has its own pooled median, 0.03983 m, from 43 close samples on tip aac2baa. Left-toe samples on tip a3c05f3 median 0.01426 m (n=21). Right-toe samples median 0.07279 m (n=9). The living median is not copied onto either toe. Contact boxes sit 0.014 m outboard of each ankle roll. The 0.40 m bound is 2.39 times the living latch distance 0.1672 m (d_min 0.1263 plus that median). A ray past 0.40 m stays a far reject. The bob pad is not stacked on either median. A stop clears only when the held-out hit uses the same leading toe and lands within 0.01 m of that toe's median. Right toe has 9 samples, under 17, so it cannot clear and it does not stop the walk. Once the left toe's ray on wall_hall_e_1 is at or under 0.60 m, further in-place re-points are dropped and the walk stays at yaw 0. No pitch, camera height, or toe bias is fit across the pooled samples. Room reach is a separate bar. In-place body yaw that asks a hip roll over 2.33 Nm unclamped is not a free re-point. d_min is not rebuilt. The ray uses the live camera height and the IMU pitch plus head_tilt, not a standing-pose table.",
+    "search": "Spawn yaw is the door-facing yaw plus or minus 90 degrees. After the stand, vel(0, +0.25) turns in place. No forward vel until a correct yes. Every 20 degrees the turn stops (yaw 0) and the body settles for 0.70 s. The room question is asked only when the doorway opening is actually in kit_cam. Otherwise the body turns in place at yaw +0.25, and that applied yaw is logged on the search. The picture is still taken after yaw has settled to 0. Moondream detects a doorway pixel only on that gated frame. The logged heading is the heading at capture, not the heading when the answer returns. The search turn sign is not taken from the door bearing. A correct yes yaws in place toward the doorway pixel, settles until applied yaw is 0, then walks at +0.056 m/s with yaw 0. Yaw is not commanded while walking. It re-points the same way after each 1.00 s stop-settle-capture. kit_cam is not moved. A floor/wall image row is ranged with the live camera. The floor-edge latch fires only when the forward ray hits the same wall the row ranged. A prop or a different wall is logged and is not added to the latch. latch_extra 0.04087 m is the median of 17 errors on wall_hall_w_2 with the sim gap under 0.40 m. wall_hall_e_1 has its own pooled median, 0.03983 m, from 43 close samples on tip aac2baa. The left-toe pad is the median of 45 close left samples, 0.04542 m: 21 from tip a3c05f3 and 24 more from the yaw-0 hold, with both committing stops left out. Right-toe samples median 0.07279 m (n=9). The living median is not copied onto either toe. Contact boxes sit 0.014 m outboard of each ankle roll. The 0.40 m bound is 2.39 times the living latch distance 0.1672 m (d_min 0.1263 plus that median). A ray past 0.40 m stays a far reject. The bob pad is not stacked on either median. A stop clears only when the held-out hit uses the same leading toe and lands within 0.01 m of that toe's median. Right toe has 9 samples, under 17, so it cannot clear and it does not stop the walk. Once the left toe's ray on wall_hall_e_1 is at or under 0.60 m, further in-place re-points are dropped and the walk stays at yaw 0. No pitch, camera height, or toe bias is fit across the pooled samples. Room reach is a separate bar. In-place body yaw that asks a hip roll over 2.33 Nm unclamped is not a free re-point. d_min is not rebuilt. The ray uses the live camera height and the IMU pitch plus head_tilt, not a standing-pose table.",
     "hip_bar_nm": 2.33,
     "soft_pass": false
   },
@@ -529,8 +529,8 @@
   "east_wall": "wall_hall_e_1",
   "east_latch_m": 0.03983016052991295,
   "east_sample_count": 43,
-  "east_l_latch_m": 0.014262776219442996,
-  "east_l_sample_count": 21,
+  "east_l_latch_m": 0.045424805087740217,
+  "east_l_sample_count": 45,
   "east_r_latch_m": 0.07279199541829862,
   "east_r_sample_count": 9,
   "toe_outboard_m": 0.014,
@@ -544,7 +544,7 @@
   "per_wall_pad_m": {
     "wall_hall_w_2": 0.04086979572280322,
     "wall_hall_e_1": 0.03983016052991295,
-    "wall_hall_e_1\u00d7L": 0.014262776219442996,
+    "wall_hall_e_1\u00d7L": 0.045424805087740217,
     "wall_hall_e_1\u00d7R": 0.07279199541829862
   },
   "bob_pad_stacked": false,
@@ -2837,7 +2837,7 @@
       "false_stop": false,
       "prop_in_frame_at_stop": null,
       "stop_path": "floor_edge",
-      "stop_reason": "floor-edge wall wall_hall_e_1 class=east_close_L toe_gap=0.140 ray=0.23413701539879064 pad=0.0143 gate=0.141 residual=0.045154112863822204 heading=-0.492 cam_z=0.335 cam_pitch=-0.2618 lead=-0.0170 lead_side=L",
+      "stop_reason": "floor-edge wall wall_hall_e_1 class=east_close_L toe_gap=0.140 ray=0.23413701539879064 run_pad=0.0143 run_gate=0.141 scored_pad=0.0454 residual=0.013992083995524984 heading=-0.492 cam_z=0.335 cam_pitch=-0.2618 lead=-0.0170 lead_side=L",
       "stop_hit_xy": null,
       "stop_on_shadow": false,
       "shadow_first_sightings": [
@@ -10558,12 +10558,13 @@
           "cam_pitch_rad": -0.2617542762292832,
           "lead_off_m": -0.017012214281004516,
           "lead_side": "L",
-          "residual_m": 0.045154112863822204,
+          "residual_m": 0.013992083995524984,
           "ranged_wall": "wall_hall_e_1",
           "latch_path": "floor_edge",
           "heading_rad": -0.49176738242421664,
           "geom_class": "east_close_L",
-          "finder": []
+          "finder": [],
+          "run_residual_m": 0.045154112863822204
         }
       ],
       "wall_range_fail": true,
@@ -10571,7 +10572,7 @@
       "wall_stop_clear": false,
       "reach_clear": false,
       "wall_stop_fail": true,
-      "wall_stop_residual_m": 0.045154112863822204,
+      "wall_stop_residual_m": 0.013992083995524984,
       "wall_stop_class": "east_close_L",
       "wall_stop_wall": "wall_hall_e_1",
       "wall_stop_heading_rad": -0.49176738242421664,
@@ -10719,7 +10720,8 @@
         -0.49012618007280345,
         0.21097606504217717
       ],
-      "end_yaw_rad": -0.4917602516784742
+      "end_yaw_rad": -0.4917602516784742,
+      "wall_stop_run_residual_m": 0.045154112863822204
     },
     {
       "room": "bathroom",
@@ -44804,12 +44806,18 @@
   "wall_stop_clear_count": 1,
   "wall_stop_fail_any": true,
   "class_reject_count": 722,
-  "wall_residual_max_m": 0.045154112863822204,
+  "wall_residual_max_m": 0.013992083995524984,
   "gait_limit_any": false,
   "search_yaw_fail_any": false,
   "inplace_hip_fail_any": true,
   "wall_bias_repeat_any": true,
   "frac_refuse_count": 10,
   "ray_reject_count": 0,
-  "surface_reject_count": 331
+  "surface_reject_count": 331,
+  "east_l_fit_applied": false,
+  "east_l_held_err_m": 0.0594168890832652,
+  "east_l_held_residual_m": 0.013992083995524984,
+  "east_l_fit_predicted_m": 0.03426379942095354,
+  "east_l_fit_residual_m": 0.02515308966231166,
+  "east_l_run_pad_m": 0.014262776219442996
 }
