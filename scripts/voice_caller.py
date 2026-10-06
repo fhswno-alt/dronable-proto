@@ -30,6 +30,17 @@ left curve +5.60° (body yaw rate +0.034→+0.009 rad/s). That is ~half
 ramp-out, ~half steady leftover curve under vel(+0.150, 0) — not
 “turn still commanded.” Soft-pass is off.
 
+The same 6 s vel(+0.150, 0) after an 11 s right turn is −2.2° chained
+and −0.6° from a straight approach. The slew is 0.40 rad/s² both ways.
+On a matching step phase the right ramp is −5.3° of body yaw (command
+integral −4.5°) and the rest of the window curves left +4.7° with
+applied_yaw and the step angle already 0, so they cancel. Straight
+vel(+0.150, 0) already curves +4.2° over 27–33 s and +3.5° over
+28.5–34.5 s. Hip-yaw targets are 0 in that stretch. Stop snaps yaw to 0
+in one tick; after a right turn the heading kick runs about +11° to
+−10° across 0.37 s of step phase. This file still publishes the 0.056
+phrases.
+
 Go to the kitchen, the bathroom, anywhere, SLAM, a map, a waypoint, or
 a strafe is refused. Kitchen and bathroom finders are other scripts.
 Tonight is voice → bus motion only.

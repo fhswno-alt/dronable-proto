@@ -21,6 +21,15 @@ the 100 ms resend clears the target → body +6.81° (command integral
 That is ~half ramp-out, ~half steady leftover curve under
 vel(+0.150, 0) — not “turn still commanded.”
 
+The same 6 s vel(+0.150, 0) after an 11 s right turn is −2.2° chained
+and −0.6° from a straight approach. The slew is 0.40 rad/s² both ways.
+On a matching step phase the right ramp is −5.3° of body yaw (command
+integral −4.5°) and the rest of the window curves left +4.7° with
+applied_yaw and the step angle already 0, so they cancel. Straight
+vel(+0.150, 0) already curves +4.2° over 27–33 s and +3.5° over
+28.5–34.5 s. Stop snaps yaw to 0 in one tick; after a right turn the
+heading kick runs about +11° to −10° across 0.37 s of step phase.
+
 A second clip is a short reverse (stand → vel(-vx_back, 0) for 5.5 s →
 stop). It is not chained onto the turn. If that snippet tips, the JSON
 says so and the clip is not kept.

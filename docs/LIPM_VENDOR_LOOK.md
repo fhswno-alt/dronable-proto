@@ -1373,3 +1373,20 @@ leftover left curve +5.60° (body yaw rate +0.034→+0.009 rad/s). That
 is ~half ramp-out, ~half steady leftover curve under `vel(+0.150, 0)`
 — not “turn still commanded.” Soft-pass is off.
 
+Left versus right unload, same plant. The 6 s `vel(+0.150, 0)` after
+the left turn is +12.3°: +6.7° while `applied_yaw` slews +0.25→0 in
+0.69 s (command integral +5.3°), then +5.6° with the yaw command and
+the step angle already 0. The 6 s `vel(+0.150, 0)` after an 11 s
+`vel(+0.150, −0.25)` is −2.2° on the chained walk and −0.6° when that
+right turn follows a straight approach. The slew is 0.40 rad/s² both
+ways. On a matching step phase the right ramp moves the body −5.3°
+(command integral −4.5°), and the rest of the window then curves left
++4.7°, so the ramp and the curve cancel. Straight `vel(+0.150, 0)`
+with no turn already curves +4.2° over 27–33 s and +3.5° over
+28.5–34.5 s. The left ramp and that curve add. Hip-yaw targets are 0
+once the step angle is 0. `a_move` follows the yaw sign and the shift
+stays +|a|. Steady rates are +0.217 and −0.233 rad/s. A pelvis-0
+probe still reads +11.3° versus −0.4°. Stop snaps yaw to 0 in one
+tick, and the heading kick follows the step phase: after a right turn
+it runs about +11° to −10° across 0.37 s of phase.
+
