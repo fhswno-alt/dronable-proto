@@ -896,18 +896,48 @@ def _install_swing_sole_target(session: sw.SteerSession, *, world_level: bool) -
     walker.step = step  # type: ignore[method-assign]
 
 
-def _install_swing_toe_up(session: sw.SteerSession, peak: float) -> None:
+def _toe_up_ramp(frac: float, shape: str) -> float:
+    """Unit toe-up vs single-support fraction. Peak stays the caller's rad."""
+    if shape == "sine":
+        return math.sin(math.pi * frac)
+    if shape != "front":
+        raise SystemExit(f"toe-up shape {shape} is not sine or front")
+    # Full by 15% of single support, held through 80%, back to 0 at touchdown.
+    if frac < 0.15:
+        u = frac / 0.15
+        return u * u * (3.0 - 2.0 * u)
+    if frac <= 0.80:
+        return 1.0
+    u = (frac - 0.80) / 0.20
+    u = min(1.0, max(0.0, u))
+    return 1.0 - u * u * (3.0 - 2.0 * u)
+
+
+def _install_swing_toe_up(
+    session: sw.SteerSession,
+    peak: float,
+    shape: str = "sine",
+) -> None:
     """Add a swing ankle toe-up that is zero at toe-off and at touchdown.
 
-    The peak is under 0.03 rad. Knee and ankle pitch keep the 20 ms
-    approach. This does not world-level the sole.
+    The peak is under 0.03 rad. ``sine`` rises from 0 at toe-off.
+    ``front`` is already at that peak by 15% of single support and holds
+    it through 80%. Knee and ankle pitch keep the 20 ms approach. This
+    does not world-level the sole.
     """
     if not 0.0 < peak < 0.03 - 1e-12:
         raise SystemExit(f"toe-up peak {peak} rad is not under 0.03")
+    if shape not in ("sine", "front"):
+        raise SystemExit(f"toe-up shape {shape} is not sine or front")
     signs = {side: _ank_pitch_raises_front(session, side) for side in ("L", "R")}
+    label = (
+        "front full by 15% hold through 80%"
+        if shape == "front"
+        else "sine"
+    )
     print(
         f"PRED toe_up_sign L {signs['L']:+.0f} R {signs['R']:+.0f} "
-        f"peak {peak:.3f} rad sine"
+        f"peak {peak:.3f} rad {label}"
     )
     lipm = session.lipm
     if lipm is None or lipm.op3 is None:
@@ -925,7 +955,7 @@ def _install_swing_toe_up(session: sw.SteerSession, peak: float) -> None:
         frac = _mid_frac(walker, swing, _cmd_time(walker))
         if frac is None or frac <= 0.0 or frac >= 1.0:
             return
-        ramp = math.sin(math.pi * float(frac))
+        ramp = _toe_up_ramp(float(frac), shape)
         delta = signs[swing] * peak * ramp
         act = ("l_" if swing == "L" else "r_") + "ank_pitch_pos"
         idx = session.act_idx[act]
@@ -1684,6 +1714,114 @@ def _surface_summary(
         "ka_checked": ka_checked,
         "mid_samples": tuple(mid_samples),
     }
+
+
+def _print_early_flat(
+    name: str,
+    rows: list[Tick],
+    surface_rows: list[dict[str, object]],
+) -> None:
+    """Toe on every 0–30% tick of each flat swing. The 20–80% window stays."""
+    by_t = {round(float(row["t"]), 5): row for row in surface_rows}
+    cycles = _swing_cycles(rows, T_END + 1.0)
+    med_n, _last_n = _cycle_index(cycles)
+    n_lines = 0
+    for step, cyc in enumerate(cycles):
+        n = len(cyc)
+        if n < 2 or med_n < 2:
+            continue
+        n_full = med_n if step == len(cycles) - 1 and n < med_n - 1 else n
+        tagged: list[dict[str, object]] = []
+        early: list[tuple[float, Tick, dict[str, object]]] = []
+        for j, row in enumerate(cyc):
+            if row.toe_z is None or row.swing is None:
+                continue
+            frac = j / (n_full - 1)
+            surf = by_t.get(round(row.t, 5))
+            if surf is None:
+                continue
+            plane = surf[row.swing]
+            if not isinstance(plane, dict):
+                continue
+            if 0.20 - 1e-12 <= frac <= 0.80 + 1e-12:
+                tagged.append(plane)
+            if frac <= 0.30 + 1e-12:
+                early.append((frac, row, plane))
+        if not tagged or any(int(plane["on_rug"]) for plane in tagged):
+            continue
+        for frac, row, plane in early:
+            n_lines += 1
+            toe_mm = float(row.toe_z) * 1000.0
+            print(
+                f"PRED {name} early_toe swing {step} side {row.swing} "
+                f"t {row.t:.3f} frac {frac:.3f} toe {toe_mm:.3f} mm "
+                f"vs_plus2 {toe_mm - 2.0:+.3f} mm "
+                f"contact {plane.get('contact', '')}"
+            )
+    print(
+        f"PRED {name} early_toe_n {n_lines} "
+        "window 0-30% of flat swings. Scoring window stays 20-80%."
+    )
+
+
+def _print_chain_bar(name: str, surface_rows: list[dict[str, object]]) -> None:
+    """Whole-walk knees and the swing ankle pitch against 2.33 Nm."""
+
+    def _best(pick) -> tuple[float, float, str, str] | None:
+        best: tuple[float, float, str, str] | None = None
+        for row in surface_rows:
+            got = pick(row)
+            if got is None:
+                continue
+            tau, contact, act = got
+            if best is None or abs(tau) > abs(best[0]):
+                best = (tau, float(row["t"]), contact, act)
+        return best
+
+    def _knee(key: str):
+        def pick(row: dict[str, object]):
+            side = "L" if key.startswith("l_") else "R"
+            plane = row[side]
+            if not isinstance(plane, dict):
+                return None
+            return float(row[key]), str(plane.get("contact", "")), key
+        return pick
+
+    def _swing_ank(row: dict[str, object]):
+        swing = row.get("swing")
+        if swing not in ("L", "R"):
+            return None
+        key = "l_ank_pitch" if swing == "L" else "r_ank_pitch"
+        if key not in row:
+            return None
+        plane = row[swing]
+        if not isinstance(plane, dict):
+            return None
+        return float(row[key]), str(plane.get("contact", "")), key
+
+    for key in ("l_knee", "r_knee"):
+        hit = _best(_knee(key))
+        if hit is None:
+            print(f"PRED {name} chain_vs_2.33 {key} missed")
+            continue
+        tau, when, contact, act = hit
+        print(
+            f"PRED {name} chain_vs_2.33 {act} {tau:+.4f} t {when:.3f} "
+            f"contact {contact or '-'} abs {abs(tau):.4f} "
+            f"ge_2.33 {int(abs(tau) >= KNEE_NM)} "
+            f"ge_2.45 {int(abs(tau) >= PLANT_NM - 1e-3)}"
+        )
+    hit = _best(_swing_ank)
+    if hit is None:
+        print(f"PRED {name} chain_vs_2.33 swing_ank_pitch missed")
+        return
+    tau, when, contact, act = hit
+    print(
+        f"PRED {name} chain_vs_2.33 swing_ank_pitch {act} {tau:+.4f} "
+        f"t {when:.3f} contact {contact or '-'} abs {abs(tau):.4f} "
+        f"ge_2.33 {int(abs(tau) >= KNEE_NM)} "
+        f"ge_2.45 {int(abs(tau) >= PLANT_NM - 1e-3)}"
+    )
 
 
 def _ankle_peak(session: sw.SteerSession) -> tuple[float, str, float]:
@@ -2984,6 +3122,60 @@ def _install_swing_hip_lead(
     return applied["hip_roll"], applied["hip_pitch"]
 
 
+def _install_swing_knee_lead(session: sw.SteerSession, lead_s: float) -> None:
+    """Write the swing knee from IK a few control ticks ahead.
+
+    Stance knees stay on the gait target. The write uses the predicted
+    force limit at 2.33 Nm. This is not a stance-load offset.
+    """
+    lipm = session.lipm
+    if lipm is None or lipm.op3 is None:
+        raise RuntimeError("gait manager walker missing")
+    if lead_s <= 0.0:
+        raise SystemExit("swing knee lead is not positive")
+    walker = lipm.op3
+    dt = float(session.ctrl_dt)
+    ticks = lead_s / dt if dt > 1e-9 else float("nan")
+    print(
+        f"PRED knee_lead swing only {lead_s * 1000.0:.1f} ms "
+        f"({ticks:.2f} ctrl ticks). Stance knees stay on the gait write. "
+        "Predicted force is clamped to ±2.33 Nm."
+    )
+    session._knee_lead_log = []
+    orig = lipm._tick_gait_manager
+
+    def wrapped(walking: bool) -> None:
+        orig(walking)
+        if not walking or session.bus.fault:
+            return
+        swing = lipm._gm_swing
+        if swing not in ("L", "R"):
+            return
+        saved_cmd = getattr(session, "_sole_cmd", None)
+        t_cmd = _cmd_time(walker)
+        period = float(walker.period)
+        jn = "l_knee" if swing == "L" else "r_knee"
+        fut_joints, _fut_info = _joints_at(
+            walker, _wrap_period(t_cmd + lead_s, period),
+        )
+        session._sole_cmd = saved_cmd
+        if fut_joints is None or jn not in fut_joints:
+            return
+        future = float(fut_joints[jn])
+        lipm.write_force_limited(jn, future, KNEE_NM)
+        idx = session.act_idx[jn + "_pos"]
+        written = float(session.data.ctrl[idx])
+        session._knee_lead_log.append((
+            float(session.data.time) + float(session.ctrl_dt),
+            jn,
+            future,
+            written,
+            int(abs(written - future) > 1e-4),
+        ))
+
+    lipm._tick_gait_manager = wrapped  # type: ignore[method-assign]
+
+
 def _stance_knees(lipm: object) -> tuple[str, ...]:
     """Knees carrying the body this tick. Double support writes both."""
     swing = getattr(lipm, "_gm_swing", None)
@@ -3187,6 +3379,11 @@ def measure_pred_clip(
     z_extra_m: float = 0.0,
     ka_log: bool = False,
     sag_cancel: bool = False,
+    toe_up_shape: str = "sine",
+    z_profile: str = "phase",
+    early_peak_m: float = 0.0,
+    knee_lead_s: float = 0.0,
+    early_log: bool = False,
 ) -> PredScore:
     """12 mm @ 20% with an optional swing-hip predicted-force clip.
 
@@ -3195,9 +3392,19 @@ def measure_pred_clip(
     on it.     ``period_s`` None keeps 0.500 s. ``bar_before_s`` scores leg
     torques only before that time. ``world_level`` and ``toe_up_rad``
     are separate swing-sole copies. The 0.98 spring band is not widened.
+    ``z_profile`` ``front`` and ``early`` replace the 12 mm parabola.
+    They are not stacked on it. Sag cancel stays off unless asked.
     """
     if world_level and toe_up_rad > 0.0:
         raise SystemExit("world-level and toe-up are separate copies")
+    if toe_up_shape not in ("sine", "front"):
+        raise SystemExit(f"toe-up shape {toe_up_shape} is not sine or front")
+    if z_profile not in ("phase", "front", "early"):
+        raise SystemExit(f"z profile {z_profile} is not phase, front, or early")
+    if z_profile == "early" and not (0.0 < early_peak_m <= 0.012 + 1e-9):
+        raise SystemExit(f"early rise peak {early_peak_m} m is outside 0–12 mm")
+    if sag_cancel and knee_lead_s > 0.0:
+        raise SystemExit("swing knee lead is not stacked on stance sag cancel")
     cfg = sw.locked_kit_config()
     if move_s is not None:
         cfg = replace(cfg, gm_move_s=float(move_s))
@@ -3206,7 +3413,22 @@ def measure_pred_clip(
     session = sw.SteerSession(video=False, scene_xml=Path(SCENE), lipm=cfg)
     _check_compiled_kv(session)
     ank_kv = _check_ank_roll_kv(session) if ankle_roll else 0.0
-    _install_phase_lift(session, 0.012, 0.20, 0.0)
+    if z_profile == "phase":
+        _install_phase_lift(session, 0.012, 0.20, 0.0)
+    elif z_profile == "front":
+        print(
+            "PRED z_front 12.000 mm smoothstep from toe-off, "
+            "full by 10% of single support, hold through 40%, down by 80%. "
+            "Same peak as the 12 mm parabola. Not stacked on it."
+        )
+        _install_slow_rise(session, 0.012, 0.10, 0.40, 0.0)
+    else:
+        print(
+            f"PRED early_rise {early_peak_m * 1000.0:.3f} mm smoothstep "
+            "from toe-off, full by 10% of single support, hold through 40%, "
+            "down by 80%. Replaces the 12 mm parabola. Not stacked on it."
+        )
+        _install_slow_rise(session, early_peak_m, 0.10, 0.40, 0.0)
     if ka_log or abs(z_extra_m) > 0.0:
         _install_swing_z_add(session, z_extra_m)
     if pitch_move_off:
@@ -3217,13 +3439,15 @@ def measure_pred_clip(
         _print_foot_geoms(session)
         _install_swing_sole_target(session, world_level=world_level)
     if toe_up_rad > 0.0:
-        _install_swing_toe_up(session, toe_up_rad)
+        _install_swing_toe_up(session, toe_up_rad, shape=toe_up_shape)
     if hip_lead:
         _install_swing_hip_lead(
             session,
             roll_scale=lead_roll_scale,
             pitch_scale=lead_pitch_scale,
         )
+    if knee_lead_s > 0.0:
+        _install_swing_knee_lead(session, knee_lead_s)
     if sag_cancel:
         _install_stance_knee_sag(session)
     lipm = session.lipm
@@ -3389,6 +3613,12 @@ def measure_pred_clip(
                     "R": planes["R"],
                     "l_knee": float(session.data.actuator_force[session.act_idx["l_knee_pos"]]),
                     "r_knee": float(session.data.actuator_force[session.act_idx["r_knee_pos"]]),
+                    "l_ank_pitch": float(
+                        session.data.actuator_force[session.act_idx["l_ank_pitch_pos"]]
+                    ),
+                    "r_ank_pitch": float(
+                        session.data.actuator_force[session.act_idx["r_ank_pitch_pos"]]
+                    ),
                 })
                 if ka_log:
                     ka_checked += 1
@@ -3488,6 +3718,7 @@ def measure_pred_clip(
     if (
         pitch_move_off or ankle_roll or period_s is not None
         or world_level or toe_up_rad > 0.0 or hip_lead or sag_cancel
+        or z_profile != "phase" or knee_lead_s > 0.0 or toe_up_shape != "sine"
     ):
         parts = ["clip" if clip else "base"]
         parts.append("pitchoff" if pitch_move_off else f"move{used_move * 1000:.0f}")
@@ -3496,7 +3727,14 @@ def measure_pred_clip(
         if world_level:
             parts.append("worldlevel")
         if toe_up_rad > 0.0:
-            parts.append(f"toeup{toe_up_rad * 1000:.0f}mrad")
+            if toe_up_shape == "front":
+                parts.append("toeupfront")
+            else:
+                parts.append(f"toeup{toe_up_rad * 1000:.0f}mrad")
+        if z_profile == "front":
+            parts.append("zfront")
+        elif z_profile == "early":
+            parts.append(f"early{early_peak_m * 1000.0:.0f}mm")
         if hip_lead:
             if abs(lead_roll_scale) <= 1e-12 and lead_pitch_scale > 0.0:
                 pitch_ms = lead_pitch_scale * (_COMPILED_KV["hip_pitch"] / 45.0) * 1000.0
@@ -3509,6 +3747,8 @@ def measure_pred_clip(
             parts.append(f"T{period_s:.2f}")
         if abs(z_extra_m) > 0.0:
             parts.append(f"z{z_extra_m * 1000.0:.3f}mm")
+        if knee_lead_s > 0.0:
+            parts.append(f"kneelead{knee_lead_s * 1000.0:.0f}ms")
         if sag_cancel:
             parts.append("sag")
         name = "_".join(parts)
@@ -3663,6 +3903,16 @@ def measure_pred_clip(
         surf = _surface_summary(
             name, rows, surface_rows, hx_flat, hx_rug,
             ka_hits if ka_log else None, ka_checked,
+        )
+        if early_log:
+            _print_early_flat(name, rows, surface_rows)
+            _print_chain_bar(name, surface_rows)
+    klog = getattr(session, "_knee_lead_log", None)
+    if klog:
+        clamps = sum(int(row[4]) for row in klog)
+        print(
+            f"PRED {name} knee_lead_n {len(klog)} clamp {clamps} "
+            "swing knee only. Stance sag cancel is off."
         )
     session.assert_plant_unchanged()
     return PredScore(
@@ -5232,6 +5482,137 @@ def measure_cmd_toe() -> None:
     else:
         print("CMD_TOE missed 3.384")
     session.assert_plant_unchanged()
+
+
+def _liftoff_copy(
+    *,
+    toe_shape: str = "sine",
+    z_profile: str = "phase",
+    early_peak_m: float = 0.0,
+    knee_lead_s: float = 0.0,
+) -> PredScore:
+    """20 ms pitch lead, roll lead 0, clip on, sag cancel off."""
+    return measure_pred_clip(
+        clip=True,
+        move_s=None,
+        pitch_move_off=True,
+        toe_up_rad=TOE_UP_PEAK,
+        toe_up_shape=toe_shape,
+        z_profile=z_profile,
+        early_peak_m=early_peak_m,
+        knee_lead_s=knee_lead_s,
+        hip_lead=True,
+        lead_roll_scale=0.0,
+        lead_pitch_scale=_pitch_lead_scale(20.0),
+        whole_toe=True,
+        surface_tag=True,
+        ka_log=True,
+        early_log=True,
+        sag_cancel=False,
+    )
+
+
+def _liftoff_clears(row: PredScore) -> bool:
+    return row.flat_hx_over == "" and row.flat_toe_mm >= 2.0
+
+
+def _report_liftoff(label: str, row: PredScore) -> None:
+    knee_rail = "knee" in row.flat_hx_over
+    print(
+        f"PRED liftoff {label} {row.name} "
+        f"flat_worst {row.flat_toe_mm:.3f} mm t {row.flat_toe_t:.3f} "
+        f"side {row.flat_toe_side} vs_plus2 {row.flat_toe_mm - 2.0:+.3f} mm "
+        f"short {2.0 - row.flat_toe_mm:.3f} mm "
+        f"box_centre {row.flat_center_mm:.3f} mm "
+        f"sole_pitch {row.flat_sole_pitch:.5f} rad "
+        f"flat_hx {row.flat_hx_over or 'under'} "
+        f"knee_rail {int(knee_rail)} "
+        f"clear {int(_liftoff_clears(row))} "
+        f"ka_over {row.ka_over_n} ka_checked {row.ka_checked}"
+    )
+
+
+def score_liftoff() -> None:
+    """Front-load lift-off on the 20 ms base. Sag cancel stays off.
+
+    The 20–80% window is unchanged. Floor-contact overs are Track 1.
+    """
+    print(
+        "PRED liftoff_plan Sag cancel stays off. "
+        "Worst toe has been the first 20-80% tick. "
+        "A ramps toe-up to 0.020 rad by 15% and holds through 80%. "
+        "B brings the 12 mm foot-z to full by 10% of single support and holds through 40%. "
+        "C is A and B. D, if A-C miss +2 mm, leads the swing knee by 1 and 2 ticks. "
+        "E replaces the 12 mm parabola with an 8 mm and a 10 mm rise, full by 10%, "
+        "on the current swing-hip clip and 20 ms pitch lead. "
+        "Scoring window stays 20-80%. Roll lead stays 0. Period stays 0.500 s."
+    )
+    cleared: list[tuple[str, PredScore]] = []
+    ran: list[tuple[str, PredScore]] = []
+    for label, kwargs in (
+        ("A", {"toe_shape": "front"}),
+        ("B", {"z_profile": "front"}),
+        ("C", {"toe_shape": "front", "z_profile": "front"}),
+    ):
+        row = _liftoff_copy(**kwargs)
+        _report_liftoff(label, row)
+        ran.append((label, row))
+        if _liftoff_clears(row):
+            cleared.append((label, row))
+    if cleared:
+        print(
+            "PRED liftoff D skipped. A, B, or C already cleared +2 mm "
+            "with floor-contact hip pitch, knee, and ankle pitch at or under 2.33 Nm."
+        )
+    else:
+        for label, lead in (("D8", 0.008), ("D16", 0.016)):
+            row = _liftoff_copy(knee_lead_s=lead)
+            _report_liftoff(label, row)
+            ran.append((label, row))
+            if _liftoff_clears(row):
+                cleared.append((label, row))
+    for label, peak in (("E8", 0.008), ("E10", 0.010)):
+        row = _liftoff_copy(z_profile="early", early_peak_m=peak)
+        _report_liftoff(label, row)
+        ran.append((label, row))
+        if _liftoff_clears(row):
+            cleared.append((label, row))
+        knee_hits = [
+            bit for bit in row.flat_hx_over.split(", ") if "knee" in bit
+        ] if row.flat_hx_over else []
+        if knee_hits:
+            print(
+                f"PRED liftoff {label} knee_rail_floor {' ; '.join(knee_hits)}. "
+                "That rail is floor contact, Track 1. "
+                "The earlier -1.60 mm / +2.45 Nm copy was before this clip and this 20 ms lead."
+            )
+    digest = sw._md5(sw.PLANT_XML)
+    print(f"PRED liftoff plant_md5 {digest}")
+    if digest != sw.PLANT_MD5:
+        raise SystemExit(f"plant md5 {digest} != {sw.PLANT_MD5}")
+    bits = " ".join(
+        f"{label} {row.flat_toe_mm:+.3f} mm"
+        for label, row in ran
+    )
+    if cleared:
+        best = max(cleared, key=lambda item: item[1].flat_toe_mm)
+        print(
+            f"PRED liftoff clear {best[0]} {best[1].name} "
+            f"flat_worst {best[1].flat_toe_mm:.3f} mm "
+            f"t {best[1].flat_toe_t:.3f} side {best[1].flat_toe_side}. "
+            f"copies {bits}. "
+            "Pitch lead stays 20 ms. Period stays 0.500 s."
+        )
+        return
+    print(
+        "PRED liftoff Prefer FAIL. Front-loaded toe-up, early foot-z, "
+        "the swing-knee lead, and the 8-10 mm rise did not clear a flat "
+        "mid-swing contact-box toe of +2 mm with hip pitch, knee, and "
+        "ankle pitch at or under 2.33 Nm on floor contact. "
+        f"copies {bits}. "
+        "The 20-80% window was not moved. Sag cancel stayed off. "
+        "Pitch lead stays 20 ms. Toe-up peak stays 0.020 rad. Period stays 0.500 s."
+    )
 
 
 def main() -> None:
