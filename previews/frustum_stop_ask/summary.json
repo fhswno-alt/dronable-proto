@@ -1,0 +1,2026 @@
+{
+  "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+  "stand_s": 1.0,
+  "width": 640,
+  "height": 480,
+  "tiny_frac": 0.01,
+  "tiny_min_side_px": 36,
+  "tiny_px": 3072,
+  "classes": [
+    "missing",
+    "out_of_frustum",
+    "occluded",
+    "tiny",
+    "in_frame_boxy",
+    "visible_enough"
+  ],
+  "old_scenes": "bb94512",
+  "current": [
+    {
+      "scene": "kitchen",
+      "xml": "mujoco/room_kitchen.xml",
+      "png": "previews/frustum_stop_ask/current_kitchen.png",
+      "bus_mode": "stand",
+      "stand_s": 1.0,
+      "stop_xy_m": [
+        0.05652733241236434,
+        8.375270919411176e-06
+      ],
+      "stop_yaw_deg": 0.00904287497863891,
+      "cam_xyz_m": [
+        0.1462133689161698,
+        0.00044755840947706405,
+        0.33506241983957036
+      ],
+      "cam_z_m": 0.33506241983957036,
+      "pitch_deg": -14.838229068946617,
+      "look_yaw_deg": 0.008953077345386088,
+      "fovy_deg": 104.82,
+      "props": [
+        {
+          "prop": "stove",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "toilet",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "bed",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "sink",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "bathtub",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "sofa",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "tv",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "dresser",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        }
+      ],
+      "scene_geoms": [
+        {
+          "name": "kitchen_cabinet",
+          "type": "box",
+          "pixels": 36379,
+          "min_side_px": 147,
+          "center_in_frame": true
+        },
+        {
+          "name": "kitchen_countertop",
+          "type": "box",
+          "pixels": 2663,
+          "min_side_px": 16,
+          "center_in_frame": true
+        },
+        {
+          "name": "kitchen_backsplash",
+          "type": "box",
+          "pixels": 23714,
+          "min_side_px": 78,
+          "center_in_frame": true
+        },
+        {
+          "name": "kitchen_kettle",
+          "type": "box",
+          "pixels": 0,
+          "min_side_px": 0,
+          "center_in_frame": true
+        },
+        {
+          "name": "table_top",
+          "type": "box",
+          "pixels": 7771,
+          "min_side_px": 70,
+          "center_in_frame": true
+        },
+        {
+          "name": "table_leg",
+          "type": "box",
+          "pixels": 4711,
+          "min_side_px": 60,
+          "center_in_frame": true
+        },
+        {
+          "name": "chair_seat",
+          "type": "box",
+          "pixels": 5035,
+          "min_side_px": 31,
+          "center_in_frame": true
+        },
+        {
+          "name": "chair_back",
+          "type": "box",
+          "pixels": 21878,
+          "min_side_px": 161,
+          "center_in_frame": true
+        }
+      ]
+    },
+    {
+      "scene": "bathroom",
+      "xml": "mujoco/room_bathroom.xml",
+      "png": "previews/frustum_stop_ask/current_bathroom.png",
+      "bus_mode": "stand",
+      "stand_s": 1.0,
+      "stop_xy_m": [
+        0.05652733241236434,
+        8.375270919411176e-06
+      ],
+      "stop_yaw_deg": 0.00904287497863891,
+      "cam_xyz_m": [
+        0.1462133689161698,
+        0.00044755840947706405,
+        0.33506241983957036
+      ],
+      "cam_z_m": 0.33506241983957036,
+      "pitch_deg": -14.838229068946617,
+      "look_yaw_deg": 0.008953077345386088,
+      "fovy_deg": 104.82,
+      "props": [
+        {
+          "prop": "stove",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "toilet",
+          "class_name": "in_frame_boxy",
+          "present": true,
+          "geom_type": "box",
+          "pixels": 29450,
+          "frac": 0.09586588541666667,
+          "min_side_px": 211,
+          "bbox": [
+            427,
+            58,
+            639,
+            268
+          ],
+          "center_xyz": [
+            0.9466666666666667,
+            -0.7799999999999999,
+            0.37999999999999995
+          ],
+          "bearing_deg": -41.2273293956977,
+          "yaw_offset_deg": -41.23637227067633,
+          "geoms": [
+            "toilet_bowl",
+            "toilet_tank",
+            "toilet_seat"
+          ]
+        },
+        {
+          "prop": "bed",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "sink",
+          "class_name": "in_frame_boxy",
+          "present": true,
+          "geom_type": "box",
+          "pixels": 17721,
+          "frac": 0.057685546875,
+          "min_side_px": 114,
+          "bbox": [
+            206,
+            5,
+            319,
+            263
+          ],
+          "center_xyz": [
+            1.0666666666666667,
+            0.20000000000000004,
+            0.6666666666666666
+          ],
+          "bearing_deg": 11.198834721829153,
+          "yaw_offset_deg": 11.189791846850511,
+          "geoms": [
+            "sink_basin",
+            "sink_pedestal",
+            "sink_faucet"
+          ]
+        },
+        {
+          "prop": "bathtub",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "sofa",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "tv",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "dresser",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        }
+      ],
+      "scene_geoms": [
+        {
+          "name": "bathroom_tile",
+          "type": "box",
+          "pixels": 27397,
+          "min_side_px": 172,
+          "center_in_frame": true
+        },
+        {
+          "name": "bathroom_vanity",
+          "type": "box",
+          "pixels": 7774,
+          "min_side_px": 130,
+          "center_in_frame": true
+        },
+        {
+          "name": "bathroom_towel",
+          "type": "box",
+          "pixels": 0,
+          "min_side_px": 0,
+          "center_in_frame": true
+        },
+        {
+          "name": "sink_pedestal",
+          "type": "box",
+          "pixels": 12468,
+          "min_side_px": 81,
+          "center_in_frame": true
+        },
+        {
+          "name": "sink_basin",
+          "type": "box",
+          "pixels": 4357,
+          "min_side_px": 65,
+          "center_in_frame": true
+        },
+        {
+          "name": "sink_faucet",
+          "type": "box",
+          "pixels": 896,
+          "min_side_px": 22,
+          "center_in_frame": true
+        },
+        {
+          "name": "toilet_bowl",
+          "type": "box",
+          "pixels": 11152,
+          "min_side_px": 98,
+          "center_in_frame": true
+        },
+        {
+          "name": "toilet_tank",
+          "type": "box",
+          "pixels": 17894,
+          "min_side_px": 138,
+          "center_in_frame": true
+        },
+        {
+          "name": "toilet_seat",
+          "type": "box",
+          "pixels": 404,
+          "min_side_px": 15,
+          "center_in_frame": true
+        }
+      ]
+    },
+    {
+      "scene": "bedroom",
+      "xml": "mujoco/room_bedroom.xml",
+      "png": "previews/frustum_stop_ask/current_bedroom.png",
+      "bus_mode": "stand",
+      "stand_s": 1.0,
+      "stop_xy_m": [
+        0.05652733241236434,
+        8.375270919411176e-06
+      ],
+      "stop_yaw_deg": 0.00904287497863891,
+      "cam_xyz_m": [
+        0.1462133689161698,
+        0.00044755840947706405,
+        0.33506241983957036
+      ],
+      "cam_z_m": 0.33506241983957036,
+      "pitch_deg": -14.838229068946617,
+      "look_yaw_deg": 0.008953077345386088,
+      "fovy_deg": 104.82,
+      "props": [
+        {
+          "prop": "stove",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "toilet",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "bed",
+          "class_name": "in_frame_boxy",
+          "present": true,
+          "geom_type": "box",
+          "pixels": 114667,
+          "frac": 0.37326497395833336,
+          "min_side_px": 261,
+          "bbox": [
+            61,
+            0,
+            579,
+            260
+          ],
+          "center_xyz": [
+            0.8366666666666668,
+            0.0,
+            0.5033333333333333
+          ],
+          "bearing_deg": -0.0006151050906837815,
+          "yaw_offset_deg": -0.009657980069334826,
+          "geoms": [
+            "bedroom_headboard",
+            "bedroom_duvet",
+            "bedroom_pillow",
+            "bedroom_pillow_r",
+            "bedroom_mattress",
+            "bedroom_bed_frame"
+          ]
+        },
+        {
+          "prop": "sink",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "bathtub",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "sofa",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "tv",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "dresser",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        }
+      ],
+      "scene_geoms": [
+        {
+          "name": "bedroom_headboard",
+          "type": "box",
+          "pixels": 46574,
+          "min_side_px": 235,
+          "center_in_frame": true
+        },
+        {
+          "name": "bedroom_duvet",
+          "type": "box",
+          "pixels": 50115,
+          "min_side_px": 124,
+          "center_in_frame": true
+        },
+        {
+          "name": "bedroom_pillow",
+          "type": "box",
+          "pixels": 5353,
+          "min_side_px": 39,
+          "center_in_frame": true
+        },
+        {
+          "name": "bedroom_pillow_r",
+          "type": "box",
+          "pixels": 5337,
+          "min_side_px": 39,
+          "center_in_frame": true
+        },
+        {
+          "name": "bedroom_mattress",
+          "type": "box",
+          "pixels": 0,
+          "min_side_px": 0,
+          "center_in_frame": true
+        },
+        {
+          "name": "bedroom_bed_frame",
+          "type": "box",
+          "pixels": 7288,
+          "min_side_px": 24,
+          "center_in_frame": true
+        },
+        {
+          "name": "nightstand_top",
+          "type": "box",
+          "pixels": 2477,
+          "min_side_px": 45,
+          "center_in_frame": true
+        },
+        {
+          "name": "nightstand_leg",
+          "type": "box",
+          "pixels": 9274,
+          "min_side_px": 101,
+          "center_in_frame": true
+        },
+        {
+          "name": "nightstand_lamp",
+          "type": "box",
+          "pixels": 4224,
+          "min_side_px": 58,
+          "center_in_frame": true
+        }
+      ]
+    },
+    {
+      "scene": "living",
+      "xml": "mujoco/room_living.xml",
+      "png": "previews/frustum_stop_ask/current_living.png",
+      "bus_mode": "stand",
+      "stand_s": 1.0,
+      "stop_xy_m": [
+        0.05652733241236434,
+        8.375270919411176e-06
+      ],
+      "stop_yaw_deg": 0.00904287497863891,
+      "cam_xyz_m": [
+        0.1462133689161698,
+        0.00044755840947706405,
+        0.33506241983957036
+      ],
+      "cam_z_m": 0.33506241983957036,
+      "pitch_deg": -14.838229068946617,
+      "look_yaw_deg": 0.008953077345386088,
+      "fovy_deg": 104.82,
+      "props": [
+        {
+          "prop": "stove",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "toilet",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "bed",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "sink",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "bathtub",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "sofa",
+          "class_name": "in_frame_boxy",
+          "present": true,
+          "geom_type": "box",
+          "pixels": 41926,
+          "frac": 0.13647786458333333,
+          "min_side_px": 148,
+          "bbox": [
+            164,
+            73,
+            475,
+            220
+          ],
+          "center_xyz": [
+            1.275,
+            0.0,
+            0.415
+          ],
+          "bearing_deg": -0.00039382719753854674,
+          "yaw_offset_deg": -0.009436702176174094,
+          "geoms": [
+            "living_sofa_seat",
+            "living_sofa_back",
+            "living_sofa_arm_l",
+            "living_sofa_arm_r"
+          ]
+        },
+        {
+          "prop": "tv",
+          "class_name": "in_frame_boxy",
+          "present": true,
+          "geom_type": "box",
+          "pixels": 37354,
+          "frac": 0.12159505208333334,
+          "min_side_px": 194,
+          "bbox": [
+            446,
+            27,
+            639,
+            257
+          ],
+          "center_xyz": [
+            1.1733333333333331,
+            -1.15,
+            0.6
+          ],
+          "bearing_deg": -45.839159974605195,
+          "yaw_offset_deg": -45.84820284958383,
+          "geoms": [
+            "tv_stand",
+            "tv_bezel",
+            "tv_screen"
+          ]
+        },
+        {
+          "prop": "dresser",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        }
+      ],
+      "scene_geoms": [
+        {
+          "name": "living_sofa_seat",
+          "type": "box",
+          "pixels": 4007,
+          "min_side_px": 17,
+          "center_in_frame": true
+        },
+        {
+          "name": "living_sofa_back",
+          "type": "box",
+          "pixels": 37741,
+          "min_side_px": 131,
+          "center_in_frame": true
+        },
+        {
+          "name": "living_sofa_arm_l",
+          "type": "box",
+          "pixels": 90,
+          "min_side_px": 13,
+          "center_in_frame": true
+        },
+        {
+          "name": "living_sofa_arm_r",
+          "type": "box",
+          "pixels": 88,
+          "min_side_px": 12,
+          "center_in_frame": true
+        },
+        {
+          "name": "tv_stand",
+          "type": "box",
+          "pixels": 16976,
+          "min_side_px": 100,
+          "center_in_frame": true
+        },
+        {
+          "name": "tv_bezel",
+          "type": "box",
+          "pixels": 7267,
+          "min_side_px": 124,
+          "center_in_frame": true
+        },
+        {
+          "name": "tv_screen",
+          "type": "box",
+          "pixels": 13111,
+          "min_side_px": 92,
+          "center_in_frame": true
+        }
+      ]
+    }
+  ],
+  "oldmesh": [
+    {
+      "scene": "kitchen",
+      "xml": "bb94512:mujoco/room_kitchen.xml",
+      "png": "previews/frustum_stop_ask/oldmesh_kitchen.png",
+      "bus_mode": "stand",
+      "stand_s": 1.0,
+      "stop_xy_m": [
+        0.05652733241236434,
+        8.375270919411176e-06
+      ],
+      "stop_yaw_deg": 0.00904287497863891,
+      "cam_xyz_m": [
+        0.1462133689161698,
+        0.00044755840947706405,
+        0.33506241983957036
+      ],
+      "cam_z_m": 0.33506241983957036,
+      "pitch_deg": -14.838229068946617,
+      "look_yaw_deg": 0.008953077345386088,
+      "fovy_deg": 104.82,
+      "props": [
+        {
+          "prop": "stove",
+          "class_name": "visible_enough",
+          "present": true,
+          "geom_type": "mesh",
+          "pixels": 10430,
+          "frac": 0.033951822916666666,
+          "min_side_px": 114,
+          "bbox": [
+            106,
+            107,
+            219,
+            232
+          ],
+          "center_xyz": [
+            1.8700273615856118,
+            1.2345198718341708,
+            0.46671815660321936
+          ],
+          "bearing_deg": 34.24445784863407,
+          "yaw_offset_deg": 34.23541497365542,
+          "geoms": [
+            "kitchen_stove"
+          ]
+        },
+        {
+          "prop": "toilet",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "bed",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "sink",
+          "class_name": "tiny",
+          "present": true,
+          "geom_type": "mesh",
+          "pixels": 11,
+          "frac": 3.580729166666667e-05,
+          "min_side_px": 3,
+          "bbox": [
+            326,
+            92,
+            328,
+            95
+          ],
+          "center_xyz": [
+            1.8176808924160581,
+            -0.05441001905916859,
+            0.9279496613231233
+          ],
+          "bearing_deg": -1.7698357822477557,
+          "yaw_offset_deg": -1.778878657226386,
+          "geoms": [
+            "kitchen_sink"
+          ]
+        },
+        {
+          "prop": "bathtub",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "sofa",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "tv",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "dresser",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        }
+      ],
+      "scene_geoms": [
+        {
+          "name": "room_floor",
+          "type": "plane",
+          "pixels": 148814,
+          "min_side_px": 253,
+          "center_in_frame": false
+        },
+        {
+          "name": "room_wall",
+          "type": "box",
+          "pixels": 8221,
+          "min_side_px": 107,
+          "center_in_frame": true
+        },
+        {
+          "name": "room_wall_left",
+          "type": "box",
+          "pixels": 16686,
+          "min_side_px": 103,
+          "center_in_frame": true
+        },
+        {
+          "name": "room_wall_right",
+          "type": "box",
+          "pixels": 0,
+          "min_side_px": 0,
+          "center_in_frame": true
+        },
+        {
+          "name": "room_ceiling",
+          "type": "box",
+          "pixels": 0,
+          "min_side_px": 0,
+          "center_in_frame": false
+        },
+        {
+          "name": "kitchen_kick",
+          "type": "box",
+          "pixels": 1854,
+          "min_side_px": 10,
+          "center_in_frame": true
+        },
+        {
+          "name": "kitchen_cabinet",
+          "type": "box",
+          "pixels": 386,
+          "min_side_px": 108,
+          "center_in_frame": true
+        },
+        {
+          "name": "kitchen_panel_a",
+          "type": "box",
+          "pixels": 0,
+          "min_side_px": 0,
+          "center_in_frame": true
+        },
+        {
+          "name": "kitchen_panel_b",
+          "type": "box",
+          "pixels": 4727,
+          "min_side_px": 53,
+          "center_in_frame": true
+        },
+        {
+          "name": "kitchen_panel_c",
+          "type": "box",
+          "pixels": 8701,
+          "min_side_px": 87,
+          "center_in_frame": true
+        },
+        {
+          "name": "kitchen_panel_d",
+          "type": "box",
+          "pixels": 8843,
+          "min_side_px": 93,
+          "center_in_frame": true
+        },
+        {
+          "name": "kitchen_counter",
+          "type": "box",
+          "pixels": 3854,
+          "min_side_px": 17,
+          "center_in_frame": true
+        },
+        {
+          "name": "kitchen_splash",
+          "type": "box",
+          "pixels": 2887,
+          "min_side_px": 17,
+          "center_in_frame": true
+        },
+        {
+          "name": "kitchen_end",
+          "type": "box",
+          "pixels": 0,
+          "min_side_px": 0,
+          "center_in_frame": true
+        },
+        {
+          "name": "kitchen_pier",
+          "type": "box",
+          "pixels": 14767,
+          "min_side_px": 121,
+          "center_in_frame": true
+        },
+        {
+          "name": "kitchen_upper_a",
+          "type": "box",
+          "pixels": 1005,
+          "min_side_px": 44,
+          "center_in_frame": true
+        },
+        {
+          "name": "kitchen_upper_b",
+          "type": "box",
+          "pixels": 5670,
+          "min_side_px": 79,
+          "center_in_frame": true
+        },
+        {
+          "name": "kitchen_upper_c",
+          "type": "box",
+          "pixels": 5542,
+          "min_side_px": 74,
+          "center_in_frame": true
+        },
+        {
+          "name": "kitchen_upper_d",
+          "type": "box",
+          "pixels": 5700,
+          "min_side_px": 79,
+          "center_in_frame": true
+        },
+        {
+          "name": "kitchen_stove",
+          "type": "mesh",
+          "pixels": 10430,
+          "min_side_px": 114,
+          "center_in_frame": true
+        },
+        {
+          "name": "kitchen_sink",
+          "type": "mesh",
+          "pixels": 11,
+          "min_side_px": 3,
+          "center_in_frame": true
+        },
+        {
+          "name": "kitchen_pendant_a",
+          "type": "mesh",
+          "pixels": 0,
+          "min_side_px": 0,
+          "center_in_frame": false
+        },
+        {
+          "name": "kitchen_pendant_b",
+          "type": "mesh",
+          "pixels": 0,
+          "min_side_px": 0,
+          "center_in_frame": false
+        },
+        {
+          "name": "table_base",
+          "type": "box",
+          "pixels": 45345,
+          "min_side_px": 236,
+          "center_in_frame": true
+        },
+        {
+          "name": "table_top",
+          "type": "box",
+          "pixels": 6459,
+          "min_side_px": 100,
+          "center_in_frame": true
+        },
+        {
+          "name": "chair_seat",
+          "type": "mesh",
+          "pixels": 928,
+          "min_side_px": 43,
+          "center_in_frame": false
+        },
+        {
+          "name": "chair_stool_b",
+          "type": "mesh",
+          "pixels": 6370,
+          "min_side_px": 154,
+          "center_in_frame": true
+        }
+      ]
+    },
+    {
+      "scene": "bathroom",
+      "xml": "bb94512:mujoco/room_bathroom.xml",
+      "png": "previews/frustum_stop_ask/oldmesh_bathroom.png",
+      "bus_mode": "stand",
+      "stand_s": 1.0,
+      "stop_xy_m": [
+        0.05652733241236434,
+        8.375270919411176e-06
+      ],
+      "stop_yaw_deg": 0.00904287497863891,
+      "cam_xyz_m": [
+        0.1462133689161698,
+        0.00044755840947706405,
+        0.33506241983957036
+      ],
+      "cam_z_m": 0.33506241983957036,
+      "pitch_deg": -14.838229068946617,
+      "look_yaw_deg": 0.008953077345386088,
+      "fovy_deg": 104.82,
+      "props": [
+        {
+          "prop": "stove",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "toilet",
+          "class_name": "visible_enough",
+          "present": true,
+          "geom_type": "mesh",
+          "pixels": 3818,
+          "frac": 0.012428385416666667,
+          "min_side_px": 59,
+          "bbox": [
+            284,
+            143,
+            342,
+            234
+          ],
+          "center_xyz": [
+            1.8507335784024268,
+            0.08365076013008212,
+            0.4954613277470178
+          ],
+          "bearing_deg": 2.6690847397713644,
+          "yaw_offset_deg": 2.6600418647927313,
+          "geoms": [
+            "toilet_bowl",
+            "toilet_tank",
+            "toilet_seat",
+            "toilet_handle"
+          ]
+        },
+        {
+          "prop": "bed",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "sink",
+          "class_name": "tiny",
+          "present": true,
+          "geom_type": "mesh",
+          "pixels": 2465,
+          "frac": 0.008024088541666667,
+          "min_side_px": 46,
+          "bbox": [
+            170,
+            89,
+            248,
+            134
+          ],
+          "center_xyz": [
+            1.8747294570401,
+            0.8817315566226754,
+            0.9648217866732616
+          ],
+          "bearing_deg": 25.87071031792356,
+          "yaw_offset_deg": 25.861667442944906,
+          "geoms": [
+            "sink_basin"
+          ]
+        },
+        {
+          "prop": "bathtub",
+          "class_name": "visible_enough",
+          "present": true,
+          "geom_type": "mesh",
+          "pixels": 5425,
+          "frac": 0.017659505208333332,
+          "min_side_px": 67,
+          "bbox": [
+            389,
+            163,
+            524,
+            229
+          ],
+          "center_xyz": [
+            1.9273020036006026,
+            -1.184373932116408,
+            0.24648314538713129
+          ],
+          "bearing_deg": -32.33778845745526,
+          "yaw_offset_deg": -32.34683133243391,
+          "geoms": [
+            "bathtub_shell",
+            "bathtub_water"
+          ]
+        },
+        {
+          "prop": "sofa",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "tv",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "dresser",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        }
+      ],
+      "scene_geoms": [
+        {
+          "name": "room_floor",
+          "type": "plane",
+          "pixels": 159072,
+          "min_side_px": 261,
+          "center_in_frame": false
+        },
+        {
+          "name": "room_wall",
+          "type": "box",
+          "pixels": 46744,
+          "min_side_px": 219,
+          "center_in_frame": true
+        },
+        {
+          "name": "room_wall_left",
+          "type": "box",
+          "pixels": 36036,
+          "min_side_px": 173,
+          "center_in_frame": true
+        },
+        {
+          "name": "room_wall_right",
+          "type": "box",
+          "pixels": 34409,
+          "min_side_px": 167,
+          "center_in_frame": true
+        },
+        {
+          "name": "room_ceiling",
+          "type": "box",
+          "pixels": 0,
+          "min_side_px": 0,
+          "center_in_frame": false
+        },
+        {
+          "name": "bathroom_tile",
+          "type": "box",
+          "pixels": 5893,
+          "min_side_px": 111,
+          "center_in_frame": true
+        },
+        {
+          "name": "bathroom_vanity",
+          "type": "mesh",
+          "pixels": 8608,
+          "min_side_px": 92,
+          "center_in_frame": true
+        },
+        {
+          "name": "bathroom_mirror",
+          "type": "mesh",
+          "pixels": 4730,
+          "min_side_px": 60,
+          "center_in_frame": true
+        },
+        {
+          "name": "sink_basin",
+          "type": "mesh",
+          "pixels": 2465,
+          "min_side_px": 46,
+          "center_in_frame": true
+        },
+        {
+          "name": "toilet_bowl",
+          "type": "mesh",
+          "pixels": 2508,
+          "min_side_px": 58,
+          "center_in_frame": true
+        },
+        {
+          "name": "toilet_tank",
+          "type": "mesh",
+          "pixels": 1035,
+          "min_side_px": 31,
+          "center_in_frame": true
+        },
+        {
+          "name": "toilet_seat",
+          "type": "mesh",
+          "pixels": 261,
+          "min_side_px": 6,
+          "center_in_frame": true
+        },
+        {
+          "name": "toilet_handle",
+          "type": "mesh",
+          "pixels": 14,
+          "min_side_px": 2,
+          "center_in_frame": true
+        },
+        {
+          "name": "bathtub_shell",
+          "type": "mesh",
+          "pixels": 5425,
+          "min_side_px": 67,
+          "center_in_frame": true
+        },
+        {
+          "name": "bathtub_water",
+          "type": "mesh",
+          "pixels": 0,
+          "min_side_px": 0,
+          "center_in_frame": true
+        }
+      ]
+    },
+    {
+      "scene": "bedroom",
+      "xml": "bb94512:mujoco/room_bedroom.xml",
+      "png": "previews/frustum_stop_ask/oldmesh_bedroom.png",
+      "bus_mode": "stand",
+      "stand_s": 1.0,
+      "stop_xy_m": [
+        0.05652733241236434,
+        8.375270919411176e-06
+      ],
+      "stop_yaw_deg": 0.00904287497863891,
+      "cam_xyz_m": [
+        0.1462133689161698,
+        0.00044755840947706405,
+        0.33506241983957036
+      ],
+      "cam_z_m": 0.33506241983957036,
+      "pitch_deg": -14.838229068946617,
+      "look_yaw_deg": 0.008953077345386088,
+      "fovy_deg": 104.82,
+      "props": [
+        {
+          "prop": "stove",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "toilet",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "bed",
+          "class_name": "visible_enough",
+          "present": true,
+          "geom_type": "mesh",
+          "pixels": 20901,
+          "frac": 0.068037109375,
+          "min_side_px": 161,
+          "bbox": [
+            146,
+            73,
+            477,
+            233
+          ],
+          "center_xyz": [
+            2.4602338207831016,
+            0.21702651888246552,
+            0.39131584959155996
+          ],
+          "bearing_deg": 5.158950494318034,
+          "yaw_offset_deg": 5.149907619339388,
+          "geoms": [
+            "bedroom_headboard"
+          ]
+        },
+        {
+          "prop": "sink",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "bathtub",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "sofa",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "tv",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "dresser",
+          "class_name": "visible_enough",
+          "present": true,
+          "geom_type": "mesh",
+          "pixels": 14536,
+          "frac": 0.04731770833333333,
+          "min_side_px": 116,
+          "bbox": [
+            453,
+            113,
+            639,
+            228
+          ],
+          "center_xyz": [
+            2.435718455525694,
+            -2.3670034228984242,
+            0.5300289273811148
+          ],
+          "bearing_deg": -44.852972492649,
+          "yaw_offset_deg": -44.862015367627635,
+          "geoms": [
+            "dresser_case"
+          ]
+        }
+      ],
+      "scene_geoms": [
+        {
+          "name": "room_floor",
+          "type": "plane",
+          "pixels": 165394,
+          "min_side_px": 270,
+          "center_in_frame": false
+        },
+        {
+          "name": "room_wall",
+          "type": "box",
+          "pixels": 37763,
+          "min_side_px": 168,
+          "center_in_frame": true
+        },
+        {
+          "name": "room_wall_left",
+          "type": "box",
+          "pixels": 31858,
+          "min_side_px": 170,
+          "center_in_frame": true
+        },
+        {
+          "name": "room_wall_right",
+          "type": "box",
+          "pixels": 18611,
+          "min_side_px": 169,
+          "center_in_frame": true
+        },
+        {
+          "name": "room_ceiling",
+          "type": "box",
+          "pixels": 17711,
+          "min_side_px": 42,
+          "center_in_frame": true
+        },
+        {
+          "name": "bedroom_headboard",
+          "type": "mesh",
+          "pixels": 20901,
+          "min_side_px": 161,
+          "center_in_frame": true
+        },
+        {
+          "name": "nightstand_top",
+          "type": "mesh",
+          "pixels": 426,
+          "min_side_px": 50,
+          "center_in_frame": true
+        },
+        {
+          "name": "nightstand_lamp",
+          "type": "mesh",
+          "pixels": 0,
+          "min_side_px": 0,
+          "center_in_frame": true
+        },
+        {
+          "name": "dresser_case",
+          "type": "mesh",
+          "pixels": 14536,
+          "min_side_px": 116,
+          "center_in_frame": true
+        }
+      ]
+    },
+    {
+      "scene": "living",
+      "xml": "bb94512:mujoco/room_living.xml",
+      "png": "previews/frustum_stop_ask/oldmesh_living.png",
+      "bus_mode": "stand",
+      "stand_s": 1.0,
+      "stop_xy_m": [
+        0.05652733241236434,
+        8.375270919411176e-06
+      ],
+      "stop_yaw_deg": 0.00904287497863891,
+      "cam_xyz_m": [
+        0.1462133689161698,
+        0.00044755840947706405,
+        0.33506241983957036
+      ],
+      "cam_z_m": 0.33506241983957036,
+      "pitch_deg": -14.838229068946617,
+      "look_yaw_deg": 0.008953077345386088,
+      "fovy_deg": 104.82,
+      "props": [
+        {
+          "prop": "stove",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "toilet",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "bed",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "sink",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "bathtub",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        },
+        {
+          "prop": "sofa",
+          "class_name": "visible_enough",
+          "present": true,
+          "geom_type": "mesh",
+          "pixels": 28053,
+          "frac": 0.091318359375,
+          "min_side_px": 120,
+          "bbox": [
+            71,
+            116,
+            442,
+            235
+          ],
+          "center_xyz": [
+            1.9447950380360384,
+            0.4200508311896931,
+            0.44493843891245627
+          ],
+          "bearing_deg": 12.541165739116591,
+          "yaw_offset_deg": 12.53212286413796,
+          "geoms": [
+            "living_sofa_back"
+          ]
+        },
+        {
+          "prop": "tv",
+          "class_name": "visible_enough",
+          "present": true,
+          "geom_type": "mesh",
+          "pixels": 5290,
+          "frac": 0.017220052083333333,
+          "min_side_px": 55,
+          "bbox": [
+            422,
+            175,
+            533,
+            229
+          ],
+          "center_xyz": [
+            1.8656618142910908,
+            -1.3824204451475206,
+            0.22493606544209205
+          ],
+          "bearing_deg": -37.38482816232892,
+          "yaw_offset_deg": -37.393871037307576,
+          "geoms": [
+            "tv_screen"
+          ]
+        },
+        {
+          "prop": "dresser",
+          "class_name": "missing",
+          "present": false,
+          "geom_type": "missing",
+          "pixels": 0,
+          "frac": 0.0,
+          "min_side_px": 0,
+          "bbox": null,
+          "center_xyz": null,
+          "bearing_deg": null,
+          "yaw_offset_deg": null,
+          "geoms": []
+        }
+      ],
+      "scene_geoms": [
+        {
+          "name": "room_floor",
+          "type": "plane",
+          "pixels": 153069,
+          "min_side_px": 261,
+          "center_in_frame": false
+        },
+        {
+          "name": "room_wall",
+          "type": "box",
+          "pixels": 47093,
+          "min_side_px": 219,
+          "center_in_frame": true
+        },
+        {
+          "name": "room_wall_left",
+          "type": "box",
+          "pixels": 26000,
+          "min_side_px": 153,
+          "center_in_frame": true
+        },
+        {
+          "name": "room_wall_right",
+          "type": "box",
+          "pixels": 33224,
+          "min_side_px": 164,
+          "center_in_frame": true
+        },
+        {
+          "name": "room_ceiling",
+          "type": "box",
+          "pixels": 0,
+          "min_side_px": 0,
+          "center_in_frame": false
+        },
+        {
+          "name": "living_sofa_back",
+          "type": "mesh",
+          "pixels": 28053,
+          "min_side_px": 120,
+          "center_in_frame": true
+        },
+        {
+          "name": "coffee_top",
+          "type": "mesh",
+          "pixels": 14471,
+          "min_side_px": 101,
+          "center_in_frame": true
+        },
+        {
+          "name": "tv_screen",
+          "type": "mesh",
+          "pixels": 5290,
+          "min_side_px": 55,
+          "center_in_frame": true
+        }
+      ]
+    }
+  ],
+  "xml_diff": {
+    "kitchen": {
+      "only_old": [
+        "chair_stool_b",
+        "kitchen_counter",
+        "kitchen_end",
+        "kitchen_kick",
+        "kitchen_panel_a",
+        "kitchen_panel_b",
+        "kitchen_panel_c",
+        "kitchen_panel_d",
+        "kitchen_pendant_a",
+        "kitchen_pendant_b",
+        "kitchen_pier",
+        "kitchen_sink",
+        "kitchen_splash",
+        "kitchen_stove",
+        "kitchen_upper_a",
+        "kitchen_upper_b",
+        "kitchen_upper_c",
+        "kitchen_upper_d",
+        "table_base"
+      ],
+      "only_current": [
+        "chair_back",
+        "kitchen_backsplash",
+        "kitchen_countertop",
+        "kitchen_kettle",
+        "table_leg"
+      ],
+      "shared": [
+        "chair_seat",
+        "kitchen_cabinet",
+        "table_top"
+      ]
+    },
+    "bathroom": {
+      "only_old": [
+        "bathroom_mirror",
+        "bathtub_shell",
+        "bathtub_water",
+        "toilet_handle"
+      ],
+      "only_current": [
+        "bathroom_towel",
+        "sink_faucet",
+        "sink_pedestal"
+      ],
+      "shared": [
+        "bathroom_tile",
+        "bathroom_vanity",
+        "sink_basin",
+        "toilet_bowl",
+        "toilet_seat",
+        "toilet_tank"
+      ]
+    },
+    "bedroom": {
+      "only_old": [
+        "dresser_case"
+      ],
+      "only_current": [
+        "bedroom_bed_frame",
+        "bedroom_duvet",
+        "bedroom_mattress",
+        "bedroom_pillow",
+        "bedroom_pillow_r",
+        "nightstand_leg"
+      ],
+      "shared": [
+        "bedroom_headboard",
+        "nightstand_lamp",
+        "nightstand_top"
+      ]
+    },
+    "living": {
+      "only_old": [
+        "coffee_top"
+      ],
+      "only_current": [
+        "living_sofa_arm_l",
+        "living_sofa_arm_r",
+        "living_sofa_seat",
+        "tv_bezel",
+        "tv_stand"
+      ],
+      "shared": [
+        "living_sofa_back",
+        "tv_screen"
+      ]
+    }
+  }
+}
