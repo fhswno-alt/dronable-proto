@@ -1795,7 +1795,7 @@ That contact is a step-on, not a Day-1 stop. While the gait is still walking on 
 
 At 7.560 s the bus flags airborne and the command goes to 0. up_z is 0.979. The left sole is on the rug at 13.4 N and the right foot is up. Neither foot is on the floor geom, and both ankle bodies are above 0.025 m, so the floor-only check counts the rug as air. That is not a tip.
 
-On this same walk, before the fault, 640 swing ticks: the swing sole minimum is −3.11 mm and its p90 is 17.51 mm. The swing toe minimum is −3.07 mm and its p90 is 25.97 mm. The minimum is the sole still on the floor while the swing flag is on. It is not the arm clear. Seventeen settled steps from 2.5 s to 6.86 s reach a sole apex of at least 17.28 mm (p90 of those apexes 18.75 mm). The swing clear is that 17.28 mm. The stated margin is 4 mm. The floor-edge arm line is 17.28 − 4 = 13.28 mm. The 12 mm rug is below that line, so it does not arm a stop. Not kit-safe. Not go-anywhere.
+On this same walk, before the fault, 640 swing ticks: the swing sole minimum is −3.11 mm and its p90 is 17.51 mm. The swing toe minimum is −3.066 mm and its p90 is 25.967 mm. The floor-edge arm line is frozen before the run at the swing-toe minimum minus 2 mm: −3.066 − 2 = −5.066 mm. The p90 is not the latch. The 12 mm rug is above −5.066 mm. Not kit-safe. Not go-anywhere.
 
 A −10° `head_tilt` walk is not enabled. On that pose the near edge is
 0.077 m at `cam_z` 0.326 m. #67 checked the wood rule at that session
