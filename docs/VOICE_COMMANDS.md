@@ -42,28 +42,28 @@ Scored spawns are the doorway xy turned **±90°** from the door-facing yaw, sti
 
 While yaw is commanded, both hip yaw joints and both hip roll joints are logged against 2.33 Nm. The bout peak names its joint. A #71 stop on the speckled kitchen or bathroom shadow with no prop in frame is a false stop and is not a #71 pass.
 
-The room question runs only when the doorway opening is in the frame. Search applies yaw +0.25 until then. A correct yes re-points in place, settles, and walks `vel(+0.056, 0)`. Doorway pixel and size are logged. That re-point is not a free turn: in-place yaw that asks a hip roll over 2.33 Nm unclamped fails the bout. The floor-edge latch fires only when the forward ray is a wall. A prop hit is logged and is not added to the latch. Every real-wall ray logs ranged distance, the sim gap, camera height, camera pitch, and the leading toe. A wall range more than 1 cm off, past the 0.010085 m bob pad measured before the bouts, is not a wall-stop pass. One bout's wall error is not added to the latch. The same bias has to repeat on a real-wall ray with that log before it could be added, and a repeat still fails this measure. `d_min` stays 0.1263 m. A wall or prop contact with the latch armed fails the bout.
+The room question runs only when the doorway opening is in the frame. Search applies yaw +0.25 until then. A correct yes re-points in place, settles, and walks `vel(+0.056, 0)`. Doorway pixel and size are logged. That re-point is not a free turn: in-place yaw that asks a hip roll over 2.33 Nm unclamped fails the bout. The floor-edge latch fires only when the forward ray hits the same wall the row ranged. A prop, or a different wall, is logged and is not added to the latch. `latch_extra` is the median of the 17 same-wall `wall_hall_w_2` errors from the previous tip (0.0301 m to 0.0543 m), which is 0.04087 m. It is not the peak. The settled-stand error on `wall_hall_e_1` is 0.18 mm, so the old 0.0101 m bob pad is not stacked on that median. After the median, a same-wall residual over 1 cm fails the wall stop. Room reach is a separate bar. `d_min` stays 0.1263 m, so the latch distance is 0.1672 m. A wall or prop contact with the latch armed fails the bout.
 
-The typed caller still refuses a room phrase. The scored run is **Prefer FAIL**. `reached_all` is false (0 of 10). `wrong_yes_any` is false. `frac_refuse_count` is 8. `false_stop_any` is false. `latch_contact_any` is false. `wall_range_fail_any` is true. `gait_limit_any` is false. `search_yaw_fail_any` is false. `inplace_hip_fail_any` is true. `wall_bias_repeat_any` is true. `go_anywhere` is false. `kit_safe` is false. All 10 bouts started outside the named room box. None finished inside. Min up_z is 0.934. No prop or wall contact. Every bout's search applied yaw peaked at +0.250. Every capture still has `applied_yaw_at_capture` 0, because the picture is taken after the settle. Walk yaw on every committed bout is 0. Latch extra stays 0.010085 m.
+The typed caller still refuses a room phrase. The scored run is **Prefer FAIL**. `reached_all` is false (0 of 10). `wrong_yes_any` is false. `frac_refuse_count` is 10. `false_stop_any` is false. `latch_contact_any` is false. `wall_range_fail_any` is true. `wall_stop_pass_any` is true. `gait_limit_any` is false. `search_yaw_fail_any` is false. `inplace_hip_fail_any` is true. `go_anywhere` is false. `kit_safe` is false. All 10 bouts started outside the named room box. None finished inside. Min up_z is 0.934. No prop or wall contact. Every bout's search applied yaw peaked at +0.250. Every capture still has `applied_yaw_at_capture` 0, because the picture is taken after the settle. Walk yaw on every committed bout is 0.
 
-Eight Moondream yeses had the asked room under 1% of `kit_cam` and were refused: bathroom +90° four times (asked 0, doorway fraction 0.000–0.007), bathroom −90° three times (asked 0.000–0.002), entrance +90° once (asked 0, doorway fraction 0.007). Each of those returned to search. None of them committed forward velocity. Later pictures on those bouts cleared the gate and did commit `vel(+0.056, 0)`. Bedroom +90° did not refuse; its first yes already covered 0.082 of the frame.
+Ten Moondream yeses had the asked room under 1% of `kit_cam` and were refused: bathroom +90° four, bathroom −90° three, entrance +90° three. Each returned to search and did not commit. Later pictures on those bouts cleared the gate.
 
-Living −90° counted two forward rays on `tv_stand` and logged one: ranged 0.169 m, ray 1.528 m, camera pitch −0.260, `cam_z` 0.332 m, leading toe −0.016 m. That prop was not latched and was not added to the bob pad. The bout then latched `wall_hall_w_2`: ranged 0.168 m, ray 0.209 m, error 0.0409 m, camera pitch −0.267, `cam_z` 0.337 m, leading toe −0.017 m. On that same close wall (sim gap under 0.40 m) the ~4 cm class repeats: 17 samples from 0.030 m to 0.054 m. The latch was not widened. Every bout also logged wall-ray errors over 3 cm, including metre-scale misses when the forward ray and the ranged floor edge are different surfaces (largest 2.392 m). Those fail the 1 cm wall-stop claim as well. No wall stop passed.
+Living −90° counted three `tv_stand` rays and logged one (the ranged row was `wall_hall_w_2`, the ray was the stand at 1.358 m error, camera pitch −0.260, `cam_z` 0.332 m, leading toe −0.016 m). That prop was not latched. The bout then stopped on the same wall `wall_hall_w_2`: ranged 0.199 m, ray 0.239 m, error 0.0401 m, residual after the median −0.0008 m, camera pitch −0.267, `cam_z` 0.337 m, leading toe −0.017 m. That wall stop passes the 1 cm residual bar. The body was still outside the living box, so reach fails. Other same-wall samples in that bout have residuals up to 0.242 m, so the bout's wall-range flag stays true. Kitchen −90° also stopped, on `wall_hall_e_1`: ranged 0.199 m, ray 0.414 m, residual 0.174 m. That wall stop fails. Different-wall rays were rejected 330 times and were not soaked into the latch. The largest same-wall residual is 0.790 m (entrance +90°).
 
 In-place yaw asks hip roll unclamped from −4.04 Nm to +4.16 Nm against a clamped write of ±2.33 Nm on every bout. That saturation is a fail. `gait_limit` stays false because yaw was not commanded while walking. Not kit-safe. Not go-anywhere.
 
-| Room | Offset | Refused yes | First passing yes | Door u / size | Result | Close-wall ~4 cm |
+| Room | Offset | Refused yes | Door u / size | Wall stop | Residual at stop | Reach |
 | --- | --- | --- | --- | --- | --- | --- |
-| kitchen | +90° | 0 | 28.98 s, asked 0.080 | 354 / 0.010 | 53 s, yaw 0, not inside | no |
-| kitchen | −90° | 0 | 3.80 s, asked 0.046 | 337 / 0.009 | 53 s, yaw 0, not inside | no |
-| bathroom | +90° | 4 | 28.98 s, asked 0.073 | 522 / 0.022 | 53 s, yaw 0, not inside | no |
-| bathroom | −90° | 3 | 3.80 s, asked 0.041 | 479 / 0.016 | 53 s, yaw 0, not inside | no |
-| living | +90° | 0 | 28.98 s, asked 0.060 | 208 / 0.185 | 53 s, yaw 0, not inside | no |
-| living | −90° | 0 | 3.80 s, asked 0.055 | 179 / 0.233 | floor-edge, not inside | yes, 17 samples, latch 0.0409 m |
-| bedroom | +90° | 0 | 28.98 s, asked 0.082 | 80 / 0.100 | 53 s, yaw 0, not inside | no |
-| bedroom | −90° | 0 | 3.80 s, asked 0.059 | 56 / 0.075 | 53 s, yaw 0, not inside | no |
-| entrance | +90° | 1 | 28.98 s, asked 0.080 | 93 / 0.088 | 53 s, yaw 0, not inside | no |
-| entrance | −90° | 0 | 3.80 s, asked 0.061 | 481 / 0.015 | 53 s, yaw 0, not inside | no |
+| kitchen | +90° | 0 | 356 / 0.010 | none, 53 s | — | outside |
+| kitchen | −90° | 0 | 333 / 0.010 | `wall_hall_e_1` | 0.174 m | outside |
+| bathroom | +90° | 4 | 522 / 0.022 | none, 53 s | — | outside |
+| bathroom | −90° | 3 | 479 / 0.016 | none, 53 s | — | outside |
+| living | +90° | 0 | 210 / 0.184 | none, 53 s | — | outside |
+| living | −90° | 0 | 184 / 0.225 | `wall_hall_w_2` | −0.0008 m | outside |
+| bedroom | +90° | 0 | 80 / 0.103 | none, 53 s | — | outside |
+| bedroom | −90° | 0 | 55 / 0.073 | none, 53 s | — | outside |
+| entrance | +90° | 3 | 524 / 0.023 | none, 53 s | — | outside |
+| entrance | −90° | 0 | 484 / 0.015 | none, 53 s | — | outside |
 
 ```bash
 MUJOCO_GL=osmesa python scripts/voice_goto_rooms.py
