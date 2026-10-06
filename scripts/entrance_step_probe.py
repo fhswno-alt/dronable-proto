@@ -55,7 +55,7 @@ _WALK_Z_RATE = 1.55
 # stays at the rate that cleared it and is not dragged down with the
 # knee. The stop bout does not read these.
 _WALK_STANCE_RATE = 1.90
-_WALK_KNEE_RATE = 1.80
+_WALK_KNEE_RATE = 1.50
 _WALK_HIP_PITCH_RATE = 1.90
 # Locked 1.55 copy, no hip slew, CoM tick 2.200 s: stance corner −2.564 mm.
 # A mid-stance tick more than 1 mm past that is a new dig.
