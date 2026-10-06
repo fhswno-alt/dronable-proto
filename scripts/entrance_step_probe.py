@@ -14081,6 +14081,7 @@ def score_sag_stop() -> None:
             f"PRED {name} actuator_post_tip {act} {tau:+.4f} t {t:.3f} "
             "is at or after the tip and is not the torque bar"
         )
+    _print_gait_peaks(name, held, summary)
     if held.get("fault"):
         fails.append(f"fault {held.get('fault')} t {float(held.get('fault_t', float('nan'))):.3f}")
     if air_zero:
@@ -14146,6 +14147,107 @@ def _keep_ask(best: tuple | None, item: tuple) -> tuple:
     if best is None or abs(float(item[3])) > abs(float(best[3])):
         return item
     return best
+
+
+def _print_gait_peaks(name: str, held: dict[str, object], summary: dict[str, object]) -> bool:
+    """Max |unclamped ask| on every leg joint before the tip.
+
+    Post-tip peaks are printed and are not the bar. True when every
+    pre-tip leg joint is present and at or under 2.33 Nm.
+    """
+    asks = held.get("asks")
+    lateral = held.get("lateral")
+    if not isinstance(asks, list):
+        print(f"PRED {name} gait_pre missing")
+        return False
+    by_lat: dict[float, dict[str, float | str]] = {}
+    if isinstance(lateral, list):
+        for row in lateral:
+            if isinstance(row, dict):
+                by_lat[round(float(row["t_ask"]), 5)] = row
+    fault_t = float(held.get("fault_t", float("nan")))
+    tipped = bool(held.get("fault")) and math.isfinite(fault_t)
+    pre: dict[str, tuple] = {}
+    post: dict[str, tuple] = {}
+    for item in asks:
+        jn = str(item[1])
+        if jn not in _WALK_LEG:
+            continue
+        t_item = float(item[0])
+        before = (not tipped) or t_item < fault_t - 1e-9
+        bucket = pre if before else post
+        bucket[jn] = _keep_ask(bucket.get(jn), item)
+
+    def _phase_frac(item: tuple) -> tuple[str, float]:
+        row = by_lat.get(round(float(item[0]), 5))
+        if row is None:
+            return str(item[5]), float("nan")
+        phase = str(row["phase"])
+        return phase, _swing_frac(phase, float(row["pose"]))
+
+    overs: list[str] = []
+    worst_over = ""
+    worst_abs = -1.0
+    for jn in _WALK_LEG:
+        item = pre.get(jn)
+        if item is None:
+            print(f"PRED {name} gait_pre {jn} missing")
+            overs.append(f"{jn} missing")
+            continue
+        phase, frac = _phase_frac(item)
+        ask = float(item[3])
+        over = abs(ask) > KNEE_NM + 1e-9
+        frac_txt = "dsp" if phase == "D" else f"{frac:.3f}"
+        print(
+            f"PRED {name} gait_pre {jn} {ask:+.4f} "
+            f"t {float(item[0]):.3f} phase {phase} frac {frac_txt} "
+            f"ge_2.33 {int(over)}"
+        )
+        if over:
+            bit = f"{jn} {ask:+.4f} t {float(item[0]):.3f} frac {frac_txt}"
+            overs.append(bit)
+            if abs(ask) > worst_abs:
+                worst_abs = abs(ask)
+                worst_over = bit
+    if not post:
+        print(f"PRED {name} gait_post none")
+    else:
+        for jn in _WALK_LEG:
+            item = post.get(jn)
+            if item is None:
+                continue
+            phase, frac = _phase_frac(item)
+            ask = float(item[3])
+            frac_txt = "dsp" if phase == "D" else f"{frac:.3f}"
+            print(
+                f"PRED {name} gait_post {jn} {ask:+.4f} "
+                f"t {float(item[0]):.3f} phase {phase} frac {frac_txt} "
+                "not the bar"
+            )
+    margin = float(summary.get("mid_margin", float("nan"))) * 1000.0
+    n_out = summary.get("n_mid_out")
+    n_mid = summary.get("n_mid")
+    if overs:
+        for bit in overs:
+            print(f"PRED {name} gait_over {bit}")
+        print(
+            f"PRED {name} gait_peak Prefer FAIL. {worst_over}. "
+            f"CoM mid_margin {margin:+.2f} mm "
+            f"n_mid_out {n_out}/{n_mid}. "
+            "Post-tip asks are not this bar. "
+            "Plant, y_swap, foot-z, crouch, and the rail stay closed. "
+            "d_min is not rebuilt. Not kit-safe."
+        )
+        return False
+    print(
+        f"PRED {name} gait_peak CLEAR. Every pre-tip leg ask stays at or "
+        "under 2.33 Nm. "
+        f"CoM mid_margin {margin:+.2f} mm "
+        f"n_mid_out {n_out}/{n_mid} is outside and is not a torque pass. "
+        "Post-tip asks are not this bar. "
+        "d_min is not rebuilt. Not kit-safe."
+    )
+    return True
 
 
 def score_mid_swing() -> None:
@@ -14644,6 +14746,7 @@ def score_mid_swing() -> None:
             f"in_20_80 {int(ssp_in_window)} "
             f"ge_2.33 {int(abs(float(knee_worst[3])) > KNEE_NM + 1e-9)}"
         )
+    _print_gait_peaks(name, held, summary)
     if (
         swing_ok and toe_bar and rug_ok and corners_ok
         and support_ok and mid_plant_ok and early_ok
