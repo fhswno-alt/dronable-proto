@@ -49,15 +49,13 @@ TOE_BAR_M = 0.002
 # that velocity term near 2.26 Nm. The parked stop stretch stays at
 # 1.90 rad/s and 0.25 / 1.060×. This rate is not that knob.
 _WALK_Z_RATE = 1.55
-# Stop-bout approach swing only. The fraction-0.115 airborne knee is a
+# Stop-bout pre-stop swing-z only. The fraction-0.115 airborne knee is a
 # swing-z slam before the stop command. Knee kv is 1.4573, so this rate
-# keeps that velocity term near 2.26 Nm. It is not the walk schedule and
-# not the post-stop 0.25 / 1.060× stretch. z stays nominal through the
-# stop's own fraction (~0.035) and again by the handoff, so the stop
-# seed and the landing z are the unwarped schedule.
+# keeps that velocity term near 2.26 Nm. The number matches the walk
+# schedule. The install does not. It is not armed on the continuous
+# walk, and it is off from the stop command so the post-stop stretch
+# still samples the unwarped z at 0.25 / 1.060×.
 _STOP_APPROACH_Z_RATE = 1.55
-_STOP_APPROACH_PIN_FRAC = 0.04
-_STOP_APPROACH_HANDOFF = 0.50
 # Loaded-leg stance rates on the continuous walk. Ankle pitch stays at
 # the 1.90 rad/s rate that already cleared it. The knee is slower on
 # its own when that rate still leaves mid-SS over 2.33 Nm. Hip pitch
@@ -441,12 +439,17 @@ def _walk_z_ik(
 
 
 def _fit_walk_z_side(
-    walker: ow.Op3Walker, side: str, rate: float,
+    walker: ow.Op3Walker,
+    side: str,
+    rate: float,
+    near_nominal: bool = False,
 ) -> dict[str, object]:
-    """Highest swing z whose knee and ankle pitch stay at ``rate`` and still land.
+    """Swing z whose knee and ankle pitch stay at ``rate`` and still land.
 
     The clock stays the real SSP. z is the only warped channel. A schedule
-    that cannot reach the landing z at this rate is refused.
+    that cannot reach the landing z at this rate is refused. The walk
+    install wants the highest such z. The stop-bout approach wants the
+    one closest to the live z.
     """
     z_fn = walker._left_z if side == "L" else walker._right_z
     start = float(walker.l_ssp_start if side == "L" else walker.r_ssp_start)
@@ -512,9 +515,12 @@ def _fit_walk_z_side(
                 or abs(ik[1] - nxt[1]) > step + 1e-8
             ):
                 continue
-            # Climb while the 0.208 toe is still ahead, then come back to
-            # the landing z. Both stay inside the rate step.
-            if fracs[i + 1] <= 0.45:
+            # The walk climbs while the 0.208 toe is still ahead, then
+            # comes back to the landing z. The stop approach stays next to
+            # the live z. Both stay inside the rate step.
+            if near_nominal:
+                key = -abs(float(grid[k]) - nom[i + 1])
+            elif fracs[i + 1] <= 0.45:
                 key = float(grid[k])
             else:
                 key = -abs(float(grid[k]) - zend)
@@ -538,7 +544,12 @@ def _fit_walk_z_side(
             continue
         dk = abs(ik[0] - prev[0]) / dt
         da = abs(ik[1] - prev[1]) / dt
-        if 0.20 - 1e-9 <= fracs[i] <= 0.80 + 1e-9:
+        in_window = (
+            True
+            if near_nominal
+            else 0.20 - 1e-9 <= fracs[i] <= 0.80 + 1e-9
+        )
+        if in_window:
             if dk > peak_k:
                 peak_k = dk
                 peak_kf = fracs[i]
@@ -660,153 +671,25 @@ def _install_walk_z_stretch(session: sw.SteerSession, rate: float = _WALK_Z_RATE
     )
 
 
-def _fit_stop_approach_z_side(
-    walker: ow.Op3Walker,
-    side: str,
-    rate: float,
-    pin_frac: float,
-    handoff_frac: float,
-) -> dict[str, object] | None:
-    """Warp only the approach of swing z, then return to the live schedule.
-
-    The clock stays the real SSP. z through ``pin_frac`` and from
-    ``handoff_frac`` on is the nominal sample, so the stop command's own
-    fraction and the landing stay unwarped. Between them the knee and
-    ankle pitch stay inside ``rate``. None when that chain does not close.
-    """
+def _swing_z_nominal(
+    walker: ow.Op3Walker, side: str,
+) -> tuple[list[float], list[float]]:
+    """Swing fraction and the live z the approach delta is measured from."""
     z_fn = walker._left_z if side == "L" else walker._right_z
     start = float(walker.l_ssp_start if side == "L" else walker.r_ssp_start)
     end = float(walker.l_ssp_end if side == "L" else walker.r_ssp_end)
     dt = float(ow.OP3_CTRL_S)
-    ts: list[float] = []
+    fracs: list[float] = []
     nom: list[float] = []
     t = start
+    span = max(end - start, 1e-9)
     while True:
-        ts.append(t)
+        fracs.append((t - start) / span)
         nom.append(float(z_fn(t)))
         if t >= end - 1e-12:
             break
         t = min(end, t + dt)
-    n = len(ts)
-    span = end - start
-    if span <= 1e-9 or n < 4:
-        return None
-    fracs = [(ts[i] - start) / span for i in range(n)]
-    pin_ids = [i for i in range(n) if fracs[i] <= float(pin_frac) + 1e-12]
-    hand_ids = [i for i in range(n) if fracs[i] + 1e-12 >= float(handoff_frac)]
-    if not pin_ids or not hand_ids:
-        return None
-    pin_lo = pin_ids[-1]
-    pin_hi = hand_ids[0]
-    if pin_hi <= pin_lo + 1:
-        return None
-    grid = np.linspace(min(nom) - 0.006, max(nom) + 0.002, 161)
-    cache: list[list[tuple[float, float] | None]] = []
-    for i in range(n):
-        cache.append([_walk_z_ik(walker, side, ts[i], float(z)) for z in grid])
-    step = float(rate) * dt
-
-    def _nearest(i: int) -> int | None:
-        best: int | None = None
-        best_d = 1e9
-        for k, ik in enumerate(cache[i]):
-            if ik is None:
-                continue
-            dist = abs(float(grid[k]) - nom[i])
-            if dist < best_d:
-                best = k
-                best_d = dist
-        return best
-
-    fixed: dict[int, int] = {}
-    for i in list(range(pin_lo + 1)) + list(range(pin_hi, n)):
-        j = _nearest(i)
-        if j is None:
-            return None
-        fixed[i] = j
-    reachable: list[set[int]] = [set() for _ in range(n)]
-    reachable[pin_hi].add(fixed[pin_hi])
-    for i in range(pin_hi - 1, pin_lo - 1, -1):
-        candidates: range | tuple[int, ...]
-        if i in fixed:
-            candidates = (fixed[i],)
-        else:
-            candidates = range(len(grid))
-        for j in candidates:
-            ik = cache[i][j]
-            if ik is None:
-                continue
-            for k in reachable[i + 1]:
-                nxt = cache[i + 1][k]
-                if nxt is None:
-                    continue
-                if (
-                    abs(ik[0] - nxt[0]) <= step + 1e-8
-                    and abs(ik[1] - nxt[1]) <= step + 1e-8
-                ):
-                    reachable[i].add(j)
-                    break
-    if fixed[pin_lo] not in reachable[pin_lo]:
-        return None
-    path = [fixed[i] for i in range(pin_lo + 1)]
-    for i in range(pin_lo, pin_hi):
-        ik = cache[i][path[-1]]
-        if ik is None:
-            return None
-        best: int | None = None
-        best_key = 1e18
-        for k in reachable[i + 1]:
-            nxt = cache[i + 1][k]
-            if nxt is None:
-                continue
-            if (
-                abs(ik[0] - nxt[0]) > step + 1e-8
-                or abs(ik[1] - nxt[1]) > step + 1e-8
-            ):
-                continue
-            key = abs(float(grid[k]) - nom[i + 1])
-            if best is None or key < best_key:
-                best = k
-                best_key = key
-        if best is None:
-            return None
-        path.append(best)
-    while len(path) < n:
-        path.append(fixed[len(path)])
-    deltas = [float(grid[path[i]]) - float(nom[i]) for i in range(n)]
-    for i in list(range(pin_lo + 1)) + list(range(pin_hi, n)):
-        deltas[i] = 0.0
-    peak_k = 0.0
-    peak_a = 0.0
-    peak_kf = 0.0
-    peak_af = 0.0
-    prev = cache[pin_lo][path[pin_lo]]
-    for i in range(pin_lo + 1, pin_hi + 1):
-        ik = cache[i][path[i]]
-        if ik is None or prev is None:
-            prev = ik
-            continue
-        dk = abs(ik[0] - prev[0]) / dt
-        da = abs(ik[1] - prev[1]) / dt
-        if dk > peak_k:
-            peak_k = dk
-            peak_kf = fracs[i]
-        if da > peak_a:
-            peak_a = da
-            peak_af = fracs[i]
-        prev = ik
-    peak_abs = max(abs(d) for d in deltas)
-    return {
-        "fracs": [float(f) for f in fracs],
-        "deltas": deltas,
-        "peak_abs_m": float(peak_abs),
-        "peak_knee": float(peak_k),
-        "peak_knee_frac": float(peak_kf),
-        "peak_ank": float(peak_a),
-        "peak_ank_frac": float(peak_af),
-        "pin_frac": float(fracs[pin_lo]),
-        "handoff_frac": float(fracs[pin_hi]),
-    }
+    return fracs, nom
 
 
 def _segment_stop_s(segments: tuple) -> float:
@@ -824,13 +707,14 @@ def _install_stop_approach_z(
     stop_s: float,
     rate: float = _STOP_APPROACH_Z_RATE,
 ) -> None:
-    """Time-stretch the stop bout's approach swing-z. The walk knob stays put.
+    """Time-stretch pre-stop swing z on the stop bout. The walk knob stays put.
 
-    Installed only on the stop bout, after the phase lift and the foot-z
-    add. From the stop command the wrapper is off, so the 0.25 / 1.060×
-    stretch still samples the unwarped z. Ankle roll and sole-flat are
-    not this path. The swing knee is the IK of this z. There is no torque
-    hold on it.
+    The schedule is the same shape the continuous walk uses at this rate:
+    knee and ankle pitch stay inside the rate and z still lands. It is
+    installed only here, and the delta is off from the stop command so
+    the 0.25 / 1.060× stretch samples the unwarped z. Ankle roll and
+    sole-flat are not this path. The swing knee slews toward this IK
+    with no torque hold, and that slew does not replace the stance memory.
     """
     lipm = session.lipm
     if lipm is None or lipm.op3 is None:
@@ -851,14 +735,22 @@ def _install_stop_approach_z(
         walker._y_swap, walker._z_move, walker._z_move_shift, walker._z_swap,
         walker._z_swap_shift, walker._a_move, walker._a_move_shift,
     )
-    rates = (float(rate), 1.40, 1.25, 1.10, 0.95)
-    handoffs = (
-        float(_STOP_APPROACH_HANDOFF),
-        0.65,
-        0.80,
-    )
-    chosen_rate = float(rate)
-    chosen_hand = float(_STOP_APPROACH_HANDOFF)
+    def _deltas(side: str, fit: dict[str, object]) -> dict[str, object]:
+        fracs, nom = _swing_z_nominal(walker, side)
+        table = fit["table"]
+        if not isinstance(table, list) or len(table) != len(nom):
+            raise SystemExit("stop approach z table does not match the nominal swing")
+        deltas = [float(table[i][1]) - float(nom[i]) for i in range(len(nom))]
+        return {
+            "fracs": fracs,
+            "deltas": deltas,
+            "peak_abs_m": max(abs(v) for v in deltas),
+            "peak_knee": float(fit["peak_knee"]),
+            "peak_knee_frac": float(fit["peak_knee_frac"]),
+            "peak_ank": float(fit["peak_ank"]),
+            "peak_ank_frac": float(fit["peak_ank_frac"]),
+        }
+
     left: dict[str, object] | None = None
     right: dict[str, object] | None = None
     try:
@@ -868,27 +760,10 @@ def _install_stop_approach_z(
         walker.previous_x = 0.020
         walker.ctrl_running = True
         walker.update_movement()
-        for trial in rates:
-            if trial > float(rate) + 1e-12:
-                continue
-            found = False
-            for hand in handoffs:
-                left_try = _fit_stop_approach_z_side(
-                    walker, "L", trial, _STOP_APPROACH_PIN_FRAC, hand,
-                )
-                right_try = _fit_stop_approach_z_side(
-                    walker, "R", trial, _STOP_APPROACH_PIN_FRAC, hand,
-                )
-                if left_try is None or right_try is None:
-                    continue
-                left = left_try
-                right = right_try
-                chosen_rate = float(trial)
-                chosen_hand = float(hand)
-                found = True
-                break
-            if found:
-                break
+        left_fit = _fit_walk_z_side(walker, "L", float(rate), near_nominal=True)
+        right_fit = _fit_walk_z_side(walker, "R", float(rate), near_nominal=True)
+        left = _deltas("L", left_fit)
+        right = _deltas("R", right_fit)
     finally:
         walker.time = saved_time
         walker.previous_x = saved_prev
@@ -902,12 +777,9 @@ def _install_stop_approach_z(
             walker._z_swap_shift, walker._a_move, walker._a_move_shift,
         ) = saved_amp
     if left is None or right is None:
-        raise SystemExit(
-            f"stop approach z cannot close at {rate:.2f} rad/s "
-            f"or milder through handoff {handoffs[-1]:.2f}"
-        )
+        raise SystemExit(f"stop approach z did not fit at {rate:.2f} rad/s")
     session._stop_approach_z = True  # type: ignore[attr-defined]
-    session._stop_approach_z_rate = float(chosen_rate)  # type: ignore[attr-defined]
+    session._stop_approach_z_rate = float(rate)  # type: ignore[attr-defined]
     data = lipm.data
 
     def _warp(orig, fit: dict[str, object], start: float, end: float):
@@ -952,9 +824,7 @@ def _install_stop_approach_z(
     walker._right_z = _warp(orig_r, right, float(walker.r_ssp_start), float(walker.r_ssp_end))  # type: ignore[method-assign]
     print(
         "PRED stop_approach_z "
-        f"rate {chosen_rate:.3f} rad/s "
-        f"pin {float(left['pin_frac']):.3f} "
-        f"handoff {chosen_hand:.3f}. "
+        f"rate {float(rate):.3f} rad/s. "
         f"L delta {float(left['peak_abs_m']) * 1000.0:.2f} mm "
         f"knee {float(left['peak_knee']):.2f} rad/s "
         f"at {float(left['peak_knee_frac']):.3f} "
@@ -963,11 +833,12 @@ def _install_stop_approach_z(
         f"R delta {float(right['peak_abs_m']) * 1000.0:.2f} mm "
         f"knee {float(right['peak_knee']):.2f} rad/s "
         f"at {float(right['peak_knee_frac']):.3f}. "
-        "This is the stop-bout approach only. "
-        "Walk swing-z stays 1.55 rad/s and is not installed here. "
+        "Closest to the live swing z, pre-stop only. "
+        "The continuous-walk install stays off. "
         "From the stop command the delta is off, so the stop stretch "
         "stays 0.25 / 1.060×. Ankle roll freeze and sole-flat stay put. "
-        "No torque hold on this knee. Foot-z stays 1.170 mm. y_swap stays 0."
+        "The swing knee slews at this rate with no torque hold. "
+        "Foot-z stays 1.170 mm. y_swap stays 0."
     )
 
 
@@ -12236,6 +12107,36 @@ def _install_sagittal_slew(
         prev[jn] = float(stepped)
         return float(stepped)
 
+    approach_cmd: dict[str, float] = {}
+    approach_at: dict[str, float] = {}
+
+    def _toward_approach(jn: str, target: float) -> float:
+        """One approach-z step toward the warped swing knee. No torque hold.
+
+        The memory is not the stance slew. Landing still starts from the
+        last stance command. The first step starts from that command when
+        it exists, otherwise from the live joint.
+        """
+        rate = float(getattr(session, "_stop_approach_z_rate", _STOP_APPROACH_Z_RATE))
+        step = rate * float(ow.OP3_CTRL_S)
+        t_now = float(lipm.data.time)
+        last = approach_at.get(jn)
+        if last is None or t_now - last >= ctrl_period - 1e-4:
+            old = approach_cmd.get(jn)
+            if old is None:
+                held = prev.get(jn)
+                old = float(held) if held is not None else float(lipm.q(jn))
+            dq = float(target) - float(old)
+            if dq > step:
+                stepped = float(old) + step
+            elif dq < -step:
+                stepped = float(old) - step
+            else:
+                stepped = float(target)
+            approach_cmd[jn] = float(stepped)
+            approach_at[jn] = t_now
+        return float(approach_cmd[jn])
+
     air_step_at: dict[str, float] = {}
     air_stepped: dict[str, float] = {}
 
@@ -12431,6 +12332,16 @@ def _install_sagittal_slew(
                 # Continuous walk only. Swing knee and ankle pitch follow
                 # the warped z. The parked stop does not set this flag.
                 q_des = _toward_walk(jn, float(q_des))
+            elif (
+                getattr(session, "_stop_approach_z", False)
+                and not getattr(session, "_sag_torque_cap", False)
+                and not limited
+                and jn.endswith("knee")
+            ):
+                # Stop bout only, before the stop command. The warped swing
+                # z owns the knee. No torque hold, and the stance memory
+                # stays the last stance command.
+                q_des = _toward_approach(jn, float(q_des))
             elif (
                 not getattr(session, "_sag_torque_cap", False)
                 and not getattr(session, "_sag_stop_installed", False)
