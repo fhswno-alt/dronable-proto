@@ -11995,6 +11995,10 @@ def _install_sagittal_slew(
         return _hold_last(jn, float(q_des))
 
     last_cmd: dict[str, float] = {}
+    # Stand-to-walk. The first gait command is a loaded transition, both
+    # feet near 6 N. Hold it inside 2.33 Nm until it catches the gait.
+    # After that the locked rate-only stance slew resumes. Not a swing stretch.
+    entrance_hold: set[str] = set()
 
     def write(jn: str, q_des: float) -> None:
         if _air_ank(jn):
@@ -12060,9 +12064,16 @@ def _install_sagittal_slew(
                     step = stance_cap
                 else:
                     step = cap
+                target = float(q_des)
                 old = prev.get(jn)
+                catching = False
+                if old is None:
+                    # No prior command. Start from the joint the stand is
+                    # holding instead of dumping the gait target.
+                    old = float(lipm.q(jn))
+                    entrance_hold.add(jn)
                 if old is not None:
-                    dq = float(q_des) - float(old)
+                    dq = float(target) - float(old)
                     if walk_stance and jn.endswith("hip_pitch"):
                         slew_stats["hip_max_abs_dq"] = max(
                             float(slew_stats["hip_max_abs_dq"]), abs(dq)
@@ -12077,6 +12088,7 @@ def _install_sagittal_slew(
                         )
                     if dq > step:
                         q_des = float(old) + step
+                        catching = True
                         if walk_stance and jn.endswith("hip_pitch"):
                             slew_stats["hip_clip"] = float(slew_stats["hip_clip"]) + 1.0
                         elif early_knee:
@@ -12085,12 +12097,19 @@ def _install_sagittal_slew(
                             slew_stats["knee_clip"] = float(slew_stats["knee_clip"]) + 1.0
                     elif dq < -step:
                         q_des = float(old) - step
+                        catching = True
                         if walk_stance and jn.endswith("hip_pitch"):
                             slew_stats["hip_clip"] = float(slew_stats["hip_clip"]) + 1.0
                         elif early_knee:
                             slew_stats["early_clip"] = float(slew_stats["early_clip"]) + 1.0
                         elif walk_stance and jn.endswith("knee"):
                             slew_stats["knee_clip"] = float(slew_stats["knee_clip"]) + 1.0
+                if jn in entrance_hold:
+                    if catching:
+                        held, _q_now, _omega, _capped = _hold_inside(jn, float(q_des))
+                        q_des = float(held)
+                    else:
+                        entrance_hold.discard(jn)
                 prev[jn] = float(q_des)
             elif (
                 getattr(session, "_walk_z_stretch", False)
@@ -12168,6 +12187,11 @@ def _install_sagittal_slew(
                 "A loaded double-support ankle stays on the stance cap. "
                 "Ankle roll, sole-flat, and the stop stretch stay put."
             )
+    print(
+        "PRED sag_slew entrance from the live joint, then inside 2.33 Nm "
+        "until that command catches the gait. "
+        "The stand-to-walk tick is a loaded transition. Not a swing stretch."
+    )
     if "hip_pitch" in suffixes:
         print(
             f"PRED sag_slew hip_pitch {_WALK_HIP_PITCH_RATE:.3f} rad/s "
