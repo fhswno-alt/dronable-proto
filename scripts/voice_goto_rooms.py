@@ -217,6 +217,49 @@ EAST_CLOSE: tuple[tuple[float, float, float, float, float, float], ...] = (
     (0.20341424894951343, -1.0887848889119358, 0.33164235823040283, -0.2729989872932855, -0.014120531915378008, 0.3550626326053704),
 )
 EAST_LATCH_M = float(statistics.median(row[0] for row in EAST_CLOSE))
+# Tip a3c05f3 kitchen −90°, same wall, ray under 0.40 m, split by
+# leading toe. The committing stop (left toe, error 0.108 m) is not
+# in either list. Contact-box centres sit 14 mm outboard of each
+# ankle-roll axis, so the ray origin flips side with the lead foot.
+# Left has 21 samples. Right has 9, under the living set of 17, so a
+# right stop is scored against its median and cannot CLEAR.
+TOE_OUTBOARD_M = 0.014
+EAST_L_ERR_M: tuple[float, ...] = (
+    0.03321512987238068,
+    0.047260122455027864,
+    0.06788215840253625,
+    0.029441220869328988,
+    0.022066927040247264,
+    0.013459704433692599,
+    0.01303616414467329,
+    0.006908804449123562,
+    0.025126806188412287,
+    0.014262776219442996,
+    0.003870003392395016,
+    0.06758082627981898,
+    0.05601018770872196,
+    0.024964942802465057,
+    0.01272136391048459,
+    0.006389876300130076,
+    0.001949075568160652,
+    0.003978962925460738,
+    0.02472477703146328,
+    0.012370575448907656,
+    0.004975797972947116,
+)
+EAST_R_ERR_M: tuple[float, ...] = (
+    0.02727480416032496,
+    0.0261903108125065,
+    0.07279199541829862,
+    0.07634195712865749,
+    0.06134884659385631,
+    0.02353490205158887,
+    0.08114385348433867,
+    0.17968368595785733,
+    0.0864448300362029,
+)
+EAST_L_LATCH_M = float(statistics.median(EAST_L_ERR_M))
+EAST_R_LATCH_M = float(statistics.median(EAST_R_ERR_M))
 # wall_hall_e_0 had five close samples on that tip, under the living
 # set of 17, so it keeps pad 0. This run does not invent one.
 DOOR_Z = (0.05, 1.35)
@@ -571,14 +614,21 @@ def _definition() -> DefinitionJson:
             f"latch_extra {LATCH_EXTRA_M:.5f} m is the median of "
             f"{len(SAME_WALL_ERR_M)} errors on {LIVING_WALL} with the "
             f"sim gap under {CLOSE_GAP_M:.2f} m. {EAST_WALL} has its "
-            f"own median, {EAST_LATCH_M:.5f} m, from {len(EAST_CLOSE)} "
-            "close samples on tip aac2baa. The living median is not "
-            "copied onto it. The 0.40 m bound is 2.39 times the living "
+            f"own pooled median, {EAST_LATCH_M:.5f} m, from {len(EAST_CLOSE)} "
+            "close samples on tip aac2baa. Left-toe samples on tip "
+            f"a3c05f3 median {EAST_L_LATCH_M:.5f} m "
+            f"(n={len(EAST_L_ERR_M)}). Right-toe samples median "
+            f"{EAST_R_LATCH_M:.5f} m (n={len(EAST_R_ERR_M)}). The "
+            "living median is not copied onto either toe. Contact "
+            f"boxes sit {TOE_OUTBOARD_M:.3f} m outboard of each ankle "
+            "roll. The 0.40 m bound is 2.39 times the living "
             "latch distance 0.1672 m (d_min 0.1263 plus that median). "
             "A ray past 0.40 m stays a far reject. The bob pad is not "
-            "stacked on either median. A stop that commits has to land "
-            f"within {RANGE_ERR_MAX_M:.2f} m of that wall's own pad, "
-            "on a hit that was not in the median set. Room reach is a "
+            "stacked on either median. A stop clears only when the "
+            "held-out hit uses the same leading toe and lands within "
+            f"{RANGE_ERR_MAX_M:.2f} m of that toe's median. Right toe "
+            f"has {len(EAST_R_ERR_M)} samples, under {len(SAME_WALL_ERR_M)}, "
+            "so it cannot clear. Room reach is a "
             "separate bar. In-place body "
             f"yaw that asks a hip roll over {HIP_BAR_NM:.2f} Nm "
             "unclamped is not a free re-point. d_min is not rebuilt. "
@@ -970,10 +1020,31 @@ def _geom_class(wall: str, true_gap: float | None) -> str:
     return "other_wall_far"
 
 
-def _pad_for(wall: str, true_gap: float | None) -> float:
+def _toe_class(klass: str, lead_side: str) -> str:
+    if klass == "east_close" and lead_side in ("L", "R"):
+        return f"east_close_{lead_side}"
+    return klass
+
+
+def _toe_ready(klass: str) -> bool:
+    """A wall×toe pad can CLEAR only with a set at least as large as the living 17."""
+    if klass == "east_close_L":
+        return len(EAST_L_ERR_M) >= len(SAME_WALL_ERR_M)
+    if klass == "east_close_R":
+        return len(EAST_R_ERR_M) >= len(SAME_WALL_ERR_M)
+    if klass in ("living_close", "other_wall_close"):
+        return True
+    return False
+
+
+def _pad_for(wall: str, true_gap: float | None, lead_side: str = "") -> float:
     klass = _geom_class(wall, true_gap)
     if klass == "living_close":
         return LATCH_EXTRA_M
+    if klass == "east_close" and lead_side == "L":
+        return EAST_L_LATCH_M
+    if klass == "east_close" and lead_side == "R":
+        return EAST_R_LATCH_M
     if klass == "east_close":
         return EAST_LATCH_M
     return 0.0
@@ -2181,8 +2252,10 @@ def _run_room(
                 err = None
                 if same and ranged is not None and true_gap is not None:
                     err = abs(ranged - float(true_gap))
-                klass = _geom_class(true_name, true_gap) if same else "reject"
-                pad = _pad_for(true_name, true_gap) if same else 0.0
+                side = str(reading.get("lead_side") or "")
+                base = _geom_class(true_name, true_gap) if same else "reject"
+                klass = _toe_class(base, side) if same else "reject"
+                pad = _pad_for(true_name, true_gap, side) if same else 0.0
                 residual = _residual_m(err, pad) if same else None
                 wall_contacts.append(_wall_hit(
                     float(session.data.time),
@@ -2313,8 +2386,10 @@ def _run_room(
                         err = None
                         if same and ranged_g is not None and true_gap is not None:
                             err = abs(ranged_g - float(true_gap))
-                        klass = _geom_class(true_name, true_gap) if same else "reject"
-                        pad = _pad_for(true_name, true_gap) if same else 0.0
+                        side = str(reading.get("lead_side") or "")
+                        base = _geom_class(true_name, true_gap) if same else "reject"
+                        klass = _toe_class(base, side) if same else "reject"
+                        pad = _pad_for(true_name, true_gap, side) if same else 0.0
                         residual = _residual_m(err, pad) if same else None
                         heading = _yaw(session.data, session.bid_body)
                         approach.append(ApproachJson(
@@ -2342,7 +2417,7 @@ def _run_room(
                             residual_m=residual,
                         ))
                         gap = reading["toe_gap_m"]
-                        close_class = klass in (
+                        close_class = base in (
                             "living_close", "east_close", "other_wall_close",
                         )
                         if same and close_class:
@@ -2359,14 +2434,16 @@ def _run_room(
                             ))
                             gate = d_min_m + pad
                             if gap is not None and float(gap) <= gate:
-                                clear = (
+                                within = (
                                     residual is not None
                                     and residual <= RANGE_ERR_MAX_M
                                 )
+                                ready = _toe_ready(klass)
+                                clear = within and ready
                                 wall_stop_clear = clear
-                                wall_stop_fail = not clear
+                                wall_stop_fail = not within
                                 wall_stop_pass = clear
-                                wall_range_fail = not clear
+                                wall_range_fail = not within
                                 wall_stop_residual = residual
                                 wall_stop_class = klass
                                 wall_stop_wall = true_name
@@ -2919,14 +2996,28 @@ def main() -> int:
         raise SystemExit(f"FAIL: east median moved to {EAST_LATCH_M}")
     if abs(EAST_LATCH_M - LATCH_EXTRA_M) < 1e-4:
         raise SystemExit("FAIL: east median copied the living median")
+    if abs(EAST_L_LATCH_M - 0.014262776219442996) > 1e-12:
+        raise SystemExit(f"FAIL: east left median moved to {EAST_L_LATCH_M}")
+    if abs(EAST_R_LATCH_M - 0.07279199541829862) > 1e-12:
+        raise SystemExit(f"FAIL: east right median moved to {EAST_R_LATCH_M}")
+    if len(EAST_L_ERR_M) != 21 or len(EAST_R_ERR_M) != 9:
+        raise SystemExit("FAIL: east toe sets changed size")
     if _pad_for(EAST_WALL, 0.20) != EAST_LATCH_M:
-        raise SystemExit("FAIL: east close pad is not the east median")
-    if _pad_for(EAST_WALL, 1.0) != 0.0:
+        raise SystemExit("FAIL: east pooled pad moved")
+    if _pad_for(EAST_WALL, 0.20, "L") != EAST_L_LATCH_M:
+        raise SystemExit("FAIL: east left pad is not the left median")
+    if _pad_for(EAST_WALL, 0.20, "R") != EAST_R_LATCH_M:
+        raise SystemExit("FAIL: east right pad is not the right median")
+    if abs(EAST_L_LATCH_M - LATCH_EXTRA_M) < 1e-3 or abs(EAST_R_LATCH_M - LATCH_EXTRA_M) < 1e-3:
+        raise SystemExit("FAIL: a toe median copied the living pad")
+    if _pad_for(EAST_WALL, 1.0, "L") != 0.0:
         raise SystemExit("FAIL: far east ray took a pad")
-    if _pad_for("wall_hall_e_0", 0.20) != 0.0:
+    if _pad_for("wall_hall_e_0", 0.20, "L") != 0.0:
         raise SystemExit("FAIL: an unmeasured close wall took a pad")
-    if _pad_for(LIVING_WALL, 0.20) != LATCH_EXTRA_M:
-        raise SystemExit("FAIL: living close pad moved")
+    if _pad_for(LIVING_WALL, 0.20, "L") != LATCH_EXTRA_M:
+        raise SystemExit("FAIL: living close pad moved onto a toe split")
+    if _pad_for(LIVING_WALL, 0.20, "R") != LATCH_EXTRA_M:
+        raise SystemExit("FAIL: living close pad moved onto a toe split")
     if _yaw_toward_u(100.0) != voice.YAW_RAD_S or _yaw_toward_u(540.0) != -voice.YAW_RAD_S:
         raise SystemExit("FAIL: doorway pixel yaw sign moved")
     if _yaw_toward_u(rc.WIDTH / 2.0) != 0.0:
@@ -3015,6 +3106,11 @@ def main() -> int:
         "east_wall": EAST_WALL,
         "east_latch_m": EAST_LATCH_M,
         "east_sample_count": len(EAST_CLOSE),
+        "east_l_latch_m": EAST_L_LATCH_M,
+        "east_l_sample_count": len(EAST_L_ERR_M),
+        "east_r_latch_m": EAST_R_LATCH_M,
+        "east_r_sample_count": len(EAST_R_ERR_M),
+        "toe_outboard_m": TOE_OUTBOARD_M,
         "east_source": "aac2baa kitchen -90 wall_hall_e_1 ray<=0.40 held out",
         "close_gap_m": CLOSE_GAP_M,
         "living_latch_distance_m": float(definition["d_min_m"]) + LATCH_EXTRA_M,
@@ -3024,6 +3120,8 @@ def main() -> int:
         "per_wall_pad_m": {
             LIVING_WALL: LATCH_EXTRA_M,
             EAST_WALL: EAST_LATCH_M,
+            "wall_hall_e_1×L": EAST_L_LATCH_M,
+            "wall_hall_e_1×R": EAST_R_LATCH_M,
         },
         "bob_pad_stacked": False,
         "bob_pad_needed": bob_needed,
