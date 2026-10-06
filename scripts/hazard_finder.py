@@ -315,7 +315,6 @@ def corridor_gate_cues(
 @dataclass
 class _StanceHit:
     xy: tuple[float, float]
-    body_xy: tuple[float, float]
 
 
 class SamePhaseFloor:
@@ -324,15 +323,18 @@ class SamePhaseFloor:
     The ray already applies this frame's pitch, roll, and head tilt.
     Memory is the in-corridor hits from the third tick of a shift bout,
     keyed by stance. A stance with no stored point emits every cue.
-    A hit farther than the body has walked since that sample, plus
-    ``PHASE_DRIFT_MARGIN_M``, is not emitted and is not written back.
-    Leaving the jumped point out of memory keeps the next tick from
-    matching it. Width and span are not read here. This does not send
-    ``stop``.
+    A hit farther than the body has walked since the last sample of
+    that stance, plus ``PHASE_DRIFT_MARGIN_M``, is not emitted and is
+    not written back. The sample anchor moves on every sample, including
+    one that accepts nothing, so an old unmatched point does not let the
+    margin grow with the whole walk. Leaving the jumped point out of
+    memory keeps the next tick from matching it. Width and span are not
+    read here. This does not send ``stop``.
     """
 
     def __init__(self) -> None:
         self._hits: dict[str, list[_StanceHit]] = {}
+        self._anchor: dict[str, tuple[float, float]] = {}
         self._in_shift = False
         self._shift_ticks = 0
 
@@ -371,7 +373,7 @@ class SamePhaseFloor:
             if hit is None:
                 kept.append(cue)
                 continue
-            if _jumped(hit, prior, body_xy):
+            if _jumped(hit, prior, body_xy, self._anchor.get(stance)):
                 if cue.too_close:
                     kept.append(replace(cue, too_close=False))
                 continue
@@ -402,6 +404,8 @@ class SamePhaseFloor:
         mem = list(prior)
         used: set[int] = set()
         fresh: list[_StanceHit] = []
+        anchor = self._anchor.get(stance, body_xy)
+        walked = math.hypot(body_xy[0] - anchor[0], body_xy[1] - anchor[1])
         for hit in accepted:
             if mem:
                 best_i = min(
@@ -409,17 +413,14 @@ class SamePhaseFloor:
                     key=lambda i: math.hypot(hit[0] - mem[i].xy[0], hit[1] - mem[i].xy[1]),
                 )
                 dist = math.hypot(hit[0] - mem[best_i].xy[0], hit[1] - mem[best_i].xy[1])
-                walked = math.hypot(
-                    body_xy[0] - mem[best_i].body_xy[0],
-                    body_xy[1] - mem[best_i].body_xy[1],
-                )
                 if dist <= walked + PHASE_DRIFT_MARGIN_M and best_i not in used:
-                    mem[best_i] = _StanceHit(hit, body_xy)
+                    mem[best_i] = _StanceHit(hit)
                     used.add(best_i)
                     continue
-            fresh.append(_StanceHit(hit, body_xy))
+            fresh.append(_StanceHit(hit))
         mem.extend(fresh)
         self._hits[stance] = mem
+        self._anchor[stance] = body_xy
 
 
 def _in_corridor_hit(
@@ -465,16 +466,21 @@ def _jumped(
     hit: tuple[float, float],
     prior: list[_StanceHit],
     body_xy: tuple[float, float],
+    anchor: tuple[float, float] | None,
 ) -> bool:
-    """True when a stored same-stance point cannot explain this hit."""
-    if not prior:
+    """True when a stored same-stance point cannot explain this hit.
+
+    ``anchor`` is the body position at the last sample of this stance.
+    An unmatched point from early in the walk does not widen the margin.
+    """
+    if not prior or anchor is None:
         return False
     best = min(
         prior,
         key=lambda item: math.hypot(hit[0] - item.xy[0], hit[1] - item.xy[1]),
     )
     dist = math.hypot(hit[0] - best.xy[0], hit[1] - best.xy[1])
-    walked = math.hypot(body_xy[0] - best.body_xy[0], body_xy[1] - best.body_xy[1])
+    walked = math.hypot(body_xy[0] - anchor[0], body_xy[1] - anchor[1])
     return dist > walked + PHASE_DRIFT_MARGIN_M
 
 
@@ -741,6 +747,19 @@ def _check_same_phase_floor(cam: rc.KitCamPose, body: rc.BodyFrame) -> None:
     fresh = other.apply((clip,), phase="swing", stance="R", body_xy=origin, **common)
     if len(fresh) != 1 or not fresh[0].too_close:
         raise SystemExit("self_check used the other stance's floor point")
+    # Empty samples still move the anchor. A 0.22 m jump stays a jump
+    # after the body has walked many periods away from the first store.
+    stale = SamePhaseFloor()
+    for _tick in range(PHASE_SAMPLE_TICK):
+        stale.apply((near,), phase="shift", stance="L", body_xy=origin, **common)
+    for step in range(1, 9):
+        place = (0.08 * step, 0.0)
+        for _tick in range(PHASE_SAMPLE_TICK):
+            stale.apply((), phase="shift", stance="L", body_xy=place, **common)
+        stale.apply((), phase="swing", stance="L", body_xy=place, **common)
+    late = stale.apply((far,), phase="swing", stance="L", body_xy=(0.72, 0.0), **common)
+    if late:
+        raise SystemExit("self_check let a jump through a stale anchor")
 
 
 if __name__ == "__main__":
