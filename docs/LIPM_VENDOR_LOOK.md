@@ -1728,15 +1728,32 @@ frames that fire the stop are the short ones. Not kit-safe.
 The Day-1 stop keeps the shortest in-corridor floor point. A later
 frame can replace that point only when the gap gets shorter. Each
 tick re-reads the point in the current body x, y, and yaw, and drops
-it when the point leaves the corridor. On this kitchen yaw the fire
-does not move. The point that crosses `d_min` is born on the fire
-tick, except at `T_detect` = 0.100 s, where it is born one tick
-earlier and still crosses at the same 5.736 s. The latch is
-`leg_2`. The saved point sits 0.013–0.014 m from that leg's floor.
-`leg_0` is not the stop. `too_close` does not fire. Prop contacts
+it when the point leaves the corridor. A new cue joins a saved point
+only when the floor positions, after that re-read, are within
+0.035 m. That radius is frozen before the run. Sim leg names are not
+a key. The kit has no leg ids. The name in the table is the nearest
+stool-leg floor point after the stop, and it is not an input.
+
+On this kitchen yaw the fire does not move versus the cue-only latch.
+The point that crosses `d_min` is born on the fire tick, except at
+`T_detect` = 0.100 s, where it is born one tick earlier and still
+crosses at 5.736 s. The report name is `leg_2`. That saved point sits
+0.014 m, 0.014 m, and 0.013 m from that leg's floor. The 0.035 m
+radius leaves other hits of the same leg on their own tracks: 3, 3,
+and 4 tracks at the three stops. The farthest of those is 0.100 m,
+0.100 m, and 0.184 m from the same floor, with gaps 0.231 m, 0.235 m,
+and 0.327 m, all above `d_min`. None of them is `leg_0`. `leg_0`
+stays outside the corridor. `too_close` does not fire. Prop contacts
 are 0. The stop peaks stay at 2.280 Nm. At the fire the finder eye
 is still short of the true camera-to-floor range by 0.011 m, 0.011 m,
-and 0.013 m. Not kit-safe.
+and 0.013 m. A join of 0.20 m on the same walk stopped at these same
+times. Not kit-safe.
+
+| `T_detect` | stop | born | tracks | report | world | eye bias | gap bias | foot–leg | settle | stop peak |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 | 5.864 s | 5.864 s | 3 | `leg_2` | 0.014 m | −0.011 m | −0.013 m | 0.163 m | 0.680 s | left hip pitch +2.280 Nm |
+| 0.033 s | 5.848 s | 5.848 s | 3 | `leg_2` | 0.014 m | −0.011 m | −0.013 m | 0.167 m | 0.624 s | left hip pitch +2.280 Nm |
+| 0.100 s | 5.736 s | 5.728 s | 4 | `leg_2` | 0.013 m | −0.013 m | −0.013 m | 0.198 m | 0.540 s | left knee −2.280 Nm |
 
 A −10° `head_tilt` walk is not enabled. On that pose the near edge is
 0.077 m at `cam_z` 0.326 m. #67 checked the wood rule at that session
