@@ -199,8 +199,10 @@ at 0.035 m stops earlier on that same leg and still leaves the
 off-axis leg outside the corridor. The Day-1 kitchen stop reads
 hazard_finder cues on the kit_cam frame and also stops on too_close.
 On this walk the cue path stops on the hitting leg before too_close,
-earlier than the sim-projection latch because the RGB read is short.
-Not kit-safe. The row source
+earlier than the sim-projection latch because the firing frame reads
+about 1 cm short. Earlier samples on the same walk read long, including
+an in-corridor leg_2 sample of +0.116 m at 5.312 s, while the true gap
+is still above d_min. Not kit-safe. The row source
 is still a sim projection. Not go-anywhere. Soft-pass is off.
 """
 from __future__ import annotations

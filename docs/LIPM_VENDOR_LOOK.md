@@ -1703,6 +1703,28 @@ The 3–5 cm buffer is not sized from this clear. On the first two runs
 the winning cue is not the lowest blob, so `find_hazard_pixel` alone
 would not have stopped on that frame.
 
+On the frame that fires each stop, finder eye minus the true
+camera-to-floor range is short. The same frame's `toe_gap` is short
+of the sim-ray gap by about the same amount. True range is the
+horizontal distance from `kit_cam` to that leg's floor point.
+
+| `T_detect` | stop | finder eye | true | eye bias | finder `toe_gap` | GT `toe_gap` | gap bias |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 | 5.864 s | 0.181 m | 0.191 m | −0.011 m | 0.126 m | 0.139 m | −0.013 m |
+| 0.033 s | 5.848 s | 0.184 m | 0.194 m | −0.011 m | 0.130 m | 0.143 m | −0.013 m |
+| 0.100 s | 5.736 s | 0.180 m | 0.193 m | −0.013 m | 0.141 m | 0.154 m | −0.013 m |
+
+The bias does not stay short on the walk up to that stop. Of 1492
+matched cue samples, 503 read long by more than 1 mm. The longest is
++0.164 m at t = 4.544 s on `leg_0`, sideways −0.523 m, outside the
+corridor (finder eye 0.659 m, true 0.495 m). Inside the corridor, 29
+of 250 samples read long. The longest of those is +0.116 m at
+t = 5.312 s on `leg_2` (finder eye 0.384 m, true 0.268 m, finder
+`toe_gap` 0.345 m, GT `toe_gap` 0.231 m). That true gap is still above
+0.1263 m. No in-corridor sample has a true `toe_gap` already at or
+under 0.1263 m while the finder `toe_gap` is still above it. The
+frames that fire the stop are the short ones. Not kit-safe.
+
 A −10° `head_tilt` walk is not enabled. On that pose the near edge is
 0.077 m at `cam_z` 0.326 m. #67 checked the wood rule at that session
 tilt: the foot contact boxes project to rows 643–749, below the

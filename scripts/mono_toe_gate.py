@@ -1012,6 +1012,25 @@ def walk_finder(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
     false_early = ""
     min_foot_leg = 1e9
     head_tilt_peak = 0.0
+    # finder eye − true camera-to-floor range. Positive is a long read.
+    bias_n = 0
+    bias_long = 0
+    bias_max = -1e9
+    bias_min = 1e9
+    bias_long_note = ""
+    in_n = 0
+    in_long = 0
+    in_max = -1e9
+    in_min = 1e9
+    in_long_note = ""
+    delay_n = 0
+    delay_gt = 1e9
+    delay_note = ""
+    fire_eye_bias: float | None = None
+    fire_gap_bias: float | None = None
+    fire_true: float | None = None
+    cross: dict[float, str] = {}
+    cross_levels = (0.0, 0.033, 0.100)
     try:
         while float(session.data.time) < t_end - 1e-9:
             now = float(session.data.time)
@@ -1042,13 +1061,16 @@ def walk_finder(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
                 cues = hf.find_hazard_cues(rgb)
                 primary = cues[0] if cues else None
 
-                def nearest(u: float, v: float) -> tuple[str, float, float | None, float | None]:
-                    best_px: tuple[str, float, float | None, float | None] | None = None
+                def nearest(
+                    u: float, v: float,
+                ) -> tuple[str, float, float | None, float | None, float | None]:
+                    best_px: tuple[str, float, float, float | None, float | None] | None = None
                     for name, point in _leg_floor_centers(model, data):
                         pix = rc.project_point(point, cam, rot)
                         if pix is None:
                             continue
                         dist = math.hypot(pix[0] - u, pix[1] - v)
+                        true_m = float(math.hypot(point[0] - cam[0], point[1] - cam[1]))
                         gt = rc.estimate_hazard(
                             pix[0], pix[1],
                             cam=pose, body=body,
@@ -1060,13 +1082,54 @@ def walk_finder(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
                         eye = None if gt is None else gt.eye_range
                         gap = None if gt is None else gt.toe_gap_m
                         if best_px is None or dist < best_px[1]:
-                            best_px = (name, dist, eye, gap)
+                            best_px = (name, dist, true_m, eye, gap)
                     if best_px is None:
-                        return ("none", 1e9, None, None)
+                        return ("none", 1e9, None, None, None)
                     return best_px
 
-                ranged: tuple[float, str, str] | None = None
+                def track(est: rc.HazardEstimate, name: str, dist: float, true_m: float | None, gt_gap: float | None) -> tuple[float | None, float | None]:
+                    nonlocal bias_n, bias_long, bias_max, bias_min, bias_long_note
+                    nonlocal in_n, in_long, in_max, in_min, in_long_note
+                    nonlocal delay_n, delay_gt, delay_note
+                    if dist > FINDER_MATCH_PX or true_m is None:
+                        return (None, None)
+                    eye_bias = est.eye_range - true_m
+                    gap_bias = None if gt_gap is None else est.toe_gap_m - gt_gap
+                    note = (
+                        f"t={now:.3f} {name} eye={est.eye_range:.3f} true={true_m:.3f} "
+                        f"eye_bias={eye_bias:+.3f} toe_gap={est.toe_gap_m:.3f} gt_gap={gt_gap} "
+                        f"gap_bias={gap_bias} side={est.sideways_m:+.3f} "
+                        f"{'in' if est.in_corridor else 'out'}"
+                    )
+                    bias_n += 1
+                    bias_max = max(bias_max, eye_bias)
+                    bias_min = min(bias_min, eye_bias)
+                    if eye_bias > 1e-3:
+                        bias_long += 1
+                        if bias_long_note == "" or eye_bias > bias_max - 1e-9:
+                            bias_long_note = note
+                    if est.in_corridor:
+                        in_n += 1
+                        in_max = max(in_max, eye_bias)
+                        in_min = min(in_min, eye_bias)
+                        if eye_bias > 1e-3:
+                            in_long += 1
+                            if in_long_note == "" or eye_bias >= in_max - 1e-12:
+                                in_long_note = note
+                        if (
+                            gt_gap is not None
+                            and gt_gap <= rc.d_min(0.0)
+                            and est.toe_gap_m > rc.d_min(0.0)
+                        ):
+                            delay_n += 1
+                            if gt_gap < delay_gt:
+                                delay_gt = gt_gap
+                                delay_note = note
+                    return (eye_bias, gap_bias)
+
+                ranged: tuple[float, str, str, float | None, float | None, float | None] | None = None
                 clipped: hf.HazardCue | None = None
+                frame_best: tuple[float, str] | None = None
                 for index, cue in enumerate(cues):
                     if cue.too_close and clipped is None:
                         clipped = cue
@@ -1082,37 +1145,60 @@ def walk_finder(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
                     )
                     if est is None:
                         continue
+                    name, dist, true_m, gt_eye, gt_gap = nearest(cue.u, cue.v)
+                    eye_bias, gap_bias = track(est, name, dist, true_m, gt_gap)
                     label = "pixel" if index == 0 else "cues"
+                    named = name if dist <= FINDER_MATCH_PX else f"unmatched {name}"
+                    if est.in_corridor and (
+                        frame_best is None or est.toe_gap_m < frame_best[0]
+                    ):
+                        frame_best = (
+                            est.toe_gap_m,
+                            f"t={now:.3f} {label} {named} toe_gap={est.toe_gap_m:.3f} "
+                            f"gt_gap={gt_gap} eye={est.eye_range:.3f} true={true_m} "
+                            f"eye_bias={eye_bias} gap_bias={gap_bias} side={est.sideways_m:+.3f}",
+                        )
                     if est.in_corridor and est.toe_gap_m <= gate:
                         if ranged is None or est.toe_gap_m < ranged[0]:
-                            name, dist, gt_eye, gt_gap = nearest(cue.u, cue.v)
-                            named = name if dist <= FINDER_MATCH_PX else f"unmatched {name}"
                             ranged = (
                                 est.toe_gap_m,
                                 label,
                                 f"{label} {named} px={dist:.1f} toe_gap={est.toe_gap_m:.3f} "
-                                f"eye={est.eye_range:.3f} gt_eye={gt_eye} gt_gap={gt_gap} "
+                                f"gt_gap={gt_gap} eye={est.eye_range:.3f} true={true_m} "
+                                f"eye_bias={eye_bias} gap_bias={gap_bias} "
                                 f"side={est.sideways_m:+.3f} u={cue.u:.1f} v={cue.v:.1f} "
                                 f"step_off={step_off:+.3f} {step_side} pad={rc.HAZARD_PAD_M:.3f}",
+                                eye_bias,
+                                gap_bias,
+                                true_m,
                             )
                     elif (not est.in_corridor) and est.toe_gap_m <= gate and false_early == "":
-                        name, dist, gt_eye, _gt_gap = nearest(cue.u, cue.v)
                         false_early = (
                             f"{name} px={dist:.1f} toe_gap={est.toe_gap_m:.3f} "
-                            f"eye={est.eye_range:.3f} gt_eye={gt_eye} side={est.sideways_m:+.3f}"
+                            f"gt_gap={gt_gap} eye={est.eye_range:.3f} true={true_m} "
+                            f"eye_bias={eye_bias} gap_bias={gap_bias} side={est.sideways_m:+.3f}"
                         )
+                if frame_best is not None:
+                    for level in cross_levels:
+                        if level in cross:
+                            continue
+                        if frame_best[0] <= rc.d_min(level):
+                            cross[level] = frame_best[1]
                 if ranged is not None:
                     session.bus.stop(now)
                     issued = now
                     stop_mark["t"] = now
                     path = ranged[1]
                     reason = ranged[2]
+                    fire_eye_bias = ranged[3]
+                    fire_gap_bias = ranged[4]
+                    fire_true = ranged[5]
                     too_close = clipped is not None
                     matched = reason
                 elif clipped is not None:
                     u = float(clipped.column) + 0.5
                     v = float(clipped.contact_row) + 0.5
-                    name, dist, gt_eye, gt_gap = nearest(u, v)
+                    name, dist, true_m, gt_eye, gt_gap = nearest(u, v)
                     named = name if dist <= FINDER_MATCH_PX else f"unmatched {name}"
                     session.bus.stop(now)
                     issued = now
@@ -1121,8 +1207,8 @@ def walk_finder(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
                     too_close = True
                     reason = (
                         f"too_close {named} px={dist:.1f} col={clipped.column} "
-                        f"row={clipped.contact_row} gt_eye={gt_eye} gt_gap={gt_gap} "
-                        f"step_off={step_off:+.3f} {step_side}"
+                        f"row={clipped.contact_row} true={true_m} gt_eye={gt_eye} "
+                        f"gt_gap={gt_gap} step_off={step_off:+.3f} {step_side}"
                     )
                     matched = reason
                     if primary is not None and primary is not clipped:
@@ -1172,6 +1258,22 @@ def walk_finder(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
         "head_tilt_peak": head_tilt_peak,
         "yaw": math.degrees(session.yaw()),
         "late_vs_sim_s": late,
+        "fire_eye_bias": fire_eye_bias,
+        "fire_gap_bias": fire_gap_bias,
+        "fire_true": fire_true,
+        "bias_n": bias_n,
+        "bias_long": bias_long,
+        "bias_max": None if bias_n == 0 else bias_max,
+        "bias_min": None if bias_n == 0 else bias_min,
+        "bias_long_note": bias_long_note,
+        "in_n": in_n,
+        "in_long": in_long,
+        "in_max": None if in_n == 0 else in_max,
+        "in_min": None if in_n == 0 else in_min,
+        "in_long_note": in_long_note,
+        "delay_n": delay_n,
+        "delay_note": delay_note,
+        "cross": {f"{key:.3f}": text for key, text in cross.items()},
     }
 
 
@@ -1188,7 +1290,16 @@ def _print_finder(result: dict[str, object]) -> None:
         f"contact={result['contact']} T_stop_run={result['t_stop']} "
         f"min_up_z={result['min_up_z']:.3f} min_foot_leg={result['min_foot_leg']} "
         f"yaw={result['yaw']:+.1f} head_tilt_peak={result['head_tilt_peak']:.4f} "
-        f"stop_worst={result['stop_worst']} stop_over={result['stop_over']}"
+        f"stop_worst={result['stop_worst']} stop_over={result['stop_over']} "
+        f"fire_eye_bias={result['fire_eye_bias']} fire_gap_bias={result['fire_gap_bias']} "
+        f"fire_true={result['fire_true']} "
+        f"bias n={result['bias_n']} long={result['bias_long']} "
+        f"max={result['bias_max']} min={result['bias_min']} "
+        f"in_n={result['in_n']} in_long={result['in_long']} "
+        f"in_max={result['in_max']} in_min={result['in_min']} "
+        f"in_long_note=[{result['in_long_note']}] long_note=[{result['bias_long_note']}] "
+        f"delay_n={result['delay_n']} delay_note=[{result['delay_note']}] "
+        f"cross={result['cross']}"
     )
 
 
