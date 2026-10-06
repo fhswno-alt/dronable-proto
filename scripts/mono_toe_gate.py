@@ -1052,7 +1052,9 @@ def walk_finder(
     only inside TRACK_JOIN_M. ``too_close`` still stops, after the finder
     clears that flag on a last-row blob outside the foot corridor. A
     same-stance hit that jumps farther than the body walked, plus 0.08 m,
-    is not emitted. A first sighting is. A stool-leg
+    is not emitted. A first sighting pixel is. A first-sighting bottom
+    clip is not ``too_close``, and a contact row wider than 40 px is
+    not a cue. A stool-leg
     name is written into the report after the stop, from the saved
     floor point, and is not used to keep or clear a track.
 

@@ -28,7 +28,10 @@ outside the corridor is not a near-floor leg, and the flag is cleared.
 A later in-corridor hit is dropped when that stance already has a
 floor point from the same gait phase and the new point is farther
 than the body has walked since then, plus a small margin. The first
-sighting, with no prior point, is emitted. Controls latches Day-1
+sighting, with no prior point, is emitted, except a bottom clip:
+that ``too_close`` waits until a same-stance point is already stored.
+A contact row that is one dark run wider than a leg column is not a
+cue. Controls latches Day-1
 ``stop`` on the flag that remains. This module does not send ``stop``.
 
 Moondream's room ask does not return a pixel. It is not called here.
@@ -71,6 +74,11 @@ LEG_SPAN_MIN = 48
 LEG_CLIP_SPAN_MIN = 48
 LEG_WIDTH_MIN = 8
 LEG_WIDTH_MAX = 40
+# The grouped column can be narrow while the contact row is one wide
+# dark band. A leg meets the floor in a run no wider than the column cap.
+# The coffee leg's contact run is 1–2 px. The stool's is 6–19 px. The
+# living-right apron run is about 225 px.
+CONTACT_RUN_MAX = LEG_WIDTH_MAX
 # Contact row this low is the near floor. The column has to be taller
 # still. The kitchen stool there is hundreds of pixels.
 NEAR_ROW = 440
@@ -192,6 +200,22 @@ def _column_hits(dark: np.ndarray, wood: np.ndarray) -> list[_Hit]:
     return hits
 
 
+def _contact_run(dark: np.ndarray, row: int, column: int) -> int:
+    """Contiguous dark pixels on the contact row through this column."""
+    height, width = dark.shape
+    if row < 0 or row >= height or column < 0 or column >= width:
+        return 0
+    if not bool(dark[row, column]):
+        return 0
+    left = column
+    while left > 0 and bool(dark[row, left - 1]):
+        left -= 1
+    right = column
+    while right + 1 < width and bool(dark[row, right + 1]):
+        right += 1
+    return right - left + 1
+
+
 def _same_leg(group: list[_Hit], hit: _Hit) -> bool:
     prev = group[-1]
     if hit.column - prev.column > COLUMN_GAP:
@@ -263,7 +287,10 @@ def find_hazard_cues(rgb: np.ndarray) -> tuple[HazardCue, ...]:
         if cue is not None:
             cues.append(cue)
     cues.sort(key=lambda cue: cue.contact_row, reverse=True)
-    return tuple(cues)
+    return tuple(
+        cue for cue in cues
+        if _contact_run(dark, cue.contact_row, cue.column) <= CONTACT_RUN_MAX
+    )
 
 
 def corridor_gate_cues(
@@ -322,7 +349,8 @@ class SamePhaseFloor:
 
     The ray already applies this frame's pitch, roll, and head tilt.
     Memory is the in-corridor hits from the third tick of a shift bout,
-    keyed by stance. A stance with no stored point emits every cue.
+    keyed by stance. A stance with no stored point emits a pixel cue.
+    A first-sighting bottom clip does not set ``too_close``.
     A hit farther than the body has walked since the last sample of
     that stance, plus ``PHASE_DRIFT_MARGIN_M``, is not emitted and is
     not written back. The sample anchor moves on every sample, including
@@ -372,6 +400,12 @@ class SamePhaseFloor:
             )
             if hit is None:
                 kept.append(cue)
+                continue
+            # A bottom clip with no stored point is not yet a leg. Coffee
+            # and the stool are emitted as pixels before they clip. Waiting
+            # for a second period would drop the coffee birth.
+            if cue.too_close and not prior:
+                kept.append(replace(cue, too_close=False))
                 continue
             if _jumped(hit, prior, body_xy, self._anchor.get(stance)):
                 if cue.too_close:
@@ -659,6 +693,18 @@ def self_check() -> None:
         raise SystemExit("self_check left a side clip as too_close")
     if not kept[1].bottom_clipped:
         raise SystemExit("self_check emitted a ray for a side clip")
+    band = _blank()
+    _paint_floor(band, 400)
+    _paint_leg(band, 300, 312, 200, 475)
+    band[474, 300:420, 0] = 30
+    band[474, 300:420, 1] = 32
+    band[474, 300:420, 2] = 34
+    _paint_leg(band, 100, 112, 200, 470)
+    band_cues = find_hazard_cues(band)
+    if any(cue.column >= 300 for cue in band_cues):
+        raise SystemExit("self_check kept a wide contact-row band")
+    if not any(100 <= cue.column < 112 and not cue.too_close for cue in band_cues):
+        raise SystemExit("self_check dropped the narrow leg beside the band")
     _check_same_phase_floor(cam, body)
 
 
@@ -745,8 +791,27 @@ def _check_same_phase_floor(cam: rc.KitCamPose, body: rc.BodyFrame) -> None:
     if len(again) != 1 or again[0].too_close:
         raise SystemExit("self_check stored the jumped clip")
     fresh = other.apply((clip,), phase="swing", stance="R", body_xy=origin, **common)
-    if len(fresh) != 1 or not fresh[0].too_close:
-        raise SystemExit("self_check used the other stance's floor point")
+    if len(fresh) != 1 or fresh[0].too_close:
+        raise SystemExit("self_check emitted a first-sighting too_close")
+    bare = SamePhaseFloor()
+    opened = bare.apply((clip,), phase="swing", stance="L", body_xy=origin, **common)
+    if len(opened) != 1 or opened[0].too_close:
+        raise SystemExit("self_check stopped on a clip with no stored point")
+    matched: HazardCue | None = None
+    for column in range(250, 390, 4):
+        cue = HazardCue(None, None, True, True, column, rc.HEIGHT - 1, 200, 12, SOURCE)
+        hit = _in_corridor_hit(cue, **common)
+        if hit is None:
+            continue
+        dist = math.hypot(hit[0] - near_hit[0], hit[1] - near_hit[1])
+        if dist <= PHASE_DRIFT_MARGIN_M:
+            matched = cue
+            break
+    if matched is None:
+        raise SystemExit("self_check found no clip on the stored leg")
+    held = gate.apply((matched,), phase="swing", stance="L", body_xy=walked, **common)
+    if len(held) != 1 or not held[0].too_close:
+        raise SystemExit("self_check cleared a too_close on a stored leg")
     # Empty samples still move the anchor. A 0.22 m jump stays a jump
     # after the body has walked many periods away from the first store.
     stale = SamePhaseFloor()
