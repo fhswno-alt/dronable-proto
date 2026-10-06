@@ -38,8 +38,13 @@ SCENE = "/tmp/m62/mujoco/room_entrance.xml"
 T_END = 8.2
 T_BAR = 7.560
 ANKLE_NM = 2.33
+KNEE_NM = 2.33
+PLANT_NM = 2.45
+KNEE_KP = 45.0
 TOE_BAR_M = 0.002
 COP_BOX_M = 0.001
+# 10.4 mm corner tilt over the 135 mm sole. MFG's 4.4° step-on.
+STEP_TILT = math.atan(0.0104 / 0.135)
 # 12 mm rug over the 135 mm contact box. Toe-up, not a torque limit.
 EDGE_PITCH = math.atan(0.012 / 0.135)
 # Commanded extra lift at ~20% of swing, sized to the 5 mm scuff gap.
@@ -80,6 +85,92 @@ def _leading_toe_z(session: sw.SteerSession, side: str) -> float:
             best_off = off
             best_z = float(corner[2])
     return best_z
+
+
+def _flex_sign(side: str) -> float:
+    """L knee increases to flex. R knee decreases."""
+    return 1.0 if side == "L" else -1.0
+
+
+FOLLOW_TICKS = 0
+
+
+def _hook_follow(session: sw.SteerSession, rug_gid: int) -> None:
+    """Stance ankle tracks the contact pose on a split sole.
+
+    The kit command is the flat hip-plus-knee offset. On the 12 mm step
+    that offset never takes the 4.4° tilt, so the servo fights the sole.
+    This copy writes the ankle target to the joint the contact is holding.
+    It does not move kp or the ±2.45 Nm rail. The joint stays inside
+    ±2.09; the nearest locked approach was about 0.7 rad short of that stop.
+    """
+    lipm = session.lipm
+    if lipm is None:
+        return
+    orig = lipm._tick_gait_manager
+
+    def wrapped(walking: bool) -> None:
+        global FOLLOW_TICKS
+        orig(walking)
+        if not walking or session.bus.fault:
+            return
+        wrote = False
+        for side, gid in (("L", session.gid_lfoot), ("R", session.gid_rfoot)):
+            floor_n = _pair_fn(session.model, session.data, gid, session.gid_floor)
+            rug_n = _pair_fn(session.model, session.data, gid, rug_gid)
+            if floor_n <= 1.0 or rug_n <= 1.0:
+                continue
+            pref = "l_" if side == "L" else "r_"
+            jn = pref + "ank_pitch"
+            lipm.write_clipped(jn, lipm.q(jn))
+            wrote = True
+        if wrote:
+            FOLLOW_TICKS += 1
+
+    lipm._tick_gait_manager = wrapped  # type: ignore[method-assign]
+
+
+def _hook_clear(session: sw.SteerSession) -> None:
+    """Mid-swing knee flex while the leading toe is under 2 mm.
+
+    The added error is capped so kp * |goal − q| stays under 2.33 Nm.
+    kp and forcerange are untouched.
+    """
+    lipm = session.lipm
+    if lipm is None or lipm.op3 is None:
+        return
+    orig = lipm._tick_gait_manager
+    max_err = KNEE_NM / KNEE_KP
+
+    def wrapped(walking: bool) -> None:
+        orig(walking)
+        if not walking or session.bus.fault:
+            return
+        swing = lipm._gm_swing
+        walker = lipm.op3
+        if swing not in ("L", "R") or walker is None:
+            return
+        if swing == "L":
+            span = walker.l_ssp_end - walker.l_ssp_start
+            frac = (walker.time - walker.l_ssp_start) / span if span > 1e-6 else 0.0
+        else:
+            span = walker.r_ssp_end - walker.r_ssp_start
+            frac = (walker.time - walker.r_ssp_start) / span if span > 1e-6 else 0.0
+        if frac < 0.20 or frac > 0.80:
+            return
+        if _leading_toe_z(session, swing) >= TOE_BAR_M:
+            return
+        pref = "l_" if swing == "L" else "r_"
+        jn = pref + "knee"
+        idx = lipm.act_idx[jn + "_pos"]
+        q = lipm.q(jn)
+        proposed = float(session.data.ctrl[idx]) + _flex_sign(swing) * 0.05
+        err = proposed - q
+        if abs(err) > max_err:
+            proposed = q + math.copysign(max_err, err)
+        lipm.write_clipped(jn, proposed)
+
+    lipm._tick_gait_manager = wrapped  # type: ignore[method-assign]
 
 
 def _hook_edge(session: sw.SteerSession, rug_gid: int) -> None:
@@ -157,7 +248,23 @@ def _ankle_peak(session: sw.SteerSession) -> tuple[float, str, float]:
     return peak, name, t_peak
 
 
-def run_one(name: str, *, z_m: float | None, edge: bool) -> dict[str, object]:
+def _named_force(session: sw.SteerSession, tokens: tuple[str, ...]) -> tuple[float, str, float]:
+    peak = 0.0
+    name = ""
+    t_peak = 0.0
+    for i in range(session.model.nu):
+        act = mj.mj_id2name(session.model, mj.mjtObj.mjOBJ_ACTUATOR, i) or ""
+        if not any(tok in act for tok in tokens):
+            continue
+        force = float(session.data.actuator_force[i])
+        if abs(force) >= abs(peak):
+            peak = force
+            name = act
+            t_peak = float(session.data.time)
+    return peak, name, t_peak
+
+
+def run_one(name: str, *, z_m: float | None, edge: bool, mode: str = "") -> dict[str, object]:
     cfg = sw.locked_kit_config()
     if z_m is not None:
         cfg = replace(cfg, name=name, gm_z_m=z_m)
@@ -165,7 +272,11 @@ def run_one(name: str, *, z_m: float | None, edge: bool) -> dict[str, object]:
     rug = mj.mj_name2id(session.model, mj.mjtObj.mjOBJ_GEOM, "col_mat_rug")
     if rug < 0:
         raise SystemExit("missing col_mat_rug")
-    if edge:
+    if mode == "follow":
+        _hook_follow(session, rug)
+    elif mode == "clear":
+        _hook_clear(session)
+    elif edge:
         _hook_edge(session, rug)
     driver = sw.ScriptedDriver((
         sw.DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
@@ -178,6 +289,12 @@ def run_one(name: str, *, z_m: float | None, edge: bool) -> dict[str, object]:
     walk_peak = 0.0
     walk_name = ""
     walk_t = 0.0
+    knee_peak = 0.0
+    knee_name = ""
+    knee_t = 0.0
+    walk_knee = 0.0
+    walk_knee_name = ""
+    walk_knee_t = 0.0
     first_fault_t: float | None = None
     first_fault = ""
     air_at_bar = False
@@ -187,6 +304,7 @@ def run_one(name: str, *, z_m: float | None, edge: bool) -> dict[str, object]:
 
     def _hook(model: mj.MjModel, data: mj.MjData) -> None:
         nonlocal ank_peak, ank_name, ank_t, walk_peak, walk_name, walk_t
+        nonlocal knee_peak, knee_name, knee_t, walk_knee, walk_knee_name, walk_knee_t
         real_step(model, data)
         force, act, when = _ankle_peak(session)
         if abs(force) > abs(ank_peak):
@@ -197,6 +315,15 @@ def run_one(name: str, *, z_m: float | None, edge: bool) -> dict[str, object]:
             walk_peak = force
             walk_name = act
             walk_t = when
+        kforce, kact, kwhen = _named_force(session, ("knee_pos",))
+        if abs(kforce) > abs(knee_peak):
+            knee_peak = kforce
+            knee_name = kact
+            knee_t = kwhen
+        if not seen_fault and abs(kforce) > abs(walk_knee):
+            walk_knee = kforce
+            walk_knee_name = kact
+            walk_knee_t = kwhen
 
     mj.mj_step = _hook
     try:
@@ -245,11 +372,13 @@ def run_one(name: str, *, z_m: float | None, edge: bool) -> dict[str, object]:
         "no_airborne_on_bout": not air_later,
         "mid_toe_above_0_002": bool(toe_min > TOE_BAR_M),
         "ankles_under_2_33": bool(abs(ank_peak) < ANKLE_NM),
+        "knees_under_2_33": bool(abs(knee_peak) < KNEE_NM),
         "cop_in_box": bool(cop <= COP_BOX_M),
     }
     # Soft-pass is off. A fault that only moves past 7.560 s is still a miss.
     clear = all(bars[k] for k in (
-        "no_airborne_on_bout", "mid_toe_above_0_002", "ankles_under_2_33", "cop_in_box",
+        "no_airborne_on_bout", "mid_toe_above_0_002",
+        "ankles_under_2_33", "knees_under_2_33", "cop_in_box",
     ))
     session.assert_plant_unchanged()
     return {
@@ -267,6 +396,12 @@ def run_one(name: str, *, z_m: float | None, edge: bool) -> dict[str, object]:
         "walk_ank_nm": walk_peak,
         "walk_ank_name": walk_name,
         "walk_ank_t": walk_t,
+        "knee_peak_nm": knee_peak,
+        "knee_name": knee_name,
+        "knee_t": knee_t,
+        "walk_knee_nm": walk_knee,
+        "walk_knee_name": walk_knee_name,
+        "walk_knee_t": walk_knee_t,
         "toe_fn_n": toe_fn,
         "edge_ticks": edge_ticks,
         "cop_m": cop,
@@ -280,14 +415,117 @@ def run_one(name: str, *, z_m: float | None, edge: bool) -> dict[str, object]:
     }
 
 
+def measure_scuff() -> None:
+    """Hip pitch and knee over the swing that holds t = 3.384 s."""
+    session = sw.SteerSession(
+        video=False, scene_xml=Path(SCENE), lipm=sw.locked_kit_config(),
+    )
+    lipm = session.lipm
+    assert lipm is not None
+    driver = sw.ScriptedDriver((
+        sw.DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+        sw.DemoSegment(4.2, "vel", sw.VX_FWD_CAP, 0.0, "forward"),
+    ))
+    goal: dict[str, float] = {}
+    orig = lipm._tick_gait_manager
+
+    def wrapped(walking: bool) -> None:
+        orig(walking)
+        swing = lipm._gm_swing
+        if swing not in ("L", "R"):
+            goal.clear()
+            return
+        pref = "l_" if swing == "L" else "r_"
+        goal["side"] = 1.0 if swing == "L" else 0.0
+        goal["knee"] = float(session.data.ctrl[session.act_idx[pref + "knee_pos"]])
+        goal["hip"] = float(session.data.ctrl[session.act_idx[pref + "hip_pitch_pos"]])
+
+    lipm._tick_gait_manager = wrapped  # type: ignore[method-assign]
+    phys: list[tuple[float, str, float, float, float, float]] = []
+    ticks: list[tuple[float, str, float, float, float, float, float]] = []
+    real_step = mj.mj_step
+
+    def hook(model: mj.MjModel, data: mj.MjData) -> None:
+        real_step(model, data)
+        side = lipm._gm_swing
+        if side not in ("L", "R"):
+            return
+        pref = "l_" if side == "L" else "r_"
+        hip = float(data.actuator_force[session.act_idx[pref + "hip_pitch_pos"]])
+        knee = float(data.actuator_force[session.act_idx[pref + "knee_pos"]])
+        knee_q = lipm.q(pref + "knee")
+        knee_ctrl = float(data.ctrl[session.act_idx[pref + "knee_pos"]])
+        phys.append((float(data.time), side, hip, knee, knee_q, knee_ctrl))
+
+    mj.mj_step = hook
+    try:
+        while float(session.data.time) < 4.2 - 1e-9:
+            driver.publish(session.bus, float(session.data.time))
+            session.step()
+            t = float(session.data.time)
+            swing = lipm._gm_swing
+            if swing not in ("L", "R") or "knee" not in goal:
+                continue
+            pref = "l_" if swing == "L" else "r_"
+            ticks.append((
+                t,
+                swing,
+                _leading_toe_z(session, swing),
+                lipm.q(pref + "knee"),
+                float(goal["knee"]),
+                lipm.q(pref + "hip_pitch"),
+                float(goal["hip"]),
+            ))
+    finally:
+        mj.mj_step = real_step
+    cycles: list[list[tuple[float, str, float, float, float, float, float]]] = []
+    cur: list[tuple[float, str, float, float, float, float, float]] = []
+    for row in ticks:
+        if cur and cur[-1][1] != row[1]:
+            cycles.append(cur)
+            cur = []
+        cur.append(row)
+    if cur:
+        cycles.append(cur)
+    hit = None
+    for cyc in cycles:
+        if any(abs(row[0] - 3.384) <= session.ctrl_dt * 0.51 for row in cyc):
+            hit = cyc
+            break
+    if hit is None:
+        print("SCUFF cycle missing")
+        return
+    t0 = hit[0][0]
+    t1 = hit[-1][0]
+    mark = min(hit, key=lambda row: abs(row[0] - 3.384))
+    in_phase = [p for p in phys if t0 - 1e-9 <= p[0] <= t1 + 1e-6 and p[1] == hit[0][1]]
+    hip_peak = max(in_phase, key=lambda p: abs(p[2]))
+    knee_peak = max(in_phase, key=lambda p: abs(p[3]))
+    near = min(in_phase, key=lambda p: abs(p[0] - mark[0]))
+    applied = [p[5] - p[4] for p in in_phase]
+    knee_err = [row[4] - row[3] for row in hit]
+    print("SCUFF_FOOT", hit[0][1])
+    print(f"SCUFF_WINDOW {t0:.3f} {t1:.3f} n {len(hit)}")
+    print(f"SCUFF_MARK t {mark[0]:.3f} toe {mark[2]:.6f} knee_q {mark[3]:.4f} knee_cmd {mark[4]:.4f} hip_q {mark[5]:.4f} hip_cmd {mark[6]:.4f}")
+    print(f"SCUFF_AT_MARK hip_tau {near[2]:.3f} knee_tau {near[3]:.3f} t {near[0]:.3f}")
+    print(f"SCUFF_HIP_PEAK {hip_peak[2]:.3f} t {hip_peak[0]:.3f}")
+    print(f"SCUFF_KNEE_PEAK {knee_peak[3]:.3f} t {knee_peak[0]:.3f}")
+    print(f"SCUFF_KNEE_GOAL_ERR max {max(knee_err):.4f} min {min(knee_err):.4f} at_mark {mark[4] - mark[3]:.4f}")
+    print(f"SCUFF_KNEE_APPLIED_ERR max {max(applied):.4f} min {min(applied):.4f} at_mark {near[5] - near[4]:.4f}")
+    print(f"SCUFF_APPLIED_AT_MARK knee_q {near[4]:.4f} knee_ctrl {near[5]:.4f}")
+    print(f"SCUFF_OVER_2_33 hip {abs(hip_peak[2]) >= KNEE_NM} knee {abs(knee_peak[3]) >= KNEE_NM}")
+    print(f"SCUFF_ON_2_45 hip {abs(hip_peak[2]) >= PLANT_NM - 0.002} knee {abs(knee_peak[3]) >= PLANT_NM - 0.002}")
+    session.assert_plant_unchanged()
+
+
 def main() -> None:
-    print(f"EDGE_PITCH {EDGE_PITCH:.6f} rad")
-    print(f"Z_LIFT_M {Z_LIFT_M:.3f}")
+    print(f"STEP_TILT {STEP_TILT:.6f} rad {math.degrees(STEP_TILT):.2f} deg")
+    measure_scuff()
     runs = [
-        run_one("locked", z_m=None, edge=False),
-        run_one("z_lift", z_m=Z_LIFT_M, edge=False),
-        run_one("edge_pitch", z_m=None, edge=True),
+        run_one("follow", z_m=None, edge=False, mode="follow"),
+        run_one("clear", z_m=None, edge=False, mode="clear"),
     ]
+    print(f"FOLLOW_TICKS {FOLLOW_TICKS}")
     for row in runs:
         print("---")
         for key, val in row.items():
