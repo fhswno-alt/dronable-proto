@@ -468,8 +468,10 @@ class LipmWalker:
     def _arm_resume_lead(self, walker: op3_walk.Op3Walker) -> None:
         """After a yaw target returns to 0, swing the outside foot next.
 
-        Applied only in double support, once per resume. A foot already
-        in single support waits. ``keep`` does not move the clock.
+        Applied only in double support, once per resume. The pose catches
+        up across that double support and the following swing, instead of
+        jumping in one tick. A foot already in single support waits.
+        ``keep`` does not move the clock.
         """
         if self._pending_lead is not None:
             upcoming = walker.next_swing()
@@ -486,6 +488,7 @@ class LipmWalker:
             self._yaw_sign = 1 if yaw > 0.0 else -1
             self._pending_lead = None
             self._resume_latched = False
+            walker.cancel_lead_morph()
             return
         if policy == "keep" or self._resume_latched or self._yaw_sign == 0:
             return

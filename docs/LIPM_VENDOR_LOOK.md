@@ -1410,9 +1410,22 @@ at 6 / 15 / 30 s, and |Δ30| is larger (2.60° versus 0.50°). First-step
 knees after stand, left-lead L 1.152 / R 1.749 Nm, right-lead L 1.749 /
 R 1.152 Nm. Both are under 2.33 Nm. The later walk still sits on
 2.330 Nm. After a yaw target returns to 0, the next double support
-swings the outside foot: right after +yaw, left after −yaw. On the
-isolated windows that cuts the post-left 6 s from +12.1° to +2.2°.
-The post-right 6 s was already going to swing the left foot and stays
-−0.6°. Those arcs stay +145° and −136°. Knees on the walks stay under
-2.33 Nm. Soft-pass is off.
+swings the outside foot: right after +yaw, left after −yaw. Doing
+that by parking the clock on the other double support in one tick
+stepped the joint targets 0.342 rad (both shoulders). A normal
+published walk tick is mean 0.023 rad, p95 0.047 rad, max 0.063 rad.
+The pose now chases the live gait over that double support, 0.056 s,
+7 ticks. The largest tick in the chase is 0.062 rad, the same size as
+the walk's own largest tick. The post-left 6 s with that chase is
++2.1°. The post-right 6 s does not move the clock and is −0.5°.
+
+The commanded turns on those windows are not the same length. Left is
+12.5 s (16→28.5 s) at +0.25 rad/s and finishes at +145.0°, mean body
+rate +0.202 rad/s. Right is 11.0 s (16→27.0 s) at −0.25 rad/s and
+finishes at −136.5°, mean body rate −0.217 rad/s. The right arc is
+8.5° shorter. The right rate is the higher of the two. The gap is the
+1.5 s shorter right hold, not a weak right gain and not an outsole
+peel. After the straight resume the leftover is +2.1° on the left and
+−0.5° on the right. Knees on the walks stay on 2.330 Nm. First-step
+knees stay under 2.33 Nm. Soft-pass is off.
 

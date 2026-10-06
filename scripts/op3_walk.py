@@ -266,6 +266,16 @@ class Op3Walker:
         self.time = 0.0
         self.previous_x = 0.0
         self.ctrl_running = False
+        # Remaining joint offset after a lead change. The clock may sit on
+        # the other double support, but the published pose starts where it
+        # was and catches up no faster than a normal walk tick.
+        self._lead_err: dict[str, float] | None = None
+        self._lead_prev_canon: dict[str, float] | None = None
+        self._lead_cap = 0.0
+        self._last_joints: dict[str, float] | None = None
+        self.lead_blend_tick = False
+        self.lead_carry_tick = False
+        self.lead_blend_s = 0.0
         self._x_move = 0.0
         self._x_swap = 0.0
         self._y_move = 0.0
@@ -365,6 +375,13 @@ class Op3Walker:
         self.angle_cmd = 0.0
         self.time = 0.0
         self.previous_x = 0.0
+        self._lead_err = None
+        self._lead_prev_canon = None
+        self._lead_cap = 0.0
+        self._last_joints = None
+        self.lead_blend_tick = False
+        self.lead_carry_tick = False
+        self.lead_blend_s = 0.0
         self.update_movement()
 
     def next_swing(self) -> str | None:
@@ -381,19 +398,145 @@ class Op3Walker:
         return None
 
     def arm_swing(self, swing: str) -> None:
-        """Place the clock in double support so the next swing is ``swing``.
+        """Line the next swing up with ``swing`` without a one-tick pose snap.
 
-        ``L`` is time 0, the published start. ``R`` is the double support
-        between the two single supports. Does not change a step length,
-        a gain, or the plant.
+        ``L`` lands on time 0. ``R`` lands on the double support between
+        the two single supports.         A small gap moves the clock now. A large gap still parks the
+        clock on that double support, so the next swing is the requested
+        foot, but the published joints start from the pose just sent and
+        chase the live pose. The first tick closes at most one normal
+        walk step. Later ticks follow the canonical step when that step
+        is already larger, and do not add a second jump on top of it.
+        Does not change a step length, a gain, or the plant.
         """
         if swing not in ("L", "R"):
             raise ValueError(f"swing lead must be L or R, got {swing}")
-        if swing == "L":
-            self.time = 0.0
-        else:
-            self.time = 0.5 * (self.l_ssp_end + self.r_ssp_start)
         self.update_movement()
+        target = 0.0 if swing == "L" else float(self.phase2)
+        q_here = self._last_joints if self._last_joints is not None else self._joints_at(self.time)
+        q_there = self._joints_at(target)
+        if q_here is None or q_there is None:
+            self.time = target
+            self._lead_err = None
+            self._lead_prev_canon = None
+            return
+        gap = self._max_abs_joint_delta(q_here, q_there)
+        if gap <= 1e-4:
+            self.time = target
+            self._lead_err = None
+            self._lead_prev_canon = None
+            return
+        cap = self._normal_tick_p95(OP3_CTRL_S)
+        if gap <= cap + 1e-4:
+            self.time = target
+            self._lead_err = None
+            self._lead_prev_canon = None
+            return
+        err = {k: float(q_there[k]) - float(q_here[k]) for k in q_here if k in q_there}
+        self._lead_cap = max(float(cap), 1e-4)
+        self._lead_err = err
+        self._lead_prev_canon = None
+        self.time = target
+
+    def cancel_lead_morph(self) -> None:
+        """A new yaw leaves the offset in place. Clearing it would snap."""
+        return
+
+    def _joints_at(self, t: float) -> dict[str, float] | None:
+        saved = self.time
+        self.time = float(t)
+        joints, _info = self.joints_now()
+        self.time = saved
+        if joints is None:
+            return None
+        return dict(joints)
+
+    def _max_abs_joint_delta(self, a: dict[str, float], b: dict[str, float]) -> float:
+        keys = set(a) & set(b)
+        if not keys:
+            return 0.0
+        return max(abs(float(a[k]) - float(b[k])) for k in keys)
+
+    def _normal_tick_p95(self, dt: float) -> float:
+        """p95 of max |Δq| over one cycle at the current step command.
+
+        The sample uses the same phase update as ``step``. Amplitudes and
+        the clock are restored afterward.
+        """
+        saved_time = self.time
+        saved_prev = self.previous_x
+        saved_run = self.ctrl_running
+        saved_amp = (
+            self._x_move, self._x_swap, self._y_move, self._y_move_shift,
+            self._y_swap, self._z_move, self._z_move_shift, self._z_swap,
+            self._z_swap_shift, self._a_move, self._a_move_shift,
+        )
+        self.time = 0.0
+        self.ctrl_running = True
+        deltas: list[float] = []
+        prev: dict[str, float] | None = None
+        n = max(1, int(round(self.period / max(dt, 1e-6))))
+        for _ in range(n):
+            self.process_phase(dt)
+            joints, _info = self.joints_now()
+            self.time += dt
+            if self.time >= self.period - 1e-12:
+                self.time = 0.0
+                self.previous_x = self.x_cmd * 0.5
+                self.update_movement()
+            if joints is not None and prev is not None:
+                deltas.append(self._max_abs_joint_delta(prev, joints))
+            prev = None if joints is None else dict(joints)
+        self.time = saved_time
+        self.previous_x = saved_prev
+        self.ctrl_running = saved_run
+        (
+            self._x_move, self._x_swap, self._y_move, self._y_move_shift,
+            self._y_swap, self._z_move, self._z_move_shift, self._z_swap,
+            self._z_swap_shift, self._a_move, self._a_move_shift,
+        ) = saved_amp
+        self.update_time()
+        if not deltas:
+            return 0.0
+        return float(np.percentile(np.asarray(deltas, dtype=np.float64), 95))
+
+    def _bleed_lead_err(self, joints: dict[str, float], phase: str) -> dict[str, float]:
+        """Chase the live pose after a lead change, without outrunning a walk tick.
+
+        The first tick closes at most the walk's p95 step. Later ticks may
+        also follow the canonical step when that step is already larger,
+        so the swing is not slowed, and they do not add a second jump on
+        top of it. ``phase`` is unused; both feet chase the same clock.
+        """
+        del phase
+        err = self._lead_err
+        if not err:
+            return joints
+        prev_pub = self._last_joints or {}
+        prev_canon = self._lead_prev_canon
+        cap = self._lead_cap
+        out: dict[str, float] = {}
+        canon_now: dict[str, float] = {}
+        for name, canon in joints.items():
+            canon_f = float(canon)
+            before = float(prev_pub.get(name, canon_f - float(err.get(name, 0.0))))
+            if prev_canon is None:
+                cstep = 0.0
+            else:
+                cstep = canon_f - float(prev_canon.get(name, canon_f))
+            limit = max(cap, abs(cstep))
+            gap = canon_f - before
+            step = max(-limit, min(limit, gap))
+            pub = before + step
+            out[name] = pub
+            canon_now[name] = canon_f
+            if name in err:
+                err[name] = canon_f - pub
+        self._lead_prev_canon = canon_now
+        if all(abs(float(v)) < 1e-4 for v in err.values()):
+            self._lead_err = None
+            self._lead_prev_canon = None
+        return out
 
     def process_phase(self, dt: float) -> None:
         half = dt / 2.0
@@ -651,13 +794,23 @@ class Op3Walker:
 
     def step(self, dt: float) -> tuple[dict[str, float] | None, StepInfo]:
         self.ctrl_running = True
+        self.lead_blend_tick = False
+        self.lead_carry_tick = False
         self.process_phase(dt)
         joints, info = self.joints_now()
+        if joints is not None and self._lead_err is not None:
+            carry = info.phase == "D"
+            joints = self._bleed_lead_err(joints, info.phase)
+            self.lead_blend_tick = True
+            self.lead_carry_tick = carry
+            self.lead_blend_s += dt
         self.time += dt
         if self.time >= self.period - 1e-12:
             self.time = 0.0
             self.previous_x = self.x_cmd * 0.5
             self.update_movement()
+        if joints is not None:
+            self._last_joints = joints
         return joints, info
 
 

@@ -155,8 +155,14 @@ right foot first and the 30 s net is −2.55°. Cold stand→forward
 stays left-first: right-first Δyaw at 30 s is −2.60°, and the first
 right-lead step knees are 1.749 / 1.152 Nm, under 2.33. After a yaw
 target returns to 0 the next double support swings the outside foot.
-That cuts the post-left 6 s from +12.1° to +2.2°. The post-right 6 s
-was already swinging left and stays −0.6°.
+A one-tick clock park stepped the targets 0.342 rad. The pose now
+chases the live gait over that double support (0.056 s); the largest
+tick is 0.062 rad, the same as the walk's own largest tick. The
+post-left 6 s is +2.1°. The post-right 6 s does not move the clock
+and is −0.5°. The left turn (12.5 s) finishes at +145.0° and the
+right turn (11.0 s) at −136.5°. The right arc is 8.5° shorter because
+the hold is shorter; the right rate is −0.217 rad/s, which is not
+the low one.
 """
 from __future__ import annotations
 
@@ -3419,6 +3425,79 @@ def _bus_kit_first_step_knee() -> tuple[list[str], list[str]]:
     return failures, lines
 
 
+def _bus_kit_resume_carry() -> tuple[list[str], list[str]]:
+    """Outside-lead resume: joint-target step, turn arc, resume leftover."""
+    failures: list[str] = []
+    lines: list[str] = []
+
+    def _yaw_at(samples: list[PoseSample], t: float) -> float:
+        best = samples[0]
+        for sample in samples:
+            if sample.t <= t + 1e-9:
+                best = sample
+            else:
+                break
+        return float(best.yaw)
+
+    def _one(label: str, script: tuple[DemoSegment, ...], t0: float, t1: float) -> None:
+        session = SteerSession(video=False, lipm=locked_kit_config())
+        walker = session.lipm.op3
+        if walker is None:
+            failures.append(f"{label} resume has no kit walker")
+            return
+        driver = ScriptedDriver(script)
+        normal: list[float] = []
+        chase: list[float] = []
+        prev: dict[str, float] | None = None
+        while float(session.data.time) < t1 + 0.05:
+            now = float(session.data.time)
+            driver.publish(session.bus, now)
+            report = session.step()
+            joints = walker._last_joints
+            if prev is not None and report.mode == "move" and joints:
+                delta = 0.0
+                for name, val in joints.items():
+                    delta = max(delta, abs(float(val) - float(prev.get(name, val))))
+                if walker.lead_blend_tick:
+                    chase.append(delta)
+                else:
+                    normal.append(delta)
+            if joints:
+                prev = {k: float(v) for k, v in joints.items()}
+        session.assert_plant_unchanged()
+        arc = math.degrees(_wrap_pi(_yaw_at(session.samples, t0) - _yaw_at(session.samples, 16.0)))
+        res = math.degrees(_wrap_pi(_yaw_at(session.samples, t1) - _yaw_at(session.samples, t0)))
+        dur = t0 - 16.0
+        rate = math.radians(arc) / dur if dur > 1e-6 else 0.0
+        hold = max(normal) if normal else 0.0
+        lines.append(
+            f"{label} arc 16→{t0:.1f}s Δyaw {arc:+.2f}°  mean {rate:+.3f} rad/s  "
+            f"resume Δyaw {res:+.2f}°"
+        )
+        if label == "left":
+            if not chase:
+                failures.append("left resume did not chase the outside-foot pose")
+            else:
+                peak = max(chase)
+                chase_s = len(chase) * float(session.ctrl_dt)
+                lines.append(
+                    f"left resume chase {chase_s:.3f}s  "
+                    f"max|Δq| {peak:.3f} rad  walk max {hold:.3f} rad"
+                )
+                if peak > hold + 0.005:
+                    failures.append(
+                        f"left resume chase tick {peak:.3f} rad exceeds walk max {hold:.3f}"
+                    )
+            if res > 8.0 or res < -8.0:
+                failures.append(f"left resume Δyaw {res:+.2f}° left the outside-foot window")
+        elif abs(res) > 4.0:
+            failures.append(f"right resume Δyaw {res:+.2f}°")
+
+    _one("left", NAV_LEFT_SCRIPT, 28.5, 34.5)
+    _one("right", NAV_RIGHT_SCRIPT, 27.0, 33.0)
+    return failures, lines
+
+
 def bus_kit_check() -> int:
     """Day-1 bus on the locked kit row. Non-zero means the Prefer FAIL bar broke."""
     contract_fail, lines = _bus_kit_contract()
@@ -3426,11 +3505,13 @@ def bus_kit_check() -> int:
     yaw_fail, yaw_lines = _bus_kit_yaw()
     rev_fail, rev_lines = _bus_kit_reverse()
     lead_fail, lead_lines = _bus_kit_first_step_knee()
-    failures = contract_fail + torque_fail + yaw_fail + rev_fail + lead_fail
+    carry_fail, carry_lines = _bus_kit_resume_carry()
+    failures = contract_fail + torque_fail + yaw_fail + rev_fail + lead_fail + carry_fail
     lines.extend(torque_lines)
     lines.extend(yaw_lines)
     lines.extend(rev_lines)
     lines.extend(lead_lines)
+    lines.extend(carry_lines)
     print("[bus-kit] Day-1 CommandBus on locked kit500")
     for line in lines:
         print(f"[bus-kit] {line}")
