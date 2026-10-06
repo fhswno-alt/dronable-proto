@@ -11918,10 +11918,12 @@ def _install_sagittal_slew(
     air_stepped: dict[str, float] = {}
 
     def _air_ank(jn: str) -> bool:
-        """Airborne ankle pitch on the stop walk, before the stop command.
+        """Clock-swing ankle pitch on the stop walk, before the stop command.
 
-        Clock DSP can still show one foot at 0 N. That foot is not the
-        loaded stance slew. Ankle roll and the stop stretch stay out.
+        The clock can still call a foot swing after it has loaded, and
+        double support can still show one foot at 0 N. Both of those
+        writes are this path. A loaded double-support ankle stays on the
+        1.90 stance cap. Ankle roll and the stop stretch stay out.
         """
         if not jn.endswith("ank_pitch") or "ank_pitch" not in suffixes:
             return False
@@ -11929,6 +11931,9 @@ def _install_sagittal_slew(
             return False
         if getattr(session, "_sag_torque_cap", False):
             return False
+        stance = _stance_prefix(_cmd_time(walker))
+        if stance != "both" and not jn.startswith(stance):
+            return True
         side = "L" if jn.startswith("l_") else "R"
         return _sole_load_n(session, side) <= _SOLE_FLAT_LOAD_N + 1e-9
 
@@ -11937,7 +11942,8 @@ def _install_sagittal_slew(
 
         The first step may start from a stale stance command. The hold
         pulls that step back to the live joint so the airborne ask cannot
-        slam. The loaded leg does not use this path.
+        slam. A loaded stance ankle and a loaded double-support ankle
+        do not use this path.
         """
         t_now = float(lipm.data.time)
         last = air_step_at.get(jn)
@@ -12146,9 +12152,10 @@ def _install_sagittal_slew(
         if getattr(session, "_sag_stop_installed", False):
             print(
                 "PRED sag_slew airborne ank_pitch "
-                f"{float(rad_s):.3f} rad/s on the stop walk while that foot "
-                f"is at or under {_SOLE_FLAT_LOAD_N:.1f} N, then inside 2.33 Nm. "
-                "Loaded ankle pitch stays on the stance cap. "
+                f"{float(rad_s):.3f} rad/s on the stop walk while the clock "
+                "calls that foot swing, and while that foot is at or under "
+                f"{_SOLE_FLAT_LOAD_N:.1f} N in double support, then inside 2.33 Nm. "
+                "A loaded double-support ankle stays on the stance cap. "
                 "Ankle roll, sole-flat, and the stop stretch stay put."
             )
     if "hip_pitch" in suffixes:
@@ -14377,6 +14384,26 @@ def _print_air_ank_land(name: str, held: dict[str, object]) -> None:
         prev = worst.get(jn)
         if prev is None or abs(float(item[3])) > abs(float(prev[3])):
             worst[jn] = item
+    swing_worst: dict[str, tuple] = {}
+    for item in asks:
+        jn = str(item[1])
+        if jn not in ("l_ank_pitch", "r_ank_pitch"):
+            continue
+        t_item = float(item[0])
+        if tipped and t_item >= fault_t - 1e-9:
+            continue
+        row = by_lat.get(round(t_item, 5))
+        if row is None:
+            continue
+        phase = str(row["phase"])
+        swinging = (jn.startswith("l_") and phase == "L") or (
+            jn.startswith("r_") and phase == "R"
+        )
+        if not swinging:
+            continue
+        prev = swing_worst.get(jn)
+        if prev is None or abs(float(item[3])) > abs(float(prev[3])):
+            swing_worst[jn] = item
 
     def _corners(tag: str, t_key: float, frac_txt: str) -> None:
         surf = by_surf.get(t_key)
@@ -14454,6 +14481,33 @@ def _print_air_ank_land(name: str, held: dict[str, object]) -> None:
             f"fn_l {float(landed['fn_l']):.2f} fn_r {float(landed['fn_r']):.2f}"
         )
         _corners(f"air_load_{jn}", t_land, frac_l_txt)
+
+    for jn in ("r_ank_pitch", "l_ank_pitch"):
+        item = swing_worst.get(jn)
+        if item is None:
+            print(f"PRED {name} swing_ank {jn} none")
+            continue
+        t_key = round(float(item[0]), 5)
+        row = by_lat.get(t_key)
+        phase = str(row["phase"]) if row is not None else str(item[5])
+        frac = float("nan")
+        fn_l = float("nan")
+        fn_r = float("nan")
+        if row is not None:
+            frac = _swing_frac(phase, float(row["pose"]))
+            fn_l = float(row["fn_l"])
+            fn_r = float(row["fn_r"])
+        frac_txt = "dsp" if phase == "D" else f"{frac:.3f}"
+        ask = float(item[3])
+        over = abs(ask) > KNEE_NM + 1e-9
+        print(
+            f"PRED {name} swing_ank {jn} {ask:+.4f} "
+            f"t {float(item[0]):.3f} phase {phase} frac {frac_txt} "
+            f"q {_ask_q(item):+.5f} q_des {float(item[2]):+.5f} "
+            f"kp_term {float(item[8]):+.4f} kv_term {float(item[9]):+.4f} "
+            f"fn_l {fn_l:.2f} fn_r {fn_r:.2f} ge_2.33 {int(over)}"
+        )
+        _corners(f"swing_{jn}", t_key, frac_txt)
 
 
 def score_mid_swing() -> None:
