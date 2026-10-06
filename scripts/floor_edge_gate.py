@@ -7,18 +7,19 @@ The margin was written down before any run of this gate:
     FLOOR_EDGE_MARGIN_M = 0.002   # 2 mm
 
 The arm input is the mid-swing toe minimum, 20–80% of each swing.
-Controls has not printed that sample. ``MID_SWING_TOE_MIN_M`` stays
-None, and the shipped gate refuses a floor-edge stop.
+Controls printed that sample. ``MID_SWING_TOE_MIN_M`` is −0.003066 m,
+384 ticks, minimum at t = 3.384 s. That minimum is a loaded floor
+contact inside the mid-swing window. It matches the whole-swing
+minimum, so the scuff is real. It is not a lift-off or touchdown
+artifact.
 
-The entrance straight whole-swing minimum is −0.003066 m. It includes
-lift-off and touchdown. It is a Prefer FAIL print and it is provisional.
-It is not the arm clearance. Subtracting 2 mm from it is −0.005066 m.
-That number is negative. It is not installed. A negative threshold
-would arm on the 0.012 m rug and on every taller edge.
+Subtracting 2 mm leaves −0.005066 m. That threshold is negative. It
+is not installed. It would arm on the 0.012 m rug and on every taller
+edge. The shipped call raises ``ScuffGait``. It does not return None
+or False.
 
-If a mid-swing minimum lands at or under 2 mm, ``arm_threshold_m``
-raises ``ScuffGait``. That is the scuff Prefer FAIL. It does not
-return None or False and keep walking.
+Controls' walk Prefer FAIL on the rug is 7.016 s to 7.560 s. The body
+is pitched over the edge. That window is not this stop gate.
 
 The rug height report is computed before any arm call. Mono at the
 stand eye, 0.335 m, looking at a 0.012 m edge 0.30 m ahead, moves the
@@ -28,8 +29,8 @@ height interval is reported next to the true 0.012 m. When the
 interval still contains that height, the estimate does not arm a stop
 and the error bar is not tightened to make it separate.
 
-p90 on that entrance bout is 0.025967 m. It is report-only. It is not
-subtracted.
+Whole-swing p90 is 0.025967 m. Mid-swing p90 is 0.024671 m. Both are
+report-only. Neither is subtracted.
 
 This module does not call ``CommandBus``. It does not edit the plant.
 ``HAZARD_PAD_M`` stays 0.020. The 3–5 cm buffer stays off. Head tilt
@@ -52,17 +53,27 @@ FLOOR_EDGE_MARGIN_MM = 2
 FLOOR_EDGE_MARGIN_M = FLOOR_EDGE_MARGIN_MM / 1000.0
 
 # Entrance straight, whole swing, including lift-off and touchdown.
-# Provisional Prefer FAIL. Not the arm clearance.
+# Same value as the locked mid-swing min. Real scuff.
 WHOLE_SWING_TOE_MIN_M = -0.003066
 
 # Arithmetic only. Negative. Not installed as a threshold.
 WHOLE_SWING_ARM_M = WHOLE_SWING_TOE_MIN_M - FLOOR_EDGE_MARGIN_M
 
-# Mid-swing, 20–80% of each swing. Not printed. None refuses the arm.
-MID_SWING_TOE_MIN_M: float | None = None
+# Locked. 20–80% of each swing, 384 ticks, min at t = 3.384 s.
+# Loaded floor contact inside the window. Not a clearance that arms.
+MID_SWING_TOE_MIN_M = -0.003066
+MID_SWING_TICKS = 384
+MID_SWING_MIN_T_S = 3.384
+MID_SWING_ARM_M = MID_SWING_TOE_MIN_M - FLOOR_EDGE_MARGIN_M
 
-# Entrance-bout swing sole p90. Report only. Not the arm.
-SWING_SOLE_P90_REPORT_M = 0.025967
+# Report only. Not the arm.
+WHOLE_SWING_P90_REPORT_M = 0.025967
+MID_SWING_P90_REPORT_M = 0.024671
+
+# Controls walk Prefer FAIL. Body pitched over the rug edge.
+# Not this stop gate.
+RUG_BODY_PITCH_T0_S = 7.016
+RUG_BODY_PITCH_T1_S = 7.560
 
 # Measured walk top of col_mat_rug. Honesty reference. Not an arm input.
 RUG_TOP_M = 0.012
@@ -111,10 +122,9 @@ class EdgeHeightReport:
 def arm_threshold_m(swing_toe_min_m: float | None) -> float | None:
     """Mid-swing min minus 2 mm.
 
-    None means the mid-swing sample has not landed, and the arm stays
-    refused. A finite min at or under the margin raises ``ScuffGait``.
-    The whole-swing provisional print is not this argument on the
-    shipped path. p90 is not this argument.
+    None is only an explicit missing sample. The shipped mid-swing min
+    is locked and is not None. A finite min at or under the margin
+    raises ``ScuffGait``. p90 is not this argument.
     """
     if swing_toe_min_m is None:
         return None
@@ -145,11 +155,11 @@ def formula_arms(edge_height_m: float, swing_toe_min_m: float | None) -> bool:
 
 
 def floor_edge_stop_armed(edge_height_m: float | None) -> bool:
-    """Shipped arm. Refuses while mid-swing is unprinted.
+    """Shipped arm. The locked mid-swing min raises ``ScuffGait``.
 
-    Raises ``ScuffGait`` when the installed mid-swing min is at or
-    under 2 mm. Does not read the whole-swing provisional min. Does
-    not send ``stop``.
+    The negative min − 2 mm threshold is not installed, so this does
+    not return true for the rug or for any other edge. It does not
+    send ``stop``. p90 is not read.
     """
     threshold = arm_threshold_m(MID_SWING_TOE_MIN_M)
     if threshold is None or edge_height_m is None:
@@ -243,6 +253,15 @@ def report_rug_height() -> EdgeHeightReport:
     )
 
 
+def shipped_scuff_raised(edge_height_m: float | None) -> bool:
+    """True when the shipped gate raises. A returned bool is not a raise."""
+    try:
+        floor_edge_stop_armed(edge_height_m)
+    except ScuffGait:
+        return True
+    return False
+
+
 def _expect_scuff(swing_toe_min_m: float) -> None:
     try:
         arm_threshold_m(swing_toe_min_m)
@@ -276,21 +295,34 @@ def self_check() -> EdgeHeightReport:
         raise SystemExit(f"whole-swing arm arithmetic {WHOLE_SWING_ARM_M}")
     if WHOLE_SWING_ARM_M >= 0.0 or WHOLE_SWING_ARM_M >= RUG_TOP_M:
         raise SystemExit("whole-swing arm is not below the rug")
-    if MID_SWING_TOE_MIN_M is not None:
-        raise SystemExit("mid-swing min locked before Controls printed it")
-    if abs(SWING_SOLE_P90_REPORT_M - 0.025967) > 1e-12:
-        raise SystemExit("p90 report moved")
+    if abs(MID_SWING_TOE_MIN_M - (-0.003066)) > 1e-12:
+        raise SystemExit("mid-swing min moved")
+    if abs(MID_SWING_TOE_MIN_M - WHOLE_SWING_TOE_MIN_M) > 1e-12:
+        raise SystemExit("mid-swing and whole-swing mins diverged")
+    if MID_SWING_TICKS != 384 or abs(MID_SWING_MIN_T_S - 3.384) > 1e-12:
+        raise SystemExit("mid-swing sample tag moved")
+    if abs(MID_SWING_ARM_M - (-0.005066)) > 1e-12:
+        raise SystemExit(f"mid-swing arm arithmetic {MID_SWING_ARM_M}")
+    if MID_SWING_ARM_M >= 0.0:
+        raise SystemExit("mid-swing arm is not negative")
+    if abs(WHOLE_SWING_P90_REPORT_M - 0.025967) > 1e-12:
+        raise SystemExit("whole-swing p90 moved")
+    if abs(MID_SWING_P90_REPORT_M - 0.024671) > 1e-12:
+        raise SystemExit("mid-swing p90 moved")
+    if abs(RUG_BODY_PITCH_T0_S - 7.016) > 1e-12 or abs(RUG_BODY_PITCH_T1_S - 7.560) > 1e-12:
+        raise SystemExit("rug pitch window moved")
     # The negative arithmetic would pass a plain compare. It is not used.
-    if not (RUG_TOP_M > WHOLE_SWING_ARM_M):
+    if not (RUG_TOP_M > MID_SWING_ARM_M):
         raise SystemExit("rug is not above the unused negative arithmetic")
-    if negative_threshold_arms(RUG_TOP_M, WHOLE_SWING_ARM_M):
+    if negative_threshold_arms(RUG_TOP_M, MID_SWING_ARM_M):
         raise SystemExit("negative threshold armed the rug")
-    if floor_edge_stop_armed(RUG_TOP_M):
-        raise SystemExit("shipped gate armed the 12 mm rug")
-    if floor_edge_stop_armed(None):
-        raise SystemExit("empty approach armed")
-    if floor_edge_stop_armed(report.hi_m):
-        raise SystemExit("height-bar top armed while mid-swing is unset")
+    if not shipped_scuff_raised(RUG_TOP_M):
+        raise SystemExit("locked mid-swing did not raise on the rug")
+    if not shipped_scuff_raised(None):
+        raise SystemExit("locked mid-swing did not raise on an empty edge")
+    if not shipped_scuff_raised(report.hi_m):
+        raise SystemExit("locked mid-swing did not raise on the height bar")
+    _expect_scuff(MID_SWING_TOE_MIN_M)
     _expect_scuff(WHOLE_SWING_TOE_MIN_M)
     _expect_scuff(FLOOR_EDGE_MARGIN_M)
     _expect_scuff(0.0)
@@ -309,8 +341,10 @@ def self_check() -> EdgeHeightReport:
     if formula_arms(RUG_TOP_M, None):
         raise SystemExit("formula armed with no mid-swing min")
     armed_src = inspect.getsource(floor_edge_stop_armed)
-    if "WHOLE_SWING" in armed_src or "P90" in armed_src or "0.025967" in armed_src:
-        raise SystemExit("shipped arm reads the provisional min or p90")
+    if "P90" in armed_src or "0.025967" in armed_src or "0.024671" in armed_src:
+        raise SystemExit("shipped arm reads a p90")
+    if "7.016" in armed_src or "7.560" in armed_src:
+        raise SystemExit("shipped arm reads the Controls pitch window")
     if abs(rc.HAZARD_PAD_M - 0.020) > 1e-12:
         raise SystemExit(f"pad moved to {rc.HAZARD_PAD_M}")
     digest = hashlib.md5(_PLANT.read_bytes()).hexdigest()
@@ -339,10 +373,14 @@ if __name__ == "__main__":
     checked = self_check()
     print(
         f"AFTER_ARM whole_swing={WHOLE_SWING_TOE_MIN_M:.6f} "
-        f"whole_swing_arm_unused={WHOLE_SWING_ARM_M:.6f} "
-        f"mid_swing={MID_SWING_TOE_MIN_M} "
-        f"p90_report={SWING_SOLE_P90_REPORT_M:.6f} "
-        f"rug_stop={floor_edge_stop_armed(checked.true_m)} "
+        f"mid_swing={MID_SWING_TOE_MIN_M:.6f} "
+        f"ticks={MID_SWING_TICKS} t_min={MID_SWING_MIN_T_S:.3f} "
+        f"arm_unused={MID_SWING_ARM_M:.6f} "
+        f"raised={shipped_scuff_raised(checked.true_m)} "
+        f"rug_stop=False "
+        f"mid_p90_report={MID_SWING_P90_REPORT_M:.6f} "
+        f"whole_p90_report={WHOLE_SWING_P90_REPORT_M:.6f} "
+        f"rug_pitch={RUG_BODY_PITCH_T0_S:.3f}-{RUG_BODY_PITCH_T1_S:.3f} "
         f"pad={rc.HAZARD_PAD_M:.3f} plant={PLANT_MD5} "
-        f"prefer_fail=refuse_arm scuff_raises not_go_anywhere"
+        f"prefer_fail=scuff_raises arm_refused not_go_anywhere"
     )

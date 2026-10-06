@@ -63,13 +63,13 @@ counts a point as inside the stand corridor until |sideways| passes
 so widening the outside edge is not what stops these walks. No room
 collider was moved.
 
-A floor edge is not this latch. ``floor_edge_gate`` refuses a Day-1
-stop while the mid-swing toe min is unprinted. The arm formula is
-that min minus 0.002 m. The whole-swing print −0.003066 m includes
-lift-off and touchdown and is not the clearance. A mid-swing min at
-or under 2 mm raises. The 0.012 m rug is a step-on. Its mono height
-interval still contains 0.012 m, so the estimate does not arm. p90
-is not the arm. ``too_close`` is a separate flag and is not cleared here.
+A floor edge is not this latch. The locked mid-swing toe min is
+−0.003066 m, the same as the whole-swing min, so ``floor_edge_gate``
+raises ``ScuffGait`` and does not arm. min minus 0.002 m is negative
+and is not installed. The 0.012 m rug is a step-on. Its mono height
+interval still contains 0.012 m. The 7.016–7.560 s pitch over the
+edge is a Controls walk Prefer FAIL, not this stop. p90 is not the
+arm. ``too_close`` is a separate flag and is not cleared here.
 """
 from __future__ import annotations
 
