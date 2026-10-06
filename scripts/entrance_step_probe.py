@@ -56,6 +56,10 @@ _WALK_Z_RATE = 1.55
 # walk, and it is off from the stop command so the post-stop stretch
 # still samples the unwarped z at 0.25 / 1.060×.
 _STOP_APPROACH_Z_RATE = 1.55
+# Stand segment ends here on the stop script. The entrance catch is that
+# loaded transition only. It is not the continuous-walk seed and it does
+# not read the walk ladder.
+_STOP_ENTRANCE_S = 1.0
 # Loaded-leg stance rates on the continuous walk. Ankle pitch stays at
 # the 1.90 rad/s rate that already cleared it. The knee is slower on
 # its own when that rate still leaves mid-SS over 2.33 Nm. Hip pitch
@@ -4781,6 +4785,29 @@ def _install_inflight_stop(
 
     def wrapped_endpoints():
         er, el, pel_r, pel_l, swap_y = orig_endpoints()
+        # Engage tick only. x/y and sole roll/pitch/yaw stay on the stand
+        # pose. z stays live, so the approach swing-z and the stop stretch
+        # still see their own schedules.
+        if (
+            getattr(session, "_entrance_freeze", False)
+            and not state["stop"]
+            and not state["pin_chain"]
+        ):
+            snap = state.get("entrance_snap")
+            if isinstance(snap, tuple) and len(snap) == 5:
+                ser, sel, spr, spl, ssy = snap
+                z_r = float(er[2])
+                z_l = float(el[2])
+                er[:] = ser
+                el[:] = sel
+                er[2] = z_r
+                el[2] = z_l
+                state["last_raw"] = (
+                    er.copy(), el.copy(), float(walker.time), float(lipm.data.time),
+                )
+                state["pose_gait"] = float(walker.time)
+                state["live_z"] = {"L": z_l, "R": z_r}
+                return er, el, float(spr), float(spl), float(ssy)
         state["last_raw"] = (er.copy(), el.copy(), float(walker.time), float(lipm.data.time))
         state["pose_gait"] = float(walker.time)
         state["live_z"] = {"L": float(el[2]), "R": float(er[2])}
@@ -5439,6 +5466,32 @@ def _install_inflight_stop(
         del vx, yaw_rate
         t = float(lipm.data.time)
         label = driver.segment(t).label
+        # The freeze lasts one control tick. The next tick clears it
+        # before the gait IK, so the loaded chain then rate-limits onto
+        # the live step. The stop pin is not this flag.
+        if state.get("entrance_freeze_tick") and t > float(state.get("entrance_t", -1.0)) + 1e-6:
+            session._entrance_freeze = False  # type: ignore[attr-defined]
+            state["entrance_freeze_tick"] = False
+        if label != "stop" and walking and not state.get("entrance_seen"):
+            er0, el0, pr0, pl0, sy0 = orig_endpoints()
+            state["entrance_snap"] = (
+                np.array(er0, dtype=np.float64, copy=True),
+                np.array(el0, dtype=np.float64, copy=True),
+                float(pr0),
+                float(pl0),
+                float(sy0),
+            )
+            session._entrance_freeze = True  # type: ignore[attr-defined]
+            session._entrance_snap = state["entrance_snap"]  # type: ignore[attr-defined]
+            state["entrance_seen"] = True
+            state["entrance_freeze_tick"] = True
+            state["entrance_t"] = t
+            print(
+                "PRED stop_entrance freeze planar+attitude at the stand pose "
+                f"t {t:.3f}. Loaded hip pitch, knee, and ankle pitch start "
+                "from the live joint and step at the stop-bout stance rate. "
+                "The continuous-walk seed stays off."
+            )
         entered_now = False
         if not state["stop"]:
             if label != "stop":
@@ -12109,6 +12162,66 @@ def _install_sagittal_slew(
 
     approach_cmd: dict[str, float] = {}
     approach_at: dict[str, float] = {}
+    entrance_cmd: dict[str, float] = {}
+    entrance_at: dict[str, float] = {}
+    entrance_done: set[str] = set()
+
+    def _entrance_live(jn: str) -> bool:
+        """Stop-bout engage only. Not the continuous-walk seed.
+
+        The loaded hip pitch, knee, and ankle pitch start from the live
+        joint. A swinging knee stays on the approach slew. A swinging
+        ankle stays on the airborne path. Hip pitch keeps this catch
+        until the command meets the gait, so the engage gap is not dumped
+        when that foot lifts. The walk ladder is not read.
+        """
+        if not getattr(session, "_sag_stop_installed", False):
+            return False
+        if getattr(session, "_walk_z_stretch", False):
+            return False
+        if getattr(session, "_sag_torque_cap", False):
+            return False
+        if float(lipm.data.time) + 1e-9 < _STOP_ENTRANCE_S:
+            return False
+        if jn in entrance_done:
+            return False
+        if not jn.endswith(("hip_pitch", "knee", "ank_pitch")):
+            return False
+        if jn.endswith("hip_pitch"):
+            return True
+        stance = _stance_prefix(_cmd_time(walker))
+        return stance == "both" or jn.startswith(stance)
+
+    def _toward_entrance(jn: str, target: float) -> float:
+        """One stop-bout stance step from the live joint. No torque hold.
+
+        The memory is not the walk seed. Knee and ankle pitch hand the
+        slewed command to the stance slew so the next loaded tick does
+        not dump the gait. The approach knee still starts from that
+        command and rate-limits on its own.
+        """
+        t_now = float(lipm.data.time)
+        last = entrance_at.get(jn)
+        if last is None or t_now - last >= ctrl_period - 1e-4:
+            old = entrance_cmd.get(jn)
+            if old is None:
+                old = float(lipm.q(jn))
+            dq = float(target) - float(old)
+            if dq > cap:
+                stepped = float(old) + cap
+            elif dq < -cap:
+                stepped = float(old) - cap
+            else:
+                stepped = float(target)
+                # The engage tick's target is the frozen stand pose.
+                # Catching that is not catching the walking chain.
+                if not getattr(session, "_entrance_freeze", False):
+                    entrance_done.add(jn)
+            entrance_cmd[jn] = float(stepped)
+            entrance_at[jn] = t_now
+            if jn.endswith(("knee", "ank_pitch")):
+                prev[jn] = float(stepped)
+        return float(entrance_cmd[jn])
 
     def _toward_approach(jn: str, target: float) -> float:
         """One approach-z step toward the warped swing knee. No torque hold.
@@ -12220,6 +12333,11 @@ def _install_sagittal_slew(
     last_cmd: dict[str, float] = {}
 
     def write(jn: str, q_des: float) -> None:
+        if _entrance_live(jn):
+            q_des = _toward_entrance(jn, float(q_des))
+            last_cmd[jn] = float(q_des)
+            orig(jn, float(q_des))
+            return
         if _air_ank(jn):
             q_des = _toward_air_ank(jn, float(q_des))
             last_cmd[jn] = float(q_des)
@@ -12414,6 +12532,13 @@ def _install_sagittal_slew(
         "The stand-to-walk tick is a loaded transition. Not a swing stretch. "
         "The stop bout does not take this seed."
     )
+    if getattr(session, "_sag_stop_installed", False):
+        print(
+            "PRED sag_slew stop_entrance from the live joint at "
+            f"{float(rad_s):.3f} rad/s on loaded hip pitch, knee, and ankle pitch. "
+            "Planar x/y and sole roll/pitch/yaw hold the stand pose on the "
+            "engage tick. The walk ladder stays off this bout."
+        )
     if "hip_pitch" in suffixes:
         print(
             f"PRED sag_slew hip_pitch {_WALK_HIP_PITCH_RATE:.3f} rad/s "
@@ -14023,6 +14148,10 @@ def score_sag_stop() -> None:
         "the 2.33 Nm part cap. "
         "From the stop command the swing hip roll, hip yaw, hip pitch, and "
         "ankle roll hold the pre-stop q_des. Planar x/y and sole roll/pitch hold. "
+        "At gait engage the stand foot planar and attitude hold for one tick. "
+        "Loaded hip pitch, knee, and ankle pitch start from the live joint "
+        "and step at the stop-bout stance rate. That catch is not the "
+        "continuous-walk seed. "
         "Before the stop, the approach swing-z is time-stretched on its own "
         "rate so the airborne knee can track. That delta is off from the "
         "stop command. The leftover swing-z is time-stretched so the knee "
@@ -14412,6 +14541,7 @@ def score_sag_stop() -> None:
     _print_gait_peaks(name, held, summary)
     _print_air_ank_land(name, held)
     _print_approach_knee(name, held)
+    _print_entrance(name, held)
     if held.get("fault"):
         fails.append(f"fault {held.get('fault')} t {float(held.get('fault_t', float('nan'))):.3f}")
     if air_zero:
@@ -14933,6 +15063,131 @@ def _print_approach_knee(name: str, held: dict[str, object]) -> None:
         "at or under 5 N. Stop ankle roll from the command until any tip "
         "stays at or under 2.33 Nm. "
         "Walk 1.55 and the stop stretch stay put."
+    )
+
+
+def _print_entrance(name: str, held: dict[str, object]) -> None:
+    """Stop-bout gait engage. Load and four corners at that tick.
+
+    The window is the loaded transition, from just before the stand
+    segment ends through the catch onto the walking chain. A swinging
+    knee in that window is still the approach print.
+    """
+    asks = held.get("asks")
+    lateral = held.get("lateral")
+    surface = held.get("surface")
+    if not isinstance(asks, list) or not isinstance(lateral, list):
+        print(f"PRED {name} entrance missing")
+        return
+    by_lat: dict[float, dict[str, float | str]] = {}
+    for row in lateral:
+        if isinstance(row, dict):
+            by_lat[round(float(row["t_ask"]), 5)] = row
+    by_surf: dict[float, dict[str, object]] = {}
+    if isinstance(surface, list):
+        for row in surface:
+            if isinstance(row, dict):
+                by_surf[round(float(row["t"]), 5)] = row
+    suffixes = ("hip_pitch", "knee", "ank_pitch")
+    t0 = _STOP_ENTRANCE_S - 0.02
+    t1 = _STOP_ENTRANCE_S + 0.20
+    worst: dict[str, tuple] = {}
+    at_tick: dict[str, tuple] = {}
+    at_dt: dict[str, float] = {}
+    for item in asks:
+        jn = str(item[1])
+        if not jn.endswith(suffixes):
+            continue
+        t_item = float(item[0])
+        if t_item < t0 - 1e-9 or t_item > t1 + 1e-9:
+            continue
+        prev = worst.get(jn)
+        if prev is None or abs(float(item[3])) > abs(float(prev[3])):
+            worst[jn] = item
+        dt = abs(t_item - _STOP_ENTRANCE_S)
+        old = at_dt.get(jn)
+        if old is None or dt < old:
+            at_tick[jn] = item
+            at_dt[jn] = dt
+
+    def _corners(tag: str, t_key: float) -> None:
+        surf = by_surf.get(t_key)
+        lat = by_lat.get(t_key)
+        fn_l = float(lat["fn_l"]) if lat is not None else float("nan")
+        fn_r = float(lat["fn_r"]) if lat is not None else float("nan")
+        print(
+            f"PRED {name} entrance_load {tag} t {t_key:.3f} "
+            f"fn_l {fn_l:.2f} fn_r {fn_r:.2f}"
+        )
+        for side in ("L", "R"):
+            plane = surf.get(side) if isinstance(surf, dict) else None
+            plane_d = plane if isinstance(plane, dict) else None
+            corners = plane_d.get("corners") if isinstance(plane_d, dict) else None
+            if not isinstance(corners, tuple) or not corners:
+                print(f"PRED {name} entrance_corners side {side} {tag} missing")
+                continue
+            parts = " ".join(
+                f"{label} {float(z) * 1000.0:+.3f}" for label, z in corners
+            )
+            low = min(corners, key=lambda packed: float(packed[1]))
+            print(
+                f"PRED {name} entrance_corners side {side} {tag} "
+                f"t {t_key:.3f} {parts} "
+                f"low {low[0]} {float(low[1]) * 1000.0:+.3f} mm"
+            )
+
+    tick_item = at_tick.get("l_ank_pitch") or at_tick.get("r_hip_pitch")
+    if tick_item is not None:
+        _corners("engage", round(float(tick_item[0]), 5))
+    else:
+        print(f"PRED {name} entrance_load engage missing")
+    overs: list[str] = []
+    for jn in (
+        "l_hip_pitch", "r_hip_pitch",
+        "l_knee", "r_knee",
+        "l_ank_pitch", "r_ank_pitch",
+    ):
+        item = worst.get(jn)
+        if item is None:
+            print(f"PRED {name} entrance {jn} none")
+            overs.append(f"{jn} missing")
+            continue
+        ask = float(item[3])
+        over = abs(ask) > KNEE_NM + 1e-9
+        row = by_lat.get(round(float(item[0]), 5))
+        fn_l = float(row["fn_l"]) if row is not None else float("nan")
+        fn_r = float(row["fn_r"]) if row is not None else float("nan")
+        print(
+            f"PRED {name} entrance {jn} {ask:+.4f} "
+            f"t {float(item[0]):.3f} "
+            f"q {_ask_q(item):+.5f} q_des {float(item[2]):+.5f} "
+            f"kp_term {float(item[8]):+.4f} kv_term {float(item[9]):+.4f} "
+            f"fn_l {fn_l:.2f} fn_r {fn_r:.2f} ge_2.33 {int(over)}"
+        )
+        if over:
+            overs.append(f"{jn} {ask:+.4f} t {float(item[0]):.3f}")
+        named = at_tick.get(jn)
+        if named is None or named is item:
+            continue
+        nrow = by_lat.get(round(float(named[0]), 5))
+        print(
+            f"PRED {name} entrance_tick {jn} {float(named[3]):+.4f} "
+            f"t {float(named[0]):.3f} "
+            f"fn_l {float(nrow['fn_l']) if nrow is not None else float('nan'):.2f} "
+            f"fn_r {float(nrow['fn_r']) if nrow is not None else float('nan'):.2f}"
+        )
+    if overs:
+        print(
+            f"PRED {name} entrance Prefer FAIL. "
+            + " | ".join(overs)
+            + ". The continuous-walk seed stays off."
+        )
+        return
+    print(
+        f"PRED {name} entrance CLEAR. "
+        "Hip pitch, knee, and ankle pitch from the engage tick through "
+        "the catch stay at or under 2.33 Nm. "
+        "The continuous-walk seed stays off."
     )
 
 
