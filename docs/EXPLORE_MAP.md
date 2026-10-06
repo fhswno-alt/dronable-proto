@@ -161,6 +161,37 @@ OWLv2 `google/owlv2-base-patch16-ensemble` (`cfd3195ba4ea9592eec887ded089f4c08ef
 
 The five fresh hit losses are living rooms whose sofa or television fired together with a bed, a toilet, or a stove, so the tie-break returned none. The current-plant bedroom stayed living on a television score of **0.312** with the bed at **0.027**. The collapse count dropped because answers became none, not because kitchen, bathroom, and bedroom separated. Empty stays none. This is Prefer FAIL. The primary model stays Moondream2 with the frozen prompt.
 
+## Primary model swap (Prefer FAIL)
+
+The frozen prompt and the frozen labels stay. The question is still one word among kitchen, bathroom, living, bedroom, entrance, and none. A hedge stays undecided. This pass puts a different model in front of that question on the same 55 fresh stills and the same six current-plant stand files. The prompt is unchanged. A miss stays a miss.
+
+Moondream2 on those pixels, frozen prompt: fresh living-collapse **6/44**, named hits **47**, empty plant **none**, current-plant kitchen / bathroom / bedroom **living / living / living** (true **0/3**). CPU median **3.84 s** (range 1.56–5.52).
+
+Three candidates. None is wired.
+
+OWLv2 `google/owlv2-base-patch16-ensemble` (`cfd3195ba4ea9592eec887ded089f4c08eff231d`, apache-2.0) is the answer on every frame. Cutoff **0.10** and the object map are the tie-break rule above. A door is logged and is not a room. Two rooms at the cutoff return none. The vote is an object count. The model was not asked the which-room sentence. The per-frame vote is the tie-break secondary column, read here as the primary label. It was not run a second time.
+
+SmolVLM-256M `HuggingFaceTB/SmolVLM-256M-Instruct` revision `7e3e67edbbed1bf9888184d9df282b700a323964`, apache-2.0, weights sha256 `74dea5904032e5ae99a2e0eef5179e6ac0f1dedc3ab0c7c2a5d4d387c843203e`. Greedy decode (`do_sample` false), 24 new tokens, the same parser as `scripts/room_ask.py`.
+
+SmolVLM-500M `HuggingFaceTB/SmolVLM-500M-Instruct` revision `a7da5b986cb59b408707209984f360a5f4ad7e47`, apache-2.0, weights sha256 `d05b567eeaf534e83d375551f068ed57b5f52d37c657197f644af5ef9db091a2`. Same decode and the same parser.
+
+| Primary | Fresh living-collapse | Fresh named hits | Empty | Current-plant kitchen / bathroom / bedroom | True | CPU median s |
+|---------|----------------------|------------------|-------|--------------------------------------------|------|--------------|
+| Moondream2 frozen | 6/44 | 47 | none | living / living / living | 0/3 | 3.84 (1.56–5.52) |
+| OWLv2 ensemble object vote | 3/44 | 19 | none | none / none / living | 0/3 | object vote, untuned this pass |
+| SmolVLM-256M | 7/44 | 30 | bathroom | bathroom / kitchen / kitchen | 0/3 | 2.21 (1.89–2.69) |
+| SmolVLM-500M | 7/44 | 34 | kitchen | kitchen / kitchen / kitchen | 1/3 | 2.44 (1.96–2.99) |
+
+The OWLv2 living-collapse count is **3/44** because non-living frames became none. Named hits fell from **47** to **19**. Empty stays none. The current-plant trio is none / none / living, true **0/3**. Bedroom stayed living on television **0.312** with the bed at **0.027**. Kitchen fired bathtub **0.138** and television **0.123** together, so the vote is none. Bathroom toilet **0.055** stayed under **0.10**.
+
+SmolVLM-256M living-collapse is **7/44**. Named hits **30**. The old kit_cam plant frame and the current-plant empty stand both answered **Bathroom.** The current-plant trio is bathroom / kitchen / kitchen, true **0/3**. The door stand answered **Entrance.** CPU median **2.21 s** (range 1.89–2.69). The four old kit_cam furnished frames in the fresh set answered kitchen, bathroom, living, and bedroom. Those frames are the earlier plant. They are not the current-plant trio.
+
+SmolVLM-500M living-collapse is **7/44**. Named hits **34**. Both empty frames answered **Kitchen.** The door stand answered **Kitchen.** The current-plant kitchen, bathroom, living, and bedroom stands all answered **Kitchen.** The trio is kitchen / kitchen / kitchen, true **1/3**. CPU median **2.44 s** (range 1.96–2.99).
+
+Qwen2-VL-2B stayed unloaded. On torch 2.14.1+cpu, torchvision 0.29.1 raises `operator torchvision::nms does not exist`. That wheel stayed off this machine. The #46 selection-set SmolVLM figure (iTHOR named 9/20, prompt with no none word) is a different still set.
+
+No candidate kept empty as none and gave kitchen, bathroom, and bedroom different true labels. Named hits stayed below **47**. This is Prefer FAIL. The primary stays Moondream2 with the frozen prompt. This is not go-anywhere. Plant md5 stayed `207f3d5e9c6a72e16f7aa0c8d224f75e`.
+
 ## Post-stop settle (separate envelope)
 
 `ASK_STOP_S` stays **0.20 s**. A 1.0 s stand before the ask was measured with `ask_hold_s` on the empty plant, frozen prompt, same five vel windows. No backtrack was inserted. min up_z **0.934**. No fault. End mode stand. World at the stop **+2.944 m, +3.134 m**, yaw **+9.34 deg**. After the 1.2 s settle, **+2.944 m, +3.134 m**, yaw **+9.35 deg**. Plant md5 stayed `207f3d5e9c6a72e16f7aa0c8d224f75e`.
