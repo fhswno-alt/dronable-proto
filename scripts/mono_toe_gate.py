@@ -62,6 +62,12 @@ counts a point as inside the stand corridor until |sideways| passes
 0.1067 m. The only centers past that line are 0.57 m or more ahead,
 so widening the outside edge is not what stops these walks. No room
 collider was moved.
+
+A floor edge is not this latch. ``floor_edge_gate`` refuses a Day-1
+stop while Controls' swing-toe min is unset. The arm formula, written
+before that print, is swing-toe min minus 0.002 m. The measured
+``col_mat_rug`` top of 0.012 m is a step-on and does not arm. p90 is
+not the arm. ``too_close`` is a separate flag and is not cleared here.
 """
 from __future__ import annotations
 
