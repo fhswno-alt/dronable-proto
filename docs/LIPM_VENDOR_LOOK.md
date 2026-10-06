@@ -1631,8 +1631,9 @@ The Day-1 latch calls `ray_corridor.estimate_hazard` and sends `stop`
 when the hit is inside that corridor and `toe_gap_m` is at or under
 `d_min`. `toe_gap_m` already subtracts the frozen 20 mm pad and the
 live step offset (+0.017 m on this walk). No 3–5 cm buffer is added.
-The pixel is still the sim projection of a stool-leg floor point, not
-an RGB finder.
+The latch in `walk_latch` still feeds that ray the sim projection of
+a stool-leg floor point. `hazard_finder` is the RGB path that does
+not. It is not wired to `stop`.
 
 On the kitchen yaw −0.25 walk the latch is `col_chair_stool_b_leg_2`,
 the leg the ankle hits. `leg_0` still reaches a forward `toe_gap` near
@@ -2090,4 +2091,59 @@ A Day-1 stop at the cue (issued at 1.904 s) has 0 prop contacts,
 min up_z 0.934, end xy +0.088, −0.005, yaw −5.9°, and a stop peak of
 +2.280 Nm on the right knee. That stop is first-sight. It is not this
 gate. Soft-pass is off. Not go-anywhere.
+
+RGB finder. `scripts/hazard_finder.py` returns the ray pixel from
+kit_cam RGB. The #65 wood test paints the floor. A stool leg on this
+mesh is the dark run that ends on that floor. `(u, v)` is the lowest
+pixel of that run in the blob's column, where the leg meets the floor.
+It is not the blob centre. A centre sits up the leg, and the ray from
+there lands long. `self_check` holds that: the floor pixel is row
+319.5 and its eye range is shorter than the same column at row 239.5.
+If the lowest pixel is the last row, the cue is `bottom_clipped` and
+`too_close`, and `u` and `v` are empty. No long range is emitted.
+`estimate_finder_hazard` passes a real pixel through
+`ray_corridor.estimate_hazard` with `HAZARD_PAD_M` 0.020. It does not
+call `stop`. Moondream's room ask does not return a pixel and is not
+called. `t_cue` is not `T_detect`. Head tilt stays off. Buffer stays
+off.
+
+Same kitchen yaw −0.25 walk, no stop. Contact is still
+`l_foot_contact` on `col_chair_stool_b_leg_2` at 6.824 s, 20.2 N.
+Step offset high water is +0.017 m on the right foot at 3.056 s.
+Head-tilt peak is 0.0005 rad. Plant md5 stays
+`207f3d5e9c6a72e16f7aa0c8d224f75e`.
+
+| Leg | samples | matched | miss | pixel err med / max | eye Δ med | both in corridor | GT in, finder out | finder in, GT out |
+| --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| `leg_2` | 101 | 82 | 19 | 5.2 / 47.6 px | −0.001 m | 32 | 0 | 1 |
+| `leg_0` | 85 | 73 | 12 | 12.1 / 40.4 px | +0.001 m | 0 | 0 | 0 |
+
+`leg_2` is in the corridor on the finder ray on every ranged sample
+where the sim projection is in the corridor. The two GT-in samples
+with no finder match are t = 4.600 s and 4.656 s, gaps 0.342 m and
+0.324 m, well above the 0.1263 m floor. The one finder-only corridor
+sample is t = 4.304 s, 3 px off, sideways −0.108 m to −0.100 m, gap
+still 0.37 m. It does not latch. The 13 long eye reads, +0.20 m to
++0.26 m, are all before t = 3.16 s, out of the corridor, and matched
+at 37–48 px. They are a wrong blob, not the column centre of the
+on-axis leg. From t = 5.752 s the on-axis finder eye is short by about
+1 cm.
+
+`leg_0` never enters the corridor under that noise. Its closest
+finder sideways is −0.204 m at t = 5.952 s (GT −0.247 m, 40 px). The
+pad-inflated edge of that hit is still about 0.10 m outside the right
+corridor edge. At t = 5.904 s the lowest pixel in the frame is that
+off-axis leg, row 478, gap 0.093 m, sideways −0.204 m, outside. The
+matched `leg_2` pixel at that same frame is already in the corridor
+at gap 0.112 m against a GT gap of 0.125 m. The single near-floor
+pixel therefore does not latch until t = 5.952 s, when `leg_2` is the
+lowest cue: pixel (274.5, 468.5), eye 0.152 m against GT 0.162 m, gap
+0.094 m against GT 0.108 m, sideways +0.066 m, in the corridor. That
+is 48 ms after the sim-projection compare would have fired, and 0.87 s
+before the 6.824 s contact. It is not a `leg_0` latch.
+
+The frame-edge flag starts at t = 6.056 s, column 267, once `leg_2`'s
+floor point has left the image. `u` and `v` are empty. A stop on that
+flag would be after the pixel latch, not instead of a range. Not
+kit-safe. Not go-anywhere. Soft-pass is off.
 
