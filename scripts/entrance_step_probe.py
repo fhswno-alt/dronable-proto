@@ -5498,15 +5498,14 @@ def _install_inflight_stop(
         if state.get("land_freeze_tick") and t > float(state.get("land_t", -1.0)) + 1e-6:
             session._land_freeze = False  # type: ignore[attr-defined]
             state["land_freeze_tick"] = False
-        # The knee catch is this double support. The ankle catch runs
-        # through that window. The next swing stays on the approach slew.
-        # Hip pitch is not these latches. Time wraps, so each latch
-        # clears once and stays clear.
-        if state.get("land_seen") and getattr(session, "_land_knee_on", False):
+        # Knee, hip pitch, and ankle pitch share the landing double
+        # support. Each latch clears once. Time wraps after that.
+        if state.get("land_seen") and (
+            getattr(session, "_land_knee_on", False)
+            or getattr(session, "_land_ank_on", False)
+        ):
             if float(walker.time) > float(walker.r_ssp_start) + 1e-9:
                 session._land_knee_on = False  # type: ignore[attr-defined]
-        if state.get("land_seen") and getattr(session, "_land_ank_on", False):
-            if t > float(getattr(session, "_land_ank_until", -1.0)) + 1e-9:
                 session._land_ank_on = False  # type: ignore[attr-defined]
         if (
             label != "stop"
@@ -5544,10 +5543,10 @@ def _install_inflight_stop(
                 print(
                     "PRED stop_land freeze planar+attitude at the last swing "
                     f"pose t {t:.3f}. The landing tick holds the live joint. "
-                    "The landing knee stays within one step of that joint "
-                    "through this double support. The landing ankle pitch "
-                    "stays within one step through the catch. Hip pitch "
-                    "stays on the engage catch. z stays live. "
+                    "The landing knee, ankle pitch, and hip pitch stay "
+                    "within one step of the live joint through this double "
+                    "support. Hip pitch then continues on the engage catch "
+                    "from that command. z stays live. "
                     "This is not a swing stretch."
                 )
         if label != "stop" and walking and not state.get("entrance_seen"):
@@ -12332,7 +12331,7 @@ def _install_sagittal_slew(
             return False
         if not jn.startswith("l_"):
             return False
-        if jn.endswith("knee"):
+        if jn.endswith(("hip_pitch", "knee")):
             return bool(getattr(session, "_land_knee_on", False))
         if jn.endswith("ank_pitch"):
             return bool(getattr(session, "_land_ank_on", False))
@@ -12347,9 +12346,10 @@ def _install_sagittal_slew(
         """
         t_now = float(lipm.data.time)
         last = land_at.get(jn)
-        # The engage catch must not resume this joint from its stale
-        # command once the leg is stance again.
-        entrance_done.add(jn)
+        # Knee and ankle pitch must not resume the engage command. Hip
+        # pitch hands this step back to that catch.
+        if not jn.endswith("hip_pitch"):
+            entrance_done.add(jn)
         if last is None or t_now - last >= ctrl_period - 1e-4:
             old = land_cmd.get(jn)
             if old is None:
@@ -12377,7 +12377,10 @@ def _install_sagittal_slew(
                     land_done.add(jn)
             land_cmd[jn] = float(stepped)
             land_at[jn] = t_now
-            if jn.endswith(("knee", "ank_pitch")):
+            if jn.endswith("hip_pitch"):
+                entrance_cmd[jn] = float(stepped)
+                entrance_at[jn] = t_now
+            else:
                 prev[jn] = float(stepped)
         return float(land_cmd[jn])
 
@@ -12708,9 +12711,9 @@ def _install_sagittal_slew(
             f"{float(rad_s):.3f} rad/s on the landing knee and ankle pitch. "
             "The first landing tick holds that joint. Planar x/y and sole "
             "roll/pitch/yaw hold the last swing pose on that tick. "
-            "The knee stays within one step of the live joint through "
-            "that double support. The ankle pitch stays within one step "
-            "through the catch. Hip pitch stays on the engage catch. "
+            "The knee, ankle pitch, and hip pitch stay within one step "
+            "of the live joint through that double support. Hip pitch "
+            "then continues on the engage catch from that command. "
             "z stays live. The walk ladder stays off this bout."
         )
     if "hip_pitch" in suffixes:
@@ -14328,10 +14331,10 @@ def score_sag_stop() -> None:
         "is not the continuous-walk seed. "
         "At the first landing double support the last swing foot's planar "
         "and attitude hold for one tick. That tick holds the live joint. "
-        "The landing knee then stays within one step of the live joint "
-        "through that double support. The landing ankle pitch stays "
-        "within one step through the catch. Hip pitch stays on the engage "
-        "catch. z stays live. That catch is not a swing stretch. "
+        "The landing knee, ankle pitch, and hip pitch then stay within "
+        "one step of the live joint through that double support. Hip "
+        "pitch then continues on the engage catch from that command. "
+        "z stays live. That catch is not a swing stretch. "
         "Before the stop, the approach swing-z is time-stretched on its own "
         "rate so the airborne knee can track. That delta is off from the "
         "stop command. The leftover swing-z is time-stretched so the knee "
