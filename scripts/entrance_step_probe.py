@@ -59,7 +59,7 @@ _WALK_KNEE_RATE = 1.75
 _WALK_HIP_PITCH_RATE = 1.90
 # Loaded knee only, from toe-off through this single-support fraction.
 # Mid-stance stays on _WALK_KNEE_RATE. DSP and the stop stay off this rate.
-_WALK_EARLY_KNEE_RATE = 1.55
+_WALK_EARLY_KNEE_RATE = 1.60
 _WALK_EARLY_FRAC = 0.13
 _WALK_EARLY_LOG_FRAC = 0.115
 # Locked 1.55 copy, no hip slew, CoM tick 2.200 s: stance corner −2.564 mm.
