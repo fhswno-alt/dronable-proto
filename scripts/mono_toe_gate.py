@@ -709,6 +709,22 @@ def _print_result(result: dict[str, object], t_detect: float, mode: str) -> None
         print(line)
 
 
+def _prop_floor_centers(
+    model: mj.MjModel, data: mj.MjData,
+) -> list[tuple[str, np.ndarray]]:
+    """Report-only floor centers of non-wall colliders. Not a stop input."""
+    rows: list[tuple[str, np.ndarray]] = []
+    for gid in range(model.ngeom):
+        name = mj.mj_id2name(model, mj.mjtObj.mjOBJ_GEOM, gid) or ""
+        if not name.startswith("col_") or _is_wall(name):
+            continue
+        center = np.asarray(data.geom_xpos[gid], dtype=np.float64)
+        point = center.copy()
+        point[2] = 0.0
+        rows.append((name, point))
+    return rows
+
+
 def _leg_floor_centers(
     model: mj.MjModel, data: mj.MjData,
 ) -> list[tuple[str, np.ndarray]]:
@@ -1014,6 +1030,8 @@ def walk_finder(
     t_detect: float,
     t_end: float = 9.0,
     long_read_m: float = 0.0,
+    scene: Path | None = None,
+    yaw_rate: float | None = None,
 ) -> dict[str, object]:
     """Day-1 stop on the shortest in-corridor finder gap. Pad stays 0.020.
 
@@ -1028,12 +1046,18 @@ def walk_finder(
     alone. A positive value adds that many metres to the toe gap of
     the floor point that first reached d_min + 0.05, on the next
     frame only. The match is the floor position, not a leg name.
+
+    ``scene`` and ``yaw_rate`` select the room and the commanded yaw.
+    The default is the kitchen walk at −0.25. The stop rule does not
+    change with the room.
     """
-    if not SCENE.is_file():
-        raise SystemExit(f"missing kitchen scene {SCENE}")
+    scene_path = SCENE if scene is None else scene
+    yaw_cmd = -sw.YAW_RATE_CAP if yaw_rate is None else yaw_rate
+    if not scene_path.is_file():
+        raise SystemExit(f"missing scene {scene_path}")
     if abs(rc.HAZARD_PAD_M - 0.020) > 1e-12:
         raise SystemExit(f"pad moved to {rc.HAZARD_PAD_M}")
-    session = sw.SteerSession(video=False, scene_xml=SCENE, lipm=sw.locked_kit_config())
+    session = sw.SteerSession(video=False, scene_xml=scene_path, lipm=sw.locked_kit_config())
     model = session.model
     cid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_CAMERA, "kit_cam")
     jid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, "head_tilt")
@@ -1079,7 +1103,7 @@ def walk_finder(
     mj.mj_step = hook
     driver = sw.ScriptedDriver((
         sw.DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
-        sw.DemoSegment(t_end, "vel", sw.VX_FWD_CAP, -sw.YAW_RATE_CAP, "turn"),
+        sw.DemoSegment(t_end, "vel", sw.VX_FWD_CAP, yaw_cmd, "turn"),
     ))
     gate = rc.d_min(t_detect)
     reach: list[tuple[float, float, float]] = []
@@ -1329,7 +1353,7 @@ def walk_finder(
                     def report_leg(hit_xy: tuple[float, float]) -> tuple[str, float]:
                         best_name = "none"
                         best = 1e9
-                        for leg, point in _leg_floor_centers(model, data):
+                        for leg, point in _prop_floor_centers(model, data):
                             apart = math.hypot(hit_xy[0] - point[0], hit_xy[1] - point[1])
                             if apart < best:
                                 best = apart
@@ -1339,7 +1363,7 @@ def walk_finder(
                     leg_name, leg_dist = report_leg(chosen.hit_xy)
                     true_m = None
                     gt_gap = None
-                    for leg, point in _leg_floor_centers(model, data):
+                    for leg, point in _prop_floor_centers(model, data):
                         if leg != leg_name:
                             continue
                         true_m = float(math.hypot(point[0] - cam[0], point[1] - cam[1]))
@@ -1421,8 +1445,11 @@ def walk_finder(
     late = None if issued is None or sim_t is None else issued - sim_t
     cue_t = CUE_LATCH_S.get(t_detect)
     late_cue = None if issued is None or cue_t is None else issued - cue_t
+    walk_worst = max(peaks.items(), key=lambda kv: abs(kv[1][0])) if peaks else None
     return {
         "plant": sw._md5(sw.PLANT_XML),
+        "scene": scene_path.name,
+        "yaw_cmd": yaw_cmd,
         "t_detect": t_detect,
         "d_min": gate,
         "issued": issued,
@@ -1436,6 +1463,7 @@ def walk_finder(
         "min_up_z": session.min_up_z,
         "min_foot_leg": None if min_foot_leg > 10 else min_foot_leg,
         "stop_worst": None if stop_worst is None else (stop_worst[0], stop_worst[1][0], stop_worst[1][1]),
+        "walk_worst": None if walk_worst is None else (walk_worst[0], walk_worst[1][0], walk_worst[1][1]),
         "stop_over": len(stop_over),
         "step_off": _high_water(reach),
         "head_tilt_peak": head_tilt_peak,
@@ -1469,7 +1497,8 @@ def _print_finder(result: dict[str, object]) -> None:
     step = result["step_off"]
     assert isinstance(step, tuple)
     print(
-        f"plant {result['plant']} mode=finder T_detect={result['t_detect']} "
+        f"plant {result['plant']} mode=finder scene={result['scene']} "
+        f"yaw_cmd={result['yaw_cmd']:+.3f} T_detect={result['t_detect']} "
         f"d_min={result['d_min']:.4f} buffer=0 pad={rc.HAZARD_PAD_M:.3f} "
         f"assoc={TRACK_JOIN_M:.3f} "
         f"step_off={step[0]:+.3f} {step[1]} t={step[2]:.3f} "
@@ -1482,7 +1511,8 @@ def _print_finder(result: dict[str, object]) -> None:
         f"contact={result['contact']} T_stop_run={result['t_stop']} "
         f"min_up_z={result['min_up_z']:.3f} min_foot_leg={result['min_foot_leg']} "
         f"yaw={result['yaw']:+.1f} head_tilt_peak={result['head_tilt_peak']:.4f} "
-        f"stop_worst={result['stop_worst']} stop_over={result['stop_over']} "
+        f"stop_worst={result['stop_worst']} walk_worst={result['walk_worst']} "
+        f"stop_over={result['stop_over']} "
         f"fire_eye_bias={result['fire_eye_bias']} fire_gap_bias={result['fire_gap_bias']} "
         f"fire_true={result['fire_true']} "
         f"bias n={result['bias_n']} long={result['bias_long']} "
@@ -1513,8 +1543,134 @@ def _print_latch(result: dict[str, object]) -> None:
     )
 
 
+def walk_open(scene: Path, yaw_rate: float, t_end: float = 9.0) -> dict[str, object]:
+    """Unstopped walk. Names the first prop contact. Not a second gate."""
+    if not scene.is_file():
+        raise SystemExit(f"missing scene {scene}")
+    session = sw.SteerSession(video=False, scene_xml=scene, lipm=sw.locked_kit_config())
+    model = session.model
+    real = mj.mj_step
+    contact: tuple[float, str, str, float] | None = None
+
+    def hook(m: mj.MjModel, d: mj.MjData) -> None:
+        nonlocal contact
+        real(m, d)
+        if contact is not None:
+            return
+        hit = _prop_hit(m, d)
+        if hit is not None:
+            contact = (float(d.time), hit[0], hit[1], hit[2])
+
+    mj.mj_step = hook
+    driver = sw.ScriptedDriver((
+        sw.DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+        sw.DemoSegment(t_end, "vel", sw.VX_FWD_CAP, yaw_rate, "open"),
+    ))
+    props = 0
+    for gid in range(model.ngeom):
+        name = mj.mj_id2name(model, mj.mjtObj.mjOBJ_GEOM, gid) or ""
+        if name.startswith("col_") and not _is_wall(name):
+            props += 1
+    try:
+        while float(session.data.time) < t_end - 1e-9:
+            now = float(session.data.time)
+            if contact is None:
+                driver.publish(session.bus, now)
+            session.step()
+            if contact is not None:
+                break
+    finally:
+        mj.mj_step = real
+    return {
+        "props": props,
+        "contact": contact,
+        "x": float(session.data.qpos[0]),
+        "y": float(session.data.qpos[1]),
+        "yaw": math.degrees(session.yaw()),
+        "min_up_z": session.min_up_z,
+        "t": float(session.data.time),
+    }
+
+
+def _rooms() -> None:
+    """Same Day-1 finder chain on every furnished room and approach.
+
+    T_detect is 0, the floor of d_min. The stop rule is unchanged.
+    """
+    hf.self_check()
+    rc.self_check()
+    want_room = sys.argv[2] if len(sys.argv) > 2 else ""
+    want_yaw = sys.argv[3] if len(sys.argv) > 3 else ""
+    rooms = ("kitchen", "bathroom", "living", "bedroom", "entrance")
+    bouts = (
+        ("straight", 0.0),
+        ("left", -sw.YAW_RATE_CAP),
+        ("right", sw.YAW_RATE_CAP),
+    )
+    root = Path("/tmp/m62/mujoco")
+    for room in rooms:
+        if want_room and room != want_room:
+            continue
+        scene = root / f"room_{room}.xml"
+        for label, yaw in bouts:
+            if want_yaw and label != want_yaw:
+                continue
+            opened = walk_open(scene, yaw)
+            print(
+                f"OPEN room={room} approach={label} yaw_cmd={yaw:+.3f} "
+                f"props={opened['props']} contact={opened['contact']} "
+                f"t={opened['t']:.3f} xy={opened['x']:+.3f},{opened['y']:+.3f} "
+                f"yaw={opened['yaw']:+.1f} min_up_z={opened['min_up_z']:.3f}",
+                flush=True,
+            )
+            result = walk_finder(0.0, scene=scene, yaw_rate=yaw)
+            _print_finder(result)
+            reason = str(result["reason"])
+            report = "none"
+            if "report=" in reason:
+                report = reason.split("report=", 1)[1].split(" ", 1)[0]
+            open_hit = opened["contact"]
+            open_name = None if open_hit is None else open_hit[2]
+            print(
+                f"BOUT room={room} approach={label} stop={result['issued']} "
+                f"path={result['path']} latch={report} "
+                f"finder_contact={result['contact']} open_contact={open_name} "
+                f"stop_worst={result['stop_worst']} stop_over={result['stop_over']} "
+                f"walk_worst={result['walk_worst']} too_close={result['too_close']}",
+                flush=True,
+            )
+
+
 def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else "gate"
+    if mode == "rooms-open":
+        want_room = sys.argv[2] if len(sys.argv) > 2 else ""
+        want_yaw = sys.argv[3] if len(sys.argv) > 3 else ""
+        root = Path("/tmp/m62/mujoco")
+        bouts = (
+            ("straight", 0.0),
+            ("left", -sw.YAW_RATE_CAP),
+            ("right", sw.YAW_RATE_CAP),
+        )
+        for room in ("kitchen", "bathroom", "living", "bedroom", "entrance"):
+            if want_room and room != want_room:
+                continue
+            scene = root / f"room_{room}.xml"
+            for label, yaw in bouts:
+                if want_yaw and label != want_yaw:
+                    continue
+                opened = walk_open(scene, yaw)
+                print(
+                    f"OPEN room={room} approach={label} yaw_cmd={yaw:+.3f} "
+                    f"props={opened['props']} contact={opened['contact']} "
+                    f"t={opened['t']:.3f} xy={opened['x']:+.3f},{opened['y']:+.3f} "
+                    f"yaw={opened['yaw']:+.1f} min_up_z={opened['min_up_z']:.3f}",
+                    flush=True,
+                )
+        return
+    if mode == "rooms":
+        _rooms()
+        return
     if mode == "finder":
         hf.self_check()
         rc.self_check()
