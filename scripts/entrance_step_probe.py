@@ -177,6 +177,78 @@ def _hook_clear(session: sw.SteerSession) -> None:
     lipm._tick_gait_manager = wrapped  # type: ignore[method-assign]
 
 
+# Measured stance hip cmd-q at the peak of the scuff swing. Left stance
+# -0.0566 rad, right stance +0.0566 rad. This is not the 1.29 Nm / 40
+# feed-forward. That term stays off.
+HIP_FF_L = -0.0566
+HIP_FF_R = 0.0566
+
+
+def _install_bezier_early(session: sw.SteerSession, peak_m: float) -> None:
+    """Phase-local early bump. Zero at toe-off and at 40% of swing.
+
+    The peak sits at 20% of single support. It is not a flat +12 or +20 mm
+    held across the swing, and it does not change gm_z_m.
+    """
+    lipm = session.lipm
+    if lipm is None or lipm.op3 is None:
+        return
+    walker = lipm.op3
+    orig_r = walker._right_z
+    orig_l = walker._left_z
+
+    def _bump(base: float, t: float, start: float, end: float) -> float:
+        span = end - start
+        if span <= 1e-6 or not (start < t <= end):
+            return base
+        frac = (t - start) / span
+        if frac <= 0.0 or frac > 0.40:
+            return base
+        s = frac / 0.40
+        return base + 4.0 * s * (1.0 - s) * peak_m
+
+    def right_z(t: float) -> float:
+        return _bump(orig_r(t), t, walker.r_ssp_start, walker.r_ssp_end)
+
+    def left_z(t: float) -> float:
+        return _bump(orig_l(t), t, walker.l_ssp_start, walker.l_ssp_end)
+
+    walker._right_z = right_z  # type: ignore[method-assign]
+    walker._left_z = left_z  # type: ignore[method-assign]
+
+
+def _hook_hip_ff(session: sw.SteerSession) -> None:
+    """Shift the stance hip-roll target by the measured cmd-q error.
+
+    The gait command is unchanged in intent. The target moves by the
+    spring deflection the hip was already carrying, so the joint can sit
+    on the old target. kp, damping, armature, and forcerange stay put.
+    The 1.29/40 rad term is not added.
+    """
+    lipm = session.lipm
+    if lipm is None:
+        return
+    orig = lipm._tick_gait_manager
+
+    def wrapped(walking: bool) -> None:
+        orig(walking)
+        if not walking or session.bus.fault:
+            return
+        swing = lipm._gm_swing
+        if swing not in ("L", "R"):
+            return
+        stance = "L" if swing == "R" else "R"
+        bias = HIP_FF_L if stance == "L" else HIP_FF_R
+        name = ("l_" if stance == "L" else "r_") + "hip_roll_pos"
+        idx = lipm.act_idx[name]
+        lo = float(session.model.actuator_ctrlrange[idx, 0])
+        hi = float(session.model.actuator_ctrlrange[idx, 1])
+        cmd = float(session.data.ctrl[idx]) + bias
+        session.data.ctrl[idx] = min(hi, max(lo, cmd))
+
+    lipm._tick_gait_manager = wrapped  # type: ignore[method-assign]
+
+
 def _install_early_z(session: sw.SteerSession, extra_m: float) -> None:
     """Add hip-frame z from toe-off through 40% of single support.
 
@@ -390,6 +462,44 @@ def _mid_frac(walker: object, side: str, t_cmd: float) -> float | None:
     return (t_cmd - start) / span
 
 
+def _pelvis_roll(session: sw.SteerSession) -> float:
+    rot = np.asarray(session.data.xmat[session.bid_body], dtype=np.float64).reshape(3, 3)
+    return math.atan2(float(rot[2, 1]), float(rot[2, 2]))
+
+
+def _roll_sample(
+    session: sw.SteerSession, t: float, swing: str,
+) -> tuple[float, str, float, float, float, float, float, float, float]:
+    stance = "L" if swing == "R" else "R"
+    pref = "l_" if stance == "L" else "r_"
+    hip_q, hip_c, hip_f = _joint_qcf(session, pref + "hip_roll")
+    ank_q, ank_c, ank_f = _joint_qcf(session, pref + "ank_roll")
+    return (t, stance, _pelvis_roll(session), hip_q, hip_c, hip_f, ank_q, ank_c, ank_f)
+
+
+def _roll_note(
+    rows: list[tuple[float, str, float, float, float, float, float, float, float]],
+) -> str:
+    if not rows:
+        return ""
+    window = [row for row in rows if 3.344 - 1e-3 <= row[0] <= 3.536 + 1e-3]
+    use = window or rows
+    hip = max(use, key=lambda row: abs(row[5]))
+    ank = max(use, key=lambda row: abs(row[8]))
+    hip_err = max(use, key=lambda row: abs(row[4] - row[3]))
+    ank_err = max(use, key=lambda row: abs(row[7] - row[6]))
+    at = min(use, key=lambda row: abs(row[0] - 3.384))
+    roll_peak = max(use, key=lambda row: abs(row[2]))
+    return (
+        f"window {use[0][0]:.3f}-{use[-1][0]:.3f} "
+        f"roll_at_3.384 {at[2]:.4f} roll_peak {roll_peak[2]:.4f} t_roll {roll_peak[0]:.3f} "
+        f"hip_tau {hip[5]:.4f} t_hip {hip[0]:.3f} hip_q {hip[3]:.4f} hip_ctrl {hip[4]:.4f} "
+        f"hip_abs_err {abs(hip_err[4] - hip_err[3]):.4f} t_hip_err {hip_err[0]:.3f} "
+        f"ank_tau {ank[8]:.4f} t_ank {ank[0]:.3f} ank_q {ank[6]:.4f} ank_ctrl {ank[7]:.4f} "
+        f"ank_abs_err {abs(ank_err[7] - ank_err[6]):.4f} t_ank_err {ank_err[0]:.3f}"
+    )
+
+
 def run_one(
     name: str,
     *,
@@ -414,6 +524,11 @@ def run_one(
         _install_mid_z(session, z_extra)
     elif mode == "zearly":
         _install_early_z(session, z_extra)
+    elif mode == "hipff":
+        _hook_hip_ff(session)
+    elif mode == "hipbez":
+        _hook_hip_ff(session)
+        _install_bezier_early(session, z_extra)
     elif mode == "dropflat":
         DROP_RESIDUAL.clear()
         _hook_drop_flat(session, rug)
@@ -443,11 +558,30 @@ def run_one(
     edge_ticks = 0
     real_step = mj.mj_step
     seen_fault = False
+    leg_peak = 0.0
+    leg_name = ""
+    leg_t = 0.0
+    walk_leg = 0.0
+    walk_leg_name = ""
+    walk_leg_t = 0.0
+    roll_rows: list[tuple[float, str, float, float, float, float, float, float, float]] = []
 
     def _hook(model: mj.MjModel, data: mj.MjData) -> None:
         nonlocal ank_peak, ank_name, ank_t, walk_peak, walk_name, walk_t
         nonlocal knee_peak, knee_name, knee_t, walk_knee, walk_knee_name, walk_knee_t
+        nonlocal leg_peak, leg_name, leg_t, walk_leg, walk_leg_name, walk_leg_t
         real_step(model, data)
+        lforce, lact, lwhen = _named_force(
+            session, ("hip_yaw", "hip_roll", "hip_pitch", "knee", "ank_pitch", "ank_roll"),
+        )
+        if abs(lforce) > abs(leg_peak):
+            leg_peak = lforce
+            leg_name = lact
+            leg_t = lwhen
+        if not seen_fault and abs(lforce) > abs(walk_leg):
+            walk_leg = lforce
+            walk_leg_name = lact
+            walk_leg_t = lwhen
         force, act, when = _ankle_peak(session)
         if abs(force) > abs(ank_peak):
             ank_peak = force
@@ -475,10 +609,12 @@ def run_one(
             t = float(session.data.time)
             swing = session.lipm._gm_swing if session.lipm is not None else None
             toe_z = _leading_toe_z(session, swing) if swing in ("L", "R") else None
-            if mode in ("zmid", "zearly") and swing in ("L", "R") and session.lipm is not None and session.lipm.op3 is not None:
+            if mode in ("hipff", "hipbez") and swing in ("L", "R") and t < T_BAR:
+                roll_rows.append(_roll_sample(session, t, swing))
+            if mode in ("zmid", "zearly", "hipbez") and swing in ("L", "R") and session.lipm is not None and session.lipm.op3 is not None:
                 walker = session.lipm.op3
                 frac = _mid_frac(walker, swing, _cmd_time(walker))
-                lo, hi = (0.20, 0.30) if mode == "zearly" else (0.20, 0.80)
+                lo, hi = (0.20, 0.30) if mode in ("zearly", "hipbez") else (0.20, 0.80)
                 if frac is not None and lo - 1e-12 <= frac <= hi + 1e-12 and t < T_BAR:
                     # ctrl has been slewed. The gait goal was the pre-slew write.
                     # Re-read the live OP3 pose at the command time and FK that.
@@ -572,6 +708,15 @@ def run_one(
         "air_at_7_560": air_at_bar,
         "bars": bars,
         "clear": clear,
+        "leg_peak_nm": leg_peak,
+        "leg_name": leg_name,
+        "leg_t": leg_t,
+        "walk_leg_nm": walk_leg,
+        "walk_leg_name": walk_leg_name,
+        "walk_leg_t": walk_leg_t,
+        "legs_under_2_33": bool(abs(walk_leg) < KNEE_NM),
+        "hit_plant_rail": bool(abs(leg_peak) >= PLANT_NM - 1e-3),
+        "roll_note": _roll_note(roll_rows),
         "x": float(session.data.qpos[0]),
         "z_extra_m": z_extra,
         "cmd_toe_min_m": min((z for _t, z in cmd_leads), default=float("nan")),
