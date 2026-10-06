@@ -25,8 +25,11 @@ hairline edge, or a wide silhouette is not a leg. ``too_close`` is
 that flag only for a clip
 whose last-row column rays into the foot corridor. A last-row dark blob
 outside the corridor is not a near-floor leg, and the flag is cleared.
-Controls latches Day-1 ``stop`` on the flag that remains. This module
-does not send ``stop``.
+A later in-corridor hit is dropped when that stance already has a
+floor point from the same gait phase and the new point is farther
+than the body has walked since then, plus a small margin. The first
+sighting, with no prior point, is emitted. Controls latches Day-1
+``stop`` on the flag that remains. This module does not send ``stop``.
 
 Moondream's room ask does not return a pixel. It is not called here.
 ``t_cue`` is not ``T_detect``. ``HAZARD_PAD_M`` stays 0.020 and is
@@ -35,6 +38,7 @@ The 3–5 cm buffer is not applied. Soft-pass is off.
 """
 from __future__ import annotations
 
+import math
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -75,6 +79,13 @@ COLUMN_GAP = 12
 ROW_JOIN = 56
 CLIP_SPLIT = 8
 WOOD_GAP_PX = 3
+# A same-stance hit farther than the body walked since that sample, plus
+# this margin, is texture drift. Coffee and the stool move 0.002–0.014 m.
+# The false clips jump about 0.22 m. 0.08 is inside 0.05–0.10.
+PHASE_DRIFT_MARGIN_M = 0.08
+# Third 8 ms tick of a shift bout. That is the steady one-foot sample.
+# The both-feet exchange is a different pitch and is not this sample.
+PHASE_SAMPLE_TICK = 3
 SOURCE = "rgb_wood_leg"
 
 
@@ -301,6 +312,172 @@ def corridor_gate_cues(
     return tuple(gated)
 
 
+@dataclass
+class _StanceHit:
+    xy: tuple[float, float]
+    body_xy: tuple[float, float]
+
+
+class SamePhaseFloor:
+    """Emit a first sighting. Drop a same-stance floor point that jumped.
+
+    The ray already applies this frame's pitch, roll, and head tilt.
+    Memory is the in-corridor hits from the third tick of a shift bout,
+    keyed by stance. A stance with no stored point emits every cue.
+    A hit farther than the body has walked since that sample, plus
+    ``PHASE_DRIFT_MARGIN_M``, is not emitted and is not written back.
+    Leaving the jumped point out of memory keeps the next tick from
+    matching it. Width and span are not read here. This does not send
+    ``stop``.
+    """
+
+    def __init__(self) -> None:
+        self._hits: dict[str, list[_StanceHit]] = {}
+        self._in_shift = False
+        self._shift_ticks = 0
+
+    def apply(
+        self,
+        cues: tuple[HazardCue, ...],
+        *,
+        phase: str,
+        stance: str,
+        body_xy: tuple[float, float],
+        cam: rc.KitCamPose,
+        body: rc.BodyFrame,
+        imu_roll_rad: float,
+        imu_pitch_rad: float,
+        head_tilt_rad: float,
+        yaw_rate: float,
+        step_off_m: float,
+        head_pan_rad: float = 0.0,
+    ) -> tuple[HazardCue, ...]:
+        sample = self._sample_now(phase)
+        prior = self._hits.get(stance, [])
+        kept: list[HazardCue] = []
+        accepted: list[tuple[float, float]] = []
+        for cue in cues:
+            hit = _in_corridor_hit(
+                cue,
+                cam=cam,
+                body=body,
+                imu_roll_rad=imu_roll_rad,
+                imu_pitch_rad=imu_pitch_rad,
+                head_tilt_rad=head_tilt_rad,
+                yaw_rate=yaw_rate,
+                step_off_m=step_off_m,
+                head_pan_rad=head_pan_rad,
+            )
+            if hit is None:
+                kept.append(cue)
+                continue
+            if _jumped(hit, prior, body_xy):
+                if cue.too_close:
+                    kept.append(replace(cue, too_close=False))
+                continue
+            kept.append(cue)
+            accepted.append(hit)
+        if sample:
+            self._commit(stance, prior, accepted, body_xy)
+        return tuple(kept)
+
+    def _sample_now(self, phase: str) -> bool:
+        if phase != "shift":
+            self._in_shift = False
+            self._shift_ticks = 0
+            return False
+        if not self._in_shift:
+            self._in_shift = True
+            self._shift_ticks = 0
+        self._shift_ticks += 1
+        return self._shift_ticks == PHASE_SAMPLE_TICK
+
+    def _commit(
+        self,
+        stance: str,
+        prior: list[_StanceHit],
+        accepted: list[tuple[float, float]],
+        body_xy: tuple[float, float],
+    ) -> None:
+        mem = list(prior)
+        used: set[int] = set()
+        fresh: list[_StanceHit] = []
+        for hit in accepted:
+            if mem:
+                best_i = min(
+                    range(len(mem)),
+                    key=lambda i: math.hypot(hit[0] - mem[i].xy[0], hit[1] - mem[i].xy[1]),
+                )
+                dist = math.hypot(hit[0] - mem[best_i].xy[0], hit[1] - mem[best_i].xy[1])
+                walked = math.hypot(
+                    body_xy[0] - mem[best_i].body_xy[0],
+                    body_xy[1] - mem[best_i].body_xy[1],
+                )
+                if dist <= walked + PHASE_DRIFT_MARGIN_M and best_i not in used:
+                    mem[best_i] = _StanceHit(hit, body_xy)
+                    used.add(best_i)
+                    continue
+            fresh.append(_StanceHit(hit, body_xy))
+        mem.extend(fresh)
+        self._hits[stance] = mem
+
+
+def _in_corridor_hit(
+    cue: HazardCue,
+    *,
+    cam: rc.KitCamPose,
+    body: rc.BodyFrame,
+    imu_roll_rad: float,
+    imu_pitch_rad: float,
+    head_tilt_rad: float,
+    yaw_rate: float,
+    step_off_m: float,
+    head_pan_rad: float,
+) -> tuple[float, float] | None:
+    """Tilt-corrected floor point, or None when the cue is outside."""
+    if cue.too_close:
+        u = float(cue.column) + 0.5
+        v = float(rc.HEIGHT) - 0.5
+    elif cue.u is None or cue.v is None:
+        return None
+    else:
+        u = float(cue.u)
+        v = float(cue.v)
+    estimate = rc.estimate_hazard(
+        u,
+        v,
+        cam=cam,
+        body=body,
+        imu_roll_rad=imu_roll_rad,
+        imu_pitch_rad=imu_pitch_rad,
+        head_tilt_rad=head_tilt_rad,
+        yaw_rate=yaw_rate,
+        step_off_m=step_off_m,
+        hazard_pad_m=rc.HAZARD_PAD_M,
+        head_pan_rad=head_pan_rad,
+    )
+    if estimate is None or not estimate.in_corridor:
+        return None
+    return estimate.hit_xy_m
+
+
+def _jumped(
+    hit: tuple[float, float],
+    prior: list[_StanceHit],
+    body_xy: tuple[float, float],
+) -> bool:
+    """True when a stored same-stance point cannot explain this hit."""
+    if not prior:
+        return False
+    best = min(
+        prior,
+        key=lambda item: math.hypot(hit[0] - item.xy[0], hit[1] - item.xy[1]),
+    )
+    dist = math.hypot(hit[0] - best.xy[0], hit[1] - best.xy[1])
+    walked = math.hypot(body_xy[0] - best.body_xy[0], body_xy[1] - best.body_xy[1])
+    return dist > walked + PHASE_DRIFT_MARGIN_M
+
+
 def find_hazard_pixel(rgb: np.ndarray) -> HazardCue | None:
     """The near-floor cue: the lowest contact in the frame.
 
@@ -476,6 +653,94 @@ def self_check() -> None:
         raise SystemExit("self_check left a side clip as too_close")
     if not kept[1].bottom_clipped:
         raise SystemExit("self_check emitted a ray for a side clip")
+    _check_same_phase_floor(cam, body)
+
+
+def _check_same_phase_floor(cam: rc.KitCamPose, body: rc.BodyFrame) -> None:
+    """First sighting stays. A 0.22 m jump against a walked body does not."""
+    common = dict(
+        cam=cam,
+        body=body,
+        imu_roll_rad=0.0,
+        imu_pitch_rad=-0.26,
+        head_tilt_rad=0.0,
+        yaw_rate=0.0,
+        step_off_m=0.017,
+        head_pan_rad=0.0,
+    )
+    near = HazardCue(320.5, 460.5, False, False, 320, 460, 180, 16, SOURCE)
+    near_hit = _in_corridor_hit(near, **common)
+    if near_hit is None:
+        raise SystemExit("self_check phase floor missed the near pixel")
+    far: HazardCue | None = None
+    far_hit: tuple[float, float] | None = None
+    for row in range(180, 450, 8):
+        cue = HazardCue(320.5, float(row) + 0.5, False, False, 320, row, 180, 16, SOURCE)
+        hit = _in_corridor_hit(cue, **common)
+        if hit is None:
+            continue
+        if math.hypot(hit[0] - near_hit[0], hit[1] - near_hit[1]) > 0.22:
+            far = cue
+            far_hit = hit
+            break
+    if far is None or far_hit is None:
+        raise SystemExit("self_check phase floor found no 0.22 m pixel")
+    origin = (0.0, 0.0)
+    gate = SamePhaseFloor()
+    for _tick in range(2):
+        out = gate.apply((near,), phase="shift", stance="L", body_xy=origin, **common)
+        if out != (near,):
+            raise SystemExit("self_check dropped a first sighting")
+    out = gate.apply((far,), phase="swing", stance="L", body_xy=origin, **common)
+    if out != (far,):
+        raise SystemExit("self_check dropped a first sighting with no stored point")
+    for _tick in range(PHASE_SAMPLE_TICK):
+        out = gate.apply((near,), phase="shift", stance="L", body_xy=origin, **common)
+        if out != (near,):
+            raise SystemExit("self_check dropped the sample that stores the first hit")
+    walked = (0.08, 0.0)
+    out = gate.apply((near,), phase="swing", stance="L", body_xy=walked, **common)
+    if out != (near,):
+        raise SystemExit("self_check dropped a floor point inside the walked margin")
+    close: HazardCue | None = None
+    for row in (456, 458, 462, 464, 450, 470):
+        cue = HazardCue(320.5, float(row) + 0.5, False, False, 320, row, 180, 16, SOURCE)
+        hit = _in_corridor_hit(cue, **common)
+        if hit is None:
+            continue
+        dist = math.hypot(hit[0] - near_hit[0], hit[1] - near_hit[1])
+        if 0.002 <= dist <= 0.014:
+            close = cue
+            break
+    if close is None:
+        raise SystemExit("self_check found no 0.002–0.014 m neighbour")
+    out = gate.apply((close,), phase="swing", stance="L", body_xy=walked, **common)
+    if out != (close,):
+        raise SystemExit("self_check dropped a coffee-sized floor move")
+    out = gate.apply((far,), phase="swing", stance="L", body_xy=walked, **common)
+    if out:
+        raise SystemExit("self_check kept a 0.22 m jump")
+    out = gate.apply((far,), phase="swing", stance="L", body_xy=walked, **common)
+    if out:
+        raise SystemExit("self_check stored a rejected jump")
+    clip = HazardCue(None, None, True, True, 320, rc.HEIGHT - 1, 200, 12, SOURCE)
+    clip_hit = _in_corridor_hit(clip, **common)
+    if clip_hit is None:
+        raise SystemExit("self_check phase floor missed the clip")
+    if math.hypot(clip_hit[0] - far_hit[0], clip_hit[1] - far_hit[1]) <= PHASE_DRIFT_MARGIN_M:
+        raise SystemExit("self_check clip is not far from the jumped pixel")
+    other = SamePhaseFloor()
+    for _tick in range(PHASE_SAMPLE_TICK):
+        other.apply((far,), phase="shift", stance="L", body_xy=origin, **common)
+    cleared = other.apply((clip,), phase="swing", stance="L", body_xy=origin, **common)
+    if len(cleared) != 1 or cleared[0].too_close or cleared[0].u is not None:
+        raise SystemExit("self_check left a jumped clip as too_close")
+    again = other.apply((clip,), phase="swing", stance="L", body_xy=origin, **common)
+    if len(again) != 1 or again[0].too_close:
+        raise SystemExit("self_check stored the jumped clip")
+    fresh = other.apply((clip,), phase="swing", stance="R", body_xy=origin, **common)
+    if len(fresh) != 1 or not fresh[0].too_close:
+        raise SystemExit("self_check used the other stance's floor point")
 
 
 if __name__ == "__main__":

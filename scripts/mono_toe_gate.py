@@ -1050,7 +1050,9 @@ def walk_finder(
     point closer. Each tick re-reads it with body x, y, and yaw, and
     drops it when it leaves the corridor. A new cue joins a saved point
     only inside TRACK_JOIN_M. ``too_close`` still stops, after the finder
-    clears that flag on a last-row blob outside the foot corridor. A stool-leg
+    clears that flag on a last-row blob outside the foot corridor. A
+    same-stance hit that jumps farther than the body walked, plus 0.08 m,
+    is not emitted. A first sighting is. A stool-leg
     name is written into the report after the stop, from the saved
     floor point, and is not used to keep or clear a track.
 
@@ -1147,6 +1149,7 @@ def walk_finder(
     cross: dict[float, str] = {}
     cross_levels = (0.0, 0.033, 0.100)
     tracks: list[_GapTrack] = []
+    phase_floor = hf.SamePhaseFloor()
     arm_xy: tuple[float, float] | None = None
     arm_gap: float | None = None
     arm_t: float | None = None
@@ -1200,6 +1203,17 @@ def walk_finder(
                     head_tilt_rad=tilt, yaw_rate=yaw_rate,
                     step_off_m=step_off, head_pan_rad=pan,
                 )
+                if session.lipm is not None:
+                    cues = phase_floor.apply(
+                        cues,
+                        phase=session.lipm.phase,
+                        stance=session.lipm.stance,
+                        body_xy=(float(data.qpos[0]), float(data.qpos[1])),
+                        cam=pose, body=body,
+                        imu_roll_rad=roll, imu_pitch_rad=pitch,
+                        head_tilt_rad=tilt, yaw_rate=yaw_rate,
+                        step_off_m=step_off, head_pan_rad=pan,
+                    )
                 primary = cues[0] if cues else None
 
                 def nearest(
