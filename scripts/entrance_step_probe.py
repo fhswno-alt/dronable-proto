@@ -1314,6 +1314,32 @@ def _mid_swing_step_mins(
     return out
 
 
+def _mid_swing_limited(
+    rows: list[Tick], t_limit: float,
+) -> tuple[float, float, float, str]:
+    """Min contact-box toe in the 20–80% window with t < t_limit.
+
+    Cycles are built through 7.560 s, so the index matches ``_mid_swing``.
+    Samples at or after ``t_limit`` are left out of this minimum.
+    """
+    best: tuple[float, float, float, str] | None = None
+    for cyc in _swing_cycles(rows, T_BAR):
+        n = len(cyc)
+        if n < 2:
+            continue
+        for i, row in enumerate(cyc):
+            if row.toe_z is None or row.swing is None or row.t >= t_limit - 1e-9:
+                continue
+            frac = i / (n - 1)
+            if not (0.20 - 1e-12 <= frac <= 0.80 + 1e-12):
+                continue
+            if best is None or row.toe_z < best[0]:
+                best = (row.toe_z, row.t, frac, row.swing)
+    if best is None:
+        return (float("nan"), float("nan"), float("nan"), "")
+    return best
+
+
 def _ankle_peak(session: sw.SteerSession) -> tuple[float, str, float]:
     peak = 0.0
     name = ""
@@ -2849,6 +2875,15 @@ def measure_pred_clip(
     finally:
         mj.mj_step = real_step
     toe_min, toe_t, _p90, _n_mid, _n_cyc, toe_frac, toe_side = _mid_swing(rows)
+    if bar is not None:
+        lim_z, lim_t, lim_frac, lim_side = _mid_swing_limited(rows, bar)
+        if lim_t == lim_t:
+            if abs(lim_t - toe_t) > 1e-6:
+                print(
+                    f"PRED toe_after_{bar:.1f} {toe_min * 1000:.3f} mm "
+                    f"t {toe_t:.3f} side {toe_side} is not the Track 1 toe."
+                )
+            toe_min, toe_t, toe_frac, toe_side = lim_z, lim_t, lim_frac, lim_side
     whole_over = [name for name, (tau, _when) in leg8.items() if abs(tau) >= KNEE_NM]
     whole_pred = [name for name, (tau, _when) in swing_pred.items() if abs(tau) > KNEE_NM + 1e-3]
     if bar is None:
@@ -3088,7 +3123,7 @@ def _print_peak_lag(
 
 
 def _write_pred_trace(score: PredScore) -> None:
-    """Per-tick swing-hip ctrl−q and q̇ for the kit bench.
+    """Per-tick swing-hip ctrl, q, and force for a before-7.0 s clear.
 
     The clip is sim-only. A closed position servo does not apply it.
     """
@@ -3373,40 +3408,64 @@ def _print_unpark(score: PredScore) -> None:
     )
 
 
-def score_unpark_track1() -> None:
-    """Swing-hip kv/kp lead at the locked 0.500 s period.
+def _helps_under_torque(score: PredScore) -> bool:
+    """Toe rose versus −0.013 mm and every leg actuator stays under 2.33 before 7.0 s."""
+    return score.legs_under and score.toe_mm > TOE_TOEUP_MM + 1e-6
 
-    A longer period is not run. The walk is already slower than the
-    kit 400 ms. The 400 ms copy runs only if this lead clears +2 mm
-    under 2.33 Nm before 7.0 s. dsp stays 0.20 and y_swap stays 0.020.
+
+def score_unpark_track1() -> None:
+    """Hip kv/kp lead, then a longer period, then both if one holds 2.33.
+
+    Base is the swing-hip clip, hip pitch off the 20 ms approach, and the
+    0.020 rad toe-up. Period copies change only the period. dsp stays 0.20
+    and y_swap stays 0.020. The hip lead is kv/kp on hip roll and hip pitch.
     """
     hip = measure_pred_clip(**_unpark_kwargs(hip_lead=True))
     _print_unpark(hip)
-    if not (hip.toe_clear and hip.holds_bar):
+    if hip.toe_clear and hip.legs_under:
+        _write_pred_trace(hip)
+        print(f"PRED unpark clear {hip.name} toe {hip.toe_mm:.3f} mm")
+    periods: list[tuple[float, PredScore]] = []
+    for period in (0.60, 0.65):
+        row = measure_pred_clip(**_unpark_kwargs(period_s=period))
+        swing = (1.0 - 0.20) * period / 2.0
         print(
-            f"PRED unpark stop. Hip lead toe {hip.toe_mm:.3f} mm "
-            f"holds {int(hip.holds_bar)} before 7.0 s. "
-            "Period stays 0.500 s. A 400 ms copy was not run. "
-            "A slower period was not run."
+            f"PRED unpark period {period:.2f} swing {swing:.3f} s "
+            f"vs_0.200 {swing / 0.200:.3f} dsp 0.20 y_swap 0.020 no_hip_lead"
+        )
+        _print_unpark(row)
+        periods.append((period, row))
+        if row.toe_clear and row.legs_under:
+            _write_pred_trace(row)
+            print(f"PRED unpark clear {row.name} toe {row.toe_mm:.3f} mm")
+    helped = [(None, hip)] if _helps_under_torque(hip) else []
+    helped.extend((period, row) for period, row in periods if _helps_under_torque(row))
+    if not helped:
+        print(
+            "PRED unpark no_combine. Neither the hip lead nor the longer period "
+            "raised the toe while every leg stayed under 2.33 before 7.0 s."
         )
         return
-    _write_pred_trace(hip)
-    print(f"PRED unpark clear {hip.name} toe {hip.toe_mm:.3f} mm at period 0.500")
-    kit = measure_pred_clip(**_unpark_kwargs(hip_lead=True, period_s=0.400))
-    swing = (1.0 - 0.20) * 0.400 / 2.0
-    print(
-        f"PRED unpark kit_period 0.400 swing {swing:.3f} s "
-        "dsp 0.20 y_swap 0.020. Same hip lead."
-    )
-    _print_unpark(kit)
-    if kit.toe_clear and kit.holds_bar:
-        _write_pred_trace(kit)
-        print(f"PRED unpark clear {kit.name} toe {kit.toe_mm:.3f} mm at period 0.400")
+    period_help = [(period, row) for period, row in periods if _helps_under_torque(row)]
+    if period_help:
+        period_s, _best = max(period_help, key=lambda item: item[1].toe_mm)
     else:
-        print(
-            f"PRED unpark kit_period short toe {kit.toe_mm:.3f} mm "
-            f"holds {int(kit.holds_bar)}. Period 0.500 cleared. Period 0.400 did not."
-        )
+        period_s = 0.60
+    both = measure_pred_clip(**_unpark_kwargs(hip_lead=True, period_s=period_s))
+    swing = (1.0 - 0.20) * period_s / 2.0
+    print(
+        f"PRED unpark combine period {period_s:.2f} swing {swing:.3f} s "
+        f"because {[row.name for _period, row in helped]}"
+    )
+    _print_unpark(both)
+    if both.toe_clear and both.legs_under:
+        _write_pred_trace(both)
+        print(f"PRED unpark clear {both.name} toe {both.toe_mm:.3f} mm")
+        return
+    print(
+        f"PRED unpark combine_short {both.name} toe {both.toe_mm:.3f} mm "
+        f"legs_under {int(both.legs_under)}."
+    )
 
 
 def score_toeup_diag() -> None:
