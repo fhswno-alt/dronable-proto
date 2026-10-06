@@ -4143,9 +4143,9 @@ def _sag_stats(rows: tuple, t_want: float, swing_side: str) -> dict[str, float |
     if not rows:
         return empty
     stance = "l_knee" if swing_side == "R" else "r_knee" if swing_side == "L" else ""
-    abs_mm = [abs(float(row[5])) for row in rows]
+    abs_mm = [abs(float(row[6])) for row in rows]
     abs_mm.sort()
-    peak = max(rows, key=lambda row: abs(float(row[5])))
+    peak = max(rows, key=lambda row: abs(float(row[6])))
     near = [
         row for row in rows
         if abs(float(row[0]) - t_want) <= 0.004 and (not stance or row[1] == stance)
@@ -4164,8 +4164,8 @@ def _sag_stats(rows: tuple, t_want: float, swing_side: str) -> dict[str, float |
     out.update({
         "n": len(rows),
         "clamp_n": sum(int(row[11]) for row in rows),
-        "peak_mm": float(peak[5]),
-        "peak_raw_mm": float(peak[6]),
+        "peak_mm": float(peak[6]),
+        "peak_raw_mm": float(peak[5]),
         "peak_t": float(peak[0]),
         "peak_joint": str(peak[1]),
         "p50_mm": _pct(0.50),
@@ -4188,13 +4188,14 @@ def _print_sag(score: PredScore, sag_ref_mm: float = 0.927) -> None:
     stats = _sag_stats(score.sag_rows, score.flat_toe_t, score.flat_toe_side)
     print(
         f"PRED sag_mm {score.name} n {stats['n']} clamp {stats['clamp_n']} "
-        f"peak {float(stats['peak_mm']):+.3f} mm "
-        f"raw {float(stats['peak_raw_mm']):+.3f} mm "
+        f"formula_peak {float(stats['peak_mm']):+.3f} mm "
+        f"applied_at_peak {float(stats['peak_raw_mm']):+.3f} mm "
         f"t {float(stats['peak_t']):.3f} {stats['peak_joint']} "
-        f"p50 {float(stats['p50_mm']):.3f} mm p90 {float(stats['p90_mm']):.3f} mm "
-        f"at_flat_toe {float(stats['toe_mm']):+.3f} mm "
-        f"raw {float(stats['toe_raw_mm']):+.3f} mm "
-        f"applied {float(stats['toe_rad']):+.5f} rad "
+        f"formula_p50 {float(stats['p50_mm']):.3f} mm "
+        f"formula_p90 {float(stats['p90_mm']):.3f} mm "
+        f"at_flat_toe formula {float(stats['toe_raw_mm']):+.3f} mm "
+        f"applied {float(stats['toe_mm']):+.3f} mm "
+        f"applied_rad {float(stats['toe_rad']):+.5f} "
         f"{stats['toe_joint']} "
         f"bias {float(stats['toe_bias']):+.4f} "
         f"constraint {float(stats['toe_con']):+.4f} "
