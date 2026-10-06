@@ -208,7 +208,10 @@ joins a saved point only within 0.035 m after that re-read. That
 radius is frozen before the run. Sim leg names are not a key. On
 this walk it fires at the same time as the cue latch. The report
 name after the stop is the hitting leg. Longer hits of that leg
-stay on their own tracks, and the firing eye stays short. Not
+stay on their own tracks, and the firing eye stays short. A one-frame
+stress adds 0.10 m to the toe gap of the floor point that first
+reached d_min + 0.05. The latch keeps the shorter gap and the stop
+time does not move. Not
 kit-safe. The row source
 is still a sim projection. Not go-anywhere. Soft-pass is off.
 """

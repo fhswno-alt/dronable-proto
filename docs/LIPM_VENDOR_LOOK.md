@@ -1755,6 +1755,14 @@ times. Not kit-safe.
 | 0.033 s | 5.848 s | 5.848 s | 3 | `leg_2` | 0.014 m | −0.011 m | −0.013 m | 0.167 m | 0.624 s | left hip pitch +2.280 Nm |
 | 0.100 s | 5.736 s | 5.728 s | 4 | `leg_2` | 0.013 m | −0.013 m | −0.013 m | 0.198 m | 0.540 s | left knee −2.280 Nm |
 
+A one-frame long read does not cancel that stop. The stress arms on the first frame whose shortest in-corridor gap is at or under `d_min + 0.05`, then adds 0.10 m to the toe gap of the next frame's cue when that cue's floor point is within 0.035 m of the armed point. The finder is normal again after that frame. Sim leg names are not used to pick the cue. On this kitchen yaw the offered gaps are 0.276 m, 0.279 m, and 0.286 m. The latch keeps 0.176 m, 0.178 m, and 0.186 m, the gap already on the track after the odometry re-read. The join distances are 0.004 m, 0.002 m, and 0.004 m. The stop stays at the cue-only times, 5.864 s, 5.848 s, and 5.736 s. Prop contacts are 0. The stop peaks stay at 2.280 Nm. The report name is still `leg_2`. Not kit-safe.
+
+| `T_detect` | arm | inject | real | offered | kept | join | stop | contacts | stop peak |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 | 5.480 s, 0.176 m | 5.488 s | 0.176 m | 0.276 m | 0.176 m | 0.004 m | 5.864 s | 0 | left hip pitch +2.280 Nm |
+| 0.033 s | 5.448 s, 0.180 m | 5.456 s | 0.179 m | 0.279 m | 0.178 m | 0.002 m | 5.848 s | 0 | left hip pitch +2.280 Nm |
+| 0.100 s | 5.416 s, 0.189 m | 5.424 s | 0.186 m | 0.286 m | 0.186 m | 0.004 m | 5.736 s | 0 | left knee −2.280 Nm |
+
 A −10° `head_tilt` walk is not enabled. On that pose the near edge is
 0.077 m at `cam_z` 0.326 m. #67 checked the wood rule at that session
 tilt: the foot contact boxes project to rows 643–749, below the
