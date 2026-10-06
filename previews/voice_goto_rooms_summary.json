@@ -5,86 +5,57 @@
   "kit_safe": false,
   "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
   "definition": {
-    "reached": "Body COM xy of body_link is inside that room's floor box, the bout started with that COM outside the same box, min up_z is at least 0.90, prop contacts are zero, and the bout ends at or before 53.0 s. A start inside the box is not a reach.",
-    "floor_box": "Axis-aligned XY of every loaded plane geom named floor or room_floor. Half-size is the plane size. A single-room file has one such plane, and that plane is that room's floor. The box is not a waypoint and is not passed to a command.",
+    "reached": "Body COM xy of body_link finishes inside that room's floor box from room_apartment.json, the bout started with that COM outside the same box, min up_z is at least 0.90, prop contacts are zero, and the bout ends at or before 53.0 s. A start inside the box is not a reach. The plant floor from -3 m to +3 m is not the box.",
+    "floor_box": "The named room floor_box in mujoco/room_apartment.json. It is not a geom and it is not passed to a command.",
     "upright": "min up_z over the bout >= 0.90",
-    "prop_contact": "A contact with normal force >= 0.5 N between a robot geom and any geom other than floor or room_floor.",
+    "prop_contact": "A contact with normal force >= 0.5 N between a robot geom and any geom other than floor.",
     "time_limit_s": 53.0,
     "voice_vx_cap": 0.056,
     "voice_yaw_cap": 0.25,
     "d_min": "d_min = 0.150 * (T_detect + T_stop). 0.150 is the hardware bound in that formula, not the voice vx cap. T_detect = 0.000 s. T_stop = 0.842 s.",
     "d_min_m": 0.1263,
+    "false_stop": "A #71 stop whose floor point lies on the speckled shadow patch in front of the kitchen or bathroom doorway, with no furniture prop in the kit_cam frame. That stop is not a #71 pass. Walls are not props.",
     "soft_pass": false
   },
-  "scene_files": [
-    "room_bathroom.xml",
-    "room_bedroom.xml",
-    "room_entrance.xml",
-    "room_kitchen.xml",
-    "room_living.xml"
-  ],
-  "joined_scene": false,
-  "doorway_spawn": false,
-  "gap": "No joined multi-room scene and no doorway spawn. Each room file is its own scene, and the documented stand starts on that scene's only floor plane, so the COM starts inside the room floor box. A start-inside pose is not a reach. No new scene was authored.",
-  "rooms": [
+  "scene": "room_apartment.xml",
+  "joined_scene": true,
+  "doorway_spawn": true,
+  "recogniser": {
+    "model": "vikhyatk/moondream2",
+    "revision": "5d6c926f44e26b07957b0dd315bbedcb4c17a5fe",
+    "prompt": "Which room is this? Answer with one word: kitchen, bathroom, living, bedroom, entrance, or none."
+  },
+  "shadow_patches": [
     {
       "room": "kitchen",
-      "scene": "room_kitchen.xml",
-      "phrase": "go to the kitchen",
-      "voice_parse": "refuse",
-      "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
-      "matched_room_words": [
-        "kitchen"
-      ],
-      "recogniser_label": "not asked",
-      "commanded_vx": null,
-      "commanded_yaw": null,
-      "d_min_m": 0.1263,
-      "d_min_v_mps": 0.15,
-      "t_detect_s": 0.0,
-      "t_stop_s": 0.842,
-      "latch_applied": false,
-      "spawn": {
-        "qpos_xyz": [
-          0.0020896980316242324,
-          -0.00018851765602289396,
-          0.23185984219012393
-        ],
-        "yaw_rad": 2.2496271650638666e-05,
-        "com_xyz": [
-          -0.0027910462701022567,
-          -0.00018054834888876954,
-          0.199362420902719
-        ],
-        "up_z": 0.99995466808768
-      },
-      "floor_boxes": [
-        {
-          "geom": "floor",
-          "xmin": -3.0,
-          "xmax": 3.0,
-          "ymin": -3.0,
-          "ymax": 3.0
-        }
-      ],
-      "started_outside": false,
-      "reached": false,
-      "reach_block": "spawn COM is inside the only floor plane of this single-room scene; started_outside is false",
-      "contact": "none",
-      "peak_nm": 0.3619768663199655,
-      "peak_actuator": "l_ank_roll_pos",
-      "min_up_z": 0.9999296015830651
+      "xmin": 0.45,
+      "xmax": 1.06,
+      "ymin": -0.56,
+      "ymax": 0.34
     },
     {
       "room": "bathroom",
-      "scene": "room_bathroom.xml",
-      "phrase": "go to the bathroom",
+      "xmin": 0.45,
+      "xmax": 1.06,
+      "ymin": 1.43,
+      "ymax": 2.33
+    }
+  ],
+  "rooms": [
+    {
+      "room": "kitchen",
+      "scene": "room_apartment.xml",
+      "phrase": "go to the kitchen",
       "voice_parse": "refuse",
       "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
+      "generic_caller": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
       "matched_room_words": [
-        "bathroom"
+        "kitchen"
       ],
-      "recogniser_label": "not asked",
+      "recogniser_label": "entrance",
+      "recogniser_raw": "entrance",
+      "recogniser_confidence": 0.6040073037147522,
+      "recogniser_seconds": 5.713494845000014,
       "commanded_vx": null,
       "commanded_yaw": null,
       "d_min_m": 0.1263,
@@ -92,96 +63,215 @@
       "t_detect_s": 0.0,
       "t_stop_s": 0.842,
       "latch_applied": false,
-      "spawn": {
-        "qpos_xyz": [
-          0.0020896980316242324,
-          -0.00018851765602289396,
-          0.23185984219012393
-        ],
-        "yaw_rad": 2.2496271650638666e-05,
-        "com_xyz": [
-          -0.0027910462701022567,
-          -0.00018054834888876954,
-          0.199362420902719
-        ],
-        "up_z": 0.99995466808768
-      },
-      "floor_boxes": [
+      "latch_pass": false,
+      "false_stop": false,
+      "prop_in_frame_at_stop": null,
+      "stop_path": "",
+      "stop_reason": "",
+      "stop_hit_xy": null,
+      "stop_on_shadow": false,
+      "shadow_first_sightings": [
         {
-          "geom": "floor",
-          "xmin": -3.0,
-          "xmax": 3.0,
-          "ymin": -3.0,
-          "ymax": 3.0
+          "patch": "kitchen",
+          "t": 1.0000000000000007,
+          "u": 320.23438735583983,
+          "v": 353.6093791966117,
+          "lum_mean": 63.216,
+          "lum_std": 10.564683809750294,
+          "speckled": true,
+          "finder_emitted": false,
+          "prop_in_frame": true,
+          "hit_xy": null
         }
       ],
-      "started_outside": false,
+      "spawn": {
+        "doorway_x": 0.29,
+        "doorway_y": -0.11,
+        "doorway_yaw": 0.0,
+        "qpos_xyz": [
+          0.3465273324123641,
+          -0.10999162472908056,
+          0.21093215861409745
+        ],
+        "yaw_rad": 0.00015782501287047446,
+        "com_xyz": [
+          0.3519593590473371,
+          -0.11001105208655107,
+          0.18342730754005485
+        ],
+        "up_z": 0.9667228207290409
+      },
+      "floor_box": {
+        "source": "room_apartment.json",
+        "xmin": 1.07,
+        "xmax": 2.92,
+        "ymin": -0.98,
+        "ymax": 0.76
+      },
+      "started_outside": true,
+      "finished_inside": false,
       "reached": false,
-      "reach_block": "spawn COM is inside the only floor plane of this single-room scene; started_outside is false",
+      "reach_block": "recogniser label 'entrance' is not kitchen; no vel was published",
       "contact": "none",
-      "peak_nm": 0.3619768663199655,
-      "peak_actuator": "l_ank_roll_pos",
-      "min_up_z": 0.9999296015830651
+      "peak_nm": 1.2623284696532018,
+      "peak_actuator": "r_ank_pitch_pos",
+      "min_up_z": 0.93415459431212,
+      "t_end": 1.0000000000000007
+    },
+    {
+      "room": "bathroom",
+      "scene": "room_apartment.xml",
+      "phrase": "go to the bathroom",
+      "voice_parse": "refuse",
+      "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
+      "generic_caller": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
+      "matched_room_words": [
+        "bathroom"
+      ],
+      "recogniser_label": "entrance",
+      "recogniser_raw": "entrance",
+      "recogniser_confidence": 0.757535994052887,
+      "recogniser_seconds": 4.789840298999934,
+      "commanded_vx": null,
+      "commanded_yaw": null,
+      "d_min_m": 0.1263,
+      "d_min_v_mps": 0.15,
+      "t_detect_s": 0.0,
+      "t_stop_s": 0.842,
+      "latch_applied": false,
+      "latch_pass": false,
+      "false_stop": false,
+      "prop_in_frame_at_stop": null,
+      "stop_path": "",
+      "stop_reason": "",
+      "stop_hit_xy": null,
+      "stop_on_shadow": false,
+      "shadow_first_sightings": [
+        {
+          "patch": "bathroom",
+          "t": 1.0000000000000007,
+          "u": 531.3092666700007,
+          "v": 353.6353281796389,
+          "lum_mean": 33.7296,
+          "lum_std": 8.558065426251426,
+          "speckled": true,
+          "finder_emitted": false,
+          "prop_in_frame": true,
+          "hit_xy": null
+        }
+      ],
+      "spawn": {
+        "doorway_x": 0.29,
+        "doorway_y": 1.88,
+        "doorway_yaw": 0.0,
+        "qpos_xyz": [
+          0.3465273324123639,
+          1.8800083752709231,
+          0.21093215861409778
+        ],
+        "yaw_rad": 0.00015782501287100298,
+        "com_xyz": [
+          0.3519593590473369,
+          1.8799889479134522,
+          0.1834273075400551
+        ],
+        "up_z": 0.9667228207290429
+      },
+      "floor_box": {
+        "source": "room_apartment.json",
+        "xmin": 1.07,
+        "xmax": 2.92,
+        "ymin": 0.84,
+        "ymax": 2.92
+      },
+      "started_outside": true,
+      "finished_inside": false,
+      "reached": false,
+      "reach_block": "recogniser label 'entrance' is not bathroom; no vel was published",
+      "contact": "none",
+      "peak_nm": 1.2623284696531982,
+      "peak_actuator": "r_ank_pitch_pos",
+      "min_up_z": 0.9341545943121201,
+      "t_end": 1.0000000000000007
     },
     {
       "room": "living",
-      "scene": "room_living.xml",
+      "scene": "room_apartment.xml",
       "phrase": "go to the living room",
-      "voice_parse": "refuse",
-      "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
+      "voice_parse": "vel",
+      "voice_line": "vel(+0.056, +0.000)",
+      "generic_caller": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
       "matched_room_words": [
         "living",
         "room"
       ],
-      "recogniser_label": "not asked",
-      "commanded_vx": null,
-      "commanded_yaw": null,
+      "recogniser_label": "living",
+      "recogniser_raw": "living",
+      "recogniser_confidence": 0.5594255328178406,
+      "recogniser_seconds": 4.313469462000057,
+      "commanded_vx": 0.056,
+      "commanded_yaw": 0.0,
       "d_min_m": 0.1263,
       "d_min_v_mps": 0.15,
       "t_detect_s": 0.0,
       "t_stop_s": 0.842,
-      "latch_applied": false,
+      "latch_applied": true,
+      "latch_pass": false,
+      "false_stop": false,
+      "prop_in_frame_at_stop": null,
+      "stop_path": "inside",
+      "stop_reason": "COM finished inside the named room box",
+      "stop_hit_xy": null,
+      "stop_on_shadow": false,
+      "shadow_first_sightings": [],
       "spawn": {
+        "doorway_x": -0.29,
+        "doorway_y": 1.52,
+        "doorway_yaw": 3.141593,
         "qpos_xyz": [
-          0.0020896980316242324,
-          -0.00018851765602289396,
-          0.23185984219012393
+          -0.34652733240946415,
+          1.5199916051646263,
+          0.21093215861409695
         ],
-        "yaw_rad": 2.2496271650638666e-05,
+        "yaw_rad": -3.141434482364475,
         "com_xyz": [
-          -0.0027910462701022567,
-          -0.00018054834888876954,
-          0.199362420902719
+          -0.351959359051163,
+          1.520011030641464,
+          0.18342730754005446
         ],
-        "up_z": 0.99995466808768
+        "up_z": 0.9667228207290443
       },
-      "floor_boxes": [
-        {
-          "geom": "floor",
-          "xmin": -3.0,
-          "xmax": 3.0,
-          "ymin": -3.0,
-          "ymax": 3.0
-        }
-      ],
-      "started_outside": false,
-      "reached": false,
-      "reach_block": "spawn COM is inside the only floor plane of this single-room scene; started_outside is false",
+      "floor_box": {
+        "source": "room_apartment.json",
+        "xmin": -2.92,
+        "xmax": -1.07,
+        "ymin": 0.12,
+        "ymax": 2.92
+      },
+      "started_outside": true,
+      "finished_inside": true,
+      "reached": true,
+      "reach_block": "",
       "contact": "none",
-      "peak_nm": 0.3619768663199655,
-      "peak_actuator": "l_ank_roll_pos",
-      "min_up_z": 0.9999296015830651
+      "peak_nm": 2.280000000000001,
+      "peak_actuator": "l_hip_pitch_pos",
+      "min_up_z": 0.9341545943121579,
+      "t_end": 12.592000000000874
     },
     {
       "room": "bedroom",
-      "scene": "room_bedroom.xml",
+      "scene": "room_apartment.xml",
       "phrase": "go to the bedroom",
       "voice_parse": "refuse",
       "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
+      "generic_caller": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
       "matched_room_words": [
         "bedroom"
       ],
-      "recogniser_label": "not asked",
+      "recogniser_label": "entrance",
+      "recogniser_raw": "entrance",
+      "recogniser_confidence": 0.5892140865325928,
+      "recogniser_seconds": 5.088549343000068,
       "commanded_vx": null,
       "commanded_yaw": null,
       "d_min_m": 0.1263,
@@ -189,83 +279,110 @@
       "t_detect_s": 0.0,
       "t_stop_s": 0.842,
       "latch_applied": false,
+      "latch_pass": false,
+      "false_stop": false,
+      "prop_in_frame_at_stop": null,
+      "stop_path": "",
+      "stop_reason": "",
+      "stop_hit_xy": null,
+      "stop_on_shadow": false,
+      "shadow_first_sightings": [],
       "spawn": {
+        "doorway_x": 0.29,
+        "doorway_y": -1.99,
+        "doorway_yaw": 0.0,
         "qpos_xyz": [
-          0.0020896980316242324,
-          -0.00018851765602289396,
-          0.23185984219012393
+          0.34652733241236394,
+          -1.989991624729077,
+          0.21093215861409745
         ],
-        "yaw_rad": 2.2496271650638666e-05,
+        "yaw_rad": 0.00015782501287090757,
         "com_xyz": [
-          -0.0027910462701022567,
-          -0.00018054834888876954,
-          0.199362420902719
+          0.35195935904733694,
+          -1.9900110520865473,
+          0.18342730754005482
         ],
-        "up_z": 0.99995466808768
+        "up_z": 0.9667228207290409
       },
-      "floor_boxes": [
-        {
-          "geom": "floor",
-          "xmin": -3.0,
-          "xmax": 3.0,
-          "ymin": -3.0,
-          "ymax": 3.0
-        }
-      ],
-      "started_outside": false,
+      "floor_box": {
+        "source": "room_apartment.json",
+        "xmin": 1.07,
+        "xmax": 2.92,
+        "ymin": -2.92,
+        "ymax": -1.06
+      },
+      "started_outside": true,
+      "finished_inside": false,
       "reached": false,
-      "reach_block": "spawn COM is inside the only floor plane of this single-room scene; started_outside is false",
+      "reach_block": "recogniser label 'entrance' is not bedroom; no vel was published",
       "contact": "none",
-      "peak_nm": 0.3619768663199655,
-      "peak_actuator": "l_ank_roll_pos",
-      "min_up_z": 0.9999296015830651
+      "peak_nm": 1.2623284696531982,
+      "peak_actuator": "r_ank_pitch_pos",
+      "min_up_z": 0.9341545943121201,
+      "t_end": 1.0000000000000007
     },
     {
       "room": "entrance",
-      "scene": "room_entrance.xml",
+      "scene": "room_apartment.xml",
       "phrase": "go to the entrance",
-      "voice_parse": "refuse",
-      "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
+      "voice_parse": "vel",
+      "voice_line": "vel(+0.056, +0.000)",
+      "generic_caller": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
       "matched_room_words": [],
-      "recogniser_label": "not asked",
-      "commanded_vx": null,
-      "commanded_yaw": null,
+      "recogniser_label": "entrance",
+      "recogniser_raw": "entrance",
+      "recogniser_confidence": 0.908092200756073,
+      "recogniser_seconds": 4.350469573000055,
+      "commanded_vx": 0.056,
+      "commanded_yaw": 0.0,
       "d_min_m": 0.1263,
       "d_min_v_mps": 0.15,
       "t_detect_s": 0.0,
       "t_stop_s": 0.842,
-      "latch_applied": false,
+      "latch_applied": true,
+      "latch_pass": false,
+      "false_stop": false,
+      "prop_in_frame_at_stop": null,
+      "stop_path": "inside",
+      "stop_reason": "COM finished inside the named room box",
+      "stop_hit_xy": null,
+      "stop_on_shadow": false,
+      "shadow_first_sightings": [],
       "spawn": {
+        "doorway_x": -0.29,
+        "doorway_y": -1.44,
+        "doorway_yaw": 3.141593,
         "qpos_xyz": [
-          0.0020896980316242324,
-          -0.00018851765602289396,
-          0.23185984219012393
+          -0.34652733240946415,
+          -1.4400083948353737,
+          0.21093215861409695
         ],
-        "yaw_rad": 2.2496271650638666e-05,
+        "yaw_rad": -3.141434482364475,
         "com_xyz": [
-          -0.0027910462701022567,
-          -0.00018054834888876954,
-          0.199362420902719
+          -0.351959359051163,
+          -1.4399889693585353,
+          0.18342730754005446
         ],
-        "up_z": 0.99995466808768
+        "up_z": 0.9667228207290443
       },
-      "floor_boxes": [
-        {
-          "geom": "floor",
-          "xmin": -3.0,
-          "xmax": 3.0,
-          "ymin": -3.0,
-          "ymax": 3.0
-        }
-      ],
-      "started_outside": false,
-      "reached": false,
-      "reach_block": "spawn COM is inside the only floor plane of this single-room scene; started_outside is false",
+      "floor_box": {
+        "source": "room_apartment.json",
+        "xmin": -2.92,
+        "xmax": -1.07,
+        "ymin": -2.92,
+        "ymax": 0.04
+      },
+      "started_outside": true,
+      "finished_inside": true,
+      "reached": true,
+      "reach_block": "",
       "contact": "none",
-      "peak_nm": 0.3619768663199655,
-      "peak_actuator": "l_ank_roll_pos",
-      "min_up_z": 0.9999296015830651
+      "peak_nm": -2.280000000000001,
+      "peak_actuator": "l_knee_pos",
+      "min_up_z": 0.9341545943121579,
+      "t_end": 12.592000000000874
     }
   ],
-  "reached_any": false
+  "reached_all": false,
+  "false_stop_any": false
 }
