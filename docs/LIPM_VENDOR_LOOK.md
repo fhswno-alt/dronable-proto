@@ -1763,6 +1763,26 @@ A one-frame long read does not cancel that stop. The stress arms on the first fr
 | 0.033 s | 5.448 s, 0.180 m | 5.456 s | 0.179 m | 0.279 m | 0.178 m | 0.002 m | 5.848 s | 0 | left hip pitch +2.280 Nm |
 | 0.100 s | 5.416 s, 0.189 m | 5.424 s | 0.186 m | 0.286 m | 0.186 m | 0.004 m | 5.736 s | 0 | left knee −2.280 Nm |
 
+The same chain at `T_detect` = 0 does not clear the five furnished rooms. Every scene has furniture colliders. None is an empty plant. Bedroom furniture sits near x 2.4 m, and a 9 s walk ends near x 1.16 m on a straight approach, so that room's unstopped walks have no prop contact. A stop there is not needed. Two bouts latch the prop the unstopped walk hits, with 0 contacts and a stop peak of 2.280 Nm: kitchen left on `col_chair_stool_b_leg_2` at 5.864 s, and living straight on `col_coffee_leg_0` at 4.376 s. Entrance straight does not stop, and the left foot hits `col_mat_rug` at 6.892 s, 11.3 N. Bathroom straight stops at 8.952 s on `col_toilet_seat` with the saved point 0.313 m from that seat and the eye 0.312 m short of the true range; the unstopped walk has no contact by 9.0 s. Living right stops at 4.000 s on an unmatched last-row `too_close`, not on `col_coffee_leg_2`, which the unstopped walk hits at 8.104 s. The other false stops are unmatched `too_close` on the last row, with no prop contact in the unstopped walk. Stop-window peaks stay at 2.280 Nm. Walks that do not stop stay under 2.33 Nm, worst hip roll −2.128 Nm or +2.278 Nm. Not kit-safe. Not go-anywhere.
+
+| room | approach | stop | latch | contacts | peak |
+| --- | --- | --- | --- | --- | --- |
+| kitchen | straight | none | | 0 | hip roll −2.128 Nm |
+| kitchen | left −0.25 | 5.864 s | `stool_b_leg_2` | 0 | +2.280 Nm |
+| kitchen | right +0.25 | none | | 0 | hip roll +2.278 Nm |
+| bathroom | straight | 8.952 s | `toilet_seat`, 0.313 m off | 0, unstopped also 0 | +2.280 Nm |
+| bathroom | left −0.25 | 5.416 s `too_close` | none | 0, unstopped also 0 | +2.280 Nm |
+| bathroom | right +0.25 | none | | 0 | hip roll +2.278 Nm |
+| living | straight | 4.376 s | `coffee_leg_0` | 0 | +2.280 Nm |
+| living | left −0.25 | 3.992 s `too_close` | none | 0, unstopped also 0 | −2.280 Nm |
+| living | right +0.25 | 4.000 s `too_close` | none | 0; unstopped hits `coffee_leg_2` at 8.104 s | −2.280 Nm |
+| bedroom | straight | 4.560 s `too_close` | none | 0, unstopped also 0 | −2.280 Nm |
+| bedroom | left −0.25 | 1.976 s `too_close` | none | 0, unstopped also 0 | +2.280 Nm |
+| bedroom | right +0.25 | 8.104 s `too_close` | none | 0, unstopped also 0 | −2.280 Nm |
+| entrance | straight | none | | rug at 6.892 s, 11.3 N | hip roll −2.128 Nm |
+| entrance | left −0.25 | 5.408 s `too_close` | none | 0, unstopped also 0 | +2.280 Nm |
+| entrance | right +0.25 | none | | 0 | hip roll +2.278 Nm |
+
 A −10° `head_tilt` walk is not enabled. On that pose the near edge is
 0.077 m at `cam_z` 0.326 m. #67 checked the wood rule at that session
 tilt: the foot contact boxes project to rows 643–749, below the
