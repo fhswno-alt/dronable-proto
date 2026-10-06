@@ -17,18 +17,23 @@ It is not an open-set room label. Before that question, Moondream detects
 a doorway. No doorway means keep searching. Search turns in place at
 +0.25 rad/s with no forward velocity. Before each picture the turn stops
 and the body settles, then kit_cam is captured. The answer is logged at
-that heading, not at reply time. A yes while the asked room is under 1%
-of the frame is a wrong yes and does not go-to. A correct yes does not
-lock that heading. A doorway that is not actually in the frame does
-not get a room question: the body turns in place at yaw +0.25. A correct
-yes re-points in place toward the doorway pixel, settles until that yaw
-is back at 0, then walks vel(+0.056, 0). Yaw is not applied while
-walking. The #71 latch stays armed on that forward motion. A colour-free
-floor/wall row is ranged with the live camera, and the stop latches only
-when the forward ray hits a wall. A wall or prop contact with the latch
-armed fails the bout. A stop on the
-speckled hall shadow by the kitchen or bathroom doorway, with no prop in
-the frame, is a false stop and is not a #71 pass.
+that heading, not at reply time. A Moondream yes while the asked room is
+under 1% of the frame is refused: it is logged against that gate and
+treated as no, so the search continues. A yes under 1% that still
+commits forward velocity is a wrong yes. A doorway that is not actually
+in the frame does not get a room question: the body turns in place at
+yaw +0.25. A correct yes re-points in place toward the doorway pixel,
+settles until that yaw is back at 0, then walks vel(+0.056, 0). Yaw is
+not applied while walking. In-place yaw that asks a hip roll over
+2.33 Nm unclamped is not a free re-point. The #71 latch stays armed on
+that forward motion. A colour-free floor/wall row is ranged with the
+live camera, and the stop latches only when the forward ray hits a wall.
+Every real-wall ray logs the ranged gap, the sim gap, camera height,
+camera pitch, and the leading toe. One wall-ray error is not added to
+the latch. A repeat of that bias is logged and still fails the
+wall-stop claim. A wall or prop contact with the latch armed fails the
+bout. A stop on the speckled hall shadow by the kitchen or bathroom
+doorway, with no prop in the frame, is a false stop and is not a #71 pass.
 
 0.150 is only the d_min bound. The plant file is only hashed.
 """
@@ -113,6 +118,10 @@ WALL_SAMPLE_S = 0.08
 # unless that measured error was added to the latch distance before
 # the bouts. Not a clearance buffer on top of a standing-pose table.
 RANGE_ERR_MAX_M = 0.01
+# The ~4 cm wall-ray class (living latch was 0.0409 m, about a third
+# of d_min). One sample is not soaked into the latch. A second sample
+# is the same class repeating. Either way the wall-stop claim fails.
+WALL_BIAS_M = 0.03
 DOOR_Z = (0.05, 1.35)
 RAY_STEP = 8
 ROOM_GEOMS: dict[str, tuple[str, ...]] = {
@@ -183,6 +192,8 @@ class AskJson(TypedDict):
     door_bbox: list[float] | None
     door_seconds: float | None
     search_applied_yaw: float
+    moondream_yes: bool
+    frac_gate: str
 
 
 class ApproachJson(TypedDict):
@@ -200,6 +211,9 @@ class ApproachJson(TypedDict):
     imu_pitch_rad: float
     head_tilt_rad: float
     cam_pitch_rad: float
+    geometric_m: float | None
+    lead_off_m: float
+    range_err_m: float | None
 
 
 class FinderCueJson(TypedDict):
@@ -225,6 +239,7 @@ class WallHitJson(TypedDict):
     imu_pitch_rad: float | None
     head_tilt_rad: float | None
     cam_pitch_rad: float | None
+    lead_off_m: float | None
     latch_path: str
     finder: list[FinderCueJson]
 
@@ -244,6 +259,12 @@ class HipJson(TypedDict):
     peak_nm: float
     abs_nm: float
     over_2_33: bool
+
+
+class InplaceHipJson(TypedDict):
+    joint: str
+    unclamped_nm: float
+    clamped_nm: float
 
 
 class RoomJson(TypedDict):
@@ -291,10 +312,16 @@ class RoomJson(TypedDict):
     wall_range_fail: bool
     wall_stop_pass: bool
     ray_reject_count: int
+    frac_refuse_count: int
+    wall_bias_max_m: float | None
+    wall_bias_count: int
+    wall_bias_repeat: bool
     search_applied_yaw_peak: float
     search_yaw_fail: bool
     latch_armed_contact: bool
     gait_limit: bool
+    inplace_hip_fail: bool
+    inplace_hip: list[InplaceHipJson]
     torque: list[TorqueJson]
     spawn: SpawnJson
     floor_box: FloorBox
@@ -395,10 +422,11 @@ def _definition() -> DefinitionJson:
         ),
         yes_no=(
             "Per asked room: 'Is there a {room} through the doorway "
-            "ahead?' yes or no. Not an open-set room name. A yes is "
-            f"correct only when that room's furniture covers at least "
-            f"{ROOM_VISIBLE_FRAC:.0%} of kit_cam. Any other yes is a "
-            "wrong yes and does not publish forward vel."
+            "ahead?' yes or no. Not an open-set room name. Moondream "
+            f"yes is logged against the {ROOM_VISIBLE_FRAC:.0%} kit_cam "
+            "gate. A yes under that fraction is refused and the search "
+            "continues. It does not publish forward vel. A yes under "
+            "that fraction that still commits forward vel is a wrong yes."
         ),
         search=(
             "Spawn yaw is the door-facing yaw plus or minus 90 degrees. "
@@ -420,12 +448,19 @@ def _definition() -> DefinitionJson:
             "is not moved. A floor/wall image row is ranged with the "
             "live camera. The floor-edge latch fires only when the "
             "forward ray hits a wall. A prop hit is logged and is not "
-            "added to the latch. A wall range more than "
-            f"{RANGE_ERR_MAX_M:.2f} m off the sim gap is not a "
-            "wall-stop pass unless that wall error was added to the "
-            "latch before the bouts. The ray uses the live camera "
-            "height and the IMU pitch plus head_tilt, not a "
-            "standing-pose table."
+            "added to the latch. Every real-wall ray logs the ranged "
+            "gap, the sim gap, camera height, camera pitch, and the "
+            "leading toe. A wall range more than "
+            f"{RANGE_ERR_MAX_M:.2f} m off the sim gap, past the bob "
+            "pad measured before the bouts, is not a wall-stop pass. "
+            "One bout's wall error is not added to the latch. The "
+            f"same bias above {WALL_BIAS_M:.2f} m must repeat on a "
+            "real-wall ray with that log before it could be added, "
+            "and a repeat still fails this measure. In-place body "
+            f"yaw that asks a hip roll over {HIP_BAR_NM:.2f} Nm "
+            "unclamped is not a free re-point. d_min is not rebuilt. "
+            "The ray uses the live camera height and the IMU pitch "
+            "plus head_tilt, not a standing-pose table."
         ),
         hip_bar_nm=HIP_BAR_NM,
         soft_pass=False,
@@ -788,6 +823,52 @@ def _range_wall(
     return reading
 
 
+def _wall_hit(
+    t: float,
+    contact: str,
+    ranged: float | None,
+    true_gap: float | None,
+    true_name: str,
+    err: float | None,
+    over: bool,
+    reading: dict[str, object],
+    latch_path: str,
+    cues: tuple[hf.HazardCue, ...],
+) -> WallHitJson:
+    lead = reading.get("lead_off_m")
+    cam_z = reading.get("cam_z_m")
+    imu_pitch = reading.get("imu_pitch_rad")
+    head_tilt = reading.get("head_tilt_rad")
+    cam_pitch = reading.get("cam_pitch_rad")
+    return WallHitJson(
+        t=t,
+        contact=contact,
+        ranged_toe_gap_m=ranged,
+        true_wall_gap_m=true_gap,
+        true_wall=true_name,
+        range_err_m=err,
+        range_over_1cm=over,
+        cam_z_m=None if cam_z is None else float(cam_z),
+        imu_pitch_rad=None if imu_pitch is None else float(imu_pitch),
+        head_tilt_rad=None if head_tilt is None else float(head_tilt),
+        cam_pitch_rad=None if cam_pitch is None else float(cam_pitch),
+        lead_off_m=None if lead is None else float(lead),
+        latch_path=latch_path,
+        finder=[_cue_json(cue) for cue in cues],
+    )
+
+
+def _inplace_rows(bout: _Bout) -> list[InplaceHipJson]:
+    rows: list[InplaceHipJson] = []
+    for joint in sorted(bout.inplace_unclamped):
+        rows.append(InplaceHipJson(
+            joint=joint,
+            unclamped_nm=float(bout.inplace_unclamped[joint]),
+            clamped_nm=float(bout.inplace_clamped.get(joint, 0.0)),
+        ))
+    return rows
+
+
 def _cue_json(cue: hf.HazardCue) -> FinderCueJson:
     return FinderCueJson(
         u=None if cue.u is None else float(cue.u),
@@ -1115,6 +1196,9 @@ class _Bout:
         self.approach_clamped: dict[str, float] = {}
         self.measured: dict[str, float] = {}
         self.gait_limit = False
+        self.inplace_hip_fail = False
+        self.inplace_unclamped: dict[str, float] = {}
+        self.inplace_clamped: dict[str, float] = {}
 
 
 def _watch_step(
@@ -1148,12 +1232,23 @@ def _watch_tau(session: sw.SteerSession, bout: _Bout) -> None:
     lipm = session.lipm
     if lipm is None:
         return
+    turning = bout.yaw_on and (
+        abs(float(session.bus.target_yaw)) > 1e-6
+        or abs(float(session.bus.applied_yaw_rate)) > 1e-6
+    )
     for joint, pair in lipm.tau_note.items():
         unclamped, clamped = pair
         prev = bout.tau_unclamped.get(joint)
         if prev is None or abs(unclamped) >= abs(prev):
             bout.tau_unclamped[joint] = unclamped
             bout.tau_clamped[joint] = clamped
+        if turning and "hip_roll" in joint:
+            held_u = bout.inplace_unclamped.get(joint)
+            if held_u is None or abs(unclamped) >= abs(held_u):
+                bout.inplace_unclamped[joint] = unclamped
+                bout.inplace_clamped[joint] = clamped
+            if abs(unclamped) > HIP_BAR_NM:
+                bout.inplace_hip_fail = True
         if not bout.approach_yaw:
             continue
         held = bout.approach_unclamped.get(joint)
@@ -1480,6 +1575,8 @@ def _look(
         door_bbox=door_bbox,
         door_seconds=door_seconds,
         search_applied_yaw=0.0,
+        moondream_yes=False,
+        frac_gate="na",
     )
     return row, fracs
 
@@ -1630,7 +1727,11 @@ def _run_room(
     wall_contacts: list[WallHitJson] = []
     wall_range_fail = False
     wall_stop_pass = False
+    wall_bias_max: float | None = None
+    wall_bias_count = 0
     gate_m = d_min_m
+    # Probe bob pad only. A bout wall error, including a repeated
+    # ~4 cm class, does not widen this.
     wall_gate_m = d_min_m + latch_extra_m
     floor_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "floor")
     walls = _wall_ids(model)
@@ -1683,19 +1784,27 @@ def _run_room(
         def consider(row: AskJson) -> str:
             nonlocal block, wrong_yes, committed, first_yes_t, first_yes_tick, first_yes_heading
             asks.append(row)
-            if row["answer"] != "yes":
+            moondream_yes = row["answer"] == "yes"
+            row["moondream_yes"] = moondream_yes
+            if not moondream_yes:
+                row["frac_gate"] = "na"
                 return row["answer"]
+            if row["asked_fraction"] < ROOM_VISIBLE_FRAC:
+                row["frac_gate"] = "refuse"
+                if committed:
+                    wrong_yes = True
+                    visible = ", ".join(row["visible_rooms"]) or "none"
+                    block = (
+                        f"wrong yes slipped the frac gate; {room_name} covers "
+                        f"{row['asked_fraction']:.3f} of kit_cam, under "
+                        f"{ROOM_VISIBLE_FRAC:.2f}; visible rooms: {visible}"
+                    )
+                    return "wrong"
+                return "no"
+            row["frac_gate"] = "pass"
             first_yes_t = row["t"]
             first_yes_tick = row["tick"]
             first_yes_heading = row["heading_at_capture"]
-            if row["asked_fraction"] < ROOM_VISIBLE_FRAC:
-                wrong_yes = True
-                visible = ", ".join(row["visible_rooms"]) or "none"
-                block = (
-                    f"wrong yes; {room_name} covers {row['asked_fraction']:.3f} of "
-                    f"kit_cam, under {ROOM_VISIBLE_FRAC:.2f}; visible rooms: {visible}"
-                )
-                return "wrong"
             committed = True
             return "commit"
 
@@ -1878,49 +1987,79 @@ def _run_room(
                     return False
                 return _settle_body(False)
 
+            def _wall_honest(err: float | None, true_gap: float | None) -> bool:
+                # The bob pad is a wall-ray error measured before the bouts.
+                # A prop miss does not widen it, and neither does this bout.
+                covered = (
+                    latch_extra_m > 0.0
+                    and true_gap is not None
+                    and float(true_gap) + 1e-6 >= d_min_m
+                    and err is not None
+                    and err <= latch_extra_m + 1e-6
+                )
+                return (err is not None and err <= RANGE_ERR_MAX_M) or covered
+
+            def _account_wall_ray(
+                reading: dict[str, object],
+                true_name: str,
+                true_gap: float | None,
+                cues: tuple[hf.HazardCue, ...],
+            ) -> None:
+                nonlocal wall_range_fail, wall_bias_max, wall_bias_count
+                ranged_raw = reading["geometric_m"]
+                ranged = None if ranged_raw is None else float(ranged_raw)
+                err = None
+                if ranged is not None and true_gap is not None:
+                    err = abs(ranged - float(true_gap))
+                if not _wall_honest(err, true_gap):
+                    wall_range_fail = True
+                if err is not None:
+                    if wall_bias_max is None or err > wall_bias_max:
+                        wall_bias_max = err
+                    if err > WALL_BIAS_M:
+                        wall_bias_count += 1
+                wall_contacts.append(_wall_hit(
+                    float(session.data.time),
+                    "none",
+                    ranged,
+                    true_gap,
+                    true_name,
+                    err,
+                    err is None or err > RANGE_ERR_MAX_M,
+                    reading,
+                    "wall_ray",
+                    cues,
+                ))
+
             def _log_range(kind: str, latch_path: str, cues: tuple[hf.HazardCue, ...]) -> None:
                 nonlocal wall_range_fail, wall_stop_pass
                 reading = _range_wall(
                     session, model, renderer, cid, jid, pan_id, reach, floor_id, walls,
                 )
                 true_name, true_gap = _true_wall_gap(model, session.data, session, cid)
-                ranged = reading["geometric_m"]
+                ranged_raw = reading["geometric_m"]
+                ranged = None if ranged_raw is None else float(ranged_raw)
                 is_wall = str(true_name).startswith("wall_")
                 err = None
                 if is_wall and ranged is not None and true_gap is not None:
-                    err = abs(float(ranged) - float(true_gap))
+                    err = abs(ranged - float(true_gap))
                 over = is_wall and (err is None or err > RANGE_ERR_MAX_M)
-                # The bob pad is a wall-ray error measured before the bouts.
-                # A prop miss does not widen it.
-                covered = (
-                    is_wall
-                    and latch_extra_m > 0.0
-                    and true_gap is not None
-                    and float(true_gap) + 1e-6 >= d_min_m
-                    and err is not None
-                    and err <= latch_extra_m + 1e-6
-                )
-                honest = is_wall and (
-                    (err is not None and err <= RANGE_ERR_MAX_M) or covered
-                )
+                honest = is_wall and _wall_honest(err, true_gap)
                 if kind == "floor_edge" and bout.contact == "none" and honest:
                     wall_stop_pass = True
                 if is_wall and kind == "floor_edge" and not honest:
                     wall_range_fail = True
-                wall_contacts.append(WallHitJson(
-                    t=float(session.data.time),
-                    contact=kind if kind != "floor_edge" else bout.contact,
-                    ranged_toe_gap_m=None if ranged is None else float(ranged),
-                    true_wall_gap_m=true_gap,
-                    true_wall=true_name,
-                    range_err_m=err,
-                    range_over_1cm=over,
-                    cam_z_m=float(reading["cam_z_m"]),
-                    imu_pitch_rad=float(reading["imu_pitch_rad"]),
-                    head_tilt_rad=float(reading["head_tilt_rad"]),
-                    cam_pitch_rad=float(reading["cam_pitch_rad"]),
-                    latch_path=latch_path,
-                    finder=[_cue_json(cue) for cue in cues],
+                wall_contacts.append(_wall_hit(
+                    float(session.data.time),
+                    kind if kind != "floor_edge" else bout.contact,
+                    ranged,
+                    true_gap,
+                    true_name,
+                    err,
+                    over,
+                    reading,
+                    latch_path,
+                    cues,
                 ))
 
             while (
@@ -2027,6 +2166,14 @@ def _run_room(
                         true_name, true_gap = _true_wall_gap(
                             model, session.data, session, cid,
                         )
+                        ranged_g = (
+                            None if reading["geometric_m"] is None
+                            else float(reading["geometric_m"])
+                        )
+                        is_wall = str(true_name).startswith("wall_")
+                        err = None
+                        if is_wall and ranged_g is not None and true_gap is not None:
+                            err = abs(ranged_g - float(true_gap))
                         approach.append(ApproachJson(
                             t=now,
                             tick=ticks,
@@ -2045,10 +2192,15 @@ def _run_room(
                             imu_pitch_rad=float(reading["imu_pitch_rad"]),
                             head_tilt_rad=float(reading["head_tilt_rad"]),
                             cam_pitch_rad=float(reading["cam_pitch_rad"]),
+                            geometric_m=ranged_g,
+                            lead_off_m=float(reading["lead_off_m"]),
+                            range_err_m=err,
                         ))
+                        if is_wall:
+                            _account_wall_ray(reading, true_name, true_gap, cues)
                         gap = reading["toe_gap_m"]
                         if gap is not None and float(gap) <= wall_gate_m:
-                            if not str(true_name).startswith("wall_"):
+                            if not is_wall:
                                 ray_reject_count += 1
                                 if (
                                     true_name != last_reject_name
@@ -2056,29 +2208,20 @@ def _run_room(
                                 ):
                                     last_reject_name = true_name
                                     last_reject_t = now
-                                    wall_contacts.append(WallHitJson(
-                                        t=now,
-                                        contact="none",
-                                        ranged_toe_gap_m=(
-                                            None if reading["geometric_m"] is None
-                                            else float(reading["geometric_m"])
+                                    wall_contacts.append(_wall_hit(
+                                        now,
+                                        "none",
+                                        ranged_g,
+                                        true_gap,
+                                        true_name,
+                                        (
+                                            None if ranged_g is None or true_gap is None
+                                            else abs(ranged_g - float(true_gap))
                                         ),
-                                        true_wall_gap_m=true_gap,
-                                        true_wall=true_name,
-                                        range_err_m=(
-                                            None if reading["geometric_m"] is None
-                                            or true_gap is None
-                                            else abs(
-                                                float(reading["geometric_m"]) - float(true_gap)
-                                            )
-                                        ),
-                                        range_over_1cm=False,
-                                        cam_z_m=float(reading["cam_z_m"]),
-                                        imu_pitch_rad=float(reading["imu_pitch_rad"]),
-                                        head_tilt_rad=float(reading["head_tilt_rad"]),
-                                        cam_pitch_rad=float(reading["cam_pitch_rad"]),
-                                        latch_path="ray_reject",
-                                        finder=[_cue_json(cue) for cue in cues],
+                                        False,
+                                        reading,
+                                        "ray_reject",
+                                        cues,
                                     ))
                             else:
                                 _log_range("floor_edge", "floor_edge", cues)
@@ -2230,6 +2373,25 @@ def _run_room(
                 )
         if bout.peak_actuator == "":
             raise SystemExit(f"FAIL {room_name}: no leg actuator force")
+        for row in asks:
+            under = (
+                row["answer"] == "yes"
+                and float(row["asked_fraction"]) < ROOM_VISIBLE_FRAC
+            )
+            if under and row["frac_gate"] != "refuse":
+                wrong_yes = True
+                if block == "":
+                    block = (
+                        f"wrong yes slipped the frac gate; {room_name} covers "
+                        f"{row['asked_fraction']:.3f} of kit_cam"
+                    )
+            if under and committed and row["frac_gate"] == "pass":
+                wrong_yes = True
+                if block == "":
+                    block = (
+                        f"wrong yes committed under the frac gate; {room_name} "
+                        f"covers {row['asked_fraction']:.3f} of kit_cam"
+                    )
         com_end = np.asarray(session.data.subtree_com[session.bid_body], dtype=np.float64)
         finished_inside = _inside(float(com_end[0]), float(com_end[1]), box)
         min_up = float(session.min_up_z)
@@ -2259,12 +2421,21 @@ def _run_room(
         confidence: float | None = None
         seconds: float | None = None
         if asks:
-            chosen = asks[-1]
+            chosen = None
             for row in asks:
-                if row["answer"] == "yes":
+                if row["answer"] == "yes" and row["frac_gate"] == "pass":
                     chosen = row
                     break
-            label = chosen["answer"]
+            if chosen is None:
+                for row in reversed(asks):
+                    if row["frac_gate"] != "refuse":
+                        chosen = row
+                        break
+            if chosen is None:
+                chosen = asks[-1]
+                label = "no"
+            else:
+                label = chosen["answer"]
             raw_answer = chosen["raw"]
             confidence = chosen["confidence"]
             seconds = chosen["seconds"]
@@ -2322,6 +2493,10 @@ def _run_room(
             wall_range_fail=wall_range_fail,
             wall_stop_pass=wall_stop_pass,
             ray_reject_count=ray_reject_count,
+            frac_refuse_count=sum(1 for row in asks if row["frac_gate"] == "refuse"),
+            wall_bias_max_m=wall_bias_max,
+            wall_bias_count=wall_bias_count,
+            wall_bias_repeat=wall_bias_count >= 2,
             search_applied_yaw_peak=search_applied_peak,
             search_yaw_fail=(
                 any(row["answer"] == "no_door" for row in asks)
@@ -2329,6 +2504,8 @@ def _run_room(
             ),
             latch_armed_contact=bool(latch_applied and bout.contact != "none"),
             gait_limit=bout.gait_limit,
+            inplace_hip_fail=bout.inplace_hip_fail,
+            inplace_hip=_inplace_rows(bout),
             torque=_torque_rows(bout),
             spawn=spawn,
             floor_box=box,
@@ -2593,10 +2770,23 @@ def main() -> int:
                 rows.append(row)
                 spawn = row["spawn"]
                 hip_over = [item["joint"] for item in row["hip_while_yawing"] if item["over_2_33"]]
+                hips = ",".join(
+                    f"{item['joint']} {item['unclamped_nm']:+.2f}/{item['clamped_nm']:+.2f}"
+                    for item in row["inplace_hip"]
+                )
+                door_u = None
+                door_frac = None
+                for ask in reversed(row["asks"]):
+                    if ask["door_u"] is not None:
+                        door_u = ask["door_u"]
+                        door_frac = ask["door_frac"]
+                        break
                 print(
                     f"{row['room']} off={row['yaw_offset_rad']:+.3f}  "
                     f"door={row['doorway_fraction']:.3f}  "
                     f"label={row['recogniser_label']!r}  "
+                    f"frac_refuse={row['frac_refuse_count']}  "
+                    f"door_u={door_u} door_px={door_frac}  "
                     f"wrong_yes={row['wrong_yes']}  "
                     f"yes_t={row['first_yes_t']} yes_tick={row['first_yes_tick']}  "
                     f"yes_heading={row['first_yes_heading_rad']}  "
@@ -2613,8 +2803,11 @@ def main() -> int:
                     f"reached={row['reached']}  contact={row['contact']}  "
                     f"wall_fail={row['wall_range_fail']}  "
                     f"wall_stop_pass={row['wall_stop_pass']}  "
+                    f"wall_bias={row['wall_bias_max_m']} "
+                    f"n={row['wall_bias_count']} repeat={row['wall_bias_repeat']}  "
                     f"latch_contact={row['latch_armed_contact']}  "
                     f"gait_limit={row['gait_limit']}  "
+                    f"inplace_hip={row['inplace_hip_fail']} {hips}  "
                     f"peak={row['peak_nm']:+.3f} {row['peak_joint']}  "
                     f"hip_over={hip_over}  "
                     f"shadows={len(row['shadow_first_sightings'])}",
@@ -2636,6 +2829,8 @@ def main() -> int:
     range_any = any(row["wall_range_fail"] for row in rows)
     gait_any = any(row["gait_limit"] for row in rows)
     search_any = any(row["search_yaw_fail"] for row in rows)
+    inplace_any = any(row["inplace_hip_fail"] for row in rows)
+    bias_repeat_any = any(row["wall_bias_repeat"] for row in rows)
     header["rooms"] = rows
     header["reached_all"] = reached_all
     header["false_stop_any"] = false_any
@@ -2644,14 +2839,18 @@ def main() -> int:
     header["wall_range_fail_any"] = range_any
     header["gait_limit_any"] = gait_any
     header["search_yaw_fail_any"] = search_any
+    header["inplace_hip_fail_any"] = inplace_any
+    header["wall_bias_repeat_any"] = bias_repeat_any
+    header["frac_refuse_count"] = sum(int(row["frac_refuse_count"]) for row in rows)
     header["ray_reject_count"] = sum(int(row["ray_reject_count"]) for row in rows)
     header["prefer_fail"] = (
         (not reached_all) or false_any or wrong_any or contact_any
-        or range_any or gait_any or search_any
+        or range_any or gait_any or search_any or inplace_any or bias_repeat_any
     )
     header["go_anywhere"] = (
         reached_all and not false_any and not wrong_any
         and not contact_any and not range_any and not gait_any and not search_any
+        and not inplace_any and not bias_repeat_any
     )
     header["kit_safe"] = False
     header["soft_pass"] = False
@@ -2667,6 +2866,9 @@ def main() -> int:
         f"wall_range_fail_any={str(range_any).lower()}  "
         f"gait_limit_any={str(gait_any).lower()}  "
         f"search_yaw_fail_any={str(search_any).lower()}  "
+        f"inplace_hip_fail_any={str(inplace_any).lower()}  "
+        f"wall_bias_repeat_any={str(bias_repeat_any).lower()}  "
+        f"frac_refuse={header['frac_refuse_count']}  "
         f"ray_reject={header['ray_reject_count']}",
         flush=True,
     )
