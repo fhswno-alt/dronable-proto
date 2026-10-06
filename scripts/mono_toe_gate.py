@@ -31,6 +31,10 @@ col_chair_stool_b_leg_0, whose eye range reads about 0.18 m short of
 the true camera-to-floor gap. That early trip is not a calibrated
 toe gap. Near the center, leg_2 at t = 5.824 s reads 0.015 m short.
 The head is not tilted. A −10° walk stays off.
+
+``ray`` replaces that row model with ``ray_corridor.estimate_hazard``.
+It does not call stop. The hazard pad is the frozen 0.020 m stand-in.
+Collider half-extents are not an input.
 """
 from __future__ import annotations
 
@@ -51,6 +55,7 @@ import mujoco as mj
 import numpy as np
 
 import gait_manager_traj as gm
+import ray_corridor as rc
 import steer_walk as sw
 
 SCENE = Path("/tmp/m62/mujoco/room_kitchen.xml")
@@ -225,6 +230,20 @@ def toe_samples(session: sw.SteerSession, cid: int) -> list[ToeSample]:
                 best_off = off
                 best_xy = (float(corner[0]), float(corner[1]))
         rows.append(ToeSample(side, swing == side, best_off, best_xy))
+    return rows
+
+
+def _leg_floor_centers(model: mj.MjModel, data: mj.MjData) -> list[tuple[str, int, np.ndarray]]:
+    """Stool-leg floor points from geom origin xy. Does not read geom size."""
+    rows: list[tuple[str, int, np.ndarray]] = []
+    for gid in range(model.ngeom):
+        name = mj.mj_id2name(model, mj.mjtObj.mjOBJ_GEOM, gid) or ""
+        if "stool" not in name or "_leg_" not in name:
+            continue
+        center = np.asarray(data.geom_xpos[gid], dtype=np.float64)
+        point = center.copy()
+        point[2] = 0.0
+        rows.append((name, gid, point))
     return rows
 
 
@@ -684,8 +703,353 @@ def _print_result(result: dict[str, object], t_detect: float, mode: str) -> None
         print(line)
 
 
+@dataclass(frozen=True)
+class RayRow:
+    t: float
+    name: str
+    u: float
+    v: float
+    eye_range: float
+    forward_m: float
+    sideways_m: float
+    toe_gap_m: float
+    in_corridor: bool
+    gt_eye: float
+    gt_forward: float
+    gt_side: float
+    gt_near: float
+    row_eye: float
+    yaw_rate: float
+    step_off: float
+    sim_half_m: float
+    origin_xy: tuple[float, float]
+    forward_xy: tuple[float, float]
+
+
+def _sim_half_footnote(model: mj.MjModel, gid: int) -> float:
+    """Horizontal half-extent of a sim box. Not an estimator input."""
+    size = np.asarray(model.geom_size[gid], dtype=np.float64)
+    return float(max(abs(size[0]), abs(size[1])))
+
+
+def _stand_outers(session: sw.SteerSession) -> tuple[float, float]:
+    """Live outer edges of the foot boxes, body left positive. Read only."""
+    data = session.data
+    origin = np.array(
+        [float(data.qpos[0]), float(data.qpos[1])],
+        dtype=np.float64,
+    )
+    fwd = body_forward_xy(data, session.bid_body)
+    left = np.array(rc.left_from_forward((float(fwd[0]), float(fwd[1]))), dtype=np.float64)
+    lo = 1e9
+    hi = -1e9
+    for side, bid, gid in (
+        ("L", session.bid_lf, session.gid_lfoot),
+        ("R", session.bid_rf, session.gid_rfoot),
+    ):
+        del side
+        for corner in _box_bottom_corners(session.model, data, bid, gid):
+            lat = float(np.dot(corner[:2] - origin, left))
+            lo = min(lo, lat)
+            hi = max(hi, lat)
+    return hi, lo
+
+
+def walk_ray(t_end: float = 9.0) -> dict[str, object]:
+    """Unarmed kitchen walk. The estimator is not wired to Day-1 stop."""
+    if not SCENE.is_file():
+        raise SystemExit(f"missing kitchen scene {SCENE}")
+    session = sw.SteerSession(video=False, scene_xml=SCENE, lipm=sw.locked_kit_config())
+    model = session.model
+    cid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_CAMERA, "kit_cam")
+    jid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, "head_tilt")
+    pan_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, "head_pan")
+    peaks: dict[str, tuple[float, float]] = {}
+    real = mj.mj_step
+    contact: tuple[float, str, str, float] | None = None
+
+    def hook(m: mj.MjModel, d: mj.MjData) -> None:
+        nonlocal contact
+        real(m, d)
+        t_now = float(d.time)
+        hit = _prop_hit(m, d)
+        if hit is not None and contact is None:
+            contact = (t_now, hit[0], hit[1], hit[2])
+        for i in range(m.nu):
+            name = mj.mj_id2name(m, mj.mjtObj.mjOBJ_ACTUATOR, i) or ""
+            if not any(tok in name for tok in LEG_TOKS):
+                continue
+            force = float(d.actuator_force[i])
+            prev = peaks.get(name)
+            if prev is None or abs(force) > abs(prev[0]):
+                peaks[name] = (force, t_now)
+
+    mj.mj_step = hook
+    driver = sw.ScriptedDriver((
+        sw.DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+        sw.DemoSegment(t_end, "vel", sw.VX_FWD_CAP, -sw.YAW_RATE_CAP, "turn"),
+    ))
+    rows: list[RayRow] = []
+    reach: list[tuple[float, float, float]] = []
+    path: list[tuple[float, float, float]] = []
+    att_err = 0.0
+    pix_err = 0.0
+    stand_outer: tuple[float, float] | None = None
+    head_tilt_peak = 0.0
+    try:
+        while float(session.data.time) < t_end - 1e-9:
+            now = float(session.data.time)
+            driver.publish(session.bus, now)
+            report = session.step()
+            t_now = float(session.data.time)
+            if stand_outer is None and 0.90 <= t_now < 1.0:
+                stand_outer = _stand_outers(session)
+            if t_now + 1e-9 < 1.0:
+                if contact is not None:
+                    break
+                continue
+            data = session.data
+            tilt = float(data.qpos[int(model.jnt_qposadr[jid])])
+            pan = float(data.qpos[int(model.jnt_qposadr[pan_id])])
+            head_tilt_peak = max(head_tilt_peak, abs(tilt))
+            body_rot = np.asarray(data.xmat[session.bid_body], dtype=np.float64).reshape(3, 3)
+            yaw, pitch, roll = rc.imu_from_body(body_rot)
+            composed = rc.camera_rotation_from_imu(yaw, pitch, roll, tilt, pan)
+            cam_rot = np.asarray(data.cam_xmat[cid], dtype=np.float64).reshape(3, 3)
+            att_err = max(att_err, float(np.max(np.abs(composed - cam_rot))))
+            if stand_outer is None and abs(t_now - 1.0) < 0.02:
+                stand_outer = _stand_outers(session)
+            cam = np.asarray(data.cam_xpos[cid], dtype=np.float64)
+            fwd = body_forward_xy(data, session.bid_body)
+            forward_xy = (float(fwd[0]), float(fwd[1]))
+            left_xy = rc.left_from_forward(forward_xy)
+            toes = toe_samples(session, cid)
+            left_off = next(row.offset_m for row in toes if row.side == "L")
+            right_off = next(row.offset_m for row in toes if row.side == "R")
+            reach.append((t_now, left_off, right_off))
+            step_off, _side, _when = _high_water(reach)
+            body = rc.BodyFrame((float(data.qpos[0]), float(data.qpos[1])), forward_xy)
+            pose = rc.KitCamPose((float(cam[0]), float(cam[1]), float(cam[2])))
+            yaw_rate = float(report.applied_yaw_rate)
+            row_pitch = torso_pitch(data, session.bid_body) + tilt
+            for name, gid, point in _leg_floor_centers(model, data):
+                pix = _project(data, cid, point)
+                if pix is None:
+                    continue
+                u, v = pix
+                if not (0.0 <= u < WIDTH and 0.0 <= v < HEIGHT):
+                    continue
+                composed_pix = rc.project_point(point, cam, composed)
+                if composed_pix is not None:
+                    pix_err = max(
+                        pix_err,
+                        abs(composed_pix[0] - u),
+                        abs(composed_pix[1] - v),
+                    )
+                est = rc.estimate_hazard(
+                    u,
+                    v,
+                    cam=pose,
+                    body=body,
+                    imu_roll_rad=roll,
+                    imu_pitch_rad=pitch,
+                    head_tilt_rad=tilt,
+                    yaw_rate=yaw_rate,
+                    step_off_m=step_off,
+                    hazard_pad_m=rc.HAZARD_PAD_M,
+                    head_pan_rad=pan,
+                )
+                if est is None:
+                    continue
+                row_eye = range_from_row(v, row_pitch, float(cam[2]))
+                if row_eye is None:
+                    continue
+                delta_cam = point[:2] - cam[:2]
+                gt_forward = float(np.dot(delta_cam, fwd))
+                origin = np.array(body.origin_xy_m, dtype=np.float64)
+                gt_side = float(np.dot(point[:2] - origin, np.array(left_xy)))
+                gt_eye = float(math.hypot(float(delta_cam[0]), float(delta_cam[1])))
+                near = gt_forward
+                for corner in _box_bottom_corners(model, data, int(model.geom_bodyid[gid]), gid):
+                    near = min(near, float(np.dot(corner[:2] - cam[:2], fwd)))
+                rows.append(RayRow(
+                    t_now, name, u, v, est.eye_range, est.forward_m, est.sideways_m,
+                    est.toe_gap_m, est.in_corridor, gt_eye, gt_forward, gt_side, near,
+                    row_eye, yaw_rate, step_off, _sim_half_footnote(model, gid),
+                    body.origin_xy_m, forward_xy,
+                ))
+            path.append((t_now, float(data.qpos[0]), float(data.qpos[1])))
+            if contact is not None:
+                break
+    finally:
+        mj.mj_step = real
+
+    worst = max(peaks.items(), key=lambda kv: abs(kv[1][0])) if peaks else None
+    return {
+        "plant": sw._md5(sw.PLANT_XML),
+        "contact": contact,
+        "rows": rows,
+        "step_off": _high_water(reach),
+        "periods": _period_lines(reach),
+        "att_err": att_err,
+        "pix_err": pix_err,
+        "stand_outer": stand_outer,
+        "head_tilt_peak": head_tilt_peak,
+        "min_up_z": session.min_up_z,
+        "yaw_deg": math.degrees(session.yaw()),
+        "worst": None if worst is None else (worst[0], worst[1][0], worst[1][1]),
+        "knees": {n: v for n, v in peaks.items() if "knee" in n},
+        "path": path,
+        "stop_sent": False,
+    }
+
+
+def _closest(rows: list[RayRow], name: str, t: float) -> RayRow | None:
+    picked = [row for row in rows if row.name == name]
+    if not picked:
+        return None
+    return min(picked, key=lambda row: abs(row.t - t))
+
+
+def _first_cross(rows: list[RayRow], t_detect: float, *, ray: bool) -> RayRow | None:
+    gate = rc.d_min(t_detect)
+    best: RayRow | None = None
+    for row in rows:
+        gap = row.toe_gap_m if ray else (row.row_eye - row.step_off)
+        if ray and not row.in_corridor:
+            continue
+        if gap <= gate and (best is None or row.t < best.t):
+            best = row
+    return best
+
+
+def _fmt_ray(row: RayRow) -> str:
+    return (
+        f"t={row.t:.3f} {row.name} row={row.v:.0f} col={row.u:.0f} "
+        f"eye={row.eye_range:.3f} gt={row.gt_eye:.3f} "
+        f"eye_bias={row.eye_range - row.gt_eye:+.3f} "
+        f"fwd={row.forward_m:.3f} gt_fwd={row.gt_forward:.3f} "
+        f"fwd_bias={row.forward_m - row.gt_forward:+.3f} "
+        f"side={row.sideways_m:+.3f} gt_side={row.gt_side:+.3f} "
+        f"near_gt={row.gt_near:.3f} toe_gap={row.toe_gap_m:.3f} "
+        f"in_corridor={int(row.in_corridor)} row_eye={row.row_eye:.3f} "
+        f"row_bias={row.row_eye - row.gt_eye:+.3f} "
+        f"yaw_rate={row.yaw_rate:+.3f} step_off={row.step_off:+.3f} "
+        f"center_gap={row.forward_m - row.step_off:.3f} "
+        f"sim_half={row.sim_half_m:.4f}"
+    )
+
+
+def _print_ray(result: dict[str, object]) -> None:
+    rows = result["rows"]
+    assert isinstance(rows, list)
+    step = result["step_off"]
+    assert isinstance(step, tuple)
+    outer = result["stand_outer"]
+    print(
+        f"plant {result['plant']} mode=ray stop_sent={int(result['stop_sent'])} "
+        f"pad={rc.HAZARD_PAD_M:.3f} outer_lock=±{rc.CORRIDOR_OUTER_M:.4f} "
+        f"outside_lock={rc.CORRIDOR_OUTSIDE_M:.3f} inboard=±{rc.CORRIDOR_INBOARD_M:.4f} "
+        f"stand_outer={outer} T_stop={rc.T_STOP_S:.3f} "
+        f"d_min(T_detect=0)={rc.d_min(0.0):.4f} "
+        f"step_off={step[0]:+.3f} {step[1]} t={step[2]:.3f} "
+        f"contact={result['contact']} min_up_z={result['min_up_z']:.3f} "
+        f"yaw={result['yaw_deg']:+.1f} head_tilt_peak={result['head_tilt_peak']:.4f} "
+        f"att_err={result['att_err']:.3e} pix_err={result['pix_err']:.3f} "
+        f"worst={result['worst']} knees={result['knees']}"
+    )
+    periods = result["periods"]
+    assert isinstance(periods, list)
+    for line in periods:
+        print(line)
+    contact = result["contact"]
+    hit_name = ""
+    hit_t = 5.824
+    if isinstance(contact, tuple):
+        hit_name = str(contact[2])
+        hit_t = float(contact[0])
+    print(f"hit_frame {_fmt_ray(hit)}" if (hit := _closest(rows, hit_name, hit_t)) else "hit_frame none")
+    for name, t in (
+        ("col_chair_stool_b_leg_0", 5.680),
+        ("col_chair_stool_b_leg_2", 5.824),
+        ("col_chair_stool_b_leg_0", hit_t),
+        ("col_chair_stool_b_leg_2", hit_t),
+    ):
+        row = _closest(rows, name, t)
+        if row is not None:
+            print(f"snap {_fmt_ray(row)}")
+    for t_detect in (0.0, 0.033, 0.100):
+        ray_hit = _first_cross(rows, t_detect, ray=True)
+        row_hit = _first_cross(rows, t_detect, ray=False)
+        ray_s = "none" if ray_hit is None else _fmt_ray(ray_hit)
+        row_s = "none" if row_hit is None else _fmt_ray(row_hit)
+        print(f"cross T_detect={t_detect:.3f} buffer=0 ray {ray_s}")
+        print(f"cross T_detect={t_detect:.3f} buffer=0 row {row_s}")
+    leg0 = [row for row in rows if row.name.endswith("leg_0")]
+    if leg0:
+        worst_row = max(leg0, key=lambda row: abs(row.row_eye - row.gt_eye))
+        print(f"leg0_worst_row {_fmt_ray(worst_row)}")
+        shrink = abs(worst_row.row_eye - worst_row.gt_eye) - abs(worst_row.eye_range - worst_row.gt_eye)
+        print(
+            f"leg0_shrink row_bias={worst_row.row_eye - worst_row.gt_eye:+.3f} "
+            f"ray_bias={worst_row.eye_range - worst_row.gt_eye:+.3f} "
+            f"shrink={shrink:.3f}"
+        )
+    ray0 = _first_cross(rows, 0.0, ray=True)
+    on_axis = _closest(rows, "col_chair_stool_b_leg_2", 5.824)
+    ray_pass = False
+    if on_axis is not None:
+        ray_bias = abs(on_axis.eye_range - on_axis.gt_eye)
+        row_bias = abs(on_axis.row_eye - on_axis.gt_eye)
+        ray_pass = ray_bias < 0.05 and (row_bias - ray_bias) > -1e-6
+        print(
+            f"on_axis_5.824 ray_bias={on_axis.eye_range - on_axis.gt_eye:+.3f} "
+            f"row_bias={on_axis.row_eye - on_axis.gt_eye:+.3f}"
+        )
+    corridor_pass = False
+    if ray0 is not None and hit_name:
+        others = [
+            row for row in rows
+            if abs(row.t - ray0.t) < 1e-9 and row.name.endswith("leg_0")
+        ]
+        leg0_in = any(row.in_corridor for row in others) or ray0.name.endswith("leg_0")
+        corridor_pass = (not leg0_in) and (hit_name in ray0.name or ray0.name == hit_name)
+        print(
+            f"latch_target {ray0.name} hit={hit_name} leg0_in={int(leg0_in)} "
+            f"corridor_filters={int(corridor_pass)}"
+        )
+    else:
+        print(f"latch_target none hit={hit_name} corridor_filters=0")
+    path = result["path"]
+    assert isinstance(path, list)
+    if rows and path and isinstance(contact, tuple):
+        last = max(rows, key=lambda row: row.t if row.name == hit_name else -1.0)
+        if last.name == hit_name and last.in_corridor:
+            state = rc.DeadReckonState(
+                last.forward_m, last.sideways_m, last.in_corridor,
+                last.origin_xy, last.forward_xy, last.t,
+            )
+            end = path[-1]
+            gap = rc.dead_reckon_gap(state, (end[1], end[2]), last.step_off)
+            print(
+                f"dead_reckon leave_t={last.t:.3f} contact_t={contact[0]:.3f} "
+                f"toe_gap={gap:.3f} in_corridor={int(last.in_corridor)} "
+                f"side={last.sideways_m:+.3f} d_min0={rc.d_min(0.0):.4f}"
+            )
+    # Buffer is not sized. Stop is not wired. The pad is a stand-in.
+    print(
+        "verdict Prefer FAIL "
+        f"ray_shrink={int(ray_pass)} corridor={int(corridor_pass)} "
+        "buffer_sized=0 stop_wired=0 kit_safe=0 soft_pass=0 head_down=0"
+    )
+
+
 def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else "gate"
+    if mode == "ray":
+        rc.self_check()
+        _print_ray(walk_ray())
+        return
     if mode == "stress":
         for t_detect in (0.0, 0.033, 0.100):
             for buffer_m in BUFFERS_M:

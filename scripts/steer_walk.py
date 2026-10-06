@@ -192,6 +192,16 @@ stool leg whose eye range reads about 0.18 m short, so the clearance
 is not a calibrated toe gap. Not kit-safe. A −10° head-down walk is
 not enabled. The row is a sim projection. Not go-anywhere. Soft-pass
 is off.
+
+The range Controls should call is `scripts/ray_corridor.py`.
+`estimate_hazard` takes the pixel, IMU roll and pitch, `head_tilt`,
+and the camera position. It returns `toe_gap_m`, `eye_range`, and
+`in_corridor`. The toe offset stays the +0.017 m period high water
+when the caller does not pass a newer one. The foot corridor is
+±0.0867 m, and 0.108 m on the outside edge at yaw ±0.25. The hazard
+pad is the frozen 0.020 m stand-in, not a collider radius. This bus
+does not latch stop from that estimate. A −10° tilt stays off.
+
 """
 from __future__ import annotations
 

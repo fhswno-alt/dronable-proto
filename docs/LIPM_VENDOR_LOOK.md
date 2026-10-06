@@ -1631,3 +1631,85 @@ min up_z 0.934, end xy +0.088, −0.005, yaw −5.9°, and a stop peak of
 +2.280 Nm on the right knee. That stop is first-sight. It is not this
 gate. Soft-pass is off. Not go-anywhere.
 
+## Ray and foot corridor (estimator only)
+
+`scripts/ray_corridor.py` replaces the row-only range. It does not call
+`CommandBus.stop`. Controls latches that. Soft-pass is off. The plant
+file is not edited. md5 stays `207f3d5e9c6a72e16f7aa0c8d224f75e`.
+`head_tilt` is not commanded. On this walk its peak is 0.0005 rad.
+A −10° head-down walk stays off.
+
+The ray takes a kit_cam pixel `(u, v)`, the live IMU roll and pitch,
+`head_tilt`, and the camera position. Intrinsics stay 640×480, fovy
+104.82. The direction uses body yaw, roll, and pitch, then `head_tilt`.
+It meets the floor at `z = 0`. Checked against `kit_cam`'s own
+rotation, the composed attitude differs by at most 1.4e-5, and the
+pixel by 0.006 px.
+
+`eye_range` is the horizontal camera-to-floor distance of that hit.
+`forward_m` is the same hit ahead of the camera, body frame.
+`sideways_m` is the hit's offset from the body origin, left positive.
+The step offset is still the period high water, not the planted sole.
+This walk again peaks at **+0.017 m** on the right foot at t = 3.056 s.
+
+    toe_gap_m = forward_m − hazard_pad − step_off
+
+A caller that uses only `eye_range` subtracts that +0.017 m itself.
+Do not subtract it twice. `t_cue` is not `T_detect`. Host and mesh
+latencies are not `T_detect`. `T_detect` stays a parameter.
+`d_min = 0.150 × (T_detect + 0.842)`. At `T_detect` = 0 that is
+0.1263 m, the floor of the formula, not a safe gap. Buffer stays off
+this run. 0.03 m and 0.05 m are not sized from it.
+
+The hazard pad is **0.020 m**, frozen before the run. It shortens the
+approach and widens the lateral interval. It is not read from a
+`col_*` size. The sim boxes on this scene are about 0.017 m across
+the horizontal half-extent. That number is a footnote. It is not an
+input. At t = 5.824 s the on-axis leg's floor centre is 0.185 m
+forward and the nearer bottom corner, in sim only, is 0.161 m. The
+20 mm pad leaves the approach at 0.165 m, 4 mm farther than that
+corner. The pad is not the leg.
+
+The corridor is the Controls measurement of the outer foot edges
+after the 14 mm outboard shift already in the plant: **±0.0867 m**.
+The inboard edges are ±0.0096 m and are not a hole. At commanded yaw
+−0.25 the left (outside) edge is **0.108 m**. The live stand soles on
+this run read +0.0867 m and −0.0867 m.
+
+Same kitchen collision walk, no stop. The left foot hits
+`col_chair_stool_b_leg_2` at 6.822 s and 20.4 N. The log ends on that
+sample (min up_z 0.934). It does not include the later clip torque.
+
+| Frame | Leg | Row eye | Ray `eye_range` | True cam–floor | Sideways | In corridor |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| 5.680 s (old row latch) | `leg_0` | 0.170 m | 0.351 m | 0.351 m | −0.276 m | no |
+| 5.824 s | `leg_2` | 0.182 m | 0.197 m | 0.197 m | +0.059 m | yes |
+
+The 0.181 m short on `leg_0` is gone at the reported precision. The
+0.015 m short on the on-axis leg is gone the same way. `leg_0` stays
+outside the corridor. With buffer 0, the first `toe_gap_m <= d_min`
+inside the corridor is `leg_2` at 5.904 s (`T_detect` = 0,
+`toe_gap_m` 0.125 m, centre gap before the pad 0.145 m). The same
+pattern holds at the placeholder `T_detect` values 0.033 s and
+0.100 s: the cross is `leg_2`, not `leg_0`. Those three times are
+not a kit `T_detect`. The centre gap at 5.904 s is still above
+0.1263 m. The pad is what puts `toe_gap_m` under that floor.
+
+`leg_2` leaves the frame at 6.040 s, still in the corridor, sideways
++0.062 m. Contact is 6.822 s. `dead_reckon_gap` from that leave,
+along the heading stored then, is −0.019 m at the contact sample.
+The robot is still yawing, so that straight advance is not the arc.
+It is the state the API returns. It is not a measured clearance.
+
+No stop was sent, so the 2.280 Nm stop hold was not run. In this
+unarmed window the knees are −2.083 Nm and +2.043 Nm. The largest
+leg sample is `l_hip_roll` at −2.271 Nm at 3.92 s, the yaw-walk
+sample already on the books. Nothing in the window crossed 2.280 Nm.
+That is not a stop-window proof.
+
+Prefer FAIL. The ray and the corridor no longer treat `leg_0` as the
+hazard on this walk, and the would-be compare names `leg_2`, the leg
+the foot hits. Day-1 stop is not wired to it. The 3–5 cm buffer is
+not sized. The 20 mm pad is not the leg. Not kit-safe. Not
+go-anywhere.
+
