@@ -19,8 +19,14 @@ leg and the range reads long.
 If that lowest pixel is the last row of the frame, the contact is cut
 off. The cue is ``bottom_clipped`` / ``too_close`` and ``u`` and ``v``
 are left empty. No pixel is emitted, so the ray cannot report a long
-range. Controls latches Day-1 ``stop`` on that flag. This module does
-not send ``stop``.
+range. A leg column is at least 48 px tall and 8–36 px wide. A
+contact in the bottom band has to be taller still. A short speck, a
+hairline edge, or a wide silhouette is not a leg. ``too_close`` is
+that flag only for a clip
+whose last-row column rays into the foot corridor. A last-row dark blob
+outside the corridor is not a near-floor leg, and the flag is cleared.
+Controls latches Day-1 ``stop`` on the flag that remains. This module
+does not send ``stop``.
 
 Moondream's room ask does not return a pixel. It is not called here.
 ``t_cue`` is not ``T_detect``. ``HAZARD_PAD_M`` stays 0.020 and is
@@ -30,7 +36,7 @@ The 3–5 cm buffer is not applied. Soft-pass is off.
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parent
@@ -53,10 +59,17 @@ WOOD_SAT_MAX = 0.75
 LEG_LUM_MAX = 90
 LEG_CHROMA_MAX = 48
 LEG_R_MAX = 100
-LEG_SPAN_MIN = 24
-LEG_CLIP_SPAN_MIN = 40
-LEG_WIDTH_MIN = 3
-LEG_WIDTH_MAX = 48
+# A real near leg in these rooms is a tall column about 11–33 px wide
+# (coffee leg, stool leg). A 3–7 px column is an edge. A 38–47 px
+# column is a silhouette. A 30 px run is a speck.
+LEG_SPAN_MIN = 48
+LEG_CLIP_SPAN_MIN = 48
+LEG_WIDTH_MIN = 8
+LEG_WIDTH_MAX = 36
+# Contact row this low is the near floor. The column has to be taller
+# still. The kitchen stool there is hundreds of pixels.
+NEAR_ROW = 440
+NEAR_SPAN_MIN = 120
 COLUMN_GAP = 12
 ROW_JOIN = 56
 CLIP_SPLIT = 8
@@ -71,7 +84,8 @@ class HazardCue:
     ``u`` and ``v`` are the ray pixel: the lowest leg pixel in the blob's
     column. Both are ``None`` when ``bottom_clipped`` is set. ``contact_row``
     is that same row, including the frame edge, and is not a ray input.
-    ``too_close`` is the flag Controls stops on. It matches ``bottom_clipped``.
+    ``too_close`` starts equal to ``bottom_clipped``. ``corridor_gate_cues``
+    clears it when that column's floor ray is outside the foot corridor.
     """
 
     u: float | None
@@ -185,6 +199,8 @@ def _cue_from_group(group: list[_Hit]) -> HazardCue | None:
         return None
     chosen = max(group, key=lambda item: (item.row, item.span))
     span = max(item.span for item in group)
+    if chosen.row >= NEAR_ROW and span < NEAR_SPAN_MIN:
+        return None
     clipped = bool(chosen.clipped)
     # Pixel centre of the lowest leg pixel in the chosen column.
     # Empty when that pixel is the frame edge.
@@ -206,8 +222,11 @@ def _cue_from_group(group: list[_Hit]) -> HazardCue | None:
 def find_hazard_cues(rgb: np.ndarray) -> tuple[HazardCue, ...]:
     """Every leg-like floor contact in the frame, nearest not preferred.
 
-    A bottom-clipped cue is included with ``u`` and ``v`` empty. Callers
-    that ray only ``u, v`` must still stop when ``too_close`` is set.
+    A bottom-clipped cue is included with ``u`` and ``v`` empty.
+    ``too_close`` still matches the clip here. ``corridor_gate_cues``
+    clears that flag when the column is outside the foot corridor.
+    Callers that ray only ``u, v`` must still stop when ``too_close``
+    remains set.
     """
     image = np.asarray(rgb)
     if image.ndim != 3 or image.shape[2] < 3:
@@ -233,6 +252,52 @@ def find_hazard_cues(rgb: np.ndarray) -> tuple[HazardCue, ...]:
             cues.append(cue)
     cues.sort(key=lambda cue: cue.contact_row, reverse=True)
     return tuple(cues)
+
+
+def corridor_gate_cues(
+    cues: tuple[HazardCue, ...],
+    *,
+    cam: rc.KitCamPose,
+    body: rc.BodyFrame,
+    imu_roll_rad: float,
+    imu_pitch_rad: float,
+    head_tilt_rad: float,
+    yaw_rate: float,
+    step_off_m: float,
+    head_pan_rad: float = 0.0,
+) -> tuple[HazardCue, ...]:
+    """Clear ``too_close`` unless the clipped column is in the foot corridor.
+
+    The last row is the near floor. A dark blob there can be a leg cut off
+    by the frame, where a ray would read long, or it can be floor grain or
+    a distant prop's silhouette at the side of the wide view. Only the
+    in-corridor clip keeps the stop flag. The pixel stays empty either way,
+    so an outside clip cannot become an optimistic long range. The pad
+    stays 0.020. This does not send ``stop``.
+    """
+    gated: list[HazardCue] = []
+    for cue in cues:
+        if not cue.too_close:
+            gated.append(cue)
+            continue
+        estimate = rc.estimate_hazard(
+            float(cue.column) + 0.5,
+            float(rc.HEIGHT) - 0.5,
+            cam=cam,
+            body=body,
+            imu_roll_rad=imu_roll_rad,
+            imu_pitch_rad=imu_pitch_rad,
+            head_tilt_rad=head_tilt_rad,
+            yaw_rate=yaw_rate,
+            step_off_m=step_off_m,
+            hazard_pad_m=rc.HAZARD_PAD_M,
+            head_pan_rad=head_pan_rad,
+        )
+        if estimate is not None and estimate.in_corridor:
+            gated.append(cue)
+            continue
+        gated.append(replace(cue, too_close=False))
+    return tuple(gated)
 
 
 def find_hazard_pixel(rgb: np.ndarray) -> HazardCue | None:
@@ -362,6 +427,24 @@ def self_check() -> None:
         raise SystemExit("self_check did not flag a frame-edge leg")
     if edge.u is not None or edge.v is not None:
         raise SystemExit("self_check emitted a pixel for a clipped leg")
+    speck = _blank()
+    _paint_floor(speck, 400)
+    _paint_leg(speck, 300, 308, 449, 479)
+    if find_hazard_pixel(speck) is not None:
+        raise SystemExit("self_check kept a short speck on the near floor")
+    clipped_speck = _blank()
+    _paint_floor(clipped_speck, 400)
+    _paint_leg(clipped_speck, 300, 308, 430, rc.HEIGHT)
+    if find_hazard_pixel(clipped_speck) is not None:
+        raise SystemExit("self_check kept a short clipped speck")
+    tall = _blank()
+    _paint_floor(tall, 400)
+    _paint_leg(tall, 300, 312, 200, 475)
+    near = find_hazard_pixel(tall)
+    if near is None or near.u is None or near.too_close:
+        raise SystemExit("self_check dropped a tall near-floor leg")
+    if abs(near.v - 474.5) > 1e-6:
+        raise SystemExit(f"self_check near v {near.v}")
     wrapped = estimate_finder_hazard(
         clipped,
         cam=cam, body=body,
@@ -378,6 +461,20 @@ def self_check() -> None:
     )
     if empty is not None:
         raise SystemExit("self_check invented a cue on black")
+    center = HazardCue(None, None, True, True, 320, rc.HEIGHT - 1, 80, 8, SOURCE)
+    side = HazardCue(None, None, True, True, 600, rc.HEIGHT - 1, 80, 8, SOURCE)
+    kept = corridor_gate_cues(
+        (center, side),
+        cam=cam, body=body,
+        imu_roll_rad=0.0, imu_pitch_rad=-0.26, head_tilt_rad=0.0,
+        yaw_rate=0.0, step_off_m=0.017,
+    )
+    if len(kept) != 2 or not kept[0].too_close or kept[0].u is not None:
+        raise SystemExit("self_check dropped an in-corridor clip")
+    if kept[1].too_close or kept[1].u is not None or kept[1].v is not None:
+        raise SystemExit("self_check left a side clip as too_close")
+    if not kept[1].bottom_clipped:
+        raise SystemExit("self_check emitted a ray for a side clip")
 
 
 if __name__ == "__main__":
