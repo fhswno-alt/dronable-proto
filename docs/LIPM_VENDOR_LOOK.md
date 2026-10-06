@@ -1489,11 +1489,10 @@ down. 0.832 s replaces 0.830 s on the empty plant. The old 0.830 s is
 not kept.
 
 The kitchen stop is timed on `subtree_com` of `body_link`. The world
-subtree includes the room and reads a false ~0.20 s. One issue,
-stopped at 6.200 s with `d_min` taken from the 0.832 s grid, settled
-in 0.842 s. The rerun that puts 0.842 s into `d_min` (stop at 6.192 s)
-settled in 0.810 s. The worst measured settle is 0.842 s. That is the
-`T_stop` in the formula below. The empty-plant grid max stays 0.832 s.
+subtree includes the room and reads a false ~0.20 s. The live-height
+toe-gap stop, issued at 6.200 s, settled in 0.842 s. The empty-plant
+grid max stays 0.832 s. The worst measured settle is 0.842 s. That is
+the `T_stop` in the formula below.
 
 Clear distance, with `v` the commanded 0.150 m/s:
 
@@ -1520,9 +1519,12 @@ mesh read is sim ground truth only. None of those three numbers is
 plugged into `d_min`.
 
 Mono range. The body-side estimate uses the pixel row where a stool
-leg meets the floor, camera height 0.335 m, and the camera world
-pitch at that frame. World pitch is IMU torso pitch plus the
-`head_tilt` joint, not `head_tilt` alone. At the end of stand
+leg meets the floor, the live `kit_cam` height and position at that
+frame, and the camera world pitch. World pitch is IMU torso pitch
+plus the `head_tilt` joint, not `head_tilt` alone. Height is the
+camera's world z. The floor plane is z = 0, so the range is
+horizontal from the point under the eye. The head pivot moves that
+point, so 0.335 m is only the stand measurement. At the end of stand
 (t = 1.00 s) the sum is −14.84°: IMU −14.82°, `head_tilt` −0.02°.
 The optical axis is −14.84° and the eye is at 0.335 m. At t = 1.90 s
 on this walk the sum is −15.58°: IMU −15.56°, `head_tilt` −0.02°.
@@ -1555,37 +1557,54 @@ Soft-pass is off. With the gate off, the left ankle still hits
 The foot is not ahead of the eye on this plant. The forward offset is
 the leading bottom corner of `l_foot_contact` / `r_foot_contact`
 minus `kit_cam`, dotted with body forward. Positive means the toe is
-ahead of the camera. At stand (t = 1.00 s) both soles are −0.016 m:
-the lean puts the eye 1.6 cm ahead of the sole. At t = 5.90 s the
-left sole, which is not swinging, is +0.006 m and the right swing
-sole is −0.036 m. The gate uses the further-ahead sole. The foot that
-hit was the one that was not swinging.
+ahead of the camera. At stand (t = 1.00 s) both soles are −0.016 m
+and `cam_z` is 0.335 m: the lean puts the eye 1.6 cm ahead of the
+sole. The near edge, from under the eye, is 0.141 m, and the toe gap
+of that edge is 0.158 m. At t = 5.90 s `cam_z` is 0.332 m, the left
+sole (not swinging) is +0.006 m, and the right swing sole is −0.037 m.
+The near edge is 0.141 m and the toe gap of that edge is 0.135 m. The
+gate uses the further-ahead sole. The foot that hit was the one that
+was not swinging.
 
-    eye_range = 0.335 / tan(depression(row, IMU + head_tilt))
+    cam_z = kit_cam world z at the frame
+    eye_range = cam_z / tan(depression(row, IMU + head_tilt))
+    near_edge = cam_z / tan(depression(last row, IMU + head_tilt))
     toe_gap = eye_range − toe_offset
+    near_toe = near_edge − toe_offset
     d_min = 0.150 × (T_detect + 0.842)
 
 `T_detect` stays open. 0.1263 m is `v × T_stop` at `T_detect` = 0. It
-is not a locked margin. If the row is in the bottom 32 pixels, the
-compare also fires when `toe_gap` is within `(eye_range − range at
-the last row)` of `d_min`. After a leg last seen in that band leaves
-the frame, the gate dead-reckons: latched `toe_gap` minus body travel
-along the latched forward. Day-1 `stop` only. The head is not tilted
-down. `head_tilt` stays at the stand angle.
+is not a locked margin. `near_edge` is the horizontal distance from
+the point under the eye. The compare subtracts `toe_offset` before it
+meets `d_min`. If a stool-leg row is in the bottom 32 pixels, the
+compare also fires when `toe_gap` is within `(eye_range − near_edge)`
+of `d_min`, which is the same check as `near_toe ≤ d_min`. The
+robot's own feet are not that row. After a leg last seen in that band
+leaves the frame, the gate dead-reckons: latched `toe_gap` minus body
+travel along the latched forward. Day-1 `stop` only. The head is not
+tilted down. `head_tilt` stays at the stand angle.
 
 On `T_detect` = 0 the in-frame `toe_gap` does not cross `d_min`. A
 negative offset makes `toe_gap` larger than the eye range, so the
 in-frame compare is later, not earlier. The dead-reckon fires. Stop
-is issued at 6.192 s on `col_chair_stool_b_leg_2` (`toe_gap` 0.126 m,
-advance 0.026 m, offset +0.000 m). Prop contacts are 0. min up_z is
-0.934. End xy is +0.528, −0.423, yaw −56.9°. The closest
-foot-to-leg-floor after the stop is 0.139 m. At the stop pose the
-closest foot to that leg's floor is 0.144 m, so the estimate is about
-2 cm short. The stop peak is −2.280 Nm on `l_hip_pitch`. No
+is issued at 6.200 s on `col_chair_stool_b_leg_2` (`toe_gap` 0.126 m,
+advance 0.028 m, `cam_z` 0.329 m, offset −0.003 m). Prop contacts are
+0. min up_z is 0.934. End xy is +0.532, −0.426, yaw −58.1°. The
+closest foot-to-leg-floor after the stop is 0.133 m. At the stop pose
+the closest foot to that leg's floor is 0.145 m, so the estimate is
+about 2 cm short. The stop peak is −2.280 Nm on the left knee. No
 stop-window leg joint crosses 2.33 Nm. This run's body-COM settle is
-0.810 s. The longer adjacent sample, 0.842 s, is the `T_stop` above.
-The row is still the sim projection of the group-3 leg bottom, not an
-RGB finder.
+0.842 s, which is the `T_stop` above. The row is still the sim
+projection of the group-3 leg bottom, not an RGB finder.
+
+A −10° `head_tilt` walk is not enabled. On that pose the near edge is
+0.077 m at `cam_z` 0.326 m, inside `d_min` and inside the toe zone, so
+the swing foot sits in the bottom of the frame. A wood-color rule on
+a walk frame can see the feet and must not treat them as a prop. The
+stills that keep the room name are a stand plus a head hold, not a
+walk. Putting the head back to +0.25 rad for a room ask is a session
+joint. It is not a Day-1 bus key. This gate does not command
+`head_tilt`.
 
 A Day-1 stop at the cue (issued at 1.904 s) has 0 prop contacts,
 min up_z 0.934, end xy +0.088, −0.005, yaw −5.9°, and a stop peak of

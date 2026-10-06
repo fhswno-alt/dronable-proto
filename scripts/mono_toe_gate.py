@@ -2,29 +2,48 @@
 """Toe-gap range gate. Day-1 stop only. Plant file is not edited.
 
 The mono range is the ground distance from kit_cam implied by one pixel
-row, camera height 0.335 m, and the live world pitch. World pitch is the
-torso IMU pitch plus head_tilt at that frame.
+row, the live camera height and position, and the live world pitch.
+World pitch is the torso IMU pitch plus head_tilt at that frame.
+Height is kit_cam world z. The floor plane is z = 0.
 
 The compare is the leading-toe gap, not the eye gap. On this plant the
 sole is not ahead of the eye at stand: both feet measure −0.016 m
 along body forward (the lean puts the eye ahead of the sole). At
 t = 5.90 s the further-ahead sole is +0.006 m and the swing sole is
-−0.036 m. The gate uses the further-ahead sole.
+−0.037 m. The gate uses the further-ahead sole. Camera height at that
+sample is 0.332 m, not the 0.335 m stand figure.
 
-    eye_range = 0.335 / tan(depression(row, IMU + head_tilt))
+    cam_z = kit_cam world z at the frame (floor plane z = 0)
+    eye_range = cam_z / tan(depression(row, IMU + head_tilt))
+    near_edge = cam_z / tan(depression(last row, IMU + head_tilt))
     toe_offset = (leading sole bottom − cam_xy) · body_forward
     toe_gap = eye_range − toe_offset
+    near_toe = near_edge − toe_offset
     d_min = 0.150 * (T_detect + T_stop)
 
-A row in the bottom 32 pixels also stops when toe_gap is within
-(eye_range − range at the last row) of d_min. After that band leaves
-the frame, dead-reckon subtracts body travel along the latched
-forward. T_stop is 0.842 s: the empty-plant grid peaked at 0.832 s,
-and the kitchen body-COM settle of the adjacent stop was 0.842 s.
-T_detect stays a parameter. 0.1263 m at T_detect = 0 is not a locked
-margin. The pixel row in this probe is the sim projection of a
-group-3 stool-leg bottom. It is not an RGB finder. The head is not
-tilted down.
+near_edge is the horizontal distance from the point under the eye.
+The compare is still the toe gap, so near_toe and toe_gap both
+subtract toe_offset before they are checked against d_min. A stool-leg
+row in the bottom 32 pixels also stops when toe_gap is within
+(eye_range − near_edge) of d_min. That is the same check as
+near_toe <= d_min, and it is only armed when the row is a stool leg.
+The robot's own feet are not a contact. After that band leaves the
+frame, dead-reckon subtracts body travel along the latched forward.
+
+Height is not frozen at 0.335 m. That figure is the stand eye height
+on this plant. A −10° head_tilt walk is not enabled: its near edge is
+inside the toe zone, so the swing foot sits in the bottom of the
+frame, and a wood-color rule on that frame can see the feet. The
+stills that keep the room name are a stand plus a head hold, not a
+walk. Restoring the head for a room ask is a session joint, not a
+Day-1 bus key.
+
+T_stop is 0.842 s. The empty-plant grid peaked at 0.832 s. The
+live-height kitchen stop settled in 0.842 s, and that is the longer
+one. T_detect stays a parameter. 0.1263 m at T_detect = 0 is not a
+locked margin.
+The pixel row in this probe is the sim projection of a group-3
+stool-leg bottom. It is not an RGB finder. The head is not tilted.
 """
 from __future__ import annotations
 
@@ -47,14 +66,16 @@ import numpy as np
 import steer_walk as sw
 
 SCENE = Path("/tmp/m62/mujoco/room_kitchen.xml")
-H_NOM = 0.335
+# Range uses kit_cam world z at the frame. Floor plane is z = 0.
+# Stand eye height on this plant is about 0.335 m. That number is not
+# the height in the formula.
 WIDTH = 640
 HEIGHT = 480
 FOVY_DEG = 104.82
 V_MPS = 0.150
 # Empty-plant all-leg hold, worst of the gait-period grid, was 0.832 s.
-# The kitchen dead-reckon stop below settled in 0.842 s. The gate uses
-# the longer one. Updated again if a rerun settles later.
+# The live-height kitchen dead-reckon stop settled in 0.842 s. The
+# gate uses the longer one. Updated again if a rerun settles later.
 T_STOP_S = 0.842
 # Bottom band. A contact here is about to leave the floor of the frame.
 NEAR_PX = 32
@@ -87,8 +108,14 @@ def body_forward_xy(data: mj.MjData, bid: int) -> np.ndarray:
     return forward / norm
 
 
-def range_from_row(row: float, pitch: float, height: float = H_NOM) -> float | None:
-    """Ground range from the eye along the boresight. Pitch is world pitch."""
+def range_from_row(row: float, pitch: float, height: float) -> float | None:
+    """Horizontal floor range from the point under the eye.
+
+    Pitch is world pitch (IMU torso plus head_tilt). Height is kit_cam
+    world z at this frame. The floor plane is z = 0.
+    """
+    if height <= 1e-4:
+        return None
     beta = math.atan((row - (HEIGHT / 2.0)) / _fy())
     depression = -(pitch - beta)
     if depression <= math.radians(1.0):
@@ -355,12 +382,14 @@ def _decide(
     model = session.model
     tilt = float(data.qpos[int(model.jnt_qposadr[jid])])
     pitch = torso_pitch(data, session.bid_body) + tilt
+    cam_z = float(data.cam_xpos[cid][2])
     toes = toe_samples(session, cid)
     # The toe that sits furthest ahead. The swing foot is often behind the eye.
     toe = max(toes, key=lambda row: row.offset_m)
     fwd = body_forward_xy(data, session.bid_body)
     seen: set[str] = set()
     best: tuple[float, str] | None = None
+    edge = range_from_row(float(HEIGHT - 1), pitch, cam_z)
     for name, point in _leg_floors(model, data):
         pix = _project(data, cid, point)
         if pix is None:
@@ -368,12 +397,11 @@ def _decide(
         u, v = pix
         if not (0.0 <= u < WIDTH and 0.0 <= v < HEIGHT):
             continue
-        eye = range_from_row(v, pitch)
+        eye = range_from_row(v, pitch, cam_z)
         if eye is None:
             continue
         seen.add(name)
         gap = eye - toe.offset_m
-        edge = range_from_row(float(HEIGHT - 1), pitch)
         near = v >= (HEIGHT - NEAR_PX)
         margin = 0.0
         if near and edge is not None:
@@ -389,10 +417,10 @@ def _decide(
             trigger = gap
             why = "near_edge"
             if best is None or trigger < best[0]:
-                best = (trigger, f"{why} {name} toe_gap={gap:.3f} margin={margin:.3f} eye={eye:.3f} off={toe.offset_m:+.3f} {toe.side}{' swing' if toe.swing else ''}")
+                best = (trigger, f"{why} {name} toe_gap={gap:.3f} margin={margin:.3f} eye={eye:.3f} cam_z={cam_z:.3f} off={toe.offset_m:+.3f} {toe.side}{' swing' if toe.swing else ''}")
             continue
         if gap <= gate and (best is None or gap < best[0]):
-            best = (gap, f"{why} {name} toe_gap={gap:.3f} eye={eye:.3f} off={toe.offset_m:+.3f} row={v:.0f} {toe.side}{' swing' if toe.swing else ''}")
+            best = (gap, f"{why} {name} toe_gap={gap:.3f} eye={eye:.3f} cam_z={cam_z:.3f} off={toe.offset_m:+.3f} row={v:.0f} {toe.side}{' swing' if toe.swing else ''}")
     for name, sight in list(latched.items()):
         if name in seen or not sight.in_near_band:
             continue
@@ -403,7 +431,7 @@ def _decide(
         ))
         dr = sight.toe_gap_m - advance
         if dr <= gate and (best is None or dr < best[0]):
-            best = (dr, f"dead_reckon {name} toe_gap={dr:.3f} advance={advance:.3f} off={toe.offset_m:+.3f}")
+            best = (dr, f"dead_reckon {name} toe_gap={dr:.3f} advance={advance:.3f} cam_z={cam_z:.3f} off={toe.offset_m:+.3f}")
     if best is None:
         return None
     return best[1]
@@ -430,8 +458,19 @@ def _pose_line(session: sw.SteerSession, cid: int, jid: int) -> str:
             for row in toes
         ]
         gaps.append(f"{name} {min(dists):.3f}")
-    del jid
-    return f"pose cam_z={cam[2]:.3f} " + " ".join(bits) + " | " + " ".join(gaps)
+    tilt = float(data.qpos[int(session.model.jnt_qposadr[jid])])
+    pitch = torso_pitch(data, session.bid_body) + tilt
+    toe = max(toes, key=lambda row: row.offset_m)
+    edge = range_from_row(float(HEIGHT - 1), pitch, float(cam[2]))
+    near = "near=none"
+    if edge is not None:
+        near = f"near_eye={edge:.3f} near_toe={edge - toe.offset_m:.3f} off={toe.offset_m:+.3f}"
+    return (
+        f"pose cam_z={cam[2]:.3f} pitch={math.degrees(pitch):+.2f} {near} "
+        + " ".join(bits)
+        + " | "
+        + " ".join(gaps)
+    )
 
 
 def _fmt(session: sw.SteerSession, cid: int, jid: int, latched: dict[str, Sight]) -> str:
@@ -440,11 +479,14 @@ def _fmt(session: sw.SteerSession, cid: int, jid: int, latched: dict[str, Sight]
     model = session.model
     tilt = float(data.qpos[int(model.jnt_qposadr[jid])])
     pitch = torso_pitch(data, session.bid_body) + tilt
+    cam_z = float(data.cam_xpos[cid][2])
     toes = toe_samples(session, cid)
     toe = max(toes, key=lambda row: row.offset_m)
     parts = " ".join(
         f"{row.side}{'*' if row.swing else ''}={row.offset_m:+.3f}" for row in toes
     )
+    edge = range_from_row(float(HEIGHT - 1), pitch, cam_z)
+    near = "near=none" if edge is None else f"near_eye={edge:.3f} near_toe={edge - toe.offset_m:.3f}"
     nearest = ""
     best_gap: float | None = None
     for name, point in _leg_floors(model, data):
@@ -454,7 +496,7 @@ def _fmt(session: sw.SteerSession, cid: int, jid: int, latched: dict[str, Sight]
         u, v = pix
         if not (0.0 <= u < WIDTH and 0.0 <= v < HEIGHT):
             continue
-        eye = range_from_row(v, pitch)
+        eye = range_from_row(v, pitch, cam_z)
         if eye is None:
             continue
         gap = eye - toe.offset_m
@@ -467,6 +509,7 @@ def _fmt(session: sw.SteerSession, cid: int, jid: int, latched: dict[str, Sight]
             )
     return (
         f"t={float(data.time):.2f} pitch={math.degrees(pitch):+.2f} "
+        f"cam_z={cam_z:.3f} {near} "
         f"toes {parts} gate_toe={toe.side}{' swing' if toe.swing else ''} "
         f"{toe.offset_m:+.3f}{nearest}"
     )
