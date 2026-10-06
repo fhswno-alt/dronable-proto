@@ -4317,6 +4317,25 @@ def _install_inflight_stop(
         state["last_raw"] = (er.copy(), el.copy(), float(walker.time), float(lipm.data.time))
         state["pose_gait"] = float(walker.time)
         state["live_z"] = {"L": float(el[2]), "R": float(er[2])}
+        def _hold_swing_xy(ep: np.ndarray, side: str) -> None:
+            """Hold x/y and the sole angles. Sagittal stop leaves z live.
+
+            Knee and ankle pitch are the IK of that pose, not a frozen
+            q_des, so the foot can still reach the floor. Hip roll, hip
+            yaw, hip pitch, and ankle roll are pinned on the joint write.
+            """
+            x, y, roll, pitch, yaw = state["swing_pin"]
+            ep[0] = float(x)
+            ep[1] = float(y)
+            if not state.get("xy_only"):
+                ep[3] = float(roll)
+                ep[4] = float(pitch)
+                ep[5] = float(yaw)
+            if state["pin_z"]:
+                z_pin = state["z_pin"]
+                assert isinstance(z_pin, dict)
+                ep[2] = float(z_pin[side])
+
         if state["pin_chain"]:
             swing = str(state["swing"])
             stance_ep = state["stance_ep"]
@@ -4327,32 +4346,14 @@ def _install_inflight_stop(
                     ep[:] = held
                     continue
                 if state["pin_swing"] and side == swing:
-                    x, y, roll, pitch, yaw = state["swing_pin"]
-                    ep[0] = float(x)
-                    ep[1] = float(y)
-                    ep[3] = float(roll)
-                    ep[4] = float(pitch)
-                    ep[5] = float(yaw)
-                    if state["pin_z"]:
-                        z_pin = state["z_pin"]
-                        assert isinstance(z_pin, dict)
-                        ep[2] = float(z_pin[side])
+                    _hold_swing_xy(ep, side)
             pel_r, pel_l = state["pel"]
             swap_y = float(state["swap_y"])
             return er, el, float(pel_r), float(pel_l), swap_y
         if state["pin_swing"]:
             swing = str(state["swing"])
             ep = el if swing == "L" else er
-            x, y, roll, pitch, yaw = state["swing_pin"]
-            ep[0] = float(x)
-            ep[1] = float(y)
-            ep[3] = float(roll)
-            ep[4] = float(pitch)
-            ep[5] = float(yaw)
-            if state["pin_z"]:
-                z_pin = state["z_pin"]
-                assert isinstance(z_pin, dict)
-                ep[2] = float(z_pin[swing])
+            _hold_swing_xy(ep, swing)
         if state["pin_stance"]:
             swing = str(state["swing"])
             side = "R" if swing == "L" else "L"
@@ -4415,6 +4416,18 @@ def _install_inflight_stop(
             + f" pel_r {float(pre['pel_r']):+.5f} pel_l {float(pre['pel_l']):+.5f} "
             "pelvis/CoM planar frozen. x_move is not zeroed on this tick."
         )
+
+    def _arm_stand_sides(load_l: float, load_r: float) -> None:
+        """Stand slew only after real double support, and only on a loaded leg."""
+        if not state["sag_stop_cap"]:
+            return
+        session._sag_stand_armed = True  # type: ignore[attr-defined]
+        sides: list[str] = []
+        if load_l > load_n:
+            sides.append("L")
+        if load_r > load_n:
+            sides.append("R")
+        session._sag_stand_sides = tuple(sides)  # type: ignore[attr-defined]
 
     def _advance_z_clock() -> None:
         walker.time = float(walker.time) + float(ow.OP3_CTRL_S)
@@ -4539,6 +4552,13 @@ def _install_inflight_stop(
         written: dict[str, dict[str, float]] = {"L": {}, "R": {}}
         ik_knee = float("nan")
         pin_knee = float("nan")
+        swing_hold = state.get("swing_hold")
+        if not isinstance(swing_hold, dict):
+            swing_hold = {}
+        # These four stay at the pre-stop q_des until that foot is on the
+        # stand slew. Knee and ankle pitch stay on the live IK, which is
+        # the remaining swing-z schedule.
+        freeze_suf = ("hip_yaw", "hip_roll", "hip_pitch", "ank_roll")
         for side in ("L", "R"):
             pref = "l_" if side == "L" else "r_"
             held = stance_q.get(side)
@@ -4554,7 +4574,10 @@ def _install_inflight_stop(
                 continue
             for suf in _STANCE_SUFFIX:
                 jn = pref + suf
-                val = float(joints[jn])
+                if suf in freeze_suf and jn in swing_hold:
+                    val = float(swing_hold[jn])
+                else:
+                    val = float(joints[jn])
                 lipm.write_clipped(jn, val)
                 written[side][suf] = val
         for jn in (
@@ -4612,12 +4635,20 @@ def _install_inflight_stop(
             entered_now = True
             if state["sag_stop_cap"]:
                 session._sag_torque_cap = True  # type: ignore[attr-defined]
+                session._sag_stand_armed = False  # type: ignore[attr-defined]
+                session._sag_stand_sides = ()  # type: ignore[attr-defined]
                 print(
                     "PRED sag_stop_cap on. Stance knee and ankle pitch "
                     "keep the 1.90 rad/s slew and step toward the stand pose. "
                     "Each of those commands stays inside "
                     "|kp*(q_des-q)| + |kv*omega| <= 2.33 Nm. "
-                    "The airborne swing-z knee is not on that slew."
+                    "Swing hip roll, hip yaw, hip pitch, and ankle roll hold "
+                    "the pre-stop q_des until that foot is over 5 N. "
+                    "Swing knee and ankle pitch are the swing-z IK, not a frozen q_des. "
+                    "Planar x/y and sole roll/pitch hold. z is not pinned. "
+                    "Loaded hips slew toward stand only after both feet are "
+                    "over 5 N, inside the same 2.33 Nm part cap. "
+                    "The airborne leg stays on that freeze."
                 )
             pre = state["pre"]
             phase = _gait_phase_name(walker)
@@ -4649,7 +4680,44 @@ def _install_inflight_stop(
             if foot_up:
                 state["saw_air"] = True
             airborne = bool(foot_up)
-            if airborne and isinstance(pre, dict):
+            if state["sag_stop_cap"] and swing in ("L", "R") and isinstance(pre, dict):
+                # From the stop command. Planar x/y and the four non-sagittal
+                # swing joints hold. Knee and ankle pitch are not in this pin.
+                ep = pre["el"] if swing == "L" else pre["er"]
+                state["swing_pin"] = (
+                    float(ep[0]), float(ep[1]), float(ep[3]), float(ep[4]), float(ep[5]),
+                )
+                state["pin_swing"] = True
+                state["xy_only"] = False
+                state["toe_hold"] = _swing_toe(swing, float(pre["gait"]))
+                des = pre.get("des")
+                hold: dict[str, float] = {}
+                if isinstance(des, dict):
+                    for side_name in ("L", "R"):
+                        side_des = des.get(side_name)
+                        if not isinstance(side_des, dict):
+                            continue
+                        pref = "l_" if side_name == "L" else "r_"
+                        for suf in ("hip_yaw", "hip_roll", "hip_pitch", "ank_roll"):
+                            if suf in side_des:
+                                hold[pref + suf] = float(side_des[suf])
+                state["swing_hold"] = hold
+                session._sag_joint_pin = hold  # type: ignore[attr-defined]
+                bits = []
+                pref = "l_" if swing == "L" else "r_"
+                for suf in ("hip_yaw", "hip_roll", "hip_pitch", "ank_roll"):
+                    jn = pref + suf
+                    if jn in hold:
+                        bits.append(f"{suf} {hold[jn]:+.5f}")
+                print(
+                    "PRED sag_stop_cap swing freeze "
+                    f"t {t:.3f} swing {swing} "
+                    + " ".join(bits)
+                    + f" x {float(ep[0]):+.5f} y {float(ep[1]):+.5f}. "
+                    "Sole roll and pitch hold. z advances. "
+                    "Knee and ankle pitch are that swing-z IK, not a frozen q_des."
+                )
+            if airborne and isinstance(pre, dict) and not state["pin_swing"]:
                 ep = pre["el"] if swing == "L" else pre["er"]
                 state["swing_pin"] = (
                     float(ep[0]), float(ep[1]), float(ep[3]), float(ep[4]), float(ep[5]),
@@ -4758,7 +4826,10 @@ def _install_inflight_stop(
             )
             _arm_chain(pre, swing)
         if state["snapped"]:
-            _write_chain("snap", "swing_xy_rp+stance_q")
+            load_l = _sole_load_n(session, "L")
+            load_r = _sole_load_n(session, "R")
+            _arm_stand_sides(load_l, load_r)
+            _write_chain("snap", "swing_xy+swing_z")
             return
         load_l = _sole_load_n(session, "L")
         load_r = _sole_load_n(session, "R")
@@ -4838,9 +4909,12 @@ def _install_inflight_stop(
             state["snapped"] = True
             if state["sag_stop_cap"]:
                 session._sag_both_stance = True  # type: ignore[attr-defined]
+                _arm_stand_sides(load_l, load_r)
                 print(
                     "PRED sag_stop_cap both feet loaded. "
-                    "Knee and ankle pitch on both legs use the stance slew."
+                    "Knee and ankle pitch on a loaded leg keep the 1.90 rad/s slew. "
+                    "Loaded hips step toward stand inside the 2.33 Nm part cap. "
+                    "A foot at or under 5 N stays on the swing freeze."
                 )
             print(
                 "PRED inflight_snap "
@@ -4856,7 +4930,7 @@ def _install_inflight_stop(
                 )
                 + "Clock stays here."
             )
-            _write_chain("snap", "swing_xy_rp+stance_q")
+            _write_chain("snap", "swing_xy+swing_z")
             return
         if not state["pin_chain"]:
             orig_tick(float(sw.VX_FWD_CAP), 0.0, True)
@@ -10945,6 +11019,54 @@ def _install_sagittal_slew(
             "omega": omega,
         })
 
+    _HIP_STAND_SUFFIX = ("hip_yaw", "hip_roll", "hip_pitch")
+
+    def _stand_side(jn: str) -> bool:
+        """True when this leg may leave the freeze and step toward stand.
+
+        The flag is set only after both feet have been over 5 N. A foot
+        that is airborne again is left out of the tuple.
+        """
+        if not getattr(session, "_sag_stand_armed", False):
+            return False
+        sides = getattr(session, "_sag_stand_sides", ())
+        if not isinstance(sides, tuple):
+            return False
+        if jn.startswith("l_"):
+            return "L" in sides
+        if jn.startswith("r_"):
+            return "R" in sides
+        return False
+
+    def _hold_pin(jn: str, q_des: float) -> float:
+        pins = getattr(session, "_sag_joint_pin", {})
+        if isinstance(pins, dict) and jn in pins:
+            return float(pins[jn])
+        return float(q_des)
+
+    def _hold_last(jn: str, q_des: float) -> float:
+        """Keep the last capped command when a foot leaves the loaded set.
+
+        Falling back to the pre-stop pin retargets the knee. The swing-z
+        schedule is a different write and does not come through here.
+        """
+        held = prev.get(jn)
+        if held is not None:
+            return float(held)
+        return _hold_pin(jn, q_des)
+
+    def _slew_loaded_hip(jn: str, q_des: float) -> float:
+        """One 1.90 rad/s step toward stand, then the 2.33 Nm hold.
+
+        The first step starts at the pre-stop pin. A stand write that
+        passes q_stand on this tick does not replace that pin.
+        """
+        pins = getattr(session, "_sag_joint_pin", {})
+        if jn not in prev and isinstance(pins, dict) and jn in pins:
+            prev[jn] = float(pins[jn])
+        held, _q_stand = _toward_stand(jn, float(q_des))
+        return held
+
     def _toward_stand(jn: str, q_des: float) -> tuple[float, float]:
         """One slew step per control tick, then the live torque hold.
 
@@ -10977,12 +11099,41 @@ def _install_sagittal_slew(
         _cap_row(jn, q_now, held, q_stand, stepped, origin, capped, omega)
         return float(held), q_stand
 
+    def _apply_stop_hip(jn: str, q_des: float) -> float:
+        """Loaded hips step toward stand. An airborne hip stays on the pin.
+
+        Knee and ankle pitch are not this path. Their 1.90 rad/s stance
+        slew is unchanged. Ankle roll stays on sole-flat when the foot is
+        loaded, and on the pin while that foot is airborne.
+        """
+        if not getattr(session, "_sag_torque_cap", False):
+            return float(q_des)
+        if not jn.endswith(_HIP_STAND_SUFFIX):
+            return float(q_des)
+        if _stand_side(jn):
+            return _slew_loaded_hip(jn, float(q_des))
+        return _hold_last(jn, float(q_des))
+
+    last_cmd: dict[str, float] = {}
+
     def write(jn: str, q_des: float) -> None:
         if jn.endswith(suffixes):
             stance = _stance_prefix(_cmd_time(walker))
             limited = stance == "both" or jn.startswith(stance)
+            # After real double support, an airborne leg is not stance.
+            if getattr(session, "_sag_stand_armed", False) and not _stand_side(jn):
+                limited = False
             if limited and getattr(session, "_sag_torque_cap", False):
                 q_des, _q_stand = _toward_stand(jn, float(q_des))
+            elif (
+                getattr(session, "_sag_torque_cap", False)
+                and getattr(session, "_sag_stand_armed", False)
+                and not _stand_side(jn)
+                and jn in prev
+            ):
+                # Foot left the loaded set. Hold the last capped command.
+                # The pre-stop pin is not written again.
+                q_des = float(prev[jn])
             elif limited:
                 old = prev.get(jn)
                 if old is not None:
@@ -10992,14 +11143,29 @@ def _install_sagittal_slew(
                     elif dq < -cap:
                         q_des = old - cap
                 prev[jn] = float(q_des)
+            last_cmd[jn] = float(q_des)
+        else:
+            q_des = _apply_stop_hip(jn, float(q_des))
         orig(jn, float(q_des))
 
     def write_limited(jn: str, q_des: float, limit_nm: float | None = None) -> None:
         # hold_stand and the stand substep call this, not write_clipped.
-        # After the stop, knee and ankle pitch still take the cap. The
-        # walk leaves the flag off, so this copy is unchanged.
+        # Knee and ankle pitch on a loaded leg keep the 1.90 rad/s cap.
+        # An airborne knee keeps the last swing-z command. Hips do not
+        # take a one-tick stand write. Loaded ankle roll stays at q,
+        # which is the sole-flat rule this path would otherwise skip.
         if jn.endswith(suffixes) and getattr(session, "_sag_torque_cap", False):
-            q_des, _q_stand = _toward_stand(jn, float(q_des))
+            if not getattr(session, "_sag_stand_armed", False) or _stand_side(jn):
+                q_des, _q_stand = _toward_stand(jn, float(q_des))
+            elif jn in last_cmd:
+                q_des = float(last_cmd[jn])
+        elif getattr(session, "_sag_torque_cap", False) and jn.endswith("ank_roll"):
+            if _stand_side(jn):
+                q_des = float(lipm.q(jn))
+            else:
+                q_des = _hold_pin(jn, float(q_des))
+        else:
+            q_des = _apply_stop_hip(jn, float(q_des))
         orig_fl(jn, float(q_des), limit_nm)
 
     lipm.write_clipped = write  # type: ignore[method-assign]
@@ -12605,9 +12771,16 @@ def score_sag_stop() -> None:
         "through the walk and the stop. "
         "On the stop that slew steps toward the stand pose and stays inside "
         "the 2.33 Nm part cap. "
-        "The airborne foot keeps swing-z. x_move is not zeroed on the stop tick. "
+        "From the stop command the swing hip roll, hip yaw, hip pitch, and "
+        "ankle roll hold the pre-stop q_des. Planar x/y and sole roll/pitch hold. "
+        "Swing knee and ankle pitch are the swing-z IK until that "
+        "foot is over 5 N. "
+        "Stand hips start only after both feet are over 5 N, and only on "
+        "a loaded leg, inside the same part cap. "
+        "x_move is not zeroed on the stop tick. "
         "The first real double support snaps the amplitude to 0. "
         "Full step. Foot-z 1.170 mm. Less-crouch closed. Trim-lead off. Yaw 0. "
+        "Torque is scored before any tip. "
         "Hip roll and CoM-in-box are logged and are not this pass. "
         "The y_swap 0 toe is not the y_swap 0.020 clear."
     )
@@ -12746,9 +12919,25 @@ def score_sag_stop() -> None:
         item for item in asks
         if str(item[1]).endswith(leg_suffix) and _WALK_STEADY_S - 1e-9 <= float(item[0]) < stop_t - 1e-9
     ]
+    fault_t = float(held.get("fault_t", float("nan")))
+    tipped = bool(held.get("fault")) and math.isfinite(fault_t)
+
+    def _before_tip(t_item: float) -> bool:
+        if not tipped:
+            return True
+        return t_item < fault_t - 1e-9
+
     post_items = [
         item for item in asks
-        if str(item[1]).endswith(leg_suffix) and float(item[0]) + 1e-9 >= stop_t
+        if str(item[1]).endswith(leg_suffix)
+        and float(item[0]) + 1e-9 >= stop_t
+        and _before_tip(float(item[0]))
+    ]
+    after_tip_items = [
+        item for item in asks
+        if str(item[1]).endswith(leg_suffix)
+        and float(item[0]) + 1e-9 >= stop_t
+        and not _before_tip(float(item[0]))
     ]
     print(
         f"PRED {name} walk_mid_margin {float(summary.get('mid_margin', float('nan'))) * 1000.0:+.2f} mm "
@@ -12839,6 +13028,18 @@ def score_sag_stop() -> None:
         if over:
             why = "pre-stop lag" if pre_over else "stop transition"
             fails.append(f"unclamped stop {jn} {ask:+.4f} t {float(item[0]):.3f} {why}")
+    after_worst = _worst(after_tip_items, leg_suffix)
+    after_peak = None
+    for item in after_worst.values():
+        if after_peak is None or abs(float(item[3])) > abs(float(after_peak[3])):
+            after_peak = item
+    if after_peak is not None:
+        _print_one("post_tip", after_peak)
+        print(
+            f"PRED {name} post_tip_note {after_peak[1]} {float(after_peak[3]):+.4f} "
+            f"t {float(after_peak[0]):.3f} is at or after the tip. "
+            "It is not the torque bar."
+        )
     near = None
     if peak is not None:
         best_dt = 1e9
@@ -12874,12 +13075,14 @@ def score_sag_stop() -> None:
         "are re-scored. Track 1 is not done."
     )
     rail_best: tuple[str, float, float] | None = None
+    rail_after: tuple[str, float, float] | None = None
     for surf in surface:
         if not isinstance(surf, dict):
             continue
         t = float(surf["t"])
         if t + 1e-9 < stop_t:
             continue
+        before = _before_tip(t)
         for act in (
             "l_knee", "r_knee", "l_hip_roll", "r_hip_roll",
             "l_hip_pitch", "r_hip_pitch", "l_hip_yaw", "r_hip_yaw",
@@ -12888,18 +13091,28 @@ def score_sag_stop() -> None:
             if act not in surf:
                 continue
             tau = float(surf[act])
-            if rail_best is None or abs(tau) > abs(rail_best[1]):
-                rail_best = (act, tau, t)
+            if before:
+                if rail_best is None or abs(tau) > abs(rail_best[1]):
+                    rail_best = (act, tau, t)
+            elif rail_after is None or abs(tau) > abs(rail_after[1]):
+                rail_after = (act, tau, t)
     if rail_best is not None:
         act, tau, t = rail_best
         print(
             f"PRED {name} actuator_peak {act} {tau:+.4f} t {t:.3f} "
             f"plant_rail {PLANT_NM:.2f} "
             f"ge_2.45 {int(abs(tau) >= PLANT_NM - 1e-3)} "
-            f"ge_2.33 {int(abs(tau) >= KNEE_NM)}"
+            f"ge_2.33 {int(abs(tau) >= KNEE_NM)} "
+            "before any tip"
         )
         if abs(tau) >= PLANT_NM - 1e-3:
             fails.append(f"actuator {act} {tau:+.4f} t {t:.3f}")
+    if rail_after is not None:
+        act, tau, t = rail_after
+        print(
+            f"PRED {name} actuator_post_tip {act} {tau:+.4f} t {t:.3f} "
+            "is at or after the tip and is not the torque bar"
+        )
     if held.get("fault"):
         fails.append(f"fault {held.get('fault')} t {float(held.get('fault_t', float('nan'))):.3f}")
     if air_zero:
@@ -12909,6 +13122,15 @@ def score_sag_stop() -> None:
         stop_t,
     )
     t_txt = "none" if t_stop is None else f"{t_stop:.3f}"
+    torque_fails = [
+        item for item in fails
+        if item.startswith("unclamped") or item.startswith("actuator") or item.startswith("no stop")
+    ]
+    if not torque_fails:
+        print(
+            f"PRED {name} pre_tip_torque every leg ask from the stop command "
+            "until the tip stays at or under 2.33 Nm."
+        )
     if fails:
         print(
             f"PRED {name} Prefer FAIL. "
@@ -12924,8 +13146,8 @@ def score_sag_stop() -> None:
         return
     d_note = "none" if t_stop is None else f"{0.150 * t_stop:.4f}"
     print(
-        f"PRED {name} CLEAR. Unclamped stop asks from the stop command onward "
-        "stay at or under 2.33 Nm on every leg joint. "
+        f"PRED {name} CLEAR. Unclamped stop asks from the stop command "
+        "until any tip stay at or under 2.33 Nm on every leg joint. "
         "Leg actuators stay under the +/-2.45 Nm plant rail. "
         f"T_stop {t_txt} s from the stop command to body speed under "
         f"{SOFT_STOP_SPEED_EPS:.2f} m/s for {SOFT_STOP_HOLD_S:.2f} s. "
