@@ -49,6 +49,11 @@ TOE_BAR_M = 0.002
 # that velocity term near 2.26 Nm. The parked stop stretch stays at
 # 1.90 rad/s and 0.25 / 1.060×. This rate is not that knob.
 _WALK_Z_RATE = 1.55
+# Loaded-leg stance rates on the continuous walk. Knee and ankle pitch
+# stay at the rate that already cleared mid-SS before the swing stretch.
+# Hip pitch can be slower on its own. The stop bout does not read these.
+_WALK_STANCE_RATE = 1.90
+_WALK_HIP_PITCH_RATE = 1.90
 # Swing ankle trim cap. This is not a world-level sole and not body roll.
 ANK_TRIM_CAP = 0.025
 # Trim-lead schedule. Full through 80% of swing, command back to 0 by 92%
@@ -6781,6 +6786,7 @@ def measure_pred_clip(
         steer_out["inflight_edge"] = inflight_edge
         steer_out["lateral"] = lateral_rows
         steer_out["sag_cap"] = list(getattr(session, "_sag_cap_rows", []))
+        steer_out["walk_slew"] = dict(getattr(session, "_walk_slew_stats", {}))
     return PredScore(
         name=name,
         clip=clip,
@@ -11633,7 +11639,8 @@ def _install_sagittal_slew(
 
     The cap is radians per second. Double support limits both legs.
     Single support limits the loaded leg only. ``joints`` chooses knee,
-    ankle pitch, or both. The logged ask uses this slowed q_des.
+    ankle pitch, and, on the continuous walk, hip pitch. The logged ask
+    uses this slowed q_des. The stop bout does not put hip pitch here.
     """
     lipm = session.lipm
     if lipm is None or lipm.op3 is None:
@@ -11641,13 +11648,25 @@ def _install_sagittal_slew(
     if rad_s < 0.0:
         raise SystemExit(f"sagittal slew {rad_s} is negative")
     suffixes = tuple(joints)
-    if not suffixes or any(name not in ("knee", "ank_pitch") for name in suffixes):
-        raise SystemExit(f"sagittal slew joints {joints} are not knee or ank_pitch")
+    allowed = ("knee", "ank_pitch", "hip_pitch")
+    if not suffixes or any(name not in allowed for name in suffixes):
+        raise SystemExit(
+            f"sagittal slew joints {joints} are not knee, ank_pitch, or hip_pitch"
+        )
     walker = lipm.op3
     orig = lipm.write_clipped
     orig_fl = lipm.write_force_limited
     prev: dict[str, float] = {}
     cap = float(rad_s) * float(ow.OP3_CTRL_S)
+    hip_cap = float(_WALK_HIP_PITCH_RATE) * float(ow.OP3_CTRL_S)
+    stance_cap = float(_WALK_STANCE_RATE) * float(ow.OP3_CTRL_S)
+    slew_stats: dict[str, float] = {
+        "hip_clip": 0.0,
+        "hip_max_abs_dq": 0.0,
+        "knee_clip": 0.0,
+        "knee_max_abs_dq": 0.0,
+    }
+    session._walk_slew_stats = slew_stats  # type: ignore[attr-defined]
     session._sag_cap_rows = []  # type: ignore[attr-defined]
     step_at: dict[str, float] = {}
     stepped_cmd: dict[str, float] = {}
@@ -11915,19 +11934,49 @@ def _install_sagittal_slew(
                 # Foot has landed and stand is not armed on this leg yet.
                 q_des = float(prev[jn])
             elif limited:
+                # The stop walk still uses the caller's cap. The continuous
+                # walk can slow hip pitch without dragging the knee.
+                walk_stance = (
+                    getattr(session, "_walk_z_stretch", False)
+                    and not getattr(session, "_sag_stop_installed", False)
+                    and not getattr(session, "_sag_torque_cap", False)
+                )
+                if walk_stance and jn.endswith("hip_pitch"):
+                    step = hip_cap
+                elif walk_stance:
+                    step = stance_cap
+                else:
+                    step = cap
                 old = prev.get(jn)
                 if old is not None:
-                    dq = float(q_des) - old
-                    if dq > cap:
-                        q_des = old + cap
-                    elif dq < -cap:
-                        q_des = old - cap
+                    dq = float(q_des) - float(old)
+                    if walk_stance and jn.endswith("hip_pitch"):
+                        slew_stats["hip_max_abs_dq"] = max(
+                            float(slew_stats["hip_max_abs_dq"]), abs(dq)
+                        )
+                    elif walk_stance and jn.endswith("knee"):
+                        slew_stats["knee_max_abs_dq"] = max(
+                            float(slew_stats["knee_max_abs_dq"]), abs(dq)
+                        )
+                    if dq > step:
+                        q_des = float(old) + step
+                        if walk_stance and jn.endswith("hip_pitch"):
+                            slew_stats["hip_clip"] = float(slew_stats["hip_clip"]) + 1.0
+                        elif walk_stance and jn.endswith("knee"):
+                            slew_stats["knee_clip"] = float(slew_stats["knee_clip"]) + 1.0
+                    elif dq < -step:
+                        q_des = float(old) - step
+                        if walk_stance and jn.endswith("hip_pitch"):
+                            slew_stats["hip_clip"] = float(slew_stats["hip_clip"]) + 1.0
+                        elif walk_stance and jn.endswith("knee"):
+                            slew_stats["knee_clip"] = float(slew_stats["knee_clip"]) + 1.0
                 prev[jn] = float(q_des)
             elif (
                 getattr(session, "_walk_z_stretch", False)
                 and not getattr(session, "_sag_stop_installed", False)
                 and not getattr(session, "_sag_torque_cap", False)
                 and not limited
+                and not jn.endswith("hip_pitch")
             ):
                 # Continuous walk only. Swing knee and ankle pitch follow
                 # the warped z. The parked stop does not set this flag.
@@ -11967,12 +12016,29 @@ def _install_sagittal_slew(
 
     lipm.write_clipped = write  # type: ignore[method-assign]
     lipm.write_force_limited = write_limited  # type: ignore[method-assign]
-    names = "+".join(suffixes)
+    names = "+".join(name for name in suffixes if name != "hip_pitch")
+    shown = float(rad_s)
+    shown_cap = cap
+    if (
+        getattr(session, "_walk_z_stretch", False)
+        and not getattr(session, "_sag_stop_installed", False)
+    ):
+        shown = float(_WALK_STANCE_RATE)
+        shown_cap = stance_cap
     print(
-        f"PRED sag_slew {float(rad_s):.3f} rad/s on stance {names}. "
-        f"Per tick {cap:.5f} rad. The swing knee keeps the swing-z schedule. "
+        f"PRED sag_slew {shown:.3f} rad/s on stance {names}. "
+        f"Per tick {shown_cap:.5f} rad. The swing knee keeps the swing-z schedule. "
         "Foot-z and less-crouch stay put."
     )
+    if "hip_pitch" in suffixes:
+        print(
+            f"PRED sag_slew hip_pitch {_WALK_HIP_PITCH_RATE:.3f} rad/s "
+            "on the loaded leg. "
+            f"Per tick {hip_cap:.5f} rad. "
+            f"Walk stance knee and ankle pitch stay at {_WALK_STANCE_RATE:.3f} rad/s. "
+            "The stop bout does not take hip pitch. "
+            "Swing hip pitch stays on the gait command."
+        )
 
 
 def _quiet_flat_toe(held: dict[str, object]) -> tuple[float, float, str, float]:
@@ -14033,14 +14099,15 @@ def score_mid_swing() -> None:
         f"Day-1 vx {sw.VX_FWD_CAP:.3f} m/s. Yaw 0. Period 0.500 s. "
         "y_swap 0. init_y 0.005 m. Foot-z 1.170 mm. Less-crouch closed. "
         "Trim-lead off. Sole-flat stance ankle stays on. "
-        "Stance knee and ankle pitch stay on the 1.90 rad/s slew. "
-        "Walk swing-z is stretched on its own knob so the swing knee and "
-        f"ankle pitch track at {_WALK_Z_RATE:.2f} rad/s. The stop stretch stays off at "
+        f"Loaded knee and ankle pitch stay on the {_WALK_STANCE_RATE:.2f} rad/s slew. "
+        f"Loaded hip pitch is on its own {_WALK_HIP_PITCH_RATE:.2f} rad/s slew. "
+        "Walk swing-z stays at "
+        f"{_WALK_Z_RATE:.2f} rad/s. The stop stretch stays off at "
         "0.25 / 1.060×. "
-        "Pass is both bars on this copy: 20-80% unclamped knee and ankle "
-        "pitch at or under 2.33 Nm, and the flat toe still at or above "
-        "+2 mm near frac 0.208. Four contact-box corners are logged "
-        "through that window. "
+        "Pass is mid-stance peaks at or under 2.33 Nm, and the flat toe "
+        "still at or above +2 mm, with four contact-box corners at or "
+        "above 0. CoM slack and the four corners are logged at the "
+        "mid-stance knee and hip-pitch peaks. "
         "The parked SSP swing knee is logged and is not the bar unless "
         "that tick moves into 20-80%. "
         "CoM outside the 38 mm box is logged and is not a torque pass. "
@@ -14079,15 +14146,16 @@ def score_mid_swing() -> None:
         y_out_m=0.005,
         x_scale=1.0,
         sag_slew_rad_s=1.90,
-        sag_slew_joints=("knee", "ank_pitch"),
+        sag_slew_joints=("knee", "ank_pitch", "hip_pitch"),
         sag_split=True,
         surface_tag=True,
         walk_z_stretch=True,
     )
     summary = _walk_lateral_summary(held, 0.0)
     summary["x_scale"] = 1.0
-    summary["sag_slew"] = 1.90
-    summary["slew_joints"] = "knee+ank_pitch"
+    summary["sag_slew"] = _WALK_STANCE_RATE
+    summary["hip_slew"] = _WALK_HIP_PITCH_RATE
+    summary["slew_joints"] = "knee+ank_pitch+hip_pitch"
     toe_mm, toe_t, toe_side, toe_frac = _quiet_flat_toe(held)
     summary["flat_toe_mm"] = toe_mm
     summary["flat_toe_t"] = toe_t
@@ -14334,6 +14402,45 @@ def score_mid_swing() -> None:
         and abs(float(dsp_w[3])) <= KNEE_NM + 1e-9
         and not _body_bad(summary)
     )
+    slew_stats = held.get("walk_slew")
+    if isinstance(slew_stats, dict):
+        dt_s = float(ow.OP3_CTRL_S)
+        hip_dq = float(slew_stats.get("hip_max_abs_dq", 0.0))
+        knee_dq = float(slew_stats.get("knee_max_abs_dq", 0.0))
+        hip_cmd = hip_dq / dt_s if dt_s > 0.0 else float("nan")
+        knee_cmd = knee_dq / dt_s if dt_s > 0.0 else float("nan")
+        print(
+            f"PRED {name} stance_slew hip {_WALK_HIP_PITCH_RATE:.2f} rad/s "
+            f"clip {int(float(slew_stats.get('hip_clip', 0.0)))} "
+            f"max_cmd {hip_cmd:.3f} rad/s "
+            f"knee {_WALK_STANCE_RATE:.2f} rad/s "
+            f"clip {int(float(slew_stats.get('knee_clip', 0.0)))} "
+            f"max_cmd {knee_cmd:.3f} rad/s"
+        )
+    mid_plant_ok = True
+    peak_times: dict[float, list[str]] = {}
+    for jn, item in stance_mid.items():
+        if not (str(jn).endswith("knee") or str(jn).endswith("hip_pitch")):
+            continue
+        peak_times.setdefault(round(float(item[0]), 5), []).append(str(jn))
+    for t_key, joints_at in sorted(peak_times.items()):
+        row = by_lat.get(t_key)
+        tag = "mid_ss_" + "+".join(joints_at)
+        _print_box_pair(name, tag, row)
+        surf = by_surf.get(t_key)
+        frac_m = float("nan")
+        if row is not None:
+            frac_m = _swing_frac(str(row["phase"]), float(row["pose"]))
+        for side in ("L", "R"):
+            plane = surf.get(side) if isinstance(surf, dict) else None
+            plane_d = plane if isinstance(plane, dict) else None
+            _print_corners(tag, side, t_key, frac_m, plane_d)
+            corners = plane_d.get("corners") if isinstance(plane_d, dict) else None
+            if not isinstance(corners, tuple) or not corners:
+                mid_plant_ok = False
+                continue
+            if any(float(z) < 0.0 for _label, z in corners):
+                mid_plant_ok = False
     ssp_frac = float("nan")
     if knee_worst is not None:
         ssp_row = by_lat.get(round(float(knee_worst[0]), 5))
@@ -14349,11 +14456,12 @@ def score_mid_swing() -> None:
             f"in_20_80 {int(ssp_in_window)} "
             f"ge_2.33 {int(abs(float(knee_worst[3])) > KNEE_NM + 1e-9)}"
         )
-    if swing_ok and toe_bar and rug_ok and corners_ok and support_ok:
+    if swing_ok and toe_bar and rug_ok and corners_ok and support_ok and mid_plant_ok:
         print(
             f"PRED {name} CLEAR. 20-80% knee and ankle pitch stay at or under "
             "2.33 Nm, and both flat toes stay at or above +2 mm near frac 0.208. "
-            "Four corners stay at or above 0 through that window. "
+            "Four corners stay at or above 0 through that window and at the "
+            "mid-stance knee and hip-pitch peaks. "
             "Mid-SS and DSP stay at or under 2.33 Nm. "
             "The parked SSP swing knee stays outside 20-80%. "
             f"CoM mid_margin {float(summary['mid_margin']) * 1000.0:+.2f} mm "
@@ -14379,6 +14487,8 @@ def score_mid_swing() -> None:
             why.append("a contact-box corner went under 0")
         if not rug_ok:
             why.append("rug clearance under 0")
+        if not mid_plant_ok:
+            why.append("a mid-stance knee or hip-pitch tick put a corner under 0")
         if not support_ok:
             overs = []
             for jn, item in stance_mid.items():
@@ -14402,14 +14512,23 @@ def score_mid_swing() -> None:
                 "toe stays at or above +2 mm. A contact-box corner is under 0. "
                 "Foot-z, crouch, y_swap, the rail, and the plant stay closed."
             )
-        elif swing_ok and toe_bar and corners_ok and not support_ok:
+        elif swing_ok and toe_bar and corners_ok and mid_plant_ok and not support_ok:
             next_lever = (
                 "20-80% knee and ankle pitch are inside 2.33 Nm, both flat "
                 "toes stay at or above +2 mm, and every contact-box corner "
                 "stays at or above 0. The miss is the mid-SS stance chain. "
-                "A slower walk swing puts the heel under 0 and the stance "
-                "hip further over. Foot-z, crouch, y_swap, the rail, and "
-                "the plant stay closed."
+                f"Loaded hip pitch is at {_WALK_HIP_PITCH_RATE:.2f} rad/s and "
+                f"the stance knee stays at {_WALK_STANCE_RATE:.2f} rad/s. "
+                "The walk swing stays at 1.55 rad/s. A slower hip does not "
+                "drag the knee below the rate that already cleared it. "
+                "Foot-z, crouch, y_swap, the rail, and the plant stay closed."
+            )
+        elif swing_ok and toe_bar and not mid_plant_ok:
+            next_lever = (
+                "The stance slew put a contact-box corner under 0 at a "
+                "mid-stance knee or hip-pitch peak. That is a dig, not a "
+                "torque pass. The walk swing stays at 1.55 rad/s. "
+                "Foot-z, crouch, y_swap, the rail, and the plant stay closed."
             )
         elif swing_ok and not toe_bar:
             next_lever = (
