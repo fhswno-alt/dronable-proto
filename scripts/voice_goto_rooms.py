@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
-"""Five-room voice go-to on the joined apartment. Soft-pass is off.
+"""Five-room yes/no search on the joined apartment. Soft-pass is off.
 
 Reach is fixed below before any room is scored. A bout reaches only when
 the settled stand COM starts outside that room's floor box in
 mujoco/room_apartment.json and finishes inside the same box, upright,
-with zero prop contacts, at or before the time limit. The box is the
-named room, not the plant floor from -3 m to +3 m. The doorway spawn
-in that file is the start.
+with zero prop contacts, at or before the time limit, and only after a
+correct per-target yes committed vel(+0.056, 0). The box is the named
+room, not the plant floor from -3 m to +3 m.
 
-The phrase is shown to Moondream on one kit_cam still. A label that
-matches the asked room publishes vel(+0.056, +0.000) on CommandBus.
-Yaw stays inside ±0.25. The doorway already faces the opening, so the
-go-to yaw is 0. The #71 latch is the corridor-gated finder stop. A
-stop on the speckled hall shadow by the kitchen or bathroom doorway,
-with no prop in the frame, is a false stop and is not a #71 pass.
+Scored spawns are the doorway xy turned ±90° from the door-facing yaw.
+A geometric census logs the kit_cam doorway fraction. ±90° is the offset
+inside the ±60–90° band where that fraction is ~0. kit_cam is not moved.
+
+The question is "Is there a {room} through the doorway ahead?" yes or no.
+It is not an open-set room label. Search turns in place at +0.25 rad/s
+with no forward velocity. The first yes ends the search. A yes while the
+asked room is under 1% of the frame is a wrong yes and does not go-to.
+A correct yes publishes vel(+0.056, +0.000) along the current heading
+and arms the #71 latch. A stop on the speckled hall shadow by the
+kitchen or bathroom doorway, with no prop in the frame, is a false stop
+and is not a #71 pass.
 
 0.150 is only the d_min bound. The plant file is only hashed.
 """
@@ -38,6 +44,7 @@ if str(_SCRIPTS) not in sys.path:
 
 import check_apartment_scene as apt
 import hazard_finder as hf
+import lipm_gait
 import mono_toe_gate as gate
 import ray_corridor as rc
 import room_ask
@@ -66,6 +73,31 @@ PHRASES: tuple[tuple[str, str], ...] = (
     ("living", "go to the living room"),
     ("bedroom", "go to the bedroom"),
     ("entrance", "go to the entrance"),
+)
+# ±90° is inside the requested ±60–90° band. The census must show the
+# doorway fraction near 0 there. ±60° and ±75° are logged and not scored,
+# because a 120° kit_cam still sees the opening at those headings.
+SPAWN_OFFSETS_RAD: tuple[float, ...] = (0.5 * math.pi, -0.5 * math.pi)
+CENSUS_OFFSETS_DEG: tuple[int, ...] = (0, 60, -60, 75, -75, 90, -90)
+SEARCH_YAW = voice.YAW_RAD_S
+SEARCH_SWEEP_RAD = 2.0 * math.pi
+ASK_STEP_RAD = math.radians(20.0)
+ROOM_VISIBLE_FRAC = 0.01
+HIP_BAR_NM = 2.33
+DOOR_Z = (0.05, 1.35)
+RAY_STEP = 8
+ROOM_GEOMS: dict[str, tuple[str, ...]] = {
+    "kitchen": ("kitchen_", "table_", "chair_"),
+    "bathroom": ("bathroom_", "sink_", "toilet_"),
+    "living": ("living_", "tv_"),
+    "bedroom": ("bedroom_", "nightstand_"),
+    "entrance": ("entrance_", "mat_"),
+}
+HIP_ACTUATORS: tuple[tuple[str, str], ...] = (
+    ("l_hip_yaw", "l_hip_yaw_pos"),
+    ("r_hip_yaw", "r_hip_yaw_pos"),
+    ("l_hip_roll", "l_hip_roll_pos"),
+    ("r_hip_roll", "r_hip_roll_pos"),
 )
 
 
@@ -100,10 +132,34 @@ class ShadowSighting(TypedDict):
     hit_xy: list[float] | None
 
 
+class AskJson(TypedDict):
+    t: float
+    tick: int
+    heading_rad: float
+    yaw_from_spawn_rad: float
+    doorway_fraction: float
+    asked_fraction: float
+    visible_rooms: list[str]
+    answer: str
+    raw: str
+    confidence: float | None
+    seconds: float | None
+
+
+class HipJson(TypedDict):
+    joint: str
+    actuator: str
+    peak_nm: float
+    abs_nm: float
+    over_2_33: bool
+
+
 class RoomJson(TypedDict):
     room: str
     scene: str
     phrase: str
+    question: str
+    yaw_offset_rad: float
     voice_parse: str
     voice_line: str
     generic_caller: str
@@ -114,6 +170,13 @@ class RoomJson(TypedDict):
     recogniser_seconds: float | None
     commanded_vx: float | None
     commanded_yaw: float | None
+    search_yaw_rate: float
+    yaw_turned_rad: float
+    first_yes_t: float | None
+    first_yes_tick: int | None
+    first_yes_heading_rad: float | None
+    wrong_yes: bool
+    committed: bool
     d_min_m: float
     d_min_v_mps: float
     t_detect_s: float
@@ -127,6 +190,10 @@ class RoomJson(TypedDict):
     stop_hit_xy: list[float] | None
     stop_on_shadow: bool
     shadow_first_sightings: list[ShadowSighting]
+    doorway_fraction: float
+    asked_fraction: float
+    visible_rooms: list[str]
+    asks: list[AskJson]
     spawn: SpawnJson
     floor_box: FloorBox
     started_outside: bool
@@ -136,8 +203,12 @@ class RoomJson(TypedDict):
     contact: str
     peak_nm: float
     peak_actuator: str
+    peak_joint: str
+    hip_while_yawing: list[HipJson]
     min_up_z: float
     t_end: float
+    end_qpos_xyz: list[float]
+    end_yaw_rad: float
 
 
 class DefinitionJson(TypedDict):
@@ -151,6 +222,9 @@ class DefinitionJson(TypedDict):
     d_min: str
     d_min_m: float
     false_stop: str
+    yes_no: str
+    search: str
+    hip_bar_nm: float
     soft_pass: bool
 
 
@@ -217,6 +291,22 @@ def _definition() -> DefinitionJson:
             "furniture prop in the kit_cam frame. That stop is not a "
             "#71 pass. Walls are not props."
         ),
+        yes_no=(
+            "Per asked room: 'Is there a {room} through the doorway "
+            "ahead?' yes or no. Not an open-set room name. A yes is "
+            f"correct only when that room's furniture covers at least "
+            f"{ROOM_VISIBLE_FRAC:.0%} of kit_cam. Any other yes is a "
+            "wrong yes and does not publish forward vel."
+        ),
+        search=(
+            "Spawn yaw is the door-facing yaw plus or minus 90 degrees. "
+            "After the stand, vel(0, +0.25) turns in place. No forward "
+            "vel until a correct yes. The question is asked at the spawn "
+            "heading and every 20 degrees of body yaw, through one full "
+            "turn. The turn sign is not taken from the door bearing. "
+            "kit_cam is not moved."
+        ),
+        hip_bar_nm=HIP_BAR_NM,
         soft_pass=False,
     )
 
@@ -312,6 +402,86 @@ def _prop_in_frame(
         if int(geom_id) in prop_ids:
             return True
     return False
+
+
+def _wrap(angle: float) -> float:
+    return (angle + math.pi) % (2.0 * math.pi) - math.pi
+
+
+def _joint_name(actuator: str) -> str:
+    if actuator.endswith("_pos"):
+        return actuator[: -len("_pos")]
+    return actuator
+
+
+def _geom_room(name: str) -> str:
+    for room, prefixes in ROOM_GEOMS.items():
+        if name.startswith(prefixes):
+            return room
+    return ""
+
+
+def _room_fractions(model: mj.MjModel, seg: np.ndarray) -> dict[str, float]:
+    fracs = {room: 0.0 for room in ROOM_GEOMS}
+    if seg.ndim != 3 or seg.shape[2] < 2:
+        raise RuntimeError(f"segmentation shape {seg.shape}")
+    geom_type = int(mj.mjtObj.mjOBJ_GEOM)
+    types = seg[:, :, 1]
+    ids = seg[:, :, 0]
+    total = float(ids.size)
+    visible = types == geom_type
+    for geom_id in np.unique(ids[visible]):
+        name = mj.mj_id2name(model, mj.mjtObj.mjOBJ_GEOM, int(geom_id)) or ""
+        room = _geom_room(name)
+        if room == "":
+            continue
+        fracs[room] += float(np.sum((ids == geom_id) & visible)) / total
+    return fracs
+
+
+def _visible_rooms(fracs: dict[str, float]) -> list[str]:
+    return [room for room, frac in fracs.items() if frac >= ROOM_VISIBLE_FRAC]
+
+
+def _doorway_fraction(
+    model: mj.MjModel,
+    data: mj.MjData,
+    opening: apt.Box,
+    step: int = RAY_STEP,
+) -> float:
+    """Fraction of kit_cam rays that pass through this doorway opening.
+
+    The plane is the hall face of the opening. A ray counts when it meets
+    that rectangle before the first geom. kit_cam is not moved.
+    """
+    cid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_CAMERA, "kit_cam")
+    origin = np.asarray(data.cam_xpos[cid], dtype=np.float64)
+    rot = np.asarray(data.cam_xmat[cid], dtype=np.float64).reshape(3, 3)
+    plane_x = opening["xmin"] if float(origin[0]) < opening["xmin"] else opening["xmax"]
+    ymin = opening["ymin"]
+    ymax = opening["ymax"]
+    z0, z1 = DOOR_Z
+    hit = 0
+    total = 0
+    geomid = np.zeros(1, dtype=np.int32)
+    for v in range(0, rc.HEIGHT, step):
+        for u in range(0, rc.WIDTH, step):
+            total += 1
+            direction = rot @ rc.pixel_direction(float(u) + 0.5, float(v) + 0.5)
+            if abs(float(direction[0])) < 1e-8:
+                continue
+            travel = (plane_x - float(origin[0])) / float(direction[0])
+            if travel <= 0.05:
+                continue
+            point = origin + travel * direction
+            if not (ymin <= float(point[1]) <= ymax and z0 <= float(point[2]) <= z1):
+                continue
+            dist = mj.mj_ray(model, data, origin, direction, None, 1, -1, geomid)
+            if dist < 0 or float(dist) + 1e-3 >= travel:
+                hit += 1
+    if total == 0:
+        return 0.0
+    return hit / total
 
 
 def _nearest_prop(
@@ -619,6 +789,8 @@ class _Bout:
         self.contact = "none"
         self.peak_nm = 0.0
         self.peak_actuator = ""
+        self.yaw_on = False
+        self.hip_peak: dict[str, float] = {}
 
 
 def _watch_step(
@@ -638,6 +810,22 @@ def _watch_step(
         if abs(force) > abs(bout.peak_nm):
             bout.peak_nm = force
             bout.peak_actuator = name
+        if bout.yaw_on and name in bout.hip_peak and abs(force) > abs(bout.hip_peak[name]):
+            bout.hip_peak[name] = force
+
+
+def _hip_rows(bout: _Bout) -> list[HipJson]:
+    rows: list[HipJson] = []
+    for joint, actuator in HIP_ACTUATORS:
+        peak = float(bout.hip_peak.get(actuator, 0.0))
+        rows.append(HipJson(
+            joint=joint,
+            actuator=actuator,
+            peak_nm=peak,
+            abs_nm=abs(peak),
+            over_2_33=abs(peak) > HIP_BAR_NM,
+        ))
+    return rows
 
 
 def _score_stop(
@@ -774,19 +962,215 @@ def _sense(
     return path, hit, rgb
 
 
+def _note_shadow(
+    session: sw.SteerSession,
+    model: mj.MjModel,
+    renderer: mj.Renderer,
+    cid: int,
+    jid: int,
+    pan_id: int,
+    reach: list[tuple[float, float, float]],
+    phase_floor: hf.SamePhaseFloor,
+    sightings: list[ShadowSighting],
+    seen: set[str],
+    prop_ids: dict[int, str],
+    rgb: np.ndarray,
+) -> None:
+    pose, body, yaw, pitch, roll, tilt, pan, step_off, cam = _pose_bits(
+        session, model, cid, jid, pan_id, reach,
+    )
+    yaw_rate = float(session.bus.applied_yaw_rate)
+    raw_cues = hf.corridor_gate_cues(
+        hf.find_hazard_cues(rgb),
+        cam=pose, body=body,
+        imu_roll_rad=roll, imu_pitch_rad=pitch,
+        head_tilt_rad=tilt, yaw_rate=yaw_rate,
+        step_off_m=step_off, head_pan_rad=pan,
+    )
+    if session.lipm is not None and not phase_floor.has_prior(session.lipm.stance):
+        raw_cues = hf.confirm_leg_columns(raw_cues, rgb)
+    finder_name, finder_hit = _finder_patch(
+        raw_cues, pose=pose, body=body, roll=roll, pitch=pitch,
+        tilt=tilt, yaw_rate=yaw_rate, step_off=step_off, pan=pan,
+    )
+    rot = rc.camera_rotation_from_imu(yaw, pitch, roll, tilt, pan)
+    candidate = _shadow_candidate(seen, rgb=rgb, cam=cam, rot=rot)
+    if candidate is not None:
+        seg = _render_seg(renderer, session.data)
+        name, u, v, mean, std = candidate
+        hit_list = None
+        if finder_name == name and finder_hit is not None:
+            hit_list = [finder_hit[0], finder_hit[1]]
+        sightings.append(ShadowSighting(
+            patch=name,
+            t=float(session.data.time),
+            u=u,
+            v=v,
+            lum_mean=mean,
+            lum_std=std,
+            speckled=True,
+            finder_emitted=finder_name == name,
+            prop_in_frame=_prop_in_frame(seg, prop_ids),
+            hit_xy=hit_list,
+        ))
+        seen.add(name)
+    elif finder_name != "" and finder_hit is not None:
+        _mark_finder(sightings, finder_name, finder_hit)
+
+
+def _look(
+    session: sw.SteerSession,
+    model: mj.MjModel,
+    renderer: mj.Renderer,
+    opening: apt.Box,
+    room_name: str,
+    question: str,
+    asker: room_ask.RoomAsk | None,
+    ask_error: str,
+    *,
+    tick: int,
+    yaw_spawn: float,
+    cid: int,
+    jid: int,
+    pan_id: int,
+    reach: list[tuple[float, float, float]],
+    phase_floor: hf.SamePhaseFloor,
+    sightings: list[ShadowSighting],
+    seen: set[str],
+    prop_ids: dict[int, str],
+) -> tuple[AskJson, dict[str, float]]:
+    rgb = _render_rgb(renderer, session.data)
+    _note_shadow(
+        session, model, renderer, cid, jid, pan_id, reach, phase_floor,
+        sightings, seen, prop_ids, rgb,
+    )
+    seg = _render_seg(renderer, session.data)
+    fracs = _room_fractions(model, seg)
+    door = _doorway_fraction(model, session.data, opening)
+    heading = _yaw(session.data, session.bid_body)
+    if asker is None:
+        answer = "not loaded"
+        raw = ask_error
+        confidence = None
+        seconds = None
+    else:
+        asked = asker.ask_yes_no(rgb, question)
+        parsed = asked.get("answer")
+        answer = "undecided" if parsed is None else str(parsed)
+        raw = str(asked.get("raw", ""))
+        conf = asked.get("confidence")
+        confidence = None if conf is None else float(conf)
+        sec = asked.get("seconds")
+        seconds = None if sec is None else float(sec)
+    row = AskJson(
+        t=float(session.data.time),
+        tick=tick,
+        heading_rad=heading,
+        yaw_from_spawn_rad=_wrap(heading - yaw_spawn),
+        doorway_fraction=door,
+        asked_fraction=float(fracs.get(room_name, 0.0)),
+        visible_rooms=_visible_rooms(fracs),
+        answer=answer,
+        raw=raw,
+        confidence=confidence,
+        seconds=seconds,
+    )
+    return row, fracs
+
+
+def _place(session: sw.SteerSession, x: float, y: float, yaw: float) -> None:
+    session.data.qpos[0] = float(x)
+    session.data.qpos[1] = float(y)
+    half = 0.5 * float(yaw)
+    session.data.qpos[3] = math.cos(half)
+    session.data.qpos[4] = 0.0
+    session.data.qpos[5] = 0.0
+    session.data.qpos[6] = math.sin(half)
+    session.data.qvel[:] = 0.0
+    mj.mj_forward(session.model, session.data)
+
+
+def _fov_census(spec: dict[str, apt.RoomSpec]) -> list[dict[str, object]]:
+    """Doorway fraction before any model call. kit_cam is not moved."""
+    session = sw.SteerSession(
+        video=False,
+        scene_xml=SCENE_XML,
+        initial_yaw=0.0,
+        lipm=sw.locked_kit_config(),
+    )
+    model = session.model
+    renderer = mj.Renderer(model, height=rc.HEIGHT, width=rc.WIDTH)
+    rows: list[dict[str, object]] = []
+    try:
+        for name in ROOM_GEOMS:
+            room = spec[name]
+            door = room["doorways"][0]
+            opening = door["opening"]
+            spawn = door["spawn"]
+            box = room["floor_box"]
+            for deg in CENSUS_OFFSETS_DEG:
+                yaw = float(spawn["yaw"]) + math.radians(deg)
+                _place(session, float(spawn["x"]), float(spawn["y"]), yaw)
+                seg = _render_seg(renderer, session.data)
+                fracs = _room_fractions(model, seg)
+                com = np.asarray(session.data.subtree_com[session.bid_body], dtype=np.float64)
+                outside = not (
+                    box["xmin"] <= float(com[0]) <= box["xmax"]
+                    and box["ymin"] <= float(com[1]) <= box["ymax"]
+                )
+                rows.append({
+                    "room": name,
+                    "offset_deg": deg,
+                    "doorway_fraction": _doorway_fraction(model, session.data, opening),
+                    "asked_fraction": float(fracs.get(name, 0.0)),
+                    "visible_rooms": _visible_rooms(fracs),
+                    "started_outside": outside,
+                })
+    finally:
+        renderer.close()
+    return rows
+
+
+def _assert_census(rows: list[dict[str, object]]) -> None:
+    by = {(str(row["room"]), int(row["offset_deg"])): row for row in rows}
+    facing = by[("kitchen", 0)]
+    left = by[("kitchen", 90)]
+    right = by[("kitchen", -90)]
+    if float(facing["doorway_fraction"]) < 0.20:
+        raise SystemExit(
+            f"FAIL: facing kitchen doorway fraction {facing['doorway_fraction']}"
+        )
+    for row in (left, right):
+        if float(row["doorway_fraction"]) > 0.02:
+            raise SystemExit(
+                f"FAIL: kitchen offset {row['offset_deg']} still sees the doorway "
+                f"({row['doorway_fraction']})"
+            )
+    if float(facing["asked_fraction"]) < ROOM_VISIBLE_FRAC:
+        raise SystemExit("FAIL: facing kitchen furniture is under the visibility bar")
+    if float(left["asked_fraction"]) >= ROOM_VISIBLE_FRAC:
+        raise SystemExit("FAIL: kitchen at +90 deg is already in frame")
+    for row in rows:
+        if int(row["offset_deg"]) in (90, -90) and not bool(row["started_outside"]):
+            raise SystemExit(f"FAIL: {row['room']} ±90 spawn is inside its box")
+    if abs(HIP_BAR_NM - 2.33) > 1e-12 or abs(HIP_BAR_NM - lipm_gait.KNEE_SAG_NM) > 1e-12:
+        raise SystemExit(f"FAIL: hip bar {HIP_BAR_NM} is not 2.33")
+
+
 def _run_room(
     room_name: str,
     phrase: str,
+    yaw_offset: float,
     spec_room: apt.RoomSpec,
     asker: room_ask.RoomAsk | None,
     ask_error: str,
-    targets_unused: dict[str, float],
     robot_bodies: set[str],
     d_min_m: float,
 ) -> RoomJson:
-    del targets_unused
     door = spec_room["doorways"][0]
     spawn_xy = door["spawn"]
+    opening = door["opening"]
+    face_yaw = float(spawn_xy["yaw"])
     box = FloorBox(
         source="room_apartment.json",
         xmin=spec_room["floor_box"]["xmin"],
@@ -797,7 +1181,7 @@ def _run_room(
     session = sw.SteerSession(
         video=False,
         scene_xml=SCENE_XML,
-        initial_yaw=float(spawn_xy["yaw"]),
+        initial_yaw=face_yaw + yaw_offset,
         lipm=sw.locked_kit_config(),
     )
     session.data.qpos[0] = float(spawn_xy["x"])
@@ -816,6 +1200,11 @@ def _run_room(
     }
     renderer = mj.Renderer(model, height=rc.HEIGHT, width=rc.WIDTH)
     bout = _Bout()
+    for _joint, actuator in HIP_ACTUATORS:
+        if actuator not in act_idx:
+            raise SystemExit(f"FAIL: missing actuator {actuator}")
+        bout.hip_peak[actuator] = 0.0
+    question = room_ask.yes_no_prompt(room_name)
     real = mj.mj_step
 
     def hook(step_model: mj.MjModel, step_data: mj.MjData) -> None:
@@ -823,110 +1212,198 @@ def _run_room(
         _watch_step(step_model, step_data, bout, robot_bodies, act_idx)
 
     mj.mj_step = hook
-    driver = sw.ScriptedDriver((
-        sw.DemoSegment(STAND_S, "stand", 0.0, 0.0, "stand"),
-        sw.DemoSegment(TIME_LIMIT_S, "vel", voice.FWD_MPS, 0.0, "forward"),
-    ))
     reach: list[tuple[float, float, float]] = []
     tracks: list[gate._GapTrack] = []
     phase_floor = hf.SamePhaseFloor()
     sightings: list[ShadowSighting] = []
     seen: set[str] = set()
+    asks: list[AskJson] = []
     gate_m = d_min_m
     generic = voice.parse_phrase(phrase)
     words = sorted(set(voice.normalize_phrase(phrase).split()) & voice._ROOM_WORDS)
     stop = _empty_stop()
-    label = "not asked"
-    raw_answer = ""
-    confidence: float | None = None
-    seconds: float | None = None
     commanded_vx: float | None = None
     commanded_yaw: float | None = None
     latch_applied = False
+    committed = False
+    wrong_yes = False
     block = ""
+    ticks = 0
+    yaw_turned = 0.0
+    first_yes_t: float | None = None
+    first_yes_tick: int | None = None
+    first_yes_heading: float | None = None
+    stand_door = 0.0
+    stand_asked = 0.0
+    stand_visible: list[str] = []
     try:
         while float(session.data.time) < STAND_S - 1e-9:
-            driver.publish(session.bus, float(session.data.time))
+            session.bus.stand(float(session.data.time))
+            bout.yaw_on = False
             session.step()
+            ticks += 1
         com = np.asarray(session.data.subtree_com[session.bid_body], dtype=np.float64)
+        yaw_spawn = _yaw(session.data, session.bid_body)
         spawn = SpawnJson(
             doorway_x=float(spawn_xy["x"]),
             doorway_y=float(spawn_xy["y"]),
-            doorway_yaw=float(spawn_xy["yaw"]),
+            doorway_yaw=face_yaw,
             qpos_xyz=[
                 float(session.data.qpos[0]),
                 float(session.data.qpos[1]),
                 float(session.data.qpos[2]),
             ],
-            yaw_rad=_yaw(session.data, session.bid_body),
+            yaw_rad=yaw_spawn,
             com_xyz=[float(com[0]), float(com[1]), float(com[2])],
             up_z=float(session.data.xmat[session.bid_body].reshape(3, 3)[2, 2]),
         )
         started_outside = not _inside(float(com[0]), float(com[1]), box)
-        rgb = _render_rgb(renderer, session.data)
-        pose, body, yaw, pitch, roll, tilt, pan, step_off, cam = _pose_bits(
-            session, model, cid, jid, pan_id, reach,
-        )
-        yaw_rate = float(session.bus.applied_yaw_rate)
-        raw_cues = hf.corridor_gate_cues(
-            hf.find_hazard_cues(rgb),
-            cam=pose, body=body,
-            imu_roll_rad=roll, imu_pitch_rad=pitch,
-            head_tilt_rad=tilt, yaw_rate=yaw_rate,
-            step_off_m=step_off, head_pan_rad=pan,
-        )
-        if session.lipm is not None and not phase_floor.has_prior(session.lipm.stance):
-            raw_cues = hf.confirm_leg_columns(raw_cues, rgb)
-        finder_name, finder_hit = _finder_patch(
-            raw_cues, pose=pose, body=body, roll=roll, pitch=pitch,
-            tilt=tilt, yaw_rate=yaw_rate, step_off=step_off, pan=pan,
-        )
-        rot = rc.camera_rotation_from_imu(yaw, pitch, roll, tilt, pan)
-        candidate = _shadow_candidate(seen, rgb=rgb, cam=cam, rot=rot)
-        if candidate is not None:
-            seg = _render_seg(renderer, session.data)
-            name, u, v, mean, std = candidate
-            hit_list = None
-            if finder_name == name and finder_hit is not None:
-                hit_list = [finder_hit[0], finder_hit[1]]
-            sightings.append(ShadowSighting(
-                patch=name,
-                t=float(session.data.time),
-                u=u,
-                v=v,
-                lum_mean=mean,
-                lum_std=std,
-                speckled=True,
-                finder_emitted=finder_name == name,
-                prop_in_frame=_prop_in_frame(seg, prop_ids),
-                hit_xy=hit_list,
-            ))
-            seen.add(name)
-        if asker is None:
-            label = "not loaded"
-            raw_answer = ask_error
-            block = "recogniser did not load, so no vel was published"
-        else:
-            asked = asker.ask(rgb)
-            raw_room = asked.get("room")
-            label = "none" if raw_room is None else str(raw_room)
-            raw_answer = str(asked.get("raw", ""))
-            conf = asked.get("confidence")
-            confidence = None if conf is None else float(conf)
-            sec = asked.get("seconds")
-            seconds = None if sec is None else float(sec)
-        if label != room_name:
-            if block == "":
-                block = (
-                    f"recogniser label {label!r} is not {room_name}; "
-                    "no vel was published"
-                )
-        elif not started_outside:
+        if not started_outside:
             block = "settled COM is inside the named room box"
-        else:
+
+        def consider(row: AskJson) -> str:
+            nonlocal block, wrong_yes, committed, first_yes_t, first_yes_tick, first_yes_heading
+            asks.append(row)
+            if row["answer"] != "yes":
+                return row["answer"]
+            first_yes_t = row["t"]
+            first_yes_tick = row["tick"]
+            first_yes_heading = row["heading_rad"]
+            if row["asked_fraction"] < ROOM_VISIBLE_FRAC:
+                wrong_yes = True
+                visible = ", ".join(row["visible_rooms"]) or "none"
+                block = (
+                    f"wrong yes; {room_name} covers {row['asked_fraction']:.3f} of "
+                    f"kit_cam, under {ROOM_VISIBLE_FRAC:.2f}; visible rooms: {visible}"
+                )
+                return "wrong"
+            committed = True
+            return "commit"
+
+        if asker is None:
+            block = "recogniser did not load, so no vel was published"
+            look, _fracs = _look(
+                session, model, renderer, opening, room_name, question,
+                None, ask_error, tick=ticks, yaw_spawn=yaw_spawn,
+                cid=cid, jid=jid, pan_id=pan_id, reach=reach,
+                phase_floor=phase_floor, sightings=sightings, seen=seen,
+                prop_ids=prop_ids,
+            )
+            asks.append(look)
+            stand_door = look["doorway_fraction"]
+            stand_asked = look["asked_fraction"]
+            stand_visible = look["visible_rooms"]
+        elif block == "":
+            look, _fracs = _look(
+                session, model, renderer, opening, room_name, question,
+                asker, ask_error, tick=ticks, yaw_spawn=yaw_spawn,
+                cid=cid, jid=jid, pan_id=pan_id, reach=reach,
+                phase_floor=phase_floor, sightings=sightings, seen=seen,
+                prop_ids=prop_ids,
+            )
+            stand_door = look["doorway_fraction"]
+            stand_asked = look["asked_fraction"]
+            stand_visible = look["visible_rooms"]
+            decision = consider(look)
+            prev_yaw = yaw_spawn
+            next_ask = ASK_STEP_RAD
+            while (
+                decision == "no" or decision == "undecided"
+            ) and float(session.data.time) < TIME_LIMIT_S - 1e-9 and yaw_turned < SEARCH_SWEEP_RAD:
+                now = float(session.data.time)
+                session.bus.vel(0.0, SEARCH_YAW, now)
+                bout.yaw_on = True
+                session.step()
+                ticks += 1
+                heading = _yaw(session.data, session.bid_body)
+                yaw_turned += _wrap(heading - prev_yaw)
+                prev_yaw = heading
+                if bout.contact != "none":
+                    stop = _Stop(
+                        path="contact",
+                        reason=bout.contact,
+                        hit_xy=None,
+                        on_shadow=False,
+                        prop_in_frame=False,
+                        false_stop=False,
+                        latch_pass=False,
+                    )
+                    block = f"prop contact during search {bout.contact}"
+                    break
+                com_now = np.asarray(
+                    session.data.subtree_com[session.bid_body], dtype=np.float64,
+                )
+                if _inside(float(com_now[0]), float(com_now[1]), box):
+                    block = (
+                        "COM entered the named box during the in-place search, "
+                        "before a go-to"
+                    )
+                    stop = _Stop(
+                        path="search_inside",
+                        reason=block,
+                        hit_xy=None,
+                        on_shadow=False,
+                        prop_in_frame=False,
+                        false_stop=False,
+                        latch_pass=False,
+                    )
+                    break
+                if yaw_turned < next_ask:
+                    continue
+                while yaw_turned >= next_ask:
+                    next_ask += ASK_STEP_RAD
+                look, _fracs = _look(
+                    session, model, renderer, opening, room_name, question,
+                    asker, ask_error, tick=ticks, yaw_spawn=yaw_spawn,
+                    cid=cid, jid=jid, pan_id=pan_id, reach=reach,
+                    phase_floor=phase_floor, sightings=sightings, seen=seen,
+                    prop_ids=prop_ids,
+                )
+                decision = consider(look)
+                if decision in ("wrong", "commit"):
+                    break
+            else:
+                if not committed and not wrong_yes and block == "" and bout.contact == "none":
+                    if float(session.data.time) >= TIME_LIMIT_S - 1e-9:
+                        block = "no yes before the time limit"
+                        stop = _Stop(
+                            path="time",
+                            reason=block,
+                            hit_xy=None,
+                            on_shadow=False,
+                            prop_in_frame=False,
+                            false_stop=False,
+                            latch_pass=False,
+                        )
+                    else:
+                        block = (
+                            f"turned {yaw_turned:.3f} rad at yaw {SEARCH_YAW:+.2f} "
+                            "with no yes"
+                        )
+                        stop = _Stop(
+                            path="no_yes",
+                            reason=block,
+                            hit_xy=None,
+                            on_shadow=False,
+                            prop_in_frame=False,
+                            false_stop=False,
+                            latch_pass=False,
+                        )
+            if wrong_yes:
+                stop = _Stop(
+                    path="wrong_yes",
+                    reason=block,
+                    hit_xy=None,
+                    on_shadow=False,
+                    prop_in_frame=False,
+                    false_stop=False,
+                    latch_pass=False,
+                )
+        if committed and stop["path"] == "":
             commanded_vx = voice.FWD_MPS
             commanded_yaw = 0.0
             latch_applied = True
+            session.bus.vel(voice.FWD_MPS, 0.0, float(session.data.time))
             while float(session.data.time) < TIME_LIMIT_S - 1e-9:
                 now = float(session.data.time)
                 path, hit, _frame = _sense(
@@ -942,7 +1419,9 @@ def _run_room(
                         prop_in_frame=prop,
                     )
                     session.bus.stop(now)
+                    bout.yaw_on = abs(session.bus.applied_yaw_rate) > 1e-6
                     session.step()
+                    ticks += 1
                     break
                 if bout.contact != "none":
                     stop = _Stop(
@@ -960,7 +1439,9 @@ def _run_room(
                 )
                 if _inside(float(com_now[0]), float(com_now[1]), box):
                     session.bus.stop(now)
+                    bout.yaw_on = abs(session.bus.applied_yaw_rate) > 1e-6
                     session.step()
+                    ticks += 1
                     stop = _Stop(
                         path="inside",
                         reason="COM finished inside the named room box",
@@ -971,8 +1452,13 @@ def _run_room(
                         latch_pass=False,
                     )
                     break
-                driver.publish(session.bus, now)
+                session.bus.vel(voice.FWD_MPS, 0.0, now)
+                bout.yaw_on = (
+                    abs(session.bus.target_yaw) > 1e-6
+                    or abs(session.bus.applied_yaw_rate) > 1e-6
+                )
                 session.step()
+                ticks += 1
                 if bout.contact != "none":
                     stop = _Stop(
                         path="contact",
@@ -1003,7 +1489,15 @@ def _run_room(
         upright = min_up >= UPRIGHT_UP_Z
         clean = bout.contact == "none"
         in_time = t_end <= TIME_LIMIT_S + 1e-6
-        reached = started_outside and finished_inside and upright and clean and in_time
+        reached = (
+            started_outside
+            and finished_inside
+            and upright
+            and clean
+            and in_time
+            and committed
+            and not wrong_yes
+        )
         if reached:
             block = ""
         elif block == "" and not finished_inside:
@@ -1012,6 +1506,20 @@ def _run_room(
             block = f"min up_z {min_up:.3f} is under {UPRIGHT_UP_Z:.2f}"
         elif block == "" and not clean:
             block = f"prop contact {bout.contact}"
+        label = "not asked"
+        raw_answer = ""
+        confidence: float | None = None
+        seconds: float | None = None
+        if asks:
+            chosen = asks[-1]
+            for row in asks:
+                if row["answer"] == "yes":
+                    chosen = row
+                    break
+            label = chosen["answer"]
+            raw_answer = chosen["raw"]
+            confidence = chosen["confidence"]
+            seconds = chosen["seconds"]
         voice_line = generic.line
         voice_parse = generic.kind
         if commanded_vx is not None and commanded_yaw is not None:
@@ -1025,6 +1533,8 @@ def _run_room(
             room=room_name,
             scene=SCENE_XML.name,
             phrase=phrase,
+            question=question,
+            yaw_offset_rad=yaw_offset,
             voice_parse=voice_parse,
             voice_line=voice_line,
             generic_caller=generic.line,
@@ -1035,6 +1545,13 @@ def _run_room(
             recogniser_seconds=seconds,
             commanded_vx=commanded_vx,
             commanded_yaw=commanded_yaw,
+            search_yaw_rate=SEARCH_YAW,
+            yaw_turned_rad=yaw_turned,
+            first_yes_t=first_yes_t,
+            first_yes_tick=first_yes_tick,
+            first_yes_heading_rad=first_yes_heading,
+            wrong_yes=wrong_yes,
+            committed=committed,
             d_min_m=d_min_m,
             d_min_v_mps=float(rc.V_MPS),
             t_detect_s=T_DETECT_S,
@@ -1048,6 +1565,10 @@ def _run_room(
             stop_hit_xy=hit_list,
             stop_on_shadow=stop["on_shadow"],
             shadow_first_sightings=sightings,
+            doorway_fraction=stand_door,
+            asked_fraction=stand_asked,
+            visible_rooms=stand_visible,
+            asks=asks,
             spawn=spawn,
             floor_box=box,
             started_outside=started_outside,
@@ -1057,8 +1578,16 @@ def _run_room(
             contact=bout.contact,
             peak_nm=bout.peak_nm,
             peak_actuator=bout.peak_actuator,
+            peak_joint=_joint_name(bout.peak_actuator),
+            hip_while_yawing=_hip_rows(bout),
             min_up_z=min_up,
             t_end=t_end,
+            end_qpos_xyz=[
+                float(session.data.qpos[0]),
+                float(session.data.qpos[1]),
+                float(session.data.qpos[2]),
+            ],
+            end_yaw_rad=_yaw(session.data, session.bid_body),
         )
     finally:
         mj.mj_step = real
@@ -1086,11 +1615,23 @@ def main() -> int:
         raise SystemExit(f"FAIL: voice forward cap moved to {voice.FWD_MPS}")
     if abs(voice.YAW_RAD_S - 0.25) > 1e-12:
         raise SystemExit(f"FAIL: voice yaw cap moved to {voice.YAW_RAD_S}")
+    if abs(SEARCH_YAW - 0.25) > 1e-12:
+        raise SystemExit(f"FAIL: search yaw moved to {SEARCH_YAW}")
     if abs(rc.V_MPS - 0.150) > 1e-12:
         raise SystemExit(f"FAIL: d_min speed bound moved to {rc.V_MPS}")
     if not SCENE_XML.is_file():
         raise SystemExit(f"FAIL: missing {SCENE_XML}")
     spec = apt._load_spec(apt.SPEC_JSON)
+    census = _fov_census(spec["rooms"])
+    _assert_census(census)
+    for row in census:
+        print(
+            f"census {row['room']} off={row['offset_deg']:+d} "
+            f"door={row['doorway_fraction']:.3f} "
+            f"asked={row['asked_fraction']:.3f} "
+            f"visible={row['visible_rooms']} outside={row['started_outside']}",
+            flush=True,
+        )
     definition = _definition()
     want = sys.argv[1] if len(sys.argv) > 1 else ""
     header: dict[str, object] = {
@@ -1103,11 +1644,19 @@ def main() -> int:
         "scene": SCENE_XML.name,
         "joined_scene": True,
         "doorway_spawn": True,
+        "kit_cam_moved": False,
         "recogniser": {
             "model": room_ask.MODEL_ID,
             "revision": room_ask.MODEL_REV,
-            "prompt": room_ask.PROMPT,
+            "prompt": room_ask.YES_NO_PROMPT,
+            "open_set_prompt_not_used": room_ask.PROMPT,
+            "room_visible_frac": ROOM_VISIBLE_FRAC,
+            "ask_step_rad": ASK_STEP_RAD,
+            "search_yaw": SEARCH_YAW,
+            "search_sweep_rad": SEARCH_SWEEP_RAD,
+            "spawn_offsets_rad": list(SPAWN_OFFSETS_RAD),
         },
+        "doorway_census": census,
         "shadow_patches": list(PATCHES),
         "rooms": [],
     }
@@ -1119,32 +1668,41 @@ def main() -> int:
     if ask_error:
         print(f"recogniser not loaded: {ask_error}", flush=True)
     rows: list[RoomJson] = []
+    expected = len(PHRASES) * len(SPAWN_OFFSETS_RAD)
     try:
         for name, phrase in PHRASES:
             if want != "" and want != name:
                 continue
-            row = _run_room(
-                name, phrase, spec["rooms"][name], asker, ask_error,
-                {}, robot_bodies, float(definition["d_min_m"]),
-            )
-            rows.append(row)
-            spawn = row["spawn"]
-            print(
-                f"{row['room']}  label={row['recogniser_label']!r}  "
-                f"spawn_com={spawn['com_xyz'][0]:+.3f},{spawn['com_xyz'][1]:+.3f}  "
-                f"started_outside={row['started_outside']}  "
-                f"vx={row['commanded_vx']} yaw={row['commanded_yaw']}  "
-                f"d_min={row['d_min_m']:.4f}  stop={row['stop_path']}  "
-                f"false_stop={row['false_stop']}  "
-                f"prop_in_frame={row['prop_in_frame_at_stop']}  "
-                f"latch_pass={row['latch_pass']}  "
-                f"reached={row['reached']}  contact={row['contact']}  "
-                f"peak={row['peak_nm']:+.3f} {row['peak_actuator']}  "
-                f"shadows={len(row['shadow_first_sightings'])}",
-                flush=True,
-            )
-            header["rooms"] = rows
-            _write(header)
+            for offset in SPAWN_OFFSETS_RAD:
+                row = _run_room(
+                    name, phrase, offset, spec["rooms"][name], asker, ask_error,
+                    robot_bodies, float(definition["d_min_m"]),
+                )
+                rows.append(row)
+                spawn = row["spawn"]
+                hip_over = [item["joint"] for item in row["hip_while_yawing"] if item["over_2_33"]]
+                print(
+                    f"{row['room']} off={row['yaw_offset_rad']:+.3f}  "
+                    f"door={row['doorway_fraction']:.3f}  "
+                    f"label={row['recogniser_label']!r}  "
+                    f"wrong_yes={row['wrong_yes']}  "
+                    f"yes_t={row['first_yes_t']} yes_tick={row['first_yes_tick']}  "
+                    f"yes_heading={row['first_yes_heading_rad']}  "
+                    f"yaw_turned={row['yaw_turned_rad']:+.3f}  "
+                    f"spawn_com={spawn['com_xyz'][0]:+.3f},{spawn['com_xyz'][1]:+.3f}  "
+                    f"vx={row['commanded_vx']} yaw={row['commanded_yaw']}  "
+                    f"d_min={row['d_min_m']:.4f}  stop={row['stop_path']}  "
+                    f"false_stop={row['false_stop']}  "
+                    f"prop_in_frame={row['prop_in_frame_at_stop']}  "
+                    f"latch_pass={row['latch_pass']}  "
+                    f"reached={row['reached']}  contact={row['contact']}  "
+                    f"peak={row['peak_nm']:+.3f} {row['peak_joint']}  "
+                    f"hip_over={hip_over}  "
+                    f"shadows={len(row['shadow_first_sightings'])}",
+                    flush=True,
+                )
+                header["rooms"] = rows
+                _write(header)
     finally:
         if asker is not None:
             asker.close()
@@ -1152,22 +1710,25 @@ def main() -> int:
         raise SystemExit("FAIL: plant file changed during the measure")
     if definition != _definition():
         raise SystemExit("FAIL: reach definition changed after the measure")
-    reached_all = len(rows) == len(PHRASES) and all(row["reached"] for row in rows)
+    reached_all = len(rows) == expected and all(row["reached"] for row in rows)
     false_any = any(row["false_stop"] for row in rows)
+    wrong_any = any(row["wrong_yes"] for row in rows)
     header["rooms"] = rows
     header["reached_all"] = reached_all
     header["false_stop_any"] = false_any
-    header["prefer_fail"] = not reached_all
-    header["go_anywhere"] = reached_all and not false_any
+    header["wrong_yes_any"] = wrong_any
+    header["prefer_fail"] = (not reached_all) or false_any or wrong_any
+    header["go_anywhere"] = reached_all and not false_any and not wrong_any
     header["kit_safe"] = False
     header["soft_pass"] = False
     _write(header)
-    if reached_all and not false_any:
+    if header["go_anywhere"]:
         print("Prefer PASS  soft-pass=off  reached_all=true", flush=True)
         return 0
     print(
         f"Prefer FAIL  soft-pass=off  reached_all={str(reached_all).lower()}  "
-        f"false_stop_any={str(false_any).lower()}",
+        f"false_stop_any={str(false_any).lower()}  "
+        f"wrong_yes_any={str(wrong_any).lower()}",
         flush=True,
     )
     return 1
