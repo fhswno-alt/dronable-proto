@@ -85,6 +85,9 @@ _STOP_KNEE_LOCAL_END = 8.20
 # Loaded ankle pull covers the pre-steady tick and the steady reopen.
 # Later stance ankles stay on the slew that already cleared them.
 _STOP_ANK_LOCAL_END = 2.60
+# Continuous loaded ankle, after the stand-to-walk catch. The 2 s
+# gate stays the steady clear.
+_WALK_ANK_PRE_S = 1.05
 # Locked 1.55 copy, no hip slew, CoM tick 2.200 s: stance corner −2.564 mm.
 # A mid-stance tick more than 1 mm past that is a new dig.
 _STANCE_DIG_M = -0.003564
@@ -12802,9 +12805,38 @@ def _install_sagittal_slew(
                             solved_a = q_now_a + (sign_a * KNEE_NM + kv_a * omega_a) / kp_a
                             if abs(solved_a - q_now_a) + 1e-9 < abs(float(q_des) - q_now_a):
                                 q_des = float(solved_a)
+                ank_slew = None
                 if walk_stance and jn.endswith("ank_pitch"):
                     t_now = float(lipm.data.time)
-                    if t_now >= _WALK_STEADY_S - 1e-9:
+                    if (
+                        _WALK_ANK_PRE_S - 1e-9 <= t_now < _WALK_STEADY_S - 1e-9
+                        and _side_loaded(jn)
+                    ):
+                        # Loaded stance ankle before 2 s. The write sits
+                        # on 2.33 Nm. The slew memory stays on the 1.90
+                        # path, so the steady gate is not left behind.
+                        ask_w, q_now_w = _ask_at(jn, float(q_des))
+                        if abs(ask_w) > KNEE_NM + 1e-9:
+                            jid_w = mj.mj_name2id(
+                                lipm.model, mj.mjtObj.mjOBJ_JOINT, jn
+                            )
+                            omega_w = float(
+                                lipm.data.qvel[int(lipm.model.jnt_dofadr[jid_w])]
+                            )
+                            idx_w = lipm.act_idx[jn + "_pos"]
+                            kp_w = float(lipm.model.actuator_gainprm[idx_w, 0])
+                            kv_w = -float(lipm.model.actuator_biasprm[idx_w, 2])
+                            if kp_w > 1e-6 and abs(kv_w * omega_w) < KNEE_NM:
+                                sign_w = 1.0 if ask_w > 0.0 else -1.0
+                                solved_w = q_now_w + (
+                                    sign_w * KNEE_NM + kv_w * omega_w
+                                ) / kp_w
+                                if abs(solved_w - q_now_w) + 1e-9 < abs(
+                                    float(q_des) - q_now_w
+                                ):
+                                    ank_slew = float(q_des)
+                                    q_des = float(solved_w)
+                    elif t_now >= _WALK_STEADY_S - 1e-9:
                         # Same loaded pattern as the stop-bout left ankle.
                         # The gait step is already rate-limited. If that
                         # step would put the loaded ask over 2.33 Nm,
@@ -12826,7 +12858,12 @@ def _install_sagittal_slew(
                                 q_des = held_cmd - step
                             else:
                                 q_des = held_cmd + step
-                prev[jn] = float(knee_slew) if knee_slew is not None else float(q_des)
+                if knee_slew is not None:
+                    prev[jn] = float(knee_slew)
+                elif ank_slew is not None:
+                    prev[jn] = float(ank_slew)
+                else:
+                    prev[jn] = float(q_des)
             elif (
                 getattr(session, "_walk_z_stretch", False)
                 and not getattr(session, "_sag_stop_installed", False)
@@ -16091,7 +16128,9 @@ def score_mid_swing() -> None:
         f"{_WALK_EARLY_FRAC:.2f}. "
         f"Through that fraction the loaded knee is {_WALK_EARLY_KNEE_RATE:.2f} rad/s. "
         f"Loaded ankle pitch stays on the {_WALK_STANCE_RATE:.2f} rad/s slew. "
-        "A stance step that would put that ask over 2.33 Nm is not taken. "
+        "Before 2 s a loaded ankle write sits on 2.33 Nm and the slew "
+        "memory stays on the 1.90 rad/s path. "
+        "From 2 s a stance step that would put that ask over 2.33 Nm is not taken. "
         f"Loaded hip pitch is on its own {_WALK_HIP_PITCH_RATE:.2f} rad/s slew. "
         "Walk swing-z stays at "
         f"{_WALK_Z_RATE:.2f} rad/s. The stop stretch stays off at "
