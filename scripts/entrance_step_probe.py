@@ -699,20 +699,32 @@ def _fk_sole(
     origin = np.asarray(data.xpos[bid], dtype=np.float64)
     rot = np.asarray(data.xmat[bid], dtype=np.float64).reshape(3, 3)
     fwd = body_forward_xy(data, session.bid_body)
-    body_xy = np.asarray(data.xpos[session.bid_body, :2], dtype=np.float64)
+    body = np.asarray(data.xpos[session.bid_body], dtype=np.float64).copy()
+    body_r = np.asarray(data.xmat[session.bid_body], dtype=np.float64).reshape(3, 3).copy()
     best_off = -1e9
     best_local_z = 0.0
+    best_corner = np.zeros(3, dtype=np.float64)
     for corner in _box_bottom_corners(model, data, bid, gid):
-        off = float(np.dot(corner[:2] - body_xy, fwd))
+        off = float(np.dot(corner[:2] - body[:2], fwd))
         if off > best_off:
             best_off = off
-            best_local_z = float((rot.T @ (corner - origin))[2])
+            best_corner = np.asarray(corner, dtype=np.float64).copy()
+            best_local_z = float((rot.T @ (best_corner - origin))[2])
+    joints = []
+    for jn in ("hip_yaw", "hip_roll", "hip_pitch", "knee", "ank_pitch", "ank_roll"):
+        jid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, pref + jn)
+        joints.append(float(data.qpos[int(model.jnt_qposadr[jid])]))
     out = {
         "lead": lead,
         "ank_z": float(origin[2]),
         "local_z": best_local_z,
-        "body_z": float(data.xpos[session.bid_body][2]),
+        "body_z": float(body[2]),
         "pitch": torso_pitch(data, session.bid_body),
+        "corner": best_corner,
+        "body": body,
+        "body_r": body_r,
+        "p_body": body_r.T @ (best_corner - body),
+        "joints": np.asarray(joints, dtype=np.float64),
     }
     data.qpos[:] = saved
     mj.mj_forward(model, data)
@@ -795,7 +807,111 @@ def measure_phase_cmd() -> None:
             f"body_z {live['body_z']:.6f} pitch {live['pitch']:.4f} "
             f"local_z {live['local_z']:.6f} ank_minus_lead {live['ank_z'] - live['lead']:.6f}"
         )
+    _print_gap_split(min(samples, key=lambda row: abs(row[0] - 3.384)))
     session.assert_plant_unchanged()
+
+
+def _print_gap_split(
+    sample: tuple[float, float, dict[str, float], dict[str, float]],
+) -> None:
+    """Split live-minus-stand sole z at the scuff tick. Same leg qdes, two pelvises."""
+    t, frac, live, nominal = sample
+    gap = float(live["lead"] - nominal["lead"])
+    drop = float(live["body_z"] - nominal["body_z"])
+    dpitch = float(live["pitch"] - nominal["pitch"])
+    live_off = _pelvis_corner_offset(live)
+    stand_off = _pelvis_corner_offset(nominal)
+    # IMU pitch is negative nose-down, so a negative dpitch times a forward
+    # offset lowers the corner. This is the linear term, not the full rotation.
+    pitch_x_fwd = dpitch * live_off["fwd_horiz"]
+    pitch_x_horiz = dpitch * live_off["horiz"]
+    pitch_x_body_x = dpitch * float(live["p_body"][0])
+    joints = np.asarray(live["joints"] - nominal["joints"], dtype=np.float64)
+    p_delta = np.asarray(live["p_body"] - nominal["p_body"], dtype=np.float64)
+    r_live = np.asarray(live["body_r"], dtype=np.float64)
+    r_stand = np.asarray(nominal["body_r"], dtype=np.float64)
+    p_stand = np.asarray(nominal["p_body"], dtype=np.float64)
+    rot_parts = (r_live[2] - r_stand[2]) * p_stand
+    rot = float(np.sum(rot_parts))
+    pitch_exact = _pitch_about_body_y(nominal, live)
+    roll_exact = _roll_about_body_x(nominal, live)
+    leftover_fwd = gap - drop - pitch_x_fwd
+    leftover_horiz = gap - drop - pitch_x_horiz
+    leftover_exact = gap - drop - pitch_exact
+    print(
+        f"GAP_SPLIT t {t:.3f} frac {frac:.3f} "
+        f"live {live['lead']:.6f} stand {nominal['lead']:.6f} gap {gap:.6f}"
+    )
+    print(
+        f"GAP_DROP {drop:.6f} body_z_live {live['body_z']:.6f} "
+        f"body_z_stand {nominal['body_z']:.6f}"
+    )
+    print(
+        f"GAP_OFFSET live_fwd_horiz {live_off['fwd_horiz']:.6f} "
+        f"live_horiz {live_off['horiz']:.6f} "
+        f"live_body_xyz {live['p_body'][0]:.6f} {live['p_body'][1]:.6f} {live['p_body'][2]:.6f}"
+    )
+    print(
+        f"GAP_OFFSET stand_fwd_horiz {stand_off['fwd_horiz']:.6f} "
+        f"stand_horiz {stand_off['horiz']:.6f} "
+        f"stand_body_xyz {nominal['p_body'][0]:.6f} {nominal['p_body'][1]:.6f} "
+        f"{nominal['p_body'][2]:.6f}"
+    )
+    print(
+        f"GAP_PITCH dpitch {dpitch:.6f} "
+        f"pitch_x_live_fwd {pitch_x_fwd:.6f} "
+        f"pitch_x_live_horiz {pitch_x_horiz:.6f} "
+        f"pitch_x_body_x {pitch_x_body_x:.6f} "
+        f"pitch_about_y {pitch_exact:.6f} roll_about_x {roll_exact:.6f} "
+        f"roll_live {_body_roll(live):.6f} roll_stand {_body_roll(nominal):.6f}"
+    )
+    print(
+        f"GAP_LEFTOVER linear_fwd {leftover_fwd:.6f} "
+        f"linear_horiz {leftover_horiz:.6f} "
+        f"after_pitch_about_y {leftover_exact:.6f} "
+        f"rotation_on_stand_point {rot:.6f} "
+        f"rot_xyz {rot_parts[0]:.6f} {rot_parts[1]:.6f} {rot_parts[2]:.6f} "
+        f"drop_plus_rotation {drop + rot:.6f}"
+    )
+    print(
+        f"GAP_JOINTS max_abs_dq {float(np.max(np.abs(joints))):.3e} "
+        f"dq {' '.join(f'{v:.3e}' for v in joints)} "
+        f"p_body_delta {' '.join(f'{v:.3e}' for v in p_delta)}"
+    )
+
+
+def _pelvis_corner_offset(row: dict[str, float]) -> dict[str, float]:
+    delta = np.asarray(row["corner"] - row["body"], dtype=np.float64)
+    fwd = np.asarray(row["body_r"], dtype=np.float64)[:2, 0]
+    norm = float(np.linalg.norm(fwd))
+    fwd = fwd / norm if norm > 1e-9 else np.array([1.0, 0.0])
+    return {
+        "horiz": float(math.hypot(delta[0], delta[1])),
+        "fwd_horiz": float(np.dot(delta[:2], fwd)),
+    }
+
+
+def _pitch_about_body_y(stand: dict[str, float], live: dict[str, float]) -> float:
+    """Sole-z change from rotating the stand pelvis about its +Y by the pitch delta."""
+    delta = float(stand["pitch"] - live["pitch"])
+    c, s = math.cos(delta), math.sin(delta)
+    ry = np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]], dtype=np.float64)
+    pitched = np.asarray(stand["body_r"], dtype=np.float64) @ ry
+    return float((pitched[2] - np.asarray(stand["body_r"])[2]) @ np.asarray(stand["p_body"]))
+
+
+def _body_roll(row: dict[str, float]) -> float:
+    rot = np.asarray(row["body_r"], dtype=np.float64)
+    return math.atan2(float(rot[2, 1]), float(rot[2, 2]))
+
+
+def _roll_about_body_x(stand: dict[str, float], live: dict[str, float]) -> float:
+    """Sole-z change from rotating the stand pelvis about its +X by the roll delta."""
+    delta = _body_roll(stand) - _body_roll(live)
+    c, s = math.cos(delta), math.sin(delta)
+    rx = np.array([[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]], dtype=np.float64)
+    rolled = np.asarray(stand["body_r"], dtype=np.float64) @ rx
+    return float((rolled[2] - np.asarray(stand["body_r"])[2]) @ np.asarray(stand["p_body"]))
 
 
 def measure_cmd_toe() -> None:
