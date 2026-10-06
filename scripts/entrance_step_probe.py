@@ -240,6 +240,56 @@ def _install_phase_lift(
     walker._left_z = left_z  # type: ignore[method-assign]
 
 
+def _install_slow_rise(
+    session: sw.SteerSession,
+    peak_m: float,
+    rise_frac: float,
+    hold_frac: float,
+    lead_s: float,
+) -> None:
+    """Rise to a modest peak over a longer window than the 20% parabola.
+
+    The height stays at or under 12 mm. ``lead_s`` is seconds before
+    toe-off. The smoothstep has zero slope at both ends of the rise, so
+    the command is not a steep front. It does not change gm_z_m or kp.
+    """
+    lipm = session.lipm
+    if lipm is None or lipm.op3 is None:
+        return
+    walker = lipm.op3
+    orig_r = walker._right_z
+    orig_l = walker._left_z
+
+    def _smooth(u: float) -> float:
+        u = min(1.0, max(0.0, u))
+        return u * u * (3.0 - 2.0 * u)
+
+    def _bump(base: float, t: float, start: float, end: float) -> float:
+        span = end - start
+        if span <= 1e-6 or peak_m == 0.0:
+            return base
+        t0 = start - max(0.0, lead_s)
+        rise_at = start + max(rise_frac, 1e-3) * span
+        hold_at = start + max(hold_frac, rise_frac) * span
+        fall_at = start + 0.80 * span
+        if t <= t0 or t > fall_at:
+            return base
+        if t < rise_at:
+            return base + _smooth((t - t0) / max(rise_at - t0, 1e-6)) * peak_m
+        if t < hold_at:
+            return base + peak_m
+        return base + (1.0 - _smooth((t - hold_at) / max(fall_at - hold_at, 1e-6))) * peak_m
+
+    def right_z(t: float) -> float:
+        return _bump(orig_r(t), t, walker.r_ssp_start, walker.r_ssp_end)
+
+    def left_z(t: float) -> float:
+        return _bump(orig_l(t), t, walker.l_ssp_start, walker.l_ssp_end)
+
+    walker._right_z = right_z  # type: ignore[method-assign]
+    walker._left_z = left_z  # type: ignore[method-assign]
+
+
 HIP_KIN: dict[str, float] = {}
 
 
@@ -588,38 +638,99 @@ def _rug_edge(session: sw.SteerSession, side: str, rug_gid: int) -> dict[str, fl
     return best
 
 
+def _heel_z(session: sw.SteerSession, side: str) -> float:
+    """Lower of the two rear sole corners, world z."""
+    bid = session.bid_lf if side == "L" else session.bid_rf
+    gid = session.gid_lfoot if side == "L" else session.gid_rfoot
+    fwd = body_forward_xy(session.data, session.bid_body)
+    origin = np.asarray(session.data.xpos[session.bid_body, :2], dtype=np.float64)
+    ranked: list[tuple[float, float]] = []
+    for corner in _box_bottom_corners(session.model, session.data, bid, gid):
+        off = float(np.dot(corner[:2] - origin, fwd))
+        ranked.append((off, float(corner[2])))
+    ranked.sort(key=lambda item: item[0])
+    if not ranked:
+        return float("nan")
+    return min(z for _off, z in ranked[:2])
+
+
+def _contact_geom(session: sw.SteerSession, side: str, rug_gid: int) -> dict[str, float]:
+    """Tilt from the floor contacts and the rug contacts on this sole.
+
+    Absolute sole tilt includes body pitch. The contact tilt is the height
+    between those two contact clouds over their separation along the sole.
+    The edge tilt is atan(12 mm / heel-to-edge), which is about 5.5° when
+    the edge is at heel→toe fraction 0.915.
+    """
+    gid = session.gid_lfoot if side == "L" else session.gid_rfoot
+    floor_pts: list[np.ndarray] = []
+    rug_pts: list[np.ndarray] = []
+    for i in range(session.data.ncon):
+        con = session.data.contact[i]
+        g1, g2 = int(con.geom1), int(con.geom2)
+        pos = np.array(con.pos, dtype=np.float64)
+        if (g1 == gid and g2 == session.gid_floor) or (g2 == gid and g1 == session.gid_floor):
+            floor_pts.append(pos)
+        if rug_gid >= 0 and ((g1 == gid and g2 == rug_gid) or (g2 == gid and g1 == rug_gid)):
+            rug_pts.append(pos)
+    heel, toe = _sole_ends(session, side)
+    out: dict[str, float] = {
+        "heel_z": _heel_z(session, side),
+        "sole": _sole_tilt(session, side),
+        "contact_tilt": float("nan"),
+        "geom_tilt": float("nan"),
+        "u": float("nan"),
+        "sep": float("nan"),
+    }
+    edge = _rug_edge(session, side, rug_gid)
+    if edge is not None:
+        heel_to_edge = float(edge["u"]) * SOLE_LEN_M
+        out["u"] = float(edge["u"])
+        out["geom_tilt"] = math.atan(RUG_TOP_M / max(heel_to_edge, 0.020))
+    if floor_pts and rug_pts:
+        pf = np.mean(np.stack(floor_pts, axis=0), axis=0)
+        pr = np.mean(np.stack(rug_pts, axis=0), axis=0)
+        along = toe - heel
+        span = float(np.linalg.norm(along[:2]))
+        dist = 0.0
+        if span > 1e-6:
+            dist = float(np.dot((pr - pf)[:2], along[:2]) / span)
+        out["sep"] = dist
+        out["contact_tilt"] = math.atan2(float(pr[2] - pf[2]), max(abs(dist), 1e-4))
+    return out
+
+
 def _edge_line(session: sw.SteerSession, rug_gid: int) -> str:
     parts: list[str] = []
     for side in ("L", "R"):
         gid = session.gid_lfoot if side == "L" else session.gid_rfoot
         floor_n = _pair_fn(session.model, session.data, gid, session.gid_floor)
         rug_n = _pair_fn(session.model, session.data, gid, rug_gid)
-        edge = _rug_edge(session, side, rug_gid)
-        tilt = _sole_tilt(session, side)
-        if edge is None:
+        geo = _contact_geom(session, side, rug_gid)
+        if not math.isfinite(geo["u"]):
             parts.append(
-                f"{side} floor {floor_n:.1f} rug {rug_n:.1f} sole {tilt:+.4f} edge none"
+                f"{side} floor {floor_n:.1f} rug {rug_n:.1f} "
+                f"heel_z {geo['heel_z'] * 1000:+.1f} mm sole {geo['sole']:+.4f} edge none"
             )
             continue
-        lever_mm = float(edge["lever_m"]) * 1000.0
         parts.append(
-            f"{side} floor {floor_n:.1f} rug {rug_n:.1f} sole {tilt:+.4f} rad "
-            f"({math.degrees(tilt):.2f} deg) edge {float(edge['u']):.3f} heel→toe "
-            f"toe-side {lever_mm:.1f} mm "
-            f"heel_x {float(edge['heel_x']):.3f} toe_x {float(edge['toe_x']):.3f} "
-            f"face_x {float(edge['face_x']):.3f}"
+            f"{side} floor {floor_n:.1f} rug {rug_n:.1f} "
+            f"heel_z {geo['heel_z'] * 1000:+.1f} mm "
+            f"sole {geo['sole']:+.4f} rad ({math.degrees(geo['sole']):.2f} deg) "
+            f"edge {geo['u']:.3f} "
+            f"geom {geo['geom_tilt']:+.4f} rad ({math.degrees(geo['geom_tilt']):.2f} deg) "
+            f"contact {geo['contact_tilt']:+.4f} rad "
+            f"({math.degrees(geo['contact_tilt']):.2f} deg) sep {geo['sep'] * 1000:.1f} mm"
         )
     return " | ".join(parts)
 
 
 def _hook_ank_follow(session: sw.SteerSession, rug_gid: int, gain: float = 1.0, rate: float = 0.0) -> None:
-    """Stance ankle follows the measured sole tilt, a fraction of a radian per tick.
+    """Stance ankle follows the floor-to-rug contact tilt, capped per tick.
 
-    The add is gain times the live toe-up angle while that sole has floor
-    and rug contact. The angle changes as the edge moves. It is not a fixed
-    4.4° or 8.8°. The swing foot is not written. Each tick moves at most
-    ``rate`` from the gait target, so the write cannot be the 0.067 rad step.
-    kp stays 35.
+    The add is gain times the tilt between the floor contact cloud and the
+    rug contact cloud. Absolute sole tilt is logged and is not the command.
+    The swing foot is not written. kp stays 35.
     """
     lipm = session.lipm
     if lipm is None:
@@ -640,16 +751,14 @@ def _hook_ank_follow(session: sw.SteerSession, rug_gid: int, gain: float = 1.0, 
             rug_n = _pair_fn(session.model, session.data, gid, rug_gid)
             if floor_n <= 1.0 or rug_n <= 1.0:
                 continue
-            edge = _rug_edge(session, side, rug_gid)
-            if edge is None:
+            geo = _contact_geom(session, side, rug_gid)
+            tilt = geo["contact_tilt"]
+            if not math.isfinite(tilt) or tilt <= 0.0:
+                tilt = geo["geom_tilt"]
+            if not math.isfinite(tilt) or tilt <= 0.0:
                 continue
             pref = "l_" if side == "L" else "r_"
             sign = 1.0 if side == "L" else -1.0
-            # Measured toe-up this tick. It moves as the edge moves.
-            # Not a fixed 4.4° or 8.8°, and not atan of the short toe-side.
-            tilt = _sole_tilt(session, side)
-            if tilt <= 0.0:
-                continue
             idx = lipm.act_idx[pref + "ank_pitch_pos"]
             flat = float(session.data.ctrl[idx])
             q = lipm.q(pref + "ank_pitch")
@@ -662,8 +771,10 @@ def _hook_ank_follow(session: sw.SteerSession, rug_gid: int, gain: float = 1.0, 
             ANK_GOAL[side] = float(session.data.ctrl[idx])
             if len(ANK_WRITES) < 8:
                 ANK_WRITES.append(
-                    f"t {float(session.data.time):.3f} {side} sole {tilt:+.4f} "
-                    f"edge {float(edge['u']):.3f} "
+                    f"t {float(session.data.time):.3f} {side} "
+                    f"heel_z {geo['heel_z'] * 1000:+.1f} mm "
+                    f"sole {geo['sole']:+.4f} contact {geo['contact_tilt']:+.4f} "
+                    f"geom {geo['geom_tilt']:+.4f} edge {geo['u']:.3f} "
                     f"q {q:+.4f} flat {flat:+.4f} goal {ANK_GOAL[side]:+.4f} "
                     f"dctrl {ANK_GOAL[side] - flat:+.4f} "
                     f"floor {floor_n:.1f} rug {rug_n:.1f}"
@@ -940,15 +1051,20 @@ def _swing_joint_snap(
         "cmd_short": TOE_BAR_M - goal_sole,
         "sag": goal_sole - actual_sole,
     }
-    for jn in ("hip_pitch", "knee", "ank_pitch"):
+    for jn in ("hip_roll", "hip_pitch", "knee", "ank_pitch"):
         q, ctrl, tau = _joint_qcf(session, pref + jn)
         goal = float(joints.get(pref + jn, ctrl))
+        idx = session.act_idx[pref + jn + "_pos"]
+        kp = float(session.model.actuator_gainprm[idx, 0])
         row[jn + "_q"] = q
         row[jn + "_ctrl"] = ctrl
         row[jn + "_goal"] = goal
         row[jn + "_tau"] = tau
         row[jn + "_goal_q"] = goal - q
         row[jn + "_ctrl_q"] = ctrl - q
+        # kp*(goal−q) is the position-loop ask. actuator_force is the output.
+        row[jn + "_ask"] = kp * (goal - q)
+        row[jn + "_kp"] = kp
     return row
 
 
@@ -964,14 +1080,13 @@ def _snap_note(snaps: list[dict[str, float | str]], toe_t: float) -> str:
         f"cmd_short_of_0.002 {float(row['cmd_short']):+.6f}",
         f"sag_cmd_minus_actual {float(row['sag']):+.6f}",
     ]
-    for jn in ("hip_pitch", "knee", "ank_pitch"):
+    for jn in ("hip_roll", "hip_pitch", "knee", "ank_pitch"):
+        force = float(row[jn + "_tau"])
+        clip = " CLIP" if abs(force) >= PLANT_NM - 0.01 else ""
         parts.append(
-            f"{jn} goal {float(row[jn + '_goal']):+.4f} "
-            f"ctrl {float(row[jn + '_ctrl']):+.4f} "
-            f"q {float(row[jn + '_q']):+.4f} "
-            f"goal-q {float(row[jn + '_goal_q']):+.4f} "
-            f"ctrl-q {float(row[jn + '_ctrl_q']):+.4f} "
-            f"tau {float(row[jn + '_tau']):+.3f}"
+            f"{jn} goal-q {float(row[jn + '_goal_q']):+.4f} "
+            f"ask {float(row[jn + '_ask']):+.2f}Nm "
+            f"actuator {force:+.3f}{clip}"
         )
     return " ".join(parts)
 
@@ -995,6 +1110,9 @@ def run_one(
     gain: float = 1.0,
     peak_frac: float = 0.20,
     lead_frac: float = 0.0,
+    rise_frac: float = 0.20,
+    hold_frac: float = 0.40,
+    lead_s: float = 0.0,
     knee_ff: float = 0.0,
     hip_ff: float = 0.0,
     ank_rate: float = 0.0,
@@ -1025,6 +1143,11 @@ def run_one(
         _install_bezier_early(session, z_extra)
     elif mode == "phase":
         _install_phase_lift(session, z_extra, peak_frac, lead_frac)
+    elif mode == "slow":
+        _install_slow_rise(session, z_extra, rise_frac, hold_frac, lead_s)
+    elif mode == "phaseank":
+        _install_phase_lift(session, z_extra, peak_frac, lead_frac)
+        _hook_ank_follow(session, rug, gain, ank_rate)
     elif mode == "swingff":
         _install_phase_lift(session, z_extra, peak_frac, lead_frac)
         _hook_swing_ff(session, knee_ff, hip_ff)
@@ -1140,10 +1263,13 @@ def run_one(
             toe_z = _leading_toe_z(session, swing) if swing in ("L", "R") else None
             if mode in ("hipff", "hipbez", "hipramp", "hiprampbez", "bez", "phase", "phaseramp") and swing in ("L", "R") and t < T_BAR:
                 roll_rows.append(_roll_sample(session, t, swing))
-            if mode in ("zmid", "zearly", "hipbez", "bez", "hiprampbez", "phase", "phaseramp", "swingff") and swing in ("L", "R") and session.lipm is not None and session.lipm.op3 is not None:
+            if mode in ("zmid", "zearly", "hipbez", "bez", "hiprampbez", "phase", "phaseramp", "swingff", "slow", "phaseank") and swing in ("L", "R") and session.lipm is not None and session.lipm.op3 is not None and not (mode in ("phase", "slow", "phaseank") and t >= 6.0):
                 walker = session.lipm.op3
                 frac = _mid_frac(walker, swing, _cmd_time(walker))
-                lo, hi = (0.20, 0.30) if mode in ("zearly", "hipbez", "bez", "hiprampbez", "phase", "phaseramp", "swingff") else (0.20, 0.80)
+                lo, hi = (0.0, 1.0) if mode in ("phase", "slow", "phaseank") else (
+                    (0.20, 0.30) if mode in ("zearly", "hipbez", "bez", "hiprampbez", "phaseramp", "swingff") else (0.20, 0.80)
+                )
+                record_all = mode in ("phase", "slow", "phaseank") and t < 5.0
                 if frac is not None and lo - 1e-12 <= frac <= hi + 1e-12 and t < T_BAR:
                     # ctrl has been slewed. The gait goal was the pre-slew write.
                     # Re-read the live OP3 pose at the command time and FK that.
@@ -1159,7 +1285,7 @@ def run_one(
                                 goal[session.act_idx[act]] = val
                         lead, _low = _fk_leading_toe(session, swing, goal)
                         cmd_leads.append((t, lead))
-                        if abs(frac - 0.208) <= 0.03:
+                        if record_all or abs(frac - 0.208) <= 0.03:
                             applied = np.array(session.data.ctrl, dtype=np.float64, copy=True)
                             app_lead, _app_low = _fk_leading_toe(session, swing, applied)
                             swing_snaps.append(_swing_joint_snap(
@@ -1198,7 +1324,7 @@ def run_one(
                 up_7560 = float(session._up_z())
                 margin_7560 = float(session._support_margin())
             rows.append(Tick(t, swing if swing in ("L", "R") else None, toe_z, swing_fn, reason))
-            if mode == "ankfollow" and 6.85 <= t <= 7.70:
+            if mode in ("ankfollow", "phaseank") and 6.85 <= t <= 7.70:
                 rug_rows.append(_rug_sample(session, rug, t, reason))
             if session.bus.fault and first_fault_t is None:
                 first_fault_t = t
@@ -1285,7 +1411,7 @@ def run_one(
         "rug_note": _rug_note(rug_rows),
         "peak_frac": peak_frac,
         "lead_frac": lead_frac,
-        "ank_writes": list(ANK_WRITES) if mode == "ankfollow" else [],
+        "ank_writes": list(ANK_WRITES) if mode in ("ankfollow", "phaseank") else [],
         "snap_note": _snap_note(swing_snaps, toe_t),
         "gain": gain,
         "x": float(session.data.qpos[0]),
