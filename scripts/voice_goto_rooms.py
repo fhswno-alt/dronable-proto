@@ -34,7 +34,12 @@ heading, camera height, camera pitch, and the leading toe. The
 the sim toe gap is under 0.40 m — the class of the 17 living
 samples. wall_hall_e_1 has its own median from 43 close samples on
 tip aac2baa, held out of this run. The living number is not copied
-onto the east wall. Other walls and a same-named wall seen from
+onto the east wall. A right-toe stop on that wall cannot clear
+and does not end the walk. Once the left toe's forward ray on
+wall_hall_e_1 is at or under 0.60 m, further in-place re-points
+are dropped so the yaw-0 walk can enter the close class. No
+pitch, camera-height, or toe bias is fit across the pooled
+samples. Other walls and a same-named wall seen from
 farther away do not get a pad. The 0.40 m bound is 2.39 times the
 living latch distance. A prop, a different wall, or that far class
 is a reject and is not soaked into the latch. A stop that does
@@ -164,6 +169,13 @@ LIVING_WALL = "wall_hall_w_2"
 # times that distance, so it is the approach in front of the latch.
 # A ray past it stays a far reject. It is not a second clearance pad.
 CLOSE_GAP_M = 0.40
+# Tip 79edde5 kitchen −90°: the left-toe forward ray on wall_hall_e_1
+# bottomed at 0.506 m, then the next 20° doorway re-point aimed the
+# walk at the cabinet. Once that left-toe ray is at or under 0.60 m,
+# further in-place re-points are dropped and the walk stays at yaw 0
+# so the ray can enter the close class. Not a pad. A right toe does
+# not arm it and does not stop the bout.
+EAST_L_HOLD_M = 0.60
 # Kitchen −90° wall_hall_e_1 on tip aac2baa. Same rule as the living
 # set: same wall id, sim ray at or under 0.40 m. Forty-three samples,
 # each with heading, cam_z, camera pitch, and leading-toe offset.
@@ -414,6 +426,18 @@ class InplaceHipJson(TypedDict):
     clamped_nm: float
 
 
+class EastLeftFact(TypedDict):
+    hold: bool
+    presented: bool
+    min_ray_m: float | None
+    t: float | None
+    heading_rad: float | None
+    cam_z_m: float | None
+    cam_pitch_rad: float | None
+    lead_off_m: float | None
+    lead_side: str
+
+
 class RoomJson(TypedDict):
     room: str
     scene: str
@@ -469,6 +493,7 @@ class RoomJson(TypedDict):
     wall_stop_pitch_rad: float | None
     wall_stop_lead_m: float | None
     wall_stop_lead_side: str
+    east_left: EastLeftFact
     wall_residual_max_m: float | None
     same_wall_count: int
     surface_reject_count: int
@@ -628,7 +653,12 @@ def _definition() -> DefinitionJson:
             "held-out hit uses the same leading toe and lands within "
             f"{RANGE_ERR_MAX_M:.2f} m of that toe's median. Right toe "
             f"has {len(EAST_R_ERR_M)} samples, under {len(SAME_WALL_ERR_M)}, "
-            "so it cannot clear. Room reach is a "
+            "so it cannot clear and it does not stop the walk. Once the "
+            f"left toe's ray on {EAST_WALL} is at or under "
+            f"{EAST_L_HOLD_M:.2f} m, further in-place re-points are "
+            "dropped and the walk stays at yaw 0. No pitch, camera "
+            "height, or toe bias is fit across the pooled samples. "
+            "Room reach is a "
             "separate bar. In-place body "
             f"yaw that asks a hip roll over {HIP_BAR_NM:.2f} Nm "
             "unclamped is not a free re-point. d_min is not rebuilt. "
@@ -1980,6 +2010,13 @@ def _run_room(
     wall_stop_pitch: float | None = None
     wall_stop_lead: float | None = None
     wall_stop_lead_side = ""
+    east_l_hold = False
+    east_l_min_ray: float | None = None
+    east_l_min_t: float | None = None
+    east_l_min_heading: float | None = None
+    east_l_min_cam_z: float | None = None
+    east_l_min_pitch: float | None = None
+    east_l_min_lead: float | None = None
     wall_bias_max: float | None = None
     wall_bias_count = 0
     wall_residual_max: float | None = None
@@ -2052,9 +2089,10 @@ def _run_room(
                 row["frac_gate"] = "refuse"
                 return "no"
             row["frac_gate"] = "pass"
-            first_yes_t = row["t"]
-            first_yes_tick = row["tick"]
-            first_yes_heading = row["heading_at_capture"]
+            if first_yes_t is None:
+                first_yes_t = row["t"]
+                first_yes_tick = row["tick"]
+                first_yes_heading = row["heading_at_capture"]
             committed = True
             return "commit"
 
@@ -2416,6 +2454,29 @@ def _run_room(
                             range_err_m=err,
                             residual_m=residual,
                         ))
+                        if (
+                            true_name == EAST_WALL
+                            and side == "L"
+                            and true_gap is not None
+                            and (
+                                east_l_min_ray is None
+                                or float(true_gap) < east_l_min_ray
+                            )
+                        ):
+                            east_l_min_ray = float(true_gap)
+                            east_l_min_t = now
+                            east_l_min_heading = heading
+                            east_l_min_cam_z = float(reading["cam_z_m"])
+                            east_l_min_pitch = float(reading["cam_pitch_rad"])
+                            east_l_min_lead = float(reading["lead_off_m"])
+                        if (
+                            true_name == EAST_WALL
+                            and side == "L"
+                            and true_gap is not None
+                            and float(true_gap) <= EAST_L_HOLD_M
+                        ):
+                            east_l_hold = True
+                            approach_yaw = 0.0
                         gap = reading["toe_gap_m"]
                         close_class = base in (
                             "living_close", "east_close", "other_wall_close",
@@ -2433,7 +2494,14 @@ def _run_room(
                                 heading, klass,
                             ))
                             gate = d_min_m + pad
-                            if gap is not None and float(gap) <= gate:
+                            # Right toe on wall_hall_e_1 has 9 samples.
+                            # It cannot CLEAR, and it must not consume
+                            # the walk before a left-toe close hit.
+                            if (
+                                gap is not None
+                                and float(gap) <= gate
+                                and klass != "east_close_R"
+                            ):
                                 within = (
                                     residual is not None
                                     and residual <= RANGE_ERR_MAX_M
@@ -2618,7 +2686,10 @@ def _run_room(
                 look = _capture()
                 last_capture = look["heading_at_capture"]
                 decision = consider(look)
-                if decision == "commit":
+                if east_l_hold:
+                    approach_yaw = 0.0
+                    need_search = False
+                elif decision == "commit":
                     if look["door_u"] is not None:
                         approach_yaw = _yaw_toward_u(float(look["door_u"]))
                     else:
@@ -2791,6 +2862,20 @@ def _run_room(
             wall_stop_pitch_rad=wall_stop_pitch,
             wall_stop_lead_m=wall_stop_lead,
             wall_stop_lead_side=wall_stop_lead_side,
+            east_left=EastLeftFact(
+                hold=east_l_hold,
+                presented=(
+                    east_l_min_ray is not None
+                    and east_l_min_ray <= CLOSE_GAP_M
+                ),
+                min_ray_m=east_l_min_ray,
+                t=east_l_min_t,
+                heading_rad=east_l_min_heading,
+                cam_z_m=east_l_min_cam_z,
+                cam_pitch_rad=east_l_min_pitch,
+                lead_off_m=east_l_min_lead,
+                lead_side="L" if east_l_min_ray is not None else "",
+            ),
             wall_residual_max_m=wall_residual_max,
             same_wall_count=same_wall_count,
             surface_reject_count=surface_reject_count,
@@ -3018,6 +3103,12 @@ def main() -> int:
         raise SystemExit("FAIL: living close pad moved onto a toe split")
     if _pad_for(LIVING_WALL, 0.20, "R") != LATCH_EXTRA_M:
         raise SystemExit("FAIL: living close pad moved onto a toe split")
+    if _toe_ready("east_close_R"):
+        raise SystemExit("FAIL: east right can clear under the living sample bar")
+    if not _toe_ready("east_close_L"):
+        raise SystemExit("FAIL: east left pad is not ready")
+    if abs(EAST_L_HOLD_M - 0.60) > 1e-12:
+        raise SystemExit(f"FAIL: east left hold moved to {EAST_L_HOLD_M}")
     if _yaw_toward_u(100.0) != voice.YAW_RAD_S or _yaw_toward_u(540.0) != -voice.YAW_RAD_S:
         raise SystemExit("FAIL: doorway pixel yaw sign moved")
     if _yaw_toward_u(rc.WIDTH / 2.0) != 0.0:
@@ -3112,6 +3203,9 @@ def main() -> int:
         "east_r_sample_count": len(EAST_R_ERR_M),
         "toe_outboard_m": TOE_OUTBOARD_M,
         "east_source": "aac2baa kitchen -90 wall_hall_e_1 ray<=0.40 held out",
+        "east_l_hold_m": EAST_L_HOLD_M,
+        "east_r_can_clear": False,
+        "bias_fit": False,
         "close_gap_m": CLOSE_GAP_M,
         "living_latch_distance_m": float(definition["d_min_m"]) + LATCH_EXTRA_M,
         "close_gap_over_living_latch": (
@@ -3190,6 +3284,13 @@ def main() -> int:
                     f"pitch={row['wall_stop_pitch_rad']} "
                     f"lead={row['wall_stop_lead_m']} "
                     f"toe={row['wall_stop_lead_side']}  "
+                    f"east_l_hold={row['east_left']['hold']} "
+                    f"east_l_ray={row['east_left']['min_ray_m']} "
+                    f"east_l_presented={row['east_left']['presented']} "
+                    f"east_l_hdg={row['east_left']['heading_rad']} "
+                    f"east_l_z={row['east_left']['cam_z_m']} "
+                    f"east_l_pitch={row['east_left']['cam_pitch_rad']} "
+                    f"east_l_lead={row['east_left']['lead_off_m']}  "
                     f"class_reject={row['class_reject_count']}  "
                     f"same_wall={row['same_wall_count']} "
                     f"surface_reject={row['surface_reject_count']}  "
