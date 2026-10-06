@@ -1,0 +1,4634 @@
+{
+  "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+  "scene": "kitchen",
+  "stand_s": 1.0,
+  "walk_s": 8.0,
+  "vx": 0.15,
+  "yaw_rate": -0.25,
+  "sample_s": 0.1,
+  "leg_z_max_m": 0.2562,
+  "tiny_px": 3072,
+  "tiny_min_side_px": 36,
+  "min_up_z": -0.7317453405133709,
+  "fault": true,
+  "fault_reason": "COM outside support and tipping margin=-0.889",
+  "end_xy": [
+    0.7085119186193143,
+    -0.6748315688098778
+  ],
+  "end_yaw_deg": 128.08195937387387,
+  "first_contact_t": 6.847999999999468,
+  "first_stool_visible_enough_t": 1.0000000000000007,
+  "first_legs_visible_enough_t": 1.9040000000000015,
+  "lead_s_stool": 5.847999999999467,
+  "lead_s_legs": 4.943999999999466,
+  "best_legs_before_contact": {
+    "t": 5.903999999999572,
+    "up_z": 0.9638099012929247,
+    "xy": [
+      0.5172901717357951,
+      -0.37140381107075804
+    ],
+    "yaw_deg": -55.280194465465826,
+    "cam_z": 0.3326821252931252,
+    "pitch_deg": -14.758093766684956,
+    "stool": {
+      "pixels": 67806,
+      "min_side_px": 386,
+      "bbox": [
+        254,
+        0,
+        639,
+        469
+      ],
+      "class_name": "visible_enough",
+      "bearing_deg": -18.673092476719034,
+      "center_z_m": 0.34143707415035696
+    },
+    "legs": {
+      "pixels": 17836,
+      "min_side_px": 258,
+      "bbox": [
+        276,
+        212,
+        639,
+        469
+      ],
+      "class_name": "visible_enough",
+      "bearing_deg": -18.710263012600308,
+      "center_z_m": 0.1281
+    },
+    "seat": {
+      "pixels": 49970,
+      "min_side_px": 277,
+      "bbox": [
+        254,
+        0,
+        639,
+        276
+      ],
+      "class_name": "visible_enough",
+      "bearing_deg": -18.673092476719034,
+      "center_z_m": 0.34143707415035696
+    },
+    "stool_pixel_z_min": 0.006003979791288527,
+    "stool_pixel_z_max": 0.47661844511964835,
+    "legs_pixel_mean_z": 0.13179114644649872,
+    "seat_pixel_mean_z": 0.42797725600201775,
+    "hit_leg_projects": true,
+    "hit_rail_projects": true
+  },
+  "nearest_contact_sample": {
+    "t": 6.799999999999473,
+    "up_z": 0.9631089902877051,
+    "xy": [
+      0.5728146264635132,
+      -0.49105207177509735
+    ],
+    "yaw_deg": -65.68293094308979,
+    "cam_z": 0.3376194724762533,
+    "pitch_deg": -15.489286821521535,
+    "stool": {
+      "pixels": 54835,
+      "min_side_px": 480,
+      "bbox": [
+        105,
+        0,
+        639,
+        479
+      ],
+      "class_name": "visible_enough",
+      "bearing_deg": -11.963337449976962,
+      "center_z_m": 0.34143707415035696
+    },
+    "legs": {
+      "pixels": 5970,
+      "min_side_px": 257,
+      "bbox": [
+        170,
+        223,
+        638,
+        479
+      ],
+      "class_name": "visible_enough",
+      "bearing_deg": -12.012538589031863,
+      "center_z_m": 0.1281
+    },
+    "seat": {
+      "pixels": 48865,
+      "min_side_px": 233,
+      "bbox": [
+        105,
+        0,
+        639,
+        232
+      ],
+      "class_name": "visible_enough",
+      "bearing_deg": -11.963337449976962,
+      "center_z_m": 0.34143707415035696
+    },
+    "stool_pixel_z_min": 0.006014554976915998,
+    "stool_pixel_z_max": 0.46099621839204286,
+    "legs_pixel_mean_z": 0.11822204049911907,
+    "seat_pixel_mean_z": 0.4428553740876193,
+    "hit_leg_projects": true,
+    "hit_rail_projects": true
+  },
+  "contact_peaks_n": {
+    "l_ank_roll_link|col_chair_stool_b_leg_2": 23.86629469560814,
+    "r_ank_roll_link|col_chair_stool_b_rail_yp": 31.611058884619784
+  },
+  "contact_episodes": [
+    {
+      "ankle": "l_ank_roll_link",
+      "prop": "col_chair_stool_b_leg_2",
+      "t_start": 6.847999999999468,
+      "t_peak": 6.847999999999468,
+      "t_end": 6.983999999999453,
+      "peak_n": 23.86629469560814
+    },
+    {
+      "ankle": "l_ank_roll_link",
+      "prop": "col_chair_stool_b_leg_2",
+      "t_start": 7.319999999999416,
+      "t_peak": 7.319999999999416,
+      "t_end": 7.383999999999409,
+      "peak_n": 21.26672891041745
+    },
+    {
+      "ankle": "l_ank_roll_link",
+      "prop": "col_chair_stool_b_leg_2",
+      "t_start": 7.775999999999366,
+      "t_peak": 7.8319999999993595,
+      "t_end": 7.895999999999352,
+      "peak_n": 17.75679692251886
+    },
+    {
+      "ankle": "r_ank_roll_link",
+      "prop": "col_chair_stool_b_rail_yp",
+      "t_start": 8.271999999999432,
+      "t_peak": 8.839999999999621,
+      "t_end": 8.999999999999675,
+      "peak_n": 31.611058884619784
+    }
+  ],
+  "n_contact_samples": 141,
+  "samples": [
+    {
+      "t": 1.0000000000000007,
+      "up_z": 0.9667228207290409,
+      "xy": [
+        0.05652733241236434,
+        8.375270919411176e-06
+      ],
+      "yaw_deg": 0.00904287497863891,
+      "cam_z": 0.33506241983957036,
+      "pitch_deg": -14.838229068946617,
+      "stool": {
+        "pixels": 6370,
+        "min_side_px": 154,
+        "bbox": [
+          486,
+          115,
+          639,
+          307
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -53.85191617403976,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 2012,
+        "min_side_px": 96,
+        "bbox": [
+          486,
+          212,
+          639,
+          307
+        ],
+        "class_name": "tiny",
+        "bearing_deg": -53.87296638246238,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 4358,
+        "min_side_px": 104,
+        "bbox": [
+          510,
+          115,
+          639,
+          218
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -53.85191617403976,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006109316720881053,
+      "stool_pixel_z_max": 0.4766684984513212,
+      "legs_pixel_mean_z": 0.12340424579585028,
+      "seat_pixel_mean_z": 0.42547559455560136,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 1.1040000000000008,
+      "up_z": 0.9660097224598214,
+      "xy": [
+        0.056977814599476234,
+        -0.01163818698573221
+      ],
+      "yaw_deg": 1.0083198324735572,
+      "cam_z": 0.3323020892731223,
+      "pitch_deg": -14.992942729544092,
+      "stool": {
+        "pixels": 6394,
+        "min_side_px": 151,
+        "bbox": [
+          489,
+          115,
+          639,
+          310
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -54.47056945456234,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 2092,
+        "min_side_px": 98,
+        "bbox": [
+          489,
+          213,
+          639,
+          310
+        ],
+        "class_name": "tiny",
+        "bearing_deg": -54.49188606872019,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 4302,
+        "min_side_px": 105,
+        "bbox": [
+          514,
+          115,
+          639,
+          219
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -54.47056945456234,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006532538588052805,
+      "stool_pixel_z_max": 0.47673624999174213,
+      "legs_pixel_mean_z": 0.12356586423731863,
+      "seat_pixel_mean_z": 0.4234371770572508,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 1.2000000000000008,
+      "up_z": 0.9630335820079877,
+      "xy": [
+        0.05753961693832069,
+        -0.01513751992761443
+      ],
+      "yaw_deg": 1.387189080718084,
+      "cam_z": 0.33852794689042176,
+      "pitch_deg": -15.239235688966883,
+      "stool": {
+        "pixels": 6755,
+        "min_side_px": 150,
+        "bbox": [
+          490,
+          92,
+          639,
+          291
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -54.75368334179855,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 2094,
+        "min_side_px": 94,
+        "bbox": [
+          490,
+          198,
+          639,
+          291
+        ],
+        "class_name": "tiny",
+        "bearing_deg": -54.77508336924123,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 4661,
+        "min_side_px": 116,
+        "bbox": [
+          510,
+          92,
+          639,
+          207
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -54.75368334179855,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006057516733255108,
+      "stool_pixel_z_max": 0.4767395787238555,
+      "legs_pixel_mean_z": 0.12335066402540493,
+      "seat_pixel_mean_z": 0.42556288355529254,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 1.304000000000001,
+      "up_z": 0.9685049256231747,
+      "xy": [
+        0.05764062620567181,
+        -0.0007467154456379943
+      ],
+      "yaw_deg": -0.4027066350283992,
+      "cam_z": 0.3299934626125936,
+      "pitch_deg": -14.432688416906549,
+      "stool": {
+        "pixels": 6539,
+        "min_side_px": 155,
+        "bbox": [
+          485,
+          112,
+          639,
+          305
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -53.466458092530075,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 2009,
+        "min_side_px": 95,
+        "bbox": [
+          485,
+          211,
+          639,
+          305
+        ],
+        "class_name": "tiny",
+        "bearing_deg": -53.48753119414698,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 4530,
+        "min_side_px": 106,
+        "bbox": [
+          507,
+          112,
+          639,
+          217
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -53.466458092530075,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006121693794796046,
+      "stool_pixel_z_max": 0.47671519030166065,
+      "legs_pixel_mean_z": 0.12263076286968749,
+      "seat_pixel_mean_z": 0.4272186322135993,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 1.400000000000001,
+      "up_z": 0.9627560337988738,
+      "xy": [
+        0.060000925631773984,
+        0.017925626063762648
+      ],
+      "yaw_deg": -2.070847443768072,
+      "cam_z": 0.3372539614120047,
+      "pitch_deg": -15.26907170806768,
+      "stool": {
+        "pixels": 6071,
+        "min_side_px": 160,
+        "bbox": [
+          480,
+          138,
+          639,
+          325
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -52.53706005168,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 1961,
+        "min_side_px": 101,
+        "bbox": [
+          480,
+          225,
+          639,
+          325
+        ],
+        "class_name": "tiny",
+        "bearing_deg": -52.55772851812975,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 4110,
+        "min_side_px": 92,
+        "bbox": [
+          507,
+          138,
+          639,
+          229
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -52.53706005168,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.0060158164169117345,
+      "stool_pixel_z_max": 0.47674031806508255,
+      "legs_pixel_mean_z": 0.1223238074816162,
+      "seat_pixel_mean_z": 0.4264503371375809,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 1.5040000000000011,
+      "up_z": 0.9636551746642592,
+      "xy": [
+        0.06188795834550761,
+        0.015953783936521897
+      ],
+      "yaw_deg": -3.6837692610780093,
+      "cam_z": 0.3351819352357906,
+      "pitch_deg": -14.844886334187118,
+      "stool": {
+        "pixels": 6327,
+        "min_side_px": 170,
+        "bbox": [
+          470,
+          143,
+          639,
+          373
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -50.94686505173377,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 1952,
+        "min_side_px": 147,
+        "bbox": [
+          470,
+          227,
+          639,
+          373
+        ],
+        "class_name": "tiny",
+        "bearing_deg": -50.96758577040288,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 4375,
+        "min_side_px": 89,
+        "bbox": [
+          497,
+          143,
+          639,
+          231
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -50.94686505173377,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006050783370125934,
+      "stool_pixel_z_max": 0.4767374424274911,
+      "legs_pixel_mean_z": 0.1189969789708314,
+      "seat_pixel_mean_z": 0.43028413860091436,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 1.6000000000000012,
+      "up_z": 0.9662492442205297,
+      "xy": [
+        0.0628243930947261,
+        -0.011399489685149073
+      ],
+      "yaw_deg": -2.1275552775345843,
+      "cam_z": 0.33094253870756574,
+      "pitch_deg": -14.944706118663188,
+      "stool": {
+        "pixels": 6885,
+        "min_side_px": 167,
+        "bbox": [
+          473,
+          111,
+          639,
+          306
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -51.61870157211095,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 1968,
+        "min_side_px": 97,
+        "bbox": [
+          473,
+          210,
+          639,
+          306
+        ],
+        "class_name": "tiny",
+        "bearing_deg": -51.64004554120078,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 4917,
+        "min_side_px": 106,
+        "bbox": [
+          494,
+          111,
+          639,
+          216
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -51.61870157211095,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006105418788655892,
+      "stool_pixel_z_max": 0.476718170845071,
+      "legs_pixel_mean_z": 0.1216565247578613,
+      "seat_pixel_mean_z": 0.43133360112836666,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 1.7040000000000013,
+      "up_z": 0.9613107607132144,
+      "xy": [
+        0.06601676299457536,
+        -0.029415989379824894
+      ],
+      "yaw_deg": -2.465180537893983,
+      "cam_z": 0.3409051745168432,
+      "pitch_deg": -14.598346779241359,
+      "stool": {
+        "pixels": 7939,
+        "min_side_px": 173,
+        "bbox": [
+          467,
+          74,
+          639,
+          279
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -50.79882057363483,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 1975,
+        "min_side_px": 89,
+        "bbox": [
+          467,
+          191,
+          639,
+          279
+        ],
+        "class_name": "tiny",
+        "bearing_deg": -50.82060471636197,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 5964,
+        "min_side_px": 128,
+        "bbox": [
+          478,
+          74,
+          639,
+          201
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -50.79882057363483,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006172553635593103,
+      "stool_pixel_z_max": 0.4767407753390872,
+      "legs_pixel_mean_z": 0.12149889791526546,
+      "seat_pixel_mean_z": 0.43637846696614196,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 1.8000000000000014,
+      "up_z": 0.9652208016360335,
+      "xy": [
+        0.07373605148630395,
+        -0.02548920874267997
+      ],
+      "yaw_deg": -4.680898276701491,
+      "cam_z": 0.33370853972074754,
+      "pitch_deg": -14.339184317036638,
+      "stool": {
+        "pixels": 8963,
+        "min_side_px": 182,
+        "bbox": [
+          458,
+          81,
+          639,
+          328
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -49.09327889136617,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 2608,
+        "min_side_px": 133,
+        "bbox": [
+          458,
+          196,
+          639,
+          328
+        ],
+        "class_name": "tiny",
+        "bearing_deg": -49.11501502688634,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 6355,
+        "min_side_px": 125,
+        "bbox": [
+          470,
+          81,
+          639,
+          205
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -49.09327889136617,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.00601159578388466,
+      "stool_pixel_z_max": 0.4767382862000783,
+      "legs_pixel_mean_z": 0.10250709755470629,
+      "seat_pixel_mean_z": 0.4376331643695347,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 1.9040000000000015,
+      "up_z": 0.9623678778654601,
+      "xy": [
+        0.08290810015152845,
+        0.005842830069926637
+      ],
+      "yaw_deg": -8.051189215554675,
+      "cam_z": 0.3345124262533243,
+      "pitch_deg": -15.698496721105917,
+      "stool": {
+        "pixels": 9792,
+        "min_side_px": 189,
+        "bbox": [
+          451,
+          120,
+          639,
+          352
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -47.24026127705076,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 3849,
+        "min_side_px": 141,
+        "bbox": [
+          451,
+          212,
+          639,
+          352
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -47.26130435842279,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 5943,
+        "min_side_px": 105,
+        "bbox": [
+          472,
+          120,
+          639,
+          224
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -47.24026127705076,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006009156704615604,
+      "stool_pixel_z_max": 0.47672446106987465,
+      "legs_pixel_mean_z": 0.10650408589686443,
+      "seat_pixel_mean_z": 0.4318876035511751,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 2.0000000000000013,
+      "up_z": 0.9625456394094416,
+      "xy": [
+        0.09006341072487502,
+        0.017951432970384616
+      ],
+      "yaw_deg": -11.29538811093127,
+      "cam_z": 0.340513922012363,
+      "pitch_deg": -13.81934849333238,
+      "stool": {
+        "pixels": 11025,
+        "min_side_px": 202,
+        "bbox": [
+          438,
+          167,
+          639,
+          377
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -44.73951205297223,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 4488,
+        "min_side_px": 143,
+        "bbox": [
+          438,
+          235,
+          639,
+          377
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -44.76030326679111,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 6537,
+        "min_side_px": 112,
+        "bbox": [
+          462,
+          167,
+          639,
+          278
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -44.73951205297223,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006001138463679723,
+      "stool_pixel_z_max": 0.47673992079376615,
+      "legs_pixel_mean_z": 0.12579824607530737,
+      "seat_pixel_mean_z": 0.4198214449258248,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 2.10399999999999,
+      "up_z": 0.9598900582684885,
+      "xy": [
+        0.09636472817262812,
+        0.0026857380244326196
+      ],
+      "yaw_deg": -9.675764727398914,
+      "cam_z": 0.3337507643733307,
+      "pitch_deg": -15.064466299206144,
+      "stool": {
+        "pixels": 10418,
+        "min_side_px": 196,
+        "bbox": [
+          444,
+          149,
+          639,
+          375
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -46.16376132264497,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 4170,
+        "min_side_px": 148,
+        "bbox": [
+          444,
+          228,
+          639,
+          375
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -46.18493332376576,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 6248,
+        "min_side_px": 102,
+        "bbox": [
+          469,
+          149,
+          639,
+          250
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -46.16376132264497,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006027302431802384,
+      "stool_pixel_z_max": 0.4767349307789883,
+      "legs_pixel_mean_z": 0.11097809152731113,
+      "seat_pixel_mean_z": 0.4252329532648257,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 2.1999999999999793,
+      "up_z": 0.9661806417665205,
+      "xy": [
+        0.09957231039133368,
+        -0.02420707660381803
+      ],
+      "yaw_deg": -8.383232730256774,
+      "cam_z": 0.3380298507075235,
+      "pitch_deg": -14.934804535431894,
+      "stool": {
+        "pixels": 11325,
+        "min_side_px": 194,
+        "bbox": [
+          446,
+          106,
+          639,
+          348
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -46.70127728434397,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 4137,
+        "min_side_px": 141,
+        "bbox": [
+          446,
+          208,
+          639,
+          348
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -46.723117294501606,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 7188,
+        "min_side_px": 110,
+        "bbox": [
+          462,
+          106,
+          639,
+          215
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -46.70127728434397,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006003227411759404,
+      "stool_pixel_z_max": 0.4767270578185223,
+      "legs_pixel_mean_z": 0.10732863025811214,
+      "seat_pixel_mean_z": 0.4271685065419694,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 2.303999999999968,
+      "up_z": 0.967032506145574,
+      "xy": [
+        0.11182727915576379,
+        -0.037387122912928866
+      ],
+      "yaw_deg": -10.05247797120991,
+      "cam_z": 0.33339231197448493,
+      "pitch_deg": -14.224947417060061,
+      "stool": {
+        "pixels": 13582,
+        "min_side_px": 203,
+        "bbox": [
+          437,
+          87,
+          639,
+          331
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -45.18691810879801,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 4877,
+        "min_side_px": 133,
+        "bbox": [
+          437,
+          199,
+          639,
+          331
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -45.2091509408647,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 8705,
+        "min_side_px": 126,
+        "bbox": [
+          448,
+          87,
+          639,
+          212
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -45.18691810879801,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006058368995213392,
+      "stool_pixel_z_max": 0.4767211104900701,
+      "legs_pixel_mean_z": 0.120725365889206,
+      "seat_pixel_mean_z": 0.42547680219365785,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 2.3999999999999573,
+      "up_z": 0.9573693669687835,
+      "xy": [
+        0.12517572963588278,
+        -0.018863992026978662
+      ],
+      "yaw_deg": -12.51588572741866,
+      "cam_z": 0.3308621534716707,
+      "pitch_deg": -16.748845877901033,
+      "stool": {
+        "pixels": 13422,
+        "min_side_px": 206,
+        "bbox": [
+          434,
+          90,
+          639,
+          329
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -44.043374802777464,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 4840,
+        "min_side_px": 132,
+        "bbox": [
+          434,
+          198,
+          639,
+          329
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -44.06518590387117,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 8582,
+        "min_side_px": 127,
+        "bbox": [
+          449,
+          90,
+          639,
+          216
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -44.043374802777464,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006000258497770583,
+      "stool_pixel_z_max": 0.4767436698808394,
+      "legs_pixel_mean_z": 0.12552173371718653,
+      "seat_pixel_mean_z": 0.42541397304149725,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 2.503999999999946,
+      "up_z": 0.968270159330854,
+      "xy": [
+        0.13628034300439668,
+        -0.007256017683202068
+      ],
+      "yaw_deg": -16.232294847178927,
+      "cam_z": 0.34034699070327185,
+      "pitch_deg": -13.472285300274054,
+      "stool": {
+        "pixels": 11896,
+        "min_side_px": 211,
+        "bbox": [
+          421,
+          154,
+          639,
+          364
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -41.28347100404471,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 4179,
+        "min_side_px": 137,
+        "bbox": [
+          421,
+          228,
+          617,
+          364
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -41.30501939517694,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 7717,
+        "min_side_px": 111,
+        "bbox": [
+          441,
+          154,
+          639,
+          264
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -41.28347100404471,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.0060427780926438635,
+      "stool_pixel_z_max": 0.47673140871045344,
+      "legs_pixel_mean_z": 0.12708559968057484,
+      "seat_pixel_mean_z": 0.41696543114233914,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 2.5999999999999353,
+      "up_z": 0.9641167008642737,
+      "xy": [
+        0.1460254807599268,
+        -0.022884182539298
+      ],
+      "yaw_deg": -14.923190808151926,
+      "cam_z": 0.3309663128126239,
+      "pitch_deg": -14.962981422123839,
+      "stool": {
+        "pixels": 13444,
+        "min_side_px": 214,
+        "bbox": [
+          426,
+          129,
+          639,
+          357
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -42.581801067787694,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 4825,
+        "min_side_px": 140,
+        "bbox": [
+          426,
+          218,
+          639,
+          357
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -42.60378286311408,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 8619,
+        "min_side_px": 122,
+        "bbox": [
+          446,
+          129,
+          639,
+          250
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -42.581801067787694,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006005160720196967,
+      "stool_pixel_z_max": 0.4767171200768672,
+      "legs_pixel_mean_z": 0.1285538707838729,
+      "seat_pixel_mean_z": 0.41818851692794473,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 2.703999999999924,
+      "up_z": 0.9638051879889192,
+      "xy": [
+        0.15081052327438266,
+        -0.05155114929800191
+      ],
+      "yaw_deg": -14.099685540081731,
+      "cam_z": 0.33879537435872065,
+      "pitch_deg": -15.082767973955463,
+      "stool": {
+        "pixels": 15255,
+        "min_side_px": 216,
+        "bbox": [
+          424,
+          87,
+          639,
+          333
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -42.67626898968342,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 5186,
+        "min_side_px": 133,
+        "bbox": [
+          424,
+          201,
+          638,
+          333
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -42.69904925040805,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 10069,
+        "min_side_px": 131,
+        "bbox": [
+          436,
+          87,
+          639,
+          217
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -42.67626898968342,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006023542232888701,
+      "stool_pixel_z_max": 0.47674068839559525,
+      "legs_pixel_mean_z": 0.12902396991145956,
+      "seat_pixel_mean_z": 0.41705936716681596,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 2.7999999999999132,
+      "up_z": 0.9678558300603303,
+      "xy": [
+        0.16589817274990334,
+        -0.06321267233344724
+      ],
+      "yaw_deg": -16.060201428010284,
+      "cam_z": 0.3367269589115265,
+      "pitch_deg": -13.668994968881172,
+      "stool": {
+        "pixels": 15148,
+        "min_side_px": 225,
+        "bbox": [
+          415,
+          83,
+          639,
+          330
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -41.123732389380365,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 4978,
+        "min_side_px": 132,
+        "bbox": [
+          415,
+          199,
+          619,
+          330
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -41.14690040069581,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 10170,
+        "min_side_px": 130,
+        "bbox": [
+          424,
+          83,
+          639,
+          212
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -41.123732389380365,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006098996917705657,
+      "stool_pixel_z_max": 0.4789705132012686,
+      "legs_pixel_mean_z": 0.12819116559236005,
+      "seat_pixel_mean_z": 0.42060313347278583,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 2.9039999999999018,
+      "up_z": 0.9526292731821084,
+      "xy": [
+        0.1884051276925213,
+        -0.04418848675531248
+      ],
+      "yaw_deg": -19.23820214125335,
+      "cam_z": 0.3286382308104843,
+      "pitch_deg": -17.635865564454853,
+      "stool": {
+        "pixels": 15446,
+        "min_side_px": 228,
+        "bbox": [
+          412,
+          79,
+          639,
+          323
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -39.85005261235207,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 4692,
+        "min_side_px": 129,
+        "bbox": [
+          412,
+          195,
+          621,
+          323
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -39.87271788362057,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 10754,
+        "min_side_px": 133,
+        "bbox": [
+          427,
+          79,
+          639,
+          211
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -39.85005261235207,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006033612649021081,
+      "stool_pixel_z_max": 0.4768590533770002,
+      "legs_pixel_mean_z": 0.12992795733955528,
+      "seat_pixel_mean_z": 0.42099025384376243,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 2.999999999999891,
+      "up_z": 0.9673599579118236,
+      "xy": [
+        0.20270511361062768,
+        -0.03088140788007794
+      ],
+      "yaw_deg": -23.138667958460452,
+      "cam_z": 0.34211917102417155,
+      "pitch_deg": -13.377802418827706,
+      "stool": {
+        "pixels": 11754,
+        "min_side_px": 212,
+        "bbox": [
+          402,
+          155,
+          632,
+          366
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -37.18830814118516,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 3918,
+        "min_side_px": 139,
+        "bbox": [
+          402,
+          228,
+          590,
+          366
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -37.21059781407905,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 7836,
+        "min_side_px": 112,
+        "bbox": [
+          421,
+          155,
+          632,
+          266
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -37.18830814118516,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006028350064619992,
+      "stool_pixel_z_max": 0.4794402637608606,
+      "legs_pixel_mean_z": 0.12699936791026425,
+      "seat_pixel_mean_z": 0.42089232447579417,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 3.1039999999998797,
+      "up_z": 0.9621376944524775,
+      "xy": [
+        0.2180957724881384,
+        -0.043248696677522944
+      ],
+      "yaw_deg": -22.57498383529903,
+      "cam_z": 0.3335658649723644,
+      "pitch_deg": -14.681931456966689,
+      "stool": {
+        "pixels": 13684,
+        "min_side_px": 226,
+        "bbox": [
+          405,
+          141,
+          639,
+          366
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -38.231992919610434,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 4417,
+        "min_side_px": 145,
+        "bbox": [
+          405,
+          222,
+          611,
+          366
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -38.254646614185845,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 9267,
+        "min_side_px": 122,
+        "bbox": [
+          427,
+          141,
+          639,
+          262
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -38.231992919610434,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006071172746884679,
+      "stool_pixel_z_max": 0.47706279295251325,
+      "legs_pixel_mean_z": 0.12838434228475742,
+      "seat_pixel_mean_z": 0.4207124185785552,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 3.199999999999869,
+      "up_z": 0.9586981487305307,
+      "xy": [
+        0.21970480165195364,
+        -0.07290110844555764
+      ],
+      "yaw_deg": -19.883088338696577,
+      "cam_z": 0.3344082394077908,
+      "pitch_deg": -16.55174566160004,
+      "stool": {
+        "pixels": 16806,
+        "min_side_px": 230,
+        "bbox": [
+          410,
+          91,
+          639,
+          349
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -40.03191841330312,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 5385,
+        "min_side_px": 145,
+        "bbox": [
+          410,
+          205,
+          638,
+          349
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -40.05549538291322,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 11421,
+        "min_side_px": 141,
+        "bbox": [
+          427,
+          91,
+          639,
+          231
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -40.03191841330312,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006026856715207418,
+      "stool_pixel_z_max": 0.4767363274904344,
+      "legs_pixel_mean_z": 0.13005337285641236,
+      "seat_pixel_mean_z": 0.41963105132336503,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 3.3039999999998577,
+      "up_z": 0.9704499691914917,
+      "xy": [
+        0.23204065284292288,
+        -0.09431206823987406
+      ],
+      "yaw_deg": -21.78299229912538,
+      "cam_z": 0.3377729587623862,
+      "pitch_deg": -13.21706110819327,
+      "stool": {
+        "pixels": 16278,
+        "min_side_px": 238,
+        "bbox": [
+          398,
+          86,
+          635,
+          343
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -38.12786399701096,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 5174,
+        "min_side_px": 139,
+        "bbox": [
+          398,
+          205,
+          607,
+          343
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -38.1521573738041,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 11104,
+        "min_side_px": 136,
+        "bbox": [
+          408,
+          86,
+          635,
+          221
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -38.12786399701096,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.0060285064710431935,
+      "stool_pixel_z_max": 0.47944145594886745,
+      "legs_pixel_mean_z": 0.12797542773112308,
+      "seat_pixel_mean_z": 0.422693084014796,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 3.399999999999847,
+      "up_z": 0.9505443698046431,
+      "xy": [
+        0.25542791383749053,
+        -0.08611171472770086
+      ],
+      "yaw_deg": -24.40432669384697,
+      "cam_z": 0.327517549419036,
+      "pitch_deg": -17.813568773437957,
+      "stool": {
+        "pixels": 18300,
+        "min_side_px": 245,
+        "bbox": [
+          395,
+          59,
+          639,
+          327
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -37.22926508828357,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 5096,
+        "min_side_px": 137,
+        "bbox": [
+          395,
+          191,
+          615,
+          327
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -37.253269169169016,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 13204,
+        "min_side_px": 148,
+        "bbox": [
+          409,
+          59,
+          639,
+          206
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -37.22926508828357,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006024571147099811,
+      "stool_pixel_z_max": 0.47727551869539064,
+      "legs_pixel_mean_z": 0.13069416126845732,
+      "seat_pixel_mean_z": 0.42488381364061045,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 3.5039999999998357,
+      "up_z": 0.9670896153660082,
+      "xy": [
+        0.2734013473692602,
+        -0.07218417258999177
+      ],
+      "yaw_deg": -28.797806379166502,
+      "cam_z": 0.34102271211618135,
+      "pitch_deg": -13.945679945573104,
+      "stool": {
+        "pixels": 13462,
+        "min_side_px": 231,
+        "bbox": [
+          387,
+          138,
+          622,
+          368
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -34.415163366183606,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 4248,
+        "min_side_px": 147,
+        "bbox": [
+          387,
+          222,
+          585,
+          368
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -34.43864924019351,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 9214,
+        "min_side_px": 124,
+        "bbox": [
+          406,
+          138,
+          622,
+          261
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -34.415163366183606,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006063182863725147,
+      "stool_pixel_z_max": 0.47966244708658645,
+      "legs_pixel_mean_z": 0.12766227435926086,
+      "seat_pixel_mean_z": 0.42274241806003904,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 3.599999999999825,
+      "up_z": 0.9661466494890678,
+      "xy": [
+        0.28797457279090255,
+        -0.08186527013705476
+      ],
+      "yaw_deg": -28.804425175402425,
+      "cam_z": 0.3339050696876203,
+      "pitch_deg": -14.014060725069532,
+      "stool": {
+        "pixels": 15151,
+        "min_side_px": 241,
+        "bbox": [
+          388,
+          133,
+          638,
+          373
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -35.028787487521214,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 4655,
+        "min_side_px": 152,
+        "bbox": [
+          388,
+          222,
+          599,
+          373
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -35.05255423819051,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 10496,
+        "min_side_px": 130,
+        "bbox": [
+          409,
+          133,
+          638,
+          262
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -35.028787487521214,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006094992312103753,
+      "stool_pixel_z_max": 0.4794491962020707,
+      "legs_pixel_mean_z": 0.12815957543780426,
+      "seat_pixel_mean_z": 0.4236762080107264,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 3.7039999999998137,
+      "up_z": 0.9584026232883522,
+      "xy": [
+        0.2876631587042136,
+        -0.11333615491425908
+      ],
+      "yaw_deg": -26.362165878209538,
+      "cam_z": 0.3339207048693944,
+      "pitch_deg": -16.60784705192625,
+      "stool": {
+        "pixels": 19350,
+        "min_side_px": 250,
+        "bbox": [
+          390,
+          81,
+          639,
+          356
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -36.41853871772656,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 5582,
+        "min_side_px": 153,
+        "bbox": [
+          390,
+          204,
+          623,
+          356
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -36.443456166098855,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 13768,
+        "min_side_px": 152,
+        "bbox": [
+          407,
+          81,
+          639,
+          232
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -36.41853871772656,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006019678781123861,
+      "stool_pixel_z_max": 0.47673164213493163,
+      "legs_pixel_mean_z": 0.13028470982123416,
+      "seat_pixel_mean_z": 0.4233126323065683,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 3.799999999999803,
+      "up_z": 0.9704922856394577,
+      "xy": [
+        0.29621761793859314,
+        -0.13382855438123004
+      ],
+      "yaw_deg": -28.119192318330764,
+      "cam_z": 0.3396397699971657,
+      "pitch_deg": -13.11193223884106,
+      "stool": {
+        "pixels": 17594,
+        "min_side_px": 233,
+        "bbox": [
+          379,
+          83,
+          611,
+          354
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -34.5263497158582,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 5406,
+        "min_side_px": 148,
+        "bbox": [
+          379,
+          207,
+          594,
+          354
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -34.5520411565854,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 12188,
+        "min_side_px": 143,
+        "bbox": [
+          386,
+          83,
+          611,
+          225
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -34.5263497158582,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006054821545547595,
+      "stool_pixel_z_max": 0.4794496387008266,
+      "legs_pixel_mean_z": 0.127731614347988,
+      "seat_pixel_mean_z": 0.42386833339962704,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 3.9039999999997916,
+      "up_z": 0.951947816903061,
+      "xy": [
+        0.3226538809617927,
+        -0.13000663471546692
+      ],
+      "yaw_deg": -30.86757968565862,
+      "cam_z": 0.3275735790766078,
+      "pitch_deg": -17.563129482613487,
+      "stool": {
+        "pixels": 21341,
+        "min_side_px": 264,
+        "bbox": [
+          376,
+          52,
+          639,
+          339
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -33.73152751960444,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 5513,
+        "min_side_px": 146,
+        "bbox": [
+          376,
+          194,
+          605,
+          339
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -33.75694593644775,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 15828,
+        "min_side_px": 161,
+        "bbox": [
+          389,
+          52,
+          639,
+          212
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -33.73152751960444,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006014656536503626,
+      "stool_pixel_z_max": 0.4792852258539201,
+      "legs_pixel_mean_z": 0.13067595588228428,
+      "seat_pixel_mean_z": 0.4280648419326001,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 3.999999999999781,
+      "up_z": 0.9640534755409127,
+      "xy": [
+        0.3412521135181219,
+        -0.11693115701815138
+      ],
+      "yaw_deg": -34.965891069805956,
+      "cam_z": 0.3400635309294718,
+      "pitch_deg": -14.722256899323911,
+      "stool": {
+        "pixels": 15895,
+        "min_side_px": 248,
+        "bbox": [
+          370,
+          123,
+          617,
+          375
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -31.358124739312956,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 4713,
+        "min_side_px": 156,
+        "bbox": [
+          370,
+          220,
+          583,
+          375
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -31.382883122913285,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 11182,
+        "min_side_px": 139,
+        "bbox": [
+          391,
+          123,
+          617,
+          261
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -31.358124739312956,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006017209714212657,
+      "stool_pixel_z_max": 0.47950958128593085,
+      "legs_pixel_mean_z": 0.12783332366094502,
+      "seat_pixel_mean_z": 0.42600684676178585,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 4.10399999999977,
+      "up_z": 0.9668909024696103,
+      "xy": [
+        0.35714598134543346,
+        -0.12582328614231822
+      ],
+      "yaw_deg": -35.66267939575067,
+      "cam_z": 0.33543969909887933,
+      "pitch_deg": -13.582988315076785,
+      "stool": {
+        "pixels": 16754,
+        "min_side_px": 255,
+        "bbox": [
+          369,
+          128,
+          623,
+          388
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -31.523551871427514,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 4985,
+        "min_side_px": 165,
+        "bbox": [
+          369,
+          224,
+          591,
+          388
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -31.548527463936324,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 11769,
+        "min_side_px": 143,
+        "bbox": [
+          393,
+          128,
+          623,
+          270
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -31.523551871427514,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006053383922403677,
+      "stool_pixel_z_max": 0.47881933731185067,
+      "legs_pixel_mean_z": 0.12733280317720638,
+      "seat_pixel_mean_z": 0.42664527529177226,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 4.1999999999997595,
+      "up_z": 0.9542657767873329,
+      "xy": [
+        0.35416703616473083,
+        -0.15551794637278515
+      ],
+      "yaw_deg": -32.78162228426496,
+      "cam_z": 0.33074262669009624,
+      "pitch_deg": -17.34211916401046,
+      "stool": {
+        "pixels": 23773,
+        "min_side_px": 267,
+        "bbox": [
+          373,
+          70,
+          639,
+          374
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -33.24391439128834,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 6391,
+        "min_side_px": 170,
+        "bbox": [
+          373,
+          205,
+          626,
+          374
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -33.27019371469041,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 17382,
+        "min_side_px": 174,
+        "bbox": [
+          394,
+          70,
+          639,
+          243
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -33.24391439128834,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006004700707284871,
+      "stool_pixel_z_max": 0.4767439963188988,
+      "legs_pixel_mean_z": 0.13105395954340934,
+      "seat_pixel_mean_z": 0.4261880773512936,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 4.303999999999748,
+      "up_z": 0.9703997422978379,
+      "xy": [
+        0.35748922969887537,
+        -0.1806095935488323
+      ],
+      "yaw_deg": -34.210768786985504,
+      "cam_z": 0.340186519590556,
+      "pitch_deg": -13.171572563150857,
+      "stool": {
+        "pixels": 21246,
+        "min_side_px": 242,
+        "bbox": [
+          360,
+          73,
+          601,
+          371
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -31.211218782186734,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 6289,
+        "min_side_px": 162,
+        "bbox": [
+          360,
+          210,
+          591,
+          371
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -31.23863465302543,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 14957,
+        "min_side_px": 159,
+        "bbox": [
+          365,
+          73,
+          601,
+          231
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -31.211218782186734,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006038235566275363,
+      "stool_pixel_z_max": 0.47912344891059794,
+      "legs_pixel_mean_z": 0.12802118456984884,
+      "seat_pixel_mean_z": 0.42585584121391257,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 4.3999999999997375,
+      "up_z": 0.9551991826446986,
+      "xy": [
+        0.38000080627249916,
+        -0.18462683668256907
+      ],
+      "yaw_deg": -36.53093939066521,
+      "cam_z": 0.329083875427666,
+      "pitch_deg": -16.744525827884907,
+      "stool": {
+        "pixels": 26346,
+        "min_side_px": 272,
+        "bbox": [
+          356,
+          37,
+          627,
+          357
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -30.506380281954762,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 6570,
+        "min_side_px": 161,
+        "bbox": [
+          356,
+          197,
+          602,
+          357
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -30.53376850758559,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 19776,
+        "min_side_px": 181,
+        "bbox": [
+          363,
+          37,
+          627,
+          217
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -30.506380281954762,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006031704768789226,
+      "stool_pixel_z_max": 0.4792977010424324,
+      "legs_pixel_mean_z": 0.13061592048249052,
+      "seat_pixel_mean_z": 0.4298395089549067,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 4.503999999999726,
+      "up_z": 0.9626137934892114,
+      "xy": [
+        0.40287704496370547,
+        -0.17141277162241098
+      ],
+      "yaw_deg": -41.114817379588466,
+      "cam_z": 0.33864329107044305,
+      "pitch_deg": -15.334456165339423,
+      "stool": {
+        "pixels": 20468,
+        "min_side_px": 266,
+        "bbox": [
+          351,
+          98,
+          616,
+          384
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -28.162805055969187,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 5513,
+        "min_side_px": 162,
+        "bbox": [
+          351,
+          223,
+          585,
+          384
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -28.18924354234926,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 14955,
+        "min_side_px": 162,
+        "bbox": [
+          374,
+          98,
+          616,
+          259
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -28.162805055969187,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006064172722562378,
+      "stool_pixel_z_max": 0.47892466646083676,
+      "legs_pixel_mean_z": 0.12838943949281312,
+      "seat_pixel_mean_z": 0.4293637611351102,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 4.599999999999715,
+      "up_z": 0.9695371476035156,
+      "xy": [
+        0.41839329110701834,
+        -0.1776060900302976
+      ],
+      "yaw_deg": -42.405621789004094,
+      "cam_z": 0.33721952932550364,
+      "pitch_deg": -13.01003256852374,
+      "stool": {
+        "pixels": 20164,
+        "min_side_px": 264,
+        "bbox": [
+          349,
+          116,
+          612,
+          404
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -27.942404083163524,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 5804,
+        "min_side_px": 168,
+        "bbox": [
+          349,
+          237,
+          586,
+          404
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -27.968888511192887,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 14360,
+        "min_side_px": 161,
+        "bbox": [
+          374,
+          116,
+          612,
+          276
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -27.942404083163524,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006051631854986084,
+      "stool_pixel_z_max": 0.4784331330125196,
+      "legs_pixel_mean_z": 0.12726066637267613,
+      "seat_pixel_mean_z": 0.4283050870243357,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 4.703999999999704,
+      "up_z": 0.9535543464759506,
+      "xy": [
+        0.4139218625947918,
+        -0.20800844603298377
+      ],
+      "yaw_deg": -39.44936263725071,
+      "cam_z": 0.3297181749575905,
+      "pitch_deg": -17.425425753303546,
+      "stool": {
+        "pixels": 30748,
+        "min_side_px": 288,
+        "bbox": [
+          352,
+          48,
+          639,
+          392
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -29.591069394354463,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 7478,
+        "min_side_px": 187,
+        "bbox": [
+          352,
+          206,
+          628,
+          392
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -29.619192378144305,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 23270,
+        "min_side_px": 205,
+        "bbox": [
+          374,
+          48,
+          639,
+          252
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -29.591069394354463,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006011921476192561,
+      "stool_pixel_z_max": 0.4767435582845875,
+      "legs_pixel_mean_z": 0.13118081265532447,
+      "seat_pixel_mean_z": 0.430078064940435,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 4.799999999999693,
+      "up_z": 0.9692035684265166,
+      "xy": [
+        0.4126289749575715,
+        -0.23159298233140485
+      ],
+      "yaw_deg": -40.505408008002775,
+      "cam_z": 0.3407937943735834,
+      "pitch_deg": -13.51785811143823,
+      "stool": {
+        "pixels": 27630,
+        "min_side_px": 258,
+        "bbox": [
+          340,
+          55,
+          597,
+          391
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -27.630802767856295,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 7639,
+        "min_side_px": 180,
+        "bbox": [
+          340,
+          212,
+          593,
+          391
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -27.660270461474454,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 19991,
+        "min_side_px": 185,
+        "bbox": [
+          341,
+          55,
+          597,
+          239
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -27.630802767856295,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006000023221604145,
+      "stool_pixel_z_max": 0.4793975116908836,
+      "legs_pixel_mean_z": 0.12831269816102248,
+      "seat_pixel_mean_z": 0.42835760314449384,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 4.903999999999682,
+      "up_z": 0.95752665914865,
+      "xy": [
+        0.4338389113481227,
+        -0.24170962819301156
+      ],
+      "yaw_deg": -42.94785802534523,
+      "cam_z": 0.32989700798576016,
+      "pitch_deg": -16.24639958866323,
+      "stool": {
+        "pixels": 35329,
+        "min_side_px": 288,
+        "bbox": [
+          334,
+          14,
+          621,
+          381
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -26.723776793080788,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 8206,
+        "min_side_px": 181,
+        "bbox": [
+          334,
+          201,
+          603,
+          381
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -26.753464250669765,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 27123,
+        "min_side_px": 215,
+        "bbox": [
+          336,
+          14,
+          621,
+          228
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -26.723776793080788,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.0060020216468825716,
+      "stool_pixel_z_max": 0.4785304148955937,
+      "legs_pixel_mean_z": 0.13069464780988418,
+      "seat_pixel_mean_z": 0.4324897695959369,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 4.999999999999671,
+      "up_z": 0.9593476775584424,
+      "xy": [
+        0.45749529867036964,
+        -0.23116757134582133
+      ],
+      "yaw_deg": -47.10484826375549,
+      "cam_z": 0.3361657032680748,
+      "pitch_deg": -16.253144684806543,
+      "stool": {
+        "pixels": 30454,
+        "min_side_px": 300,
+        "bbox": [
+          331,
+          57,
+          630,
+          398
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -25.051122365992796,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 7166,
+        "min_side_px": 181,
+        "bbox": [
+          331,
+          218,
+          596,
+          398
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -25.079643689396022,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 23288,
+        "min_side_px": 203,
+        "bbox": [
+          349,
+          57,
+          630,
+          259
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -25.051122365992796,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006012216293595274,
+      "stool_pixel_z_max": 0.47745058325143513,
+      "legs_pixel_mean_z": 0.12932062689815557,
+      "seat_pixel_mean_z": 0.4332322334012247,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 5.10399999999966,
+      "up_z": 0.9700213172031495,
+      "xy": [
+        0.4745909697766058,
+        -0.23732736773570404
+      ],
+      "yaw_deg": -49.05555020400255,
+      "cam_z": 0.3383263989620919,
+      "pitch_deg": -12.818574280609726,
+      "stool": {
+        "pixels": 28083,
+        "min_side_px": 292,
+        "bbox": [
+          327,
+          94,
+          618,
+          429
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -24.508736018371565,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 7644,
+        "min_side_px": 204,
+        "bbox": [
+          327,
+          226,
+          592,
+          429
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -24.537155730432858,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 20439,
+        "min_side_px": 194,
+        "bbox": [
+          353,
+          94,
+          618,
+          287
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -24.508736018371565,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006012572545058936,
+      "stool_pixel_z_max": 0.4782465347374403,
+      "legs_pixel_mean_z": 0.12728274427015937,
+      "seat_pixel_mean_z": 0.43048311700458014,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 5.199999999999649,
+      "up_z": 0.9531210774257213,
+      "xy": [
+        0.4691760199398661,
+        -0.26455377148063414
+      ],
+      "yaw_deg": -46.231191768481885,
+      "cam_z": 0.3282388947739618,
+      "pitch_deg": -17.340689278738274,
+      "stool": {
+        "pixels": 42806,
+        "min_side_px": 311,
+        "bbox": [
+          329,
+          11,
+          639,
+          421
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -26.015527843183946,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 9570,
+        "min_side_px": 205,
+        "bbox": [
+          329,
+          217,
+          639,
+          421
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -26.045804248742684,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 33236,
+        "min_side_px": 256,
+        "bbox": [
+          353,
+          11,
+          639,
+          266
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -26.015527843183946,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006008766692389422,
+      "stool_pixel_z_max": 0.47674509738601223,
+      "legs_pixel_mean_z": 0.1317249194660193,
+      "seat_pixel_mean_z": 0.4361996909937269,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 5.303999999999638,
+      "up_z": 0.9686703887008759,
+      "xy": [
+        0.4624916489969557,
+        -0.29027424506518673
+      ],
+      "yaw_deg": -46.80059354367023,
+      "cam_z": 0.3409170183013616,
+      "pitch_deg": -13.698512477509164,
+      "stool": {
+        "pixels": 41237,
+        "min_side_px": 297,
+        "bbox": [
+          313,
+          19,
+          609,
+          421
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -23.934507857975717,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 10321,
+        "min_side_px": 208,
+        "bbox": [
+          317,
+          214,
+          606,
+          421
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -23.966754802006108,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 30916,
+        "min_side_px": 234,
+        "bbox": [
+          313,
+          19,
+          609,
+          252
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -23.934507857975717,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006041997766976226,
+      "stool_pixel_z_max": 0.4777729352560626,
+      "legs_pixel_mean_z": 0.1287233559144231,
+      "seat_pixel_mean_z": 0.4321462097828752,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 5.399999999999627,
+      "up_z": 0.9617822630837303,
+      "xy": [
+        0.4776048636552405,
+        -0.3048336210261653
+      ],
+      "yaw_deg": -48.89916165671299,
+      "cam_z": 0.33187847441696106,
+      "pitch_deg": -15.21147023978441,
+      "stool": {
+        "pixels": 49696,
+        "min_side_px": 324,
+        "bbox": [
+          302,
+          0,
+          625,
+          417
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -22.87874042167772,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 11329,
+        "min_side_px": 211,
+        "bbox": [
+          308,
+          207,
+          616,
+          417
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -22.91163147081403,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 38367,
+        "min_side_px": 247,
+        "bbox": [
+          302,
+          0,
+          625,
+          246
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -22.87874042167772,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006006214898007678,
+      "stool_pixel_z_max": 0.47671390018455384,
+      "legs_pixel_mean_z": 0.13040177999371516,
+      "seat_pixel_mean_z": 0.432624062133009,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 5.503999999999616,
+      "up_z": 0.9570618139934693,
+      "xy": [
+        0.5057578945913258,
+        -0.2973487632171764
+      ],
+      "yaw_deg": -53.332753857917965,
+      "cam_z": 0.3344135131157577,
+      "pitch_deg": -16.822107901944623,
+      "stool": {
+        "pixels": 51345,
+        "min_side_px": 334,
+        "bbox": [
+          306,
+          0,
+          639,
+          424
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -21.656727825438594,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 10247,
+        "min_side_px": 210,
+        "bbox": [
+          306,
+          215,
+          618,
+          424
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -21.68802861087903,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 41098,
+        "min_side_px": 266,
+        "bbox": [
+          318,
+          0,
+          639,
+          265
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -21.656727825438594,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006035442193452145,
+      "stool_pixel_z_max": 0.47674142336867287,
+      "legs_pixel_mean_z": 0.13104890931057894,
+      "seat_pixel_mean_z": 0.4362623009958898,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 5.599999999999605,
+      "up_z": 0.9705627872833393,
+      "xy": [
+        0.522439234759707,
+        -0.30205030010609996
+      ],
+      "yaw_deg": -55.70887068354815,
+      "cam_z": 0.3400449849990142,
+      "pitch_deg": -12.66795784695751,
+      "stool": {
+        "pixels": 44733,
+        "min_side_px": 339,
+        "bbox": [
+          301,
+          54,
+          639,
+          464
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -20.95266564143222,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 11003,
+        "min_side_px": 237,
+        "bbox": [
+          301,
+          228,
+          610,
+          464
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -20.98358490746014,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 33730,
+        "min_side_px": 249,
+        "bbox": [
+          328,
+          54,
+          639,
+          302
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -20.95266564143222,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006009337975671547,
+      "stool_pixel_z_max": 0.4767457455041689,
+      "legs_pixel_mean_z": 0.12813107325590423,
+      "seat_pixel_mean_z": 0.4337435370569708,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 5.703999999999594,
+      "up_z": 0.9537811209038267,
+      "xy": [
+        0.5168727069977908,
+        -0.3288913921398126
+      ],
+      "yaw_deg": -53.01123912400135,
+      "cam_z": 0.3281899050575888,
+      "pitch_deg": -17.122797887618933,
+      "stool": {
+        "pixels": 55609,
+        "min_side_px": 339,
+        "bbox": [
+          301,
+          0,
+          639,
+          461
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -22.28091957203506,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 13183,
+        "min_side_px": 243,
+        "bbox": [
+          301,
+          219,
+          639,
+          461
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -22.31419607940876,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 42426,
+        "min_side_px": 281,
+        "bbox": [
+          323,
+          0,
+          639,
+          280
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -22.28091957203506,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006016140150244931,
+      "stool_pixel_z_max": 0.4767381992079387,
+      "legs_pixel_mean_z": 0.12709865405500542,
+      "seat_pixel_mean_z": 0.4425202916089964,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 5.799999999999583,
+      "up_z": 0.9670008857899296,
+      "xy": [
+        0.5062255901183195,
+        -0.3518639214439825
+      ],
+      "yaw_deg": -53.076318853553374,
+      "cam_z": 0.3402848183805717,
+      "pitch_deg": -14.297772794615533,
+      "stool": {
+        "pixels": 64269,
+        "min_side_px": 362,
+        "bbox": [
+          278,
+          0,
+          639,
+          465
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -20.23436298440899,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 15644,
+        "min_side_px": 249,
+        "bbox": [
+          288,
+          217,
+          639,
+          465
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -20.27016053967904,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 48625,
+        "min_side_px": 274,
+        "bbox": [
+          278,
+          0,
+          639,
+          273
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -20.23436298440899,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006003608400889926,
+      "stool_pixel_z_max": 0.47673971916548274,
+      "legs_pixel_mean_z": 0.13071695023093896,
+      "seat_pixel_mean_z": 0.4310051706185463,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 5.903999999999572,
+      "up_z": 0.9638099012929247,
+      "xy": [
+        0.5172901717357951,
+        -0.37140381107075804
+      ],
+      "yaw_deg": -55.280194465465826,
+      "cam_z": 0.3326821252931252,
+      "pitch_deg": -14.758093766684956,
+      "stool": {
+        "pixels": 67806,
+        "min_side_px": 386,
+        "bbox": [
+          254,
+          0,
+          639,
+          469
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -18.673092476719034,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 17836,
+        "min_side_px": 258,
+        "bbox": [
+          276,
+          212,
+          639,
+          469
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -18.710263012600308,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 49970,
+        "min_side_px": 277,
+        "bbox": [
+          254,
+          0,
+          639,
+          276
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -18.673092476719034,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006003979791288527,
+      "stool_pixel_z_max": 0.47661844511964835,
+      "legs_pixel_mean_z": 0.13179114644649872,
+      "seat_pixel_mean_z": 0.42797725600201775,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 5.999999999999561,
+      "up_z": 0.9536912297271805,
+      "xy": [
+        0.5447103087550286,
+        -0.36843477751112547
+      ],
+      "yaw_deg": -59.09599256464576,
+      "cam_z": 0.33154259487869076,
+      "pitch_deg": -17.532175579515478,
+      "stool": {
+        "pixels": 64061,
+        "min_side_px": 370,
+        "bbox": [
+          270,
+          0,
+          639,
+          464
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -18.391684619344517,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 16605,
+        "min_side_px": 254,
+        "bbox": [
+          274,
+          211,
+          639,
+          464
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -18.42695636496839,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 47456,
+        "min_side_px": 274,
+        "bbox": [
+          270,
+          0,
+          639,
+          273
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -18.391684619344517,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.00601576308801649,
+      "stool_pixel_z_max": 0.47556864632414275,
+      "legs_pixel_mean_z": 0.1329287115853979,
+      "seat_pixel_mean_z": 0.43356028613528724,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 6.10399999999955,
+      "up_z": 0.970346952504389,
+      "xy": [
+        0.563294010095114,
+        -0.37341397347947064
+      ],
+      "yaw_deg": -62.17661812383852,
+      "cam_z": 0.34071253462284923,
+      "pitch_deg": -12.715871650708078,
+      "stool": {
+        "pixels": 70909,
+        "min_side_px": 374,
+        "bbox": [
+          266,
+          0,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -17.57362153748676,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 13704,
+        "min_side_px": 250,
+        "bbox": [
+          266,
+          230,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -17.60806483577997,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 57205,
+        "min_side_px": 327,
+        "bbox": [
+          294,
+          0,
+          639,
+          326
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -17.57362153748676,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006450817069517667,
+      "stool_pixel_z_max": 0.4767422507863445,
+      "legs_pixel_mean_z": 0.14864945248043798,
+      "seat_pixel_mean_z": 0.4374946196503654,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 6.199999999999539,
+      "up_z": 0.9564909922874164,
+      "xy": [
+        0.5586953673190089,
+        -0.39668530719848016
+      ],
+      "yaw_deg": -60.04505942194166,
+      "cam_z": 0.32940378332436077,
+      "pitch_deg": -16.41944860714109,
+      "stool": {
+        "pixels": 62472,
+        "min_side_px": 377,
+        "bbox": [
+          263,
+          0,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -18.494712893637484,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 13155,
+        "min_side_px": 256,
+        "bbox": [
+          263,
+          224,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -18.53186836337818,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 49317,
+        "min_side_px": 294,
+        "bbox": [
+          281,
+          0,
+          639,
+          293
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -18.494712893637484,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006014647341252899,
+      "stool_pixel_z_max": 0.4722207768651838,
+      "legs_pixel_mean_z": 0.13260688262158687,
+      "seat_pixel_mean_z": 0.43493159813611815,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 6.303999999999528,
+      "up_z": 0.9655167388481158,
+      "xy": [
+        0.542769495851728,
+        -0.4206520943408935
+      ],
+      "yaw_deg": -59.47746500585147,
+      "cam_z": 0.33959001516423587,
+      "pitch_deg": -14.723076110281186,
+      "stool": {
+        "pixels": 70528,
+        "min_side_px": 431,
+        "bbox": [
+          209,
+          0,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -16.071660799539472,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 13424,
+        "min_side_px": 260,
+        "bbox": [
+          231,
+          220,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -16.112874203362765,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 57104,
+        "min_side_px": 327,
+        "bbox": [
+          209,
+          0,
+          639,
+          326
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -16.071660799539472,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006042651257541554,
+      "stool_pixel_z_max": 0.4722846063862443,
+      "legs_pixel_mean_z": 0.14601470202970784,
+      "seat_pixel_mean_z": 0.43046925029912564,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 6.399999999999517,
+      "up_z": 0.9671006185146858,
+      "xy": [
+        0.5473859334917939,
+        -0.4409897484263004
+      ],
+      "yaw_deg": -61.43866215378709,
+      "cam_z": 0.3347288249235319,
+      "pitch_deg": -13.970688039023845,
+      "stool": {
+        "pixels": 74676,
+        "min_side_px": 480,
+        "bbox": [
+          159,
+          0,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -14.016693087343896,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 13196,
+        "min_side_px": 261,
+        "bbox": [
+          188,
+          219,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -14.06029946004196,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 61480,
+        "min_side_px": 353,
+        "bbox": [
+          159,
+          0,
+          639,
+          352
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -14.016693087343896,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006013908400085255,
+      "stool_pixel_z_max": 0.47083819329263255,
+      "legs_pixel_mean_z": 0.15697578962742045,
+      "seat_pixel_mean_z": 0.4223286161745951,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 6.503999999999506,
+      "up_z": 0.952386655262952,
+      "xy": [
+        0.5767916870412969,
+        -0.4432448630431585
+      ],
+      "yaw_deg": -65.21930476953723,
+      "cam_z": 0.330301760276227,
+      "pitch_deg": -17.755088742250045,
+      "stool": {
+        "pixels": 56953,
+        "min_side_px": 461,
+        "bbox": [
+          179,
+          0,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -14.66685142035601,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 12482,
+        "min_side_px": 268,
+        "bbox": [
+          194,
+          212,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -14.707960789962868,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 44471,
+        "min_side_px": 370,
+        "bbox": [
+          179,
+          0,
+          639,
+          369
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -14.66685142035601,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006199905397058336,
+      "stool_pixel_z_max": 0.46290677064508645,
+      "legs_pixel_mean_z": 0.15970289319692318,
+      "seat_pixel_mean_z": 0.4280306427875106,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 6.599999999999495,
+      "up_z": 0.969372319459459,
+      "xy": [
+        0.5949257161054947,
+        -0.44770049326696226
+      ],
+      "yaw_deg": -68.57340059120523,
+      "cam_z": 0.34160018617582594,
+      "pitch_deg": -12.98309645793197,
+      "stool": {
+        "pixels": 67306,
+        "min_side_px": 431,
+        "bbox": [
+          209,
+          0,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -14.077054741403174,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 7723,
+        "min_side_px": 247,
+        "bbox": [
+          209,
+          233,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -14.116625516086799,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 59583,
+        "min_side_px": 404,
+        "bbox": [
+          220,
+          0,
+          639,
+          403
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -14.077054741403174,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006108117216148845,
+      "stool_pixel_z_max": 0.4700050968101205,
+      "legs_pixel_mean_z": 0.14845153576590805,
+      "seat_pixel_mean_z": 0.44185891941321326,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 6.703999999999484,
+      "up_z": 0.9583447200086752,
+      "xy": [
+        0.5915259616419953,
+        -0.4704582095276459
+      ],
+      "yaw_deg": -66.97041166169623,
+      "cam_z": 0.33064276758348815,
+      "pitch_deg": -15.911220696160797,
+      "stool": {
+        "pixels": 52896,
+        "min_side_px": 446,
+        "bbox": [
+          194,
+          0,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -14.595234558594655,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 5810,
+        "min_side_px": 259,
+        "bbox": [
+          194,
+          221,
+          624,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -14.638438860759749,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 47086,
+        "min_side_px": 231,
+        "bbox": [
+          207,
+          0,
+          639,
+          230
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -14.595234558594655,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.0061351090292136035,
+      "stool_pixel_z_max": 0.46149191530349754,
+      "legs_pixel_mean_z": 0.11830967730255983,
+      "seat_pixel_mean_z": 0.44446375082894524,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 6.799999999999473,
+      "up_z": 0.9631089902877051,
+      "xy": [
+        0.5728146264635132,
+        -0.49105207177509735
+      ],
+      "yaw_deg": -65.68293094308979,
+      "cam_z": 0.3376194724762533,
+      "pitch_deg": -15.489286821521535,
+      "stool": {
+        "pixels": 54835,
+        "min_side_px": 480,
+        "bbox": [
+          105,
+          0,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -11.963337449976962,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 5970,
+        "min_side_px": 257,
+        "bbox": [
+          170,
+          223,
+          638,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -12.012538589031863,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 48865,
+        "min_side_px": 233,
+        "bbox": [
+          105,
+          0,
+          639,
+          232
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -11.963337449976962,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006014554976915998,
+      "stool_pixel_z_max": 0.46099621839204286,
+      "legs_pixel_mean_z": 0.11822204049911907,
+      "seat_pixel_mean_z": 0.4428553740876193,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 6.903999999999462,
+      "up_z": 0.9574748204082841,
+      "xy": [
+        0.5637985869812482,
+        -0.5106274224093008
+      ],
+      "yaw_deg": -61.429342959535106,
+      "cam_z": 0.3378356388876683,
+      "pitch_deg": -15.024327381996715,
+      "stool": {
+        "pixels": 54263,
+        "min_side_px": 480,
+        "bbox": [
+          32,
+          0,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -13.71811755938802,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 5673,
+        "min_side_px": 261,
+        "bbox": [
+          173,
+          219,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -13.772462610458547,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 48590,
+        "min_side_px": 240,
+        "bbox": [
+          32,
+          0,
+          593,
+          239
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -13.71811755938802,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006054111441581078,
+      "stool_pixel_z_max": 0.46099625933952115,
+      "legs_pixel_mean_z": 0.11962174780665413,
+      "seat_pixel_mean_z": 0.44573569249162587,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 6.999999999999451,
+      "up_z": 0.9314475160711602,
+      "xy": [
+        0.5656403206840173,
+        -0.5172518813146482
+      ],
+      "yaw_deg": -59.87156676922369,
+      "cam_z": 0.3337877813041292,
+      "pitch_deg": -17.92433957462017,
+      "stool": {
+        "pixels": 46764,
+        "min_side_px": 480,
+        "bbox": [
+          0,
+          0,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -15.29205517831474,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 5648,
+        "min_side_px": 279,
+        "bbox": [
+          182,
+          201,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -15.347666873044403,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 41116,
+        "min_side_px": 234,
+        "bbox": [
+          0,
+          0,
+          519,
+          233
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -15.29205517831474,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006157487863621025,
+      "stool_pixel_z_max": 0.4609962241567574,
+      "legs_pixel_mean_z": 0.12091798771988355,
+      "seat_pixel_mean_z": 0.44517512718608726,
+      "hit_leg_projects": false,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 7.10399999999944,
+      "up_z": 0.941599506743219,
+      "xy": [
+        0.5785764636324158,
+        -0.4998386188414426
+      ],
+      "yaw_deg": -70.28383612252163,
+      "cam_z": 0.3296992018657222,
+      "pitch_deg": -16.860861427115367,
+      "stool": {
+        "pixels": 52127,
+        "min_side_px": 480,
+        "bbox": [
+          0,
+          0,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -8.066211017912224,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 6784,
+        "min_side_px": 273,
+        "bbox": [
+          153,
+          207,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -8.116323959558827,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 45343,
+        "min_side_px": 241,
+        "bbox": [
+          0,
+          0,
+          639,
+          240
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -8.066211017912224,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006013838138707817,
+      "stool_pixel_z_max": 0.4609962526350449,
+      "legs_pixel_mean_z": 0.11793549044306316,
+      "seat_pixel_mean_z": 0.4459775806554597,
+      "hit_leg_projects": false,
+      "hit_rail_projects": false
+    },
+    {
+      "t": 7.199999999999429,
+      "up_z": 0.9827951629496767,
+      "xy": [
+        0.5988459617046327,
+        -0.47784363091157817
+      ],
+      "yaw_deg": -79.0125054664118,
+      "cam_z": 0.3369810034142937,
+      "pitch_deg": -10.650240134291579,
+      "stool": {
+        "pixels": 84089,
+        "min_side_px": 480,
+        "bbox": [
+          68,
+          0,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -3.643627085153753,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 12745,
+        "min_side_px": 242,
+        "bbox": [
+          123,
+          238,
+          634,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -3.686906516034014,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 71344,
+        "min_side_px": 321,
+        "bbox": [
+          68,
+          0,
+          639,
+          320
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -3.643627085153753,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006040894572281852,
+      "stool_pixel_z_max": 0.4639607617187743,
+      "legs_pixel_mean_z": 0.15685974906600078,
+      "seat_pixel_mean_z": 0.43070256528174344,
+      "hit_leg_projects": true,
+      "hit_rail_projects": false
+    },
+    {
+      "t": 7.303999999999418,
+      "up_z": 0.9764461329391156,
+      "xy": [
+        0.6127218450120027,
+        -0.48611771966094264
+      ],
+      "yaw_deg": -75.18878502407097,
+      "cam_z": 0.34082758794024764,
+      "pitch_deg": -11.779295402214998,
+      "stool": {
+        "pixels": 68587,
+        "min_side_px": 480,
+        "bbox": [
+          144,
+          0,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -9.787462646479128,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 5949,
+        "min_side_px": 239,
+        "bbox": [
+          144,
+          241,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -9.829758424652994,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 62638,
+        "min_side_px": 244,
+        "bbox": [
+          146,
+          0,
+          639,
+          243
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -9.787462646479128,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.0060379460768050786,
+      "stool_pixel_z_max": 0.463908367997795,
+      "legs_pixel_mean_z": 0.12239037183861004,
+      "seat_pixel_mean_z": 0.44589413483476076,
+      "hit_leg_projects": false,
+      "hit_rail_projects": false
+    },
+    {
+      "t": 7.399999999999407,
+      "up_z": 0.9355148061032907,
+      "xy": [
+        0.6237857924356301,
+        -0.4954245536441404
+      ],
+      "yaw_deg": -61.30163776924987,
+      "cam_z": 0.3329312366448344,
+      "pitch_deg": -20.201188384057605,
+      "stool": {
+        "pixels": 40791,
+        "min_side_px": 419,
+        "bbox": [
+          221,
+          0,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -25.600157608319222,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 5762,
+        "min_side_px": 265,
+        "bbox": [
+          221,
+          215,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -25.641807495370017,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 35029,
+        "min_side_px": 228,
+        "bbox": [
+          267,
+          0,
+          639,
+          227
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -25.600157608319222,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006261351535432502,
+      "stool_pixel_z_max": 0.4609961913483861,
+      "legs_pixel_mean_z": 0.12260911844789607,
+      "seat_pixel_mean_z": 0.4395329696240983,
+      "hit_leg_projects": false,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 7.503999999999396,
+      "up_z": 0.9384958911230457,
+      "xy": [
+        0.6165634906580507,
+        -0.48901270584443995
+      ],
+      "yaw_deg": -57.42159268300524,
+      "cam_z": 0.32472505449637734,
+      "pitch_deg": -20.231674515103034,
+      "stool": {
+        "pixels": 35042,
+        "min_side_px": 396,
+        "bbox": [
+          244,
+          0,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -28.213790757768294,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 5740,
+        "min_side_px": 270,
+        "bbox": [
+          244,
+          210,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -28.25584206316691,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 29302,
+        "min_side_px": 214,
+        "bbox": [
+          263,
+          0,
+          639,
+          213
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -28.213790757768294,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006051855391652372,
+      "stool_pixel_z_max": 0.4609962445327643,
+      "legs_pixel_mean_z": 0.12373421360653401,
+      "seat_pixel_mean_z": 0.4375001552894996,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 7.599999999999385,
+      "up_z": 0.9858594401462932,
+      "xy": [
+        0.6044346957184256,
+        -0.48398595243589526
+      ],
+      "yaw_deg": -60.332575807545844,
+      "cam_z": 0.3472140940979298,
+      "pitch_deg": -9.631628478410269,
+      "stool": {
+        "pixels": 63177,
+        "min_side_px": 419,
+        "bbox": [
+          221,
+          0,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -23.184129643747184,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 5119,
+        "min_side_px": 228,
+        "bbox": [
+          223,
+          252,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -23.22748774896931,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 58058,
+        "min_side_px": 255,
+        "bbox": [
+          221,
+          0,
+          639,
+          254
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -23.184129643747184,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006052410582430667,
+      "stool_pixel_z_max": 0.4661248296402748,
+      "legs_pixel_mean_z": 0.11904615954070358,
+      "seat_pixel_mean_z": 0.4472297957970754,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 7.703999999999374,
+      "up_z": 0.9902604860072637,
+      "xy": [
+        0.5957539158172452,
+        -0.5001490571295933
+      ],
+      "yaw_deg": -60.634852636057,
+      "cam_z": 0.3420146886608455,
+      "pitch_deg": -7.684962643715266,
+      "stool": {
+        "pixels": 66624,
+        "min_side_px": 476,
+        "bbox": [
+          164,
+          0,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -20.898013152713133,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 5245,
+        "min_side_px": 229,
+        "bbox": [
+          205,
+          251,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -20.945538297207378,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 61379,
+        "min_side_px": 258,
+        "bbox": [
+          164,
+          0,
+          639,
+          257
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -20.898013152713133,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006044336521534632,
+      "stool_pixel_z_max": 0.46300620434479606,
+      "legs_pixel_mean_z": 0.11894507918789153,
+      "seat_pixel_mean_z": 0.44657215059942407,
+      "hit_leg_projects": true,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 7.799999999999363,
+      "up_z": 0.9647113860690045,
+      "xy": [
+        0.6001299681104275,
+        -0.5306262456314111
+      ],
+      "yaw_deg": -59.64054460995835,
+      "cam_z": 0.33650409556231736,
+      "pitch_deg": -14.971763185977688,
+      "stool": {
+        "pixels": 50134,
+        "min_side_px": 480,
+        "bbox": [
+          138,
+          0,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -21.858680137810154,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 5809,
+        "min_side_px": 252,
+        "bbox": [
+          184,
+          228,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -21.91163474002272,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 44325,
+        "min_side_px": 238,
+        "bbox": [
+          138,
+          0,
+          639,
+          237
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -21.858680137810154,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006196740606755846,
+      "stool_pixel_z_max": 0.4609962464668757,
+      "legs_pixel_mean_z": 0.12201580858734003,
+      "seat_pixel_mean_z": 0.44393577393563216,
+      "hit_leg_projects": false,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 7.9039999999993515,
+      "up_z": 0.8781850095761279,
+      "xy": [
+        0.6108685901134369,
+        -0.5572829458144315
+      ],
+      "yaw_deg": -43.7770817131406,
+      "cam_z": 0.32041854457284746,
+      "pitch_deg": -28.039689065443117,
+      "stool": {
+        "pixels": 13908,
+        "min_side_px": 415,
+        "bbox": [
+          225,
+          0,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -39.295942987203034,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 8736,
+        "min_side_px": 304,
+        "bbox": [
+          225,
+          176,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -39.35296402921887,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 5172,
+        "min_side_px": 189,
+        "bbox": [
+          333,
+          0,
+          639,
+          188
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -39.295942987203034,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.00601009915828582,
+      "stool_pixel_z_max": 0.4138091950893773,
+      "legs_pixel_mean_z": 0.13864092365877956,
+      "seat_pixel_mean_z": 0.3377362463139676,
+      "hit_leg_projects": false,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 7.999999999999341,
+      "up_z": 0.8007192466247297,
+      "xy": [
+        0.6181930931815723,
+        -0.5705241108601437
+      ],
+      "yaw_deg": -23.954607470732956,
+      "cam_z": 0.30085037038392887,
+      "pitch_deg": -36.068663047677084,
+      "stool": {
+        "pixels": 10409,
+        "min_side_px": 360,
+        "bbox": [
+          280,
+          0,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -60.536539411671754,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 6472,
+        "min_side_px": 343,
+        "bbox": [
+          280,
+          137,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -60.595084512460105,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 3937,
+        "min_side_px": 97,
+        "bbox": [
+          443,
+          0,
+          539,
+          138
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -60.536539411671754,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006257599602185082,
+      "stool_pixel_z_max": 0.34500970247420465,
+      "legs_pixel_mean_z": 0.13268823656086812,
+      "seat_pixel_mean_z": 0.30827500134647323,
+      "hit_leg_projects": false,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 8.103999999999376,
+      "up_z": 0.7439143588585271,
+      "xy": [
+        0.6440645600054554,
+        -0.5641445383078288
+      ],
+      "yaw_deg": -30.650236548493467,
+      "cam_z": 0.2890207863801595,
+      "pitch_deg": -41.94560888629241,
+      "stool": {
+        "pixels": 11388,
+        "min_side_px": 351,
+        "bbox": [
+          279,
+          0,
+          629,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -60.29279358970116,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 7360,
+        "min_side_px": 351,
+        "bbox": [
+          279,
+          117,
+          629,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -60.34094569445699,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 4028,
+        "min_side_px": 114,
+        "bbox": [
+          468,
+          0,
+          581,
+          119
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -60.29279358970116,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.00600006446463397,
+      "stool_pixel_z_max": 0.32317012113170895,
+      "legs_pixel_mean_z": 0.1375336200278583,
+      "seat_pixel_mean_z": 0.2950006352267323,
+      "hit_leg_projects": false,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 8.199999999999408,
+      "up_z": 0.6637449075551723,
+      "xy": [
+        0.6709970547207047,
+        -0.5690056981774102
+      ],
+      "yaw_deg": -32.57744566577891,
+      "cam_z": 0.269054651799754,
+      "pitch_deg": -48.38340788850342,
+      "stool": {
+        "pixels": 13890,
+        "min_side_px": 351,
+        "bbox": [
+          289,
+          0,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -65.0571816671664,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 10546,
+        "min_side_px": 351,
+        "bbox": [
+          289,
+          69,
+          639,
+          479
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -65.095763998533,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 3344,
+        "min_side_px": 72,
+        "bbox": [
+          542,
+          0,
+          639,
+          71
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -65.0571816671664,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006079028757748517,
+      "stool_pixel_z_max": 0.28584212554540983,
+      "legs_pixel_mean_z": 0.15136709288483888,
+      "seat_pixel_mean_z": 0.2721848912686455,
+      "hit_leg_projects": false,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 8.303999999999442,
+      "up_z": 0.49379198987114636,
+      "xy": [
+        0.7017894079824053,
+        -0.5983185733395401
+      ],
+      "yaw_deg": -30.94959657813098,
+      "cam_z": 0.22185527390348608,
+      "pitch_deg": -60.42136906152053,
+      "stool": {
+        "pixels": 15865,
+        "min_side_px": 360,
+        "bbox": [
+          280,
+          2,
+          639,
+          470
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -76.13203117467445,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 15865,
+        "min_side_px": 360,
+        "bbox": [
+          280,
+          2,
+          639,
+          470
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -76.15787724873968,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 0,
+        "min_side_px": 0,
+        "bbox": null,
+        "class_name": "out_of_frustum",
+        "bearing_deg": -76.13203117467445,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006388938772699165,
+      "stool_pixel_z_max": 0.20115310581353488,
+      "legs_pixel_mean_z": 0.13079060865269523,
+      "seat_pixel_mean_z": null,
+      "hit_leg_projects": false,
+      "hit_rail_projects": true
+    },
+    {
+      "t": 8.399999999999475,
+      "up_z": 0.3484985172925662,
+      "xy": [
+        0.7138453419558903,
+        -0.6262746238951021
+      ],
+      "yaw_deg": -29.508565254776688,
+      "cam_z": 0.17838937261834406,
+      "pitch_deg": -69.4334076298701,
+      "stool": {
+        "pixels": 11774,
+        "min_side_px": 217,
+        "bbox": [
+          348,
+          10,
+          639,
+          226
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -83.61418263533172,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 11774,
+        "min_side_px": 217,
+        "bbox": [
+          348,
+          10,
+          639,
+          226
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -83.63062381592083,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 0,
+        "min_side_px": 0,
+        "bbox": null,
+        "class_name": "out_of_frustum",
+        "bearing_deg": -83.61418263533172,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.0060024012802654125,
+      "stool_pixel_z_max": 0.13466938011484558,
+      "legs_pixel_mean_z": 0.09851016951429648,
+      "seat_pixel_mean_z": null,
+      "hit_leg_projects": false,
+      "hit_rail_projects": false
+    },
+    {
+      "t": 8.50399999999951,
+      "up_z": 0.23069262190408418,
+      "xy": [
+        0.7184614885693782,
+        -0.6495135184543134
+      ],
+      "yaw_deg": -24.88241661246444,
+      "cam_z": 0.142008914132347,
+      "pitch_deg": -76.04922134195056,
+      "stool": {
+        "pixels": 5919,
+        "min_side_px": 130,
+        "bbox": [
+          403,
+          22,
+          532,
+          174
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -92.79183343614591,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 5919,
+        "min_side_px": 130,
+        "bbox": [
+          403,
+          22,
+          532,
+          174
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -92.79954814014506,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 0,
+        "min_side_px": 0,
+        "bbox": null,
+        "class_name": "out_of_frustum",
+        "bearing_deg": -92.79183343614591,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006000500422075394,
+      "stool_pixel_z_max": 0.08328653782757718,
+      "legs_pixel_mean_z": 0.050865403523709926,
+      "seat_pixel_mean_z": null,
+      "hit_leg_projects": false,
+      "hit_rail_projects": false
+    },
+    {
+      "t": 8.599999999999541,
+      "up_z": 0.11810534692453244,
+      "xy": [
+        0.7212552418533619,
+        -0.6671162992750969
+      ],
+      "yaw_deg": -11.321524014017056,
+      "cam_z": 0.10641602146987925,
+      "pitch_deg": -81.81852645437847,
+      "stool": {
+        "pixels": 4557,
+        "min_side_px": 84,
+        "bbox": [
+          389,
+          25,
+          472,
+          123
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -110.30333132667651,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 4557,
+        "min_side_px": 84,
+        "bbox": [
+          389,
+          25,
+          472,
+          123
+        ],
+        "class_name": "visible_enough",
+        "bearing_deg": -110.3016867196373,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 0,
+        "min_side_px": 0,
+        "bbox": null,
+        "class_name": "out_of_frustum",
+        "bearing_deg": -110.30333132667651,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": 0.006048299433117729,
+      "stool_pixel_z_max": 0.03726638921479164,
+      "legs_pixel_mean_z": 0.02242199080030758,
+      "seat_pixel_mean_z": null,
+      "hit_leg_projects": false,
+      "hit_rail_projects": false
+    },
+    {
+      "t": 8.703999999999576,
+      "up_z": -0.027845073814512775,
+      "xy": [
+        0.7229229756455247,
+        -0.6850807831734885
+      ],
+      "yaw_deg": 61.42986837875811,
+      "cam_z": 0.059556757921184596,
+      "pitch_deg": -85.17914847737815,
+      "stool": {
+        "pixels": 0,
+        "min_side_px": 0,
+        "bbox": null,
+        "class_name": "occluded",
+        "bearing_deg": 172.52264459553356,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 0,
+        "min_side_px": 0,
+        "bbox": null,
+        "class_name": "occluded",
+        "bearing_deg": 172.53681154228298,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 0,
+        "min_side_px": 0,
+        "bbox": null,
+        "class_name": "out_of_frustum",
+        "bearing_deg": 172.52264459553356,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": null,
+      "stool_pixel_z_max": null,
+      "legs_pixel_mean_z": null,
+      "seat_pixel_mean_z": null,
+      "hit_leg_projects": false,
+      "hit_rail_projects": false
+    },
+    {
+      "t": 8.799999999999608,
+      "up_z": -0.20263804617184356,
+      "xy": [
+        0.7219432474821675,
+        -0.6982837763684636
+      ],
+      "yaw_deg": 108.43796842632352,
+      "cam_z": 0.002157287065083051,
+      "pitch_deg": -77.63170943888582,
+      "stool": {
+        "pixels": 0,
+        "min_side_px": 0,
+        "bbox": null,
+        "class_name": "out_of_frustum",
+        "bearing_deg": 122.42623702640782,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 0,
+        "min_side_px": 0,
+        "bbox": null,
+        "class_name": "out_of_frustum",
+        "bearing_deg": 122.45092670017777,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 0,
+        "min_side_px": 0,
+        "bbox": null,
+        "class_name": "out_of_frustum",
+        "bearing_deg": 122.42623702640782,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": null,
+      "stool_pixel_z_max": null,
+      "legs_pixel_mean_z": null,
+      "seat_pixel_mean_z": null,
+      "hit_leg_projects": false,
+      "hit_rail_projects": false
+    },
+    {
+      "t": 8.903999999999643,
+      "up_z": -0.46479467207915837,
+      "xy": [
+        0.720272634395042,
+        -0.6963639825465328
+      ],
+      "yaw_deg": 122.22123451728785,
+      "cam_z": -0.08520708208331541,
+      "pitch_deg": -62.238949203871854,
+      "stool": {
+        "pixels": 0,
+        "min_side_px": 0,
+        "bbox": null,
+        "class_name": "out_of_frustum",
+        "bearing_deg": 109.74847645409648,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 0,
+        "min_side_px": 0,
+        "bbox": null,
+        "class_name": "out_of_frustum",
+        "bearing_deg": 109.76976285663596,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 0,
+        "min_side_px": 0,
+        "bbox": null,
+        "class_name": "out_of_frustum",
+        "bearing_deg": 109.74847645409648,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": null,
+      "stool_pixel_z_max": null,
+      "legs_pixel_mean_z": null,
+      "seat_pixel_mean_z": null,
+      "hit_leg_projects": false,
+      "hit_rail_projects": false
+    },
+    {
+      "t": 8.999999999999675,
+      "up_z": -0.7317453405133709,
+      "xy": [
+        0.7085119186193143,
+        -0.6748315688098778
+      ],
+      "yaw_deg": 128.08195937387387,
+      "cam_z": -0.17333601664996323,
+      "pitch_deg": -42.93305614669758,
+      "stool": {
+        "pixels": 0,
+        "min_side_px": 0,
+        "bbox": null,
+        "class_name": "out_of_frustum",
+        "bearing_deg": 113.05012012761301,
+        "center_z_m": 0.34143707415035696
+      },
+      "legs": {
+        "pixels": 0,
+        "min_side_px": 0,
+        "bbox": null,
+        "class_name": "out_of_frustum",
+        "bearing_deg": 113.04425198863328,
+        "center_z_m": 0.1281
+      },
+      "seat": {
+        "pixels": 0,
+        "min_side_px": 0,
+        "bbox": null,
+        "class_name": "out_of_frustum",
+        "bearing_deg": 113.05012012761301,
+        "center_z_m": 0.34143707415035696
+      },
+      "stool_pixel_z_min": null,
+      "stool_pixel_z_max": null,
+      "legs_pixel_mean_z": null,
+      "seat_pixel_mean_z": null,
+      "hit_leg_projects": false,
+      "hit_rail_projects": false
+    }
+  ]
+}
