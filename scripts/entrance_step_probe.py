@@ -5488,9 +5488,9 @@ def _install_inflight_stop(
             state["entrance_t"] = t
             print(
                 "PRED stop_entrance freeze planar+attitude at the stand pose "
-                f"t {t:.3f}. Loaded hip pitch, knee, and ankle pitch start "
-                "from the live joint and step at the stop-bout stance rate. "
-                "The continuous-walk seed stays off."
+                f"t {t:.3f}. The engage tick holds the live joint. Loaded "
+                "hip pitch, knee, and ankle pitch then step at the stop-bout "
+                "stance rate. The continuous-walk seed stays off."
             )
         entered_now = False
         if not state["stop"]:
@@ -12195,9 +12195,11 @@ def _install_sagittal_slew(
     def _toward_entrance(jn: str, target: float) -> float:
         """One stop-bout stance step from the live joint. No torque hold.
 
-        The memory is not the walk seed. Knee and ankle pitch hand the
-        slewed command to the stance slew so the next loaded tick does
-        not dump the gait. The approach knee still starts from that
+        The engage tick writes the live joint and does not step toward
+        the frozen stand IK. Later ticks step at the stop-bout stance
+        rate. The memory is not the walk seed. Knee and ankle pitch hand
+        the slewed command to the stance slew so the next loaded tick
+        does not dump the gait. The approach knee still starts from that
         command and rate-limits on its own.
         """
         t_now = float(lipm.data.time)
@@ -12206,16 +12208,20 @@ def _install_sagittal_slew(
             old = entrance_cmd.get(jn)
             if old is None:
                 old = float(lipm.q(jn))
-            dq = float(target) - float(old)
-            if dq > cap:
-                stepped = float(old) + cap
-            elif dq < -cap:
-                stepped = float(old) - cap
+            # Delayed write. The engage tick's IK is the frozen stand
+            # pose, and a step toward it starts the joint the wrong way.
+            # Hold the live joint on that tick. The next tick rate-limits
+            # from there onto the walking chain.
+            if getattr(session, "_entrance_freeze", False):
+                stepped = float(old)
             else:
-                stepped = float(target)
-                # The engage tick's target is the frozen stand pose.
-                # Catching that is not catching the walking chain.
-                if not getattr(session, "_entrance_freeze", False):
+                dq = float(target) - float(old)
+                if dq > cap:
+                    stepped = float(old) + cap
+                elif dq < -cap:
+                    stepped = float(old) - cap
+                else:
+                    stepped = float(target)
                     entrance_done.add(jn)
             entrance_cmd[jn] = float(stepped)
             entrance_at[jn] = t_now
@@ -12536,8 +12542,9 @@ def _install_sagittal_slew(
         print(
             "PRED sag_slew stop_entrance from the live joint at "
             f"{float(rad_s):.3f} rad/s on loaded hip pitch, knee, and ankle pitch. "
-            "Planar x/y and sole roll/pitch/yaw hold the stand pose on the "
-            "engage tick. The walk ladder stays off this bout."
+            "The engage tick holds that joint. Planar x/y and sole "
+            "roll/pitch/yaw hold the stand pose on that tick. "
+            "The walk ladder stays off this bout."
         )
     if "hip_pitch" in suffixes:
         print(
@@ -14149,9 +14156,9 @@ def score_sag_stop() -> None:
         "From the stop command the swing hip roll, hip yaw, hip pitch, and "
         "ankle roll hold the pre-stop q_des. Planar x/y and sole roll/pitch hold. "
         "At gait engage the stand foot planar and attitude hold for one tick. "
-        "Loaded hip pitch, knee, and ankle pitch start from the live joint "
-        "and step at the stop-bout stance rate. That catch is not the "
-        "continuous-walk seed. "
+        "That tick holds the live joint. Loaded hip pitch, knee, and ankle "
+        "pitch then step from there at the stop-bout stance rate. That catch "
+        "is not the continuous-walk seed. "
         "Before the stop, the approach swing-z is time-stretched on its own "
         "rate so the airborne knee can track. That delta is off from the "
         "stop command. The leftover swing-z is time-stretched so the knee "
