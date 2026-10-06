@@ -12062,11 +12062,11 @@ def _install_sagittal_slew(
                     step = cap
                 target = float(q_des)
                 old = prev.get(jn)
-                if old is None:
-                    # No prior command. Start from the joint the stand is
-                    # holding instead of dumping the gait target. The locked
-                    # rate-only slew takes the later ticks. No torque hold
-                    # here: that hold moved the mid-stance knee over 2.33 Nm.
+                if old is None and walk_stance:
+                    # Continuous walk only. The first command starts from
+                    # the joint the stand is holding. The stop bout keeps
+                    # its own first write: seeding it there drove the
+                    # approach knee past 9 Nm.
                     old = float(lipm.q(jn))
                 if old is not None:
                     dq = float(target) - float(old)
@@ -12176,9 +12176,10 @@ def _install_sagittal_slew(
                 "Ankle roll, sole-flat, and the stop stretch stay put."
             )
     print(
-        "PRED sag_slew entrance from the live joint at the stance rate. "
+        "PRED sag_slew entrance from the live joint at the stance rate "
+        "on the continuous walk. "
         "The stand-to-walk tick is a loaded transition. Not a swing stretch. "
-        "No extra torque hold on that catch-up."
+        "The stop bout does not take this seed."
     )
     if "hip_pitch" in suffixes:
         print(
