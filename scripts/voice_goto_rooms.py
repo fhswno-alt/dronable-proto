@@ -32,8 +32,11 @@ Every real-wall ray logs the ranged gap, the sim gap, wall id,
 heading, camera height, camera pitch, and the leading toe. The
 0.04087 m median is the pad for wall_hall_w_2 only, and only when
 the sim toe gap is under 0.40 m — the class of the 17 living
-samples. Other walls and a same-named wall seen from farther away
-do not get that pad. A prop, a different wall, or that far class
+samples. wall_hall_e_1 has its own median from 43 close samples on
+tip aac2baa, held out of this run. The living number is not copied
+onto the east wall. Other walls and a same-named wall seen from
+farther away do not get a pad. The 0.40 m bound is 2.39 times the
+living latch distance. A prop, a different wall, or that far class
 is a reject and is not soaked into the latch. A stop that does
 commit has to land within 1 cm of its own pad or the wall stop
 fails. Room reach is a separate bar. A wall or prop contact with
@@ -156,7 +159,66 @@ LATCH_EXTRA_M = float(statistics.median(SAME_WALL_ERR_M))
 # That median was measured on one wall, close in. It does not travel
 # to wall_hall_e_1 or to wall_hall_w_2 seen from several metres.
 LIVING_WALL = "wall_hall_w_2"
+# Walk-up band the living 17 were collected in. The living latch
+# distance is d_min 0.1263 m + 0.04087 m = 0.1672 m. 0.40 m is 2.39
+# times that distance, so it is the approach in front of the latch.
+# A ray past it stays a far reject. It is not a second clearance pad.
 CLOSE_GAP_M = 0.40
+# Kitchen −90° wall_hall_e_1 on tip aac2baa. Same rule as the living
+# set: same wall id, sim ray at or under 0.40 m. Forty-three samples,
+# each with heading, cam_z, camera pitch, and leading-toe offset.
+# Fields are err_m, heading_rad, cam_z_m, cam_pitch_rad, lead_off_m,
+# ray_m. The pad is the median of the errors, not the 0.203 m stop
+# and not the living 0.04087 m. This run's stop is held out of the set.
+EAST_WALL = "wall_hall_e_1"
+EAST_CLOSE: tuple[tuple[float, float, float, float, float, float], ...] = (
+    (0.018459365711454845, -0.4606900838575969, 0.33718933789269756, -0.2671429837835369, -0.016491813459113984, 0.33490592913320616),
+    (0.019870525838155018, -0.46195893615946887, 0.33744800112190904, -0.26402938625225036, -0.012644825991786368, 0.3299715110478957),
+    (0.01124062789056579, -0.43427071535135814, 0.3301707897045914, -0.25295381942490985, -0.010123955800654222, 0.315424532378546),
+    (0.022371324879031707, -0.4761343165000211, 0.34063553729231116, -0.25905005299972245, -0.010977319959444825, 0.312038340787725),
+    (0.014172653072355712, -0.4612933593826507, 0.33717973854714234, -0.2671923372683821, -0.01651888607747099, 0.30487624685085946),
+    (0.018998198212342, -0.46250215271906087, 0.3374256155723085, -0.2641164023287797, -0.012685444580628563, 0.2999100473193094),
+    (0.006096072416868825, -0.4348887612765236, 0.330160175955297, -0.2529932460953037, -0.010148613032648988, 0.28577148663538565),
+    (0.023313578415210978, -0.4768345281773284, 0.34065095873573525, -0.25885090649992015, -0.010919778644733808, 0.2818080682094471),
+    (0.035660759960736144, -0.746090386572843, 0.33485648896777087, -0.2618130230308264, -0.01704636387668256, 0.27425972120831166),
+    (0.036071440108821906, -0.7314091599820147, 0.3317063632666801, -0.25966896322938354, -0.01561049322581752, 0.27900257721470023),
+    (0.050568529557177, -0.7263628537175592, 0.3380462053184142, -0.26627850535952474, -0.016255039309352903, 0.2922150871323482),
+    (0.04503687948824822, -0.7283522442006857, 0.3352973155697339, -0.2581840727488311, -0.01243995440282667, 0.2821163716984157),
+    (0.027595774569479314, -0.7589572132972796, 0.33010918608334866, -0.25408778341169586, -0.014156752315027728, 0.26509308151516964),
+    (0.1506722347683461, -0.7756526546352759, 0.33717640441487934, -0.2672920486363157, -0.01655566964270053, 0.38381729649228774),
+    (0.14898969455207245, -0.7768477128544267, 0.33743866355903174, -0.2640961546692104, -0.012668132996911288, 0.3793135738974913),
+    (0.12738228017970862, -0.749222269764188, 0.3301768335657582, -0.25294125245734234, -0.010121967105166978, 0.3549950585691097),
+    (0.04497046451139322, -0.7208985450729345, 0.3353585763229499, -0.26659465443992963, -0.014400297242675426, 0.2774128465796174),
+    (0.05734815276887134, -0.7114021646992944, 0.3405789223798939, -0.2527152404446212, -0.007520735924884345, 0.2787574278349222),
+    (0.03355800739425943, -0.7316803922536118, 0.3331088490152483, -0.24951393080036327, -0.0038629449826222914, 0.24812503447279355),
+    (0.04858847054956744, -0.7732600808980788, 0.33164158284879064, -0.2730123326318353, -0.014122202117667402, 0.26037443312605485),
+    (0.15977280287477152, -0.7911252235176623, 0.3406368352762272, -0.2590431501924645, -0.010973367416138751, 0.36602840881824605),
+    (0.031361574454811886, -0.7471441763591538, 0.33485806509748006, -0.26173796265356525, -0.017005496145546715, 0.2444756223651281),
+    (0.03983016052991295, -0.7324751512263892, 0.331677898327193, -0.2599949848092821, -0.015682675631513647, 0.24870065373761152),
+    (0.048247989518562545, -0.727540082962291, 0.33801794502803356, -0.2665183138056701, -0.01633966734784161, 0.2616005499836222),
+    (0.04104436193218278, -0.7295011591256627, 0.3352888602868898, -0.2581814447167103, -0.012449656336555948, 0.2515629819985977),
+    (0.024918157535977842, -0.7600336858703329, 0.3301210064107261, -0.25397807379702353, -0.014127734130392429, 0.23558779659430756),
+    (0.14646226056805706, -0.7766557509878589, 0.33716651931956176, -0.2673418659102439, -0.01658329482280911, 0.35357006607699026),
+    (0.14554391353400592, -0.7777912036774642, 0.337415629577165, -0.26417923411511873, -0.012708381038177615, 0.34901329360502337),
+    (0.12376247265784124, -0.7501185621894505, 0.3301648022024256, -0.2530107679385132, -0.010155790434849762, 0.3254086667817543),
+    (0.05000255522016028, -0.7218536259628895, 0.3353584573496013, -0.2666383131569396, -0.014411483025159653, 0.24844003513458646),
+    (0.05210515775543695, -0.7124457311990573, 0.34057389237431396, -0.25271394817137677, -0.007524459619047157, 0.24762418167164896),
+    (0.03770138160585387, -0.7328023388525927, 0.3330854097124395, -0.24948714338283537, -0.0038667944095315708, 0.21772686074825495),
+    (0.04600715811464742, -0.7743908235512676, 0.33166836539049277, -0.272962779562084, -0.014093136370115429, 0.22998706299486588),
+    (0.1581449343160692, -0.7921294719740872, 0.3406569881286009, -0.2588176658778602, -0.01090441404853212, 0.33529851229523233),
+    (0.029462726524616734, -1.061699202041039, 0.3348576673122178, -0.2618052220409971, -0.01704574344505056, 0.22520206093525463),
+    (0.01683454355199429, -1.0470086919346588, 0.3317061854364401, -0.25967226602422905, -0.01561589177576248, 0.21938652187847438),
+    (0.01029539713228686, -1.0419269940043625, 0.3380437310497457, -0.26631909655641717, -0.016272608374541156, 0.20077107470372366),
+    (0.001156175575773244, -1.0439559006840442, 0.33529651083188644, -0.25819162951502245, -0.012442013996414628, 0.20710294518197478),
+    (0.046379076628352306, -1.0745597017304598, 0.3301082980725061, -0.254089008125809, -0.014157488731327866, 0.2292230478241917),
+    (0.15784185620779986, -1.0364333994420951, 0.3353572412084168, -0.26663515116474923, -0.014401271388128993, 0.36481984376591),
+    (0.02623597153238752, -1.0269963306750818, 0.34057970020559336, -0.25270331320446876, -0.007516456413613475, 0.1795644881552401),
+    (0.003559847832219243, -1.0472716893339638, 0.3331087348572291, -0.2495060459108312, -0.003860749523748706, 0.19418107280454722),
+    (0.20341424894951343, -1.0887848889119358, 0.33164235823040283, -0.2729989872932855, -0.014120531915378008, 0.3550626326053704),
+)
+EAST_LATCH_M = float(statistics.median(row[0] for row in EAST_CLOSE))
+# wall_hall_e_0 had five close samples on that tip, under the living
+# set of 17, so it keeps pad 0. This run does not invent one.
 DOOR_Z = (0.05, 1.35)
 RAY_STEP = 8
 ROOM_GEOMS: dict[str, tuple[str, ...]] = {
@@ -248,6 +310,7 @@ class ApproachJson(TypedDict):
     cam_pitch_rad: float
     geometric_m: float | None
     lead_off_m: float
+    lead_side: str
     range_err_m: float | None
     residual_m: float | None
 
@@ -276,6 +339,7 @@ class WallHitJson(TypedDict):
     head_tilt_rad: float | None
     cam_pitch_rad: float | None
     lead_off_m: float | None
+    lead_side: str
     residual_m: float | None
     ranged_wall: str
     latch_path: str
@@ -357,6 +421,11 @@ class RoomJson(TypedDict):
     wall_stop_residual_m: float | None
     wall_stop_class: str
     wall_stop_wall: str
+    wall_stop_heading_rad: float | None
+    wall_stop_cam_z_m: float | None
+    wall_stop_pitch_rad: float | None
+    wall_stop_lead_m: float | None
+    wall_stop_lead_side: str
     wall_residual_max_m: float | None
     same_wall_count: int
     surface_reject_count: int
@@ -501,11 +570,16 @@ def _definition() -> DefinitionJson:
             "a different wall is logged and is not added to the latch. "
             f"latch_extra {LATCH_EXTRA_M:.5f} m is the median of "
             f"{len(SAME_WALL_ERR_M)} errors on {LIVING_WALL} with the "
-            f"sim gap under {CLOSE_GAP_M:.2f} m. It is not added on "
-            "other walls or on a far look at the same name. The bob "
-            "pad is not stacked on it. A stop that commits has to "
-            f"land within {RANGE_ERR_MAX_M:.2f} m of that wall's own "
-            "pad. Room reach is a separate bar. In-place body "
+            f"sim gap under {CLOSE_GAP_M:.2f} m. {EAST_WALL} has its "
+            f"own median, {EAST_LATCH_M:.5f} m, from {len(EAST_CLOSE)} "
+            "close samples on tip aac2baa. The living median is not "
+            "copied onto it. The 0.40 m bound is 2.39 times the living "
+            "latch distance 0.1672 m (d_min 0.1263 plus that median). "
+            "A ray past 0.40 m stays a far reject. The bob pad is not "
+            "stacked on either median. A stop that commits has to land "
+            f"within {RANGE_ERR_MAX_M:.2f} m of that wall's own pad, "
+            "on a hit that was not in the median set. Room reach is a "
+            "separate bar. In-place body "
             f"yaw that asks a hip roll over {HIP_BAR_NM:.2f} Nm "
             "unclamped is not a free re-point. d_min is not rebuilt. "
             "The ray uses the live camera height and the IMU pitch "
@@ -829,10 +903,13 @@ def _range_wall(
         session, model, cid, jid, pan_id, reach,
     )
     toes = gate.toe_samples(session, cid)
-    # Distance in front of the foot that is ahead right now. The latch
-    # still subtracts the period high-water inside toe_gap. That margin
-    # is not camera-pitch error.
-    lead_off = 0.0 if not toes else max(float(row.offset_m) for row in toes)
+    # Distance in front of the foot that is ahead right now. East-hall
+    # and west-hall headings swap which foot that is. The latch still
+    # subtracts the period high-water inside toe_gap. That margin is
+    # not camera-pitch error.
+    lead = None if not toes else max(toes, key=lambda row: row.offset_m)
+    lead_off = 0.0 if lead is None else float(lead.offset_m)
+    lead_side = "" if lead is None else str(lead.side)
     reading: dict[str, object] = {
         "u": None,
         "v": None,
@@ -840,6 +917,7 @@ def _range_wall(
         "toe_gap_m": None,
         "geometric_m": None,
         "lead_off_m": lead_off,
+        "lead_side": lead_side,
         "step_off_m": float(step_off),
         "in_corridor": False,
         "cam_z_m": float(pose.position_m[2]),
@@ -883,7 +961,9 @@ def _geom_class(wall: str, true_gap: float | None) -> str:
     close = float(true_gap) <= CLOSE_GAP_M
     if wall == LIVING_WALL and close:
         return "living_close"
-    if wall == LIVING_WALL:
+    if wall == EAST_WALL and close:
+        return "east_close"
+    if wall == LIVING_WALL or wall == EAST_WALL:
         return "far_same_name"
     if close:
         return "other_wall_close"
@@ -891,8 +971,11 @@ def _geom_class(wall: str, true_gap: float | None) -> str:
 
 
 def _pad_for(wall: str, true_gap: float | None) -> float:
-    if _geom_class(wall, true_gap) == "living_close":
+    klass = _geom_class(wall, true_gap)
+    if klass == "living_close":
         return LATCH_EXTRA_M
+    if klass == "east_close":
+        return EAST_LATCH_M
     return 0.0
 
 
@@ -935,6 +1018,7 @@ def _wall_hit(
         head_tilt_rad=None if head_tilt is None else float(head_tilt),
         cam_pitch_rad=None if cam_pitch is None else float(cam_pitch),
         lead_off_m=None if lead is None else float(lead),
+        lead_side=str(reading.get("lead_side") or ""),
         residual_m=residual,
         ranged_wall=str(reading.get("wall") or ""),
         latch_path=latch_path,
@@ -1820,6 +1904,11 @@ def _run_room(
     wall_stop_residual: float | None = None
     wall_stop_class = ""
     wall_stop_wall = ""
+    wall_stop_heading: float | None = None
+    wall_stop_cam_z: float | None = None
+    wall_stop_pitch: float | None = None
+    wall_stop_lead: float | None = None
+    wall_stop_lead_side = ""
     wall_bias_max: float | None = None
     wall_bias_count = 0
     wall_residual_max: float | None = None
@@ -1827,7 +1916,7 @@ def _run_room(
     surface_reject_count = 0
     class_reject_count = 0
     gate_m = d_min_m
-    # Living close class only. Other walls use d_min with no extra.
+    # Per wall. Living and east close classes add their own medians.
     wall_gate_m = d_min_m + latch_extra_m
     floor_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "floor")
     walls = _wall_ids(model)
@@ -2248,11 +2337,14 @@ def _run_room(
                             cam_pitch_rad=float(reading["cam_pitch_rad"]),
                             geometric_m=ranged_g,
                             lead_off_m=float(reading["lead_off_m"]),
+                            lead_side=str(reading["lead_side"]),
                             range_err_m=err,
                             residual_m=residual,
                         ))
                         gap = reading["toe_gap_m"]
-                        close_class = klass in ("living_close", "other_wall_close")
+                        close_class = klass in (
+                            "living_close", "east_close", "other_wall_close",
+                        )
                         if same and close_class:
                             same_wall_count += 1
                             if err is not None:
@@ -2278,6 +2370,11 @@ def _run_room(
                                 wall_stop_residual = residual
                                 wall_stop_class = klass
                                 wall_stop_wall = true_name
+                                wall_stop_heading = heading
+                                wall_stop_cam_z = float(reading["cam_z_m"])
+                                wall_stop_pitch = float(reading["cam_pitch_rad"])
+                                wall_stop_lead = float(reading["lead_off_m"])
+                                wall_stop_lead_side = str(reading["lead_side"])
                                 if residual is not None and (
                                     wall_residual_max is None
                                     or residual > wall_residual_max
@@ -2305,7 +2402,8 @@ def _run_room(
                                         f"heading={heading:+.3f} "
                                         f"cam_z={float(reading['cam_z_m']):.3f} "
                                         f"cam_pitch={float(reading['cam_pitch_rad']):+.4f} "
-                                        f"lead={float(reading['lead_off_m']):+.4f}"
+                                        f"lead={float(reading['lead_off_m']):+.4f} "
+                                        f"lead_side={reading['lead_side']}"
                                     ),
                                     hit_xy=None,
                                     on_shadow=False,
@@ -2611,6 +2709,11 @@ def _run_room(
             wall_stop_residual_m=wall_stop_residual,
             wall_stop_class=wall_stop_class,
             wall_stop_wall=wall_stop_wall,
+            wall_stop_heading_rad=wall_stop_heading,
+            wall_stop_cam_z_m=wall_stop_cam_z,
+            wall_stop_pitch_rad=wall_stop_pitch,
+            wall_stop_lead_m=wall_stop_lead,
+            wall_stop_lead_side=wall_stop_lead_side,
             wall_residual_max_m=wall_residual_max,
             same_wall_count=same_wall_count,
             surface_reject_count=surface_reject_count,
@@ -2808,6 +2911,22 @@ def main() -> int:
         raise SystemExit(f"FAIL: same-wall set has {len(SAME_WALL_ERR_M)} samples")
     if abs(LATCH_EXTRA_M - 0.04086979572280322) > 1e-12:
         raise SystemExit(f"FAIL: latch median moved to {LATCH_EXTRA_M}")
+    if len(EAST_CLOSE) != 43:
+        raise SystemExit(f"FAIL: east close set has {len(EAST_CLOSE)} samples")
+    if any(row[5] > CLOSE_GAP_M + 1e-12 for row in EAST_CLOSE):
+        raise SystemExit("FAIL: east close set includes a ray past 0.40 m")
+    if abs(EAST_LATCH_M - 0.03983016052991295) > 1e-12:
+        raise SystemExit(f"FAIL: east median moved to {EAST_LATCH_M}")
+    if abs(EAST_LATCH_M - LATCH_EXTRA_M) < 1e-4:
+        raise SystemExit("FAIL: east median copied the living median")
+    if _pad_for(EAST_WALL, 0.20) != EAST_LATCH_M:
+        raise SystemExit("FAIL: east close pad is not the east median")
+    if _pad_for(EAST_WALL, 1.0) != 0.0:
+        raise SystemExit("FAIL: far east ray took a pad")
+    if _pad_for("wall_hall_e_0", 0.20) != 0.0:
+        raise SystemExit("FAIL: an unmeasured close wall took a pad")
+    if _pad_for(LIVING_WALL, 0.20) != LATCH_EXTRA_M:
+        raise SystemExit("FAIL: living close pad moved")
     if _yaw_toward_u(100.0) != voice.YAW_RAD_S or _yaw_toward_u(540.0) != -voice.YAW_RAD_S:
         raise SystemExit("FAIL: doorway pixel yaw sign moved")
     if _yaw_toward_u(rc.WIDTH / 2.0) != 0.0:
@@ -2892,6 +3011,20 @@ def main() -> int:
         "latch_sample_count": len(SAME_WALL_ERR_M),
         "latch_band_min_m": min(SAME_WALL_ERR_M),
         "latch_band_max_m": max(SAME_WALL_ERR_M),
+        "latch_wall": LIVING_WALL,
+        "east_wall": EAST_WALL,
+        "east_latch_m": EAST_LATCH_M,
+        "east_sample_count": len(EAST_CLOSE),
+        "east_source": "aac2baa kitchen -90 wall_hall_e_1 ray<=0.40 held out",
+        "close_gap_m": CLOSE_GAP_M,
+        "living_latch_distance_m": float(definition["d_min_m"]) + LATCH_EXTRA_M,
+        "close_gap_over_living_latch": (
+            CLOSE_GAP_M / (float(definition["d_min_m"]) + LATCH_EXTRA_M)
+        ),
+        "per_wall_pad_m": {
+            LIVING_WALL: LATCH_EXTRA_M,
+            EAST_WALL: EAST_LATCH_M,
+        },
         "bob_pad_stacked": False,
         "bob_pad_needed": bob_needed,
         "rooms": [],
@@ -2953,7 +3086,12 @@ def main() -> int:
                     f"wall_stop_fail={row['wall_stop_fail']}  "
                     f"stop_wall={row['wall_stop_wall']} "
                     f"stop_class={row['wall_stop_class']} "
-                    f"stop_residual={row['wall_stop_residual_m']}  "
+                    f"stop_residual={row['wall_stop_residual_m']} "
+                    f"hdg={row['wall_stop_heading_rad']} "
+                    f"z={row['wall_stop_cam_z_m']} "
+                    f"pitch={row['wall_stop_pitch_rad']} "
+                    f"lead={row['wall_stop_lead_m']} "
+                    f"toe={row['wall_stop_lead_side']}  "
                     f"class_reject={row['class_reject_count']}  "
                     f"same_wall={row['same_wall_count']} "
                     f"surface_reject={row['surface_reject_count']}  "
