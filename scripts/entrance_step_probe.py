@@ -55,7 +55,7 @@ _WALK_Z_RATE = 1.55
 # stays at the rate that cleared it and is not dragged down with the
 # knee. The stop bout does not read these.
 _WALK_STANCE_RATE = 1.90
-_WALK_KNEE_RATE = 1.50
+_WALK_KNEE_RATE = 1.65
 _WALK_HIP_PITCH_RATE = 1.90
 # Locked 1.55 copy, no hip slew, CoM tick 2.200 s: stance corner −2.564 mm.
 # A mid-stance tick more than 1 mm past that is a new dig.
@@ -14547,7 +14547,7 @@ def score_mid_swing() -> None:
             next_lever = (
                 "20-80% knee and ankle pitch are inside 2.33 Nm, both flat "
                 "toes stay at or above +2 mm, and every contact-box corner "
-                "stays at or above 0. The miss is the mid-SS stance chain. "
+                "stays at or above 0. The miss is the support chain named above. "
                 f"Loaded hip pitch is at {_WALK_HIP_PITCH_RATE:.2f} rad/s, "
                 f"the stance knee is at {_WALK_KNEE_RATE:.2f} rad/s, and "
                 f"ankle pitch stays at {_WALK_STANCE_RATE:.2f} rad/s. "
