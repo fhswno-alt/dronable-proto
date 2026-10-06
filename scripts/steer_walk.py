@@ -170,14 +170,19 @@ Hip roll while yawing used to cross 2.33 Nm on the empty plant
 damping adds to the spring. While applied yaw is away from 0 the
 hip-roll command uses the 2.33 Nm prediction budget. The same window
 then peaks at −2.27 Nm. Straight walking is not on that budget.
-Forcerange stays ±2.45 Nm. A Day-1 stop before the kitchen stool
-contact keeps 0 prop contacts and min up_z 0.934. Stop knees measure
-2.280 Nm. Other stop joints still sit near 2.40 Nm. The bus is stood
-on the next 8 ms tick. The body settle, T_stop, is up to 0.830 s and
-8.3 cm of COM path. Clear distance is v × (T_detect + T_stop) with
-T_detect left open. The #63 t_cue of 1.90 s is first-visible, not
-T_detect. Reversing yaw at 4.0 s also misses the stool and stays under
-2.33 Nm. Yaw 0 does not. Not go-anywhere. Soft-pass is off.
+Forcerange stays ±2.45 Nm. The stop hold limits every leg joint
+(hip yaw, hip roll, hip pitch, knee, ankle pitch, ankle roll) to a
+2.28 Nm prediction, rewritten each physics step from the live q and
+ω. Measured peaks on that hold are 2.280 Nm, 0.05 under 2.33. A
+command written once per tick left hip pitch at 2.309 Nm on one
+phase. The bus is stood on the next 8 ms tick. Body settle, T_stop,
+is 0.832 s on the straight walk stopped at gait clock 0.322 s, with
+8.2 cm of COM path. That replaces 0.830 s. Clear distance stays
+d_min = v × (T_detect + T_stop) with v = 0.150 m/s. T_detect is not
+filled in. The 0.342 ms RGB compute and a 33 ms frame are not kit
+T_detect, and 0.125 m / 0.129 m are not a locked margin. Camera
+world pitch for a mono range is IMU torso pitch plus head_tilt at
+the frame, not head_tilt alone. Not go-anywhere. Soft-pass is off.
 """
 from __future__ import annotations
 
@@ -1646,9 +1651,24 @@ class SteerSession:
             elif step < -slew:
                 step = -slew
             end[idx] = float(ctrl_from[idx]) + step
+        # A stand hold freezes the gait target, then this loop used to
+        # keep that ctrl for every physics step. Hip pitch on one stop
+        # phase then measured 2.309 Nm against a 2.28 Nm prediction.
+        # Re-limit the leg command from the live q and ω before each step.
+        hold = (
+            self.lipm is not None
+            and self.lipm.phase == "stand"
+            and self.lipm.cfg.schedule == "gait_manager"
+        )
         for i in range(n):
             alpha = (i + 1) / float(n)
             self.data.ctrl[:] = ctrl_from + (end - ctrl_from) * alpha
+            if hold:
+                for jn, val in self.lipm.q_stand.items():
+                    if any(tok in jn for tok in ("hip_", "knee", "ank_")):
+                        self.lipm.write_force_limited(jn, val, lipm_gait.LEG_STOP_NM)
+                    else:
+                        self.lipm.write_force_limited(jn, val)
             self.data.qfrc_applied[:] = 0.0
             self.data.xfrc_applied[:] = 0.0
             mj.mj_step(self.model, self.data)
@@ -3208,18 +3228,19 @@ def _bus_kit_forward_stop() -> tuple[list[str], list[str]]:
                 failures.append(
                     f"{label} {name} {peak.force_nm:+.3f} Nm crosses {lipm_gait.KNEE_SAG_NM:.2f}"
                 )
+            leg = any(tok in name for tok in ("hip_", "knee", "ank_"))
             if (
                 label == "stop"
-                and "knee" in name
-                and abs(peak.force_nm) > lipm_gait.KNEE_STOP_NM + 1e-3
+                and leg
+                and abs(peak.force_nm) > lipm_gait.LEG_STOP_NM + 1e-3
             ):
                 failures.append(
                     f"{label} {name} {peak.force_nm:+.3f} Nm has no "
-                    f"{lipm_gait.KNEE_STOP_HEADROOM_NM:.2f} Nm headroom under "
+                    f"{lipm_gait.LEG_STOP_HEADROOM_NM:.2f} Nm headroom under "
                     f"{lipm_gait.KNEE_SAG_NM:.2f}"
                 )
-            # Stop holds non-knees at 0.98·forcerange (2.401 Nm). The 2.33 bar
-            # on hip roll is the walking turn, not that hold.
+            # The 2.33 bar on hip roll is the walking turn. The stop hold
+            # is the all-leg 2.28 Nm check above.
             if (
                 label == "forward"
                 and "hip_roll" in name
@@ -3272,6 +3293,7 @@ def _bus_kit_yaw() -> tuple[list[str], list[str]]:
         stop_s = 9.00
         peaks: dict[str, _TauPeak] = {}
         move_peaks: dict[str, _TauPeak] = {}
+        stop_peaks: dict[str, _TauPeak] = {}
         real_step = mj.mj_step
 
         def _step(model: mj.MjModel, data: mj.MjData) -> None:
@@ -3279,6 +3301,8 @@ def _bus_kit_yaw() -> tuple[list[str], list[str]]:
             _note_leg_peaks(session, peaks)
             if session.bus.mode == "move":
                 _note_leg_peaks(session, move_peaks)
+            elif float(data.time) >= move_s - 1e-9:
+                _note_leg_peaks(session, stop_peaks)
 
         mj.mj_step = _step
         last_send = -1.0
@@ -3329,14 +3353,13 @@ def _bus_kit_yaw() -> tuple[list[str], list[str]]:
                 failures.append(f"{name} {joint} {peak.force_nm:+.3f} Nm")
             if "knee" in joint and abs(peak.force_nm) > lipm_gait.KNEE_SAG_NM + 1e-3:
                 failures.append(f"{name} knee {joint} {peak.force_nm:+.3f} Nm")
-            if (
-                "knee" in joint
-                and peak.t_s >= move_s - 1e-9
-                and abs(peak.force_nm) > lipm_gait.KNEE_STOP_NM + 1e-3
-            ):
+        for joint, peak in stop_peaks.items():
+            if not any(tok in joint for tok in ("hip_", "knee", "ank_")):
+                continue
+            if abs(peak.force_nm) > lipm_gait.LEG_STOP_NM + 1e-3:
                 failures.append(
-                    f"{name} stop knee {joint} {peak.force_nm:+.3f} Nm "
-                    f"lacks {lipm_gait.KNEE_STOP_HEADROOM_NM:.2f} Nm headroom"
+                    f"{name} stop {joint} {peak.force_nm:+.3f} Nm "
+                    f"lacks {lipm_gait.LEG_STOP_HEADROOM_NM:.2f} Nm headroom"
                 )
         for joint, peak in move_peaks.items():
             if "hip_roll" in joint and abs(peak.force_nm) > lipm_gait.KNEE_SAG_NM + 1e-3:

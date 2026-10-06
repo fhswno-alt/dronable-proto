@@ -1324,14 +1324,18 @@ step. Settled body vx is −0.031 m/s (ratio 0.98). Half of that clamp,
 
 Knees are reported against 2.33 Nm, the HX-35H budget at about 10.5 V.
 The plant forcerange stays ±2.45. Stop and the 200 ms silence apply the
-stand command through the force limit on that same tick. The knee
-command budget on that hold is 2.28 Nm, so the measured stop peak sits
-0.05 Nm under the bar. They do not slew through the walking target.
+stand command through the force limit on that same tick. Every leg
+joint on that hold — hip yaw, hip roll, hip pitch, knee, ankle pitch,
+and ankle roll — uses a 2.28 Nm prediction, rewritten from the live
+joint and its rate before each physics step. The measured stop peak
+sits on 2.280 Nm, 0.05 under the 2.33 bar. A command written once per
+tick left `l_hip_pitch` at 2.309 Nm on the straight stop at gait clock
+0.322 s. They do not slew through the walking target.
 
 | Window | Settled body vx | Knee peak | Other peak |
 | --- | ---: | ---: | ---: |
 | Forward, command +0.150 | +0.150 m/s | right +2.173 Nm | hip roll −2.128 Nm |
-| Stop from that walk | — | both knees +2.280 Nm | ankle pitch +2.401 Nm |
+| Stop from that walk | — | stop legs 2.280 Nm | stop legs 2.280 Nm |
 
 Nothing crosses 2.33 Nm on a knee. Nothing crosses 2.449 Nm on a leg.
 Swing sole p90 on this forward row is 1.75 / 1.73 cm. min up_z is 0.941
@@ -1456,39 +1460,42 @@ support (tipping margin −0.889, min up_z −0.94). With the budget on,
 the same script still clips that stool leg at 6.82 s and 20.4 N, and
 hip pitch reaches ±2.45 Nm during the clip. It does not tip (min up_z
 0.921). A Day-1 `stop` at 6.80 s, before that contact, finishes with
-0 prop contacts, min up_z 0.934, and knees at −2.280 Nm. The stop hold
-puts the other leg joints at 2.401 Nm (over 2.33, under ±2.45). A stop
-at 6.2 s is also clear of props and touches `r_hip_pitch` at −2.450 Nm.
-A stop at 6.82 s is the contact. Commanding yaw 0 at 5.0 s or 6.0 s
-still hits the stool and tips. Reversing to `vel(+0.150, +0.25)` at
-4.0 s misses the stool, stays at min up_z 0.934, and stays under
-2.33 Nm. The same reversal at 5.0 s does not. Bath, bed, living, and
-entrance on this 8 s turn match the empty plant (heading −101.4°, 0
-prop contacts). `col_entrance_sill` is a wall and was not touched.
-Not go-anywhere.
+0 prop contacts, min up_z 0.934, xy +0.555, −0.517, yaw −74.4°, and
+every stop-window leg joint at 2.280 Nm. A stop at 6.20 s is also
+clear, with the same 2.280 Nm stop peak. A stop at 6.82 s is the
+contact. Commanding yaw 0 at 5.0 s or 6.0 s still hits the stool and
+tips. Reversing to `vel(+0.150, +0.25)` at 4.0 s misses the stool,
+stays at min up_z 0.934, and stays under 2.33 Nm. The same reversal
+at 5.0 s does not. Bath, bed, living, and entrance on this 8 s turn
+match the empty plant (heading −101.4°, 0 prop contacts).
+`col_entrance_sill` is a wall and was not touched. Not go-anywhere.
 
 Stop distance. `applied_vx` is 0 and `mode` is stand on the next 8 ms
 tick (`T_bus` = 0.008 s). The body is not stood then. `T_stop` is the
 time from the stop command until the horizontal COM speed stays under
 0.02 m/s for 0.20 s. Sampled on the empty plant after the walk is up,
 for `vel(+0.150, 0)` and `vel(+0.150, ±0.25)`, across one gait period
-of issue times. `T_stop` runs from 0.554 s to 0.830 s. The long one is
-the straight walk stopped at gait clock 0.322 s. COM path length over
-that settle is 3.5–8.3 cm. Net COM displacement is at most 3.3 cm.
-min up_z stays 0.930–0.934. Knee peaks on those stops are 2.280 Nm.
-Hip pitch and ankle pitch on the hold are 2.401 Nm. The stool-timed
-right turn, stop at 6.80 s, settles in 0.570 s and 4.1 cm of COM path.
-The same stop on the #62 kitchen still has 0 prop contacts.
+of issue times, with every leg joint on the 2.28 Nm per-step hold.
+`T_stop` runs from 0.538 s to 0.832 s. The long one is the straight
+walk stopped at 4.40 s, gait clock 0.322 s. COM path on that settle
+is 8.2 cm. Net COM displacement on the grid is at most 3.4 cm.
+min up_z stays 0.930–0.934. Every leg joint on those stops measures
+2.280 Nm. Nothing on the hold crosses 2.33 Nm. Settled
+`|q − q_stand|` is 0.006 rad on the right knee and body z is 0.211.
+The larger error at the stop instant, up to 0.231 rad, is the walk
+pose being left. `v × T_stop` = 0.150 × 0.832 = 0.1248 m, longer than
+the 0.082 m COM path, because the body is already slowing down.
+0.832 s replaces 0.830 s. The old 0.830 s is not kept.
 
 Clear distance, with `v` the commanded 0.150 m/s:
 
-`d_min ≥ v × (T_detect + T_stop)`
+`d_min = v × (T_detect + T_stop)`
 
-`T_stop` = 0.830 s. `v × T_stop` = 0.125 m, which is longer than the
-measured 0.083 m COM path, because the body is already slowing down.
-`T_detect` is the time from the first-visible frame to an RGB-only
-detector firing on `kit_cam`, measured on the detector the kit would
-run. It is left as a parameter. It is not filled in here.
+`T_stop` = 0.832 s. `T_detect` is the time from the first-visible frame
+to an RGB-only detector firing on `kit_cam`, on the detector the kit
+would run, including Pi and camera frame latency. It is a parameter.
+It is not filled in here. A numeric `d_min` is not locked. 0.125 m and
+0.129 m are not the margin.
 
 `t_cue` is separate. On #63 the leg/rail band of the stool mesh is
 `visible_enough` at t = 1.90 s, and the whole stool is `visible_enough`
@@ -1496,4 +1503,52 @@ at t = 1.00 s. That frustum uses sim ground-truth masks the real kit
 will not have. First contact on that replay is t = 6.85 s, so the cue
 is available for 6.85 − 1.90 = 4.95 s before contact. That 4.95 s is
 cue availability, not `T_detect`.
+
+#65 times an RGB wood-fraction rule at 0.342 ms from the `kit_cam`
+buffer to `CommandBus.stop`. That compute is not kit `T_detect`.
+Hardware still wants the Pi and the camera frame, about +33 ms at
+30 fps, and that add is not a measured Pi latency either. The 28.8 ms
+mesh read is sim ground truth only. None of those three numbers is
+plugged into `d_min`.
+
+Mono range. The body-side estimate uses the pixel row where a stool
+leg meets the floor, camera height 0.335 m, and the camera world
+pitch at that frame. World pitch is IMU torso pitch plus the
+`head_tilt` joint, not `head_tilt` alone. At the end of stand
+(t = 1.00 s) the sum is −14.84°: IMU −14.82°, `head_tilt` −0.02°.
+The optical axis is −14.84° and the eye is at 0.335 m. At t = 1.90 s
+on this walk the sum is −15.58°: IMU −15.56°, `head_tilt` −0.02°.
+The optical axis matches the sum. The −0.74° change from stand is
+torso rock. `head_tilt` does not move. Using `head_tilt` alone
+(−0.02°) on the cue row estimates 1.210 m. The horizontal gap from
+the camera to that floor point is 0.767 m.
+
+The row is the sim projection of the group-3 leg bottom. It is not
+an RGB contact finder. The formula ignores the image column. At the
+cue the contact sits at column 456, and the live estimate is 0.557 m
+against 0.767 m. Stand pitch on the same row is 0.574 m. Most of that
+0.21 m shortfall is the center-column model. The pitch choice is
+1.7 cm.
+
+Near the middle of the frame the pitch choice is the error. At
+t = 5.46 s, `col_chair_stool_b_leg_2` is at row 381, column 312,
+ground gap 0.227 m. Live pitch −18.29° estimates 0.229 m. Stand
+pitch −14.84° estimates 0.260 m, 3.3 cm long. `head_tilt` alone
+estimates 0.439 m.
+
+That leg's floor contact leaves the frame at t = 6.06 s. The last
+in-frame live estimate is 0.138 m at t = 6.04 s (stand pitch 0.142 m,
+gap 0.147 m). `d_min` at `T_detect` = 0 is 0.1248 m. Adding the
+0.342 ms compute and a 33 ms frame, which is still not kit
+`T_detect`, gives 0.1298 m. Both thresholds are under 0.138 m, so
+the live estimate does not cross `d_min` before the row leaves. The
+range gate does not stop. The foot still hits
+`col_chair_stool_b_leg_2` at 6.82 s and 20.4 N, hip pitch reaches
+−2.450 Nm at 7.81 s, and min up_z is 0.921. A later leg's row does
+cross, and the gate writes `stop` at 8.78 s, after the contact.
+
+A Day-1 stop at the cue (issued at 1.904 s) has 0 prop contacts,
+min up_z 0.934, end xy +0.088, −0.005, yaw −5.9°, and a stop peak of
++2.280 Nm on the right knee. That stop is first-sight. It is not the
+range gate. Soft-pass is off. Not go-anywhere.
 
