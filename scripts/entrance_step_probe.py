@@ -3611,11 +3611,14 @@ def _install_unclamp_log(lipm: object, bucket: list[tuple]) -> None:
         omega = float(lipm.data.qvel[int(lipm.model.jnt_dofadr[jid])])
         kp = float(lipm.model.actuator_gainprm[idx, 0])
         kv = -float(lipm.model.actuator_biasprm[idx, 2])
-        ask = kp * (float(q_des) - q) - kv * omega
+        kp_term = kp * (float(q_des) - q)
+        kv_term = -kv * omega
+        ask = kp_term + kv_term
         bucket.append((
             float(lipm.data.time), jn, float(q_des), float(ask),
             float(lipm.cmd_yaw), str(lipm.phase), kind,
             None if limit is None else float(limit),
+            float(kp_term), float(kv_term), float(omega), float(kp), float(kv),
         ))
 
     def wrapped_fl(jn: str, q_des: float, limit_nm: float | None = None) -> None:
@@ -3628,6 +3631,124 @@ def _install_unclamp_log(lipm: object, bucket: list[tuple]) -> None:
 
     lipm.write_force_limited = wrapped_fl  # type: ignore[method-assign]
     lipm.write_clipped = wrapped_wc  # type: ignore[method-assign]
+
+
+def _movement_boundary(walker: object) -> bool:
+    """True on the OP3 ticks that call ``update_movement``.
+
+    Those ticks are gait time 0, phase1, and phase3. phase2 updates the
+    clock only. A command written on this tick is the one the step latches.
+    """
+    t = float(walker.time)
+    half = float(ow.OP3_CTRL_S) / 2.0
+    if abs(t) <= 1e-12:
+        return True
+    if abs(t - float(walker.phase1)) <= half + 1e-12:
+        return True
+    if abs(t - float(walker.phase3)) <= half + 1e-12:
+        return True
+    return False
+
+
+def _ramp_goal(label: str) -> tuple[float, float] | None:
+    """Gait (vx, yaw) after a boundary ramp. None keeps the bus command."""
+    cap = sw.VX_FWD_CAP
+    yaw = sw.YAW_RATE_CAP
+    if label in ("stand", "forward"):
+        return None
+    if label in ("stop", "settle"):
+        return (0.0, 0.0)
+    if label in ("yaw_left_on", "yaw_left"):
+        return (cap, yaw)
+    if label in ("yaw_right_on", "yaw_right"):
+        return (cap, -yaw)
+    raise SystemExit(f"ramp label {label} has no gait goal")
+
+
+def _install_command_ramp(
+    lipm: object,
+    driver: sw.ScriptedDriver,
+    latches: list[tuple],
+) -> None:
+    """Latch vx and yaw at OP3 movement boundaries. Do not write the stand pose.
+
+    The bus keeps a non-zero vel so the 20 ms approach stays on. The gait
+    sees the latched command, not that bus slew. A new goal is anchored at
+    the first boundary, then spread over two periods. Settle keeps the
+    zero step. It does not call hold_stand.
+    """
+    period = float(lipm.cfg.gm_period_s)
+    ramp_s = 2.0 * period
+    ramp_labels = {"stop", "yaw_left_on", "yaw_right_on"}
+    orig = lipm.tick
+    state = {
+        "label": "",
+        "vx": 0.0,
+        "yaw": 0.0,
+        "vx0": 0.0,
+        "yaw0": 0.0,
+        "armed": False,
+        "t0": 0.0,
+    }
+    print(
+        "PRED steer_ramp schedule "
+        f"period {period:.3f} s ramp {ramp_s:.3f} s "
+        f"phase1 {float(lipm.op3.phase1):.3f} phase3 {float(lipm.op3.phase3):.3f}. "
+        "Step length and yaw change at those boundaries. "
+        "Settle stays on the zero step. hold_stand stays off."
+    )
+
+    def wrapped(vx: float, yaw_rate: float, walking: bool) -> None:
+        t = float(lipm.data.time)
+        label = driver.segment(t).label
+        goal = _ramp_goal(label)
+        if goal is None:
+            state["label"] = label
+            state["vx"] = float(vx)
+            state["yaw"] = float(yaw_rate)
+            state["armed"] = False
+            orig(vx, yaw_rate, walking)
+            return
+        if state["label"] != label:
+            state["label"] = label
+            state["vx0"] = float(state["vx"])
+            state["yaw0"] = float(state["yaw"])
+            state["armed"] = False
+            state["t0"] = t
+        if _movement_boundary(lipm.op3):
+            if not state["armed"]:
+                state["armed"] = True
+                state["t0"] = t
+                frac = 0.0
+            elif label in ramp_labels:
+                frac = min(1.0, (t - float(state["t0"])) / ramp_s)
+            else:
+                frac = 1.0
+            gvx, gyaw = goal
+            state["vx"] = float(state["vx0"]) + (gvx - float(state["vx0"])) * frac
+            state["yaw"] = float(state["yaw0"]) + (gyaw - float(state["yaw0"])) * frac
+            latches.append((
+                t, float(lipm.op3.time), label, float(state["vx"]),
+                float(state["yaw"]), float(frac),
+            ))
+            print(
+                f"PRED steer_ramp latch t {t:.3f} gait_t {float(lipm.op3.time):.3f} "
+                f"seg {label} vx {float(state['vx']):+.4f} "
+                f"yaw {float(state['yaw']):+.4f} frac {frac:.3f}"
+            )
+        lipm.yaw_target = float(state["yaw"])
+        orig(float(state["vx"]), float(state["yaw"]), True)
+
+    lipm.tick = wrapped  # type: ignore[method-assign]
+
+
+def _joint_damping(session: sw.SteerSession, jn: str) -> tuple[float, float, float, float]:
+    """Joint damping force ``-damping * ω``, plus ω, the coefficient, and qfrc_passive."""
+    jid = mj.mj_name2id(session.model, mj.mjtObj.mjOBJ_JOINT, jn)
+    dof = int(session.model.jnt_dofadr[jid])
+    damp = float(session.model.dof_damping[dof])
+    omega = float(session.data.qvel[dof])
+    return -damp * omega, omega, damp, float(session.data.qfrc_passive[dof])
 
 
 def measure_pred_clip(
@@ -3670,6 +3791,7 @@ def measure_pred_clip(
     t_end: float | None = None,
     segments: tuple[sw.DemoSegment, ...] | None = None,
     steer_out: dict[str, object] | None = None,
+    command_ramp: bool = False,
 ) -> PredScore:
     """12 mm @ 20% with an optional swing-hip predicted-force clip.
 
@@ -3789,6 +3911,11 @@ def measure_pred_clip(
             sw.DemoSegment(end, "vel", sw.VX_FWD_CAP, 0.0, "forward"),
         )
     driver = sw.ScriptedDriver(segments)
+    ramp_latches: list[tuple] = []
+    if command_ramp:
+        if steer_out is None:
+            raise SystemExit("command ramp needs the steer log")
+        _install_command_ramp(lipm, driver, ramp_latches)
     rows: list[Tick] = []
     surface_rows: list[dict[str, object]] = []
     hx_chain = (
@@ -3987,6 +4114,12 @@ def measure_pred_clip(
                     surf_row["seg"] = driver.segment(t).label
                     surf_row["yaw"] = float(lipm.cmd_yaw)
                     surf_row["phase"] = str(lipm.phase)
+                    for jn in ("l_knee", "r_knee", "l_hip_roll", "r_hip_roll"):
+                        damp_f, omega, damp_c, passive = _joint_damping(session, jn)
+                        surf_row[jn + "_damp"] = damp_f
+                        surf_row[jn + "_omega"] = omega
+                        surf_row[jn + "_damp_c"] = damp_c
+                        surf_row[jn + "_passive"] = passive
                 if yswap_lead_s > 0.0:
                     stand_l = float(lipm.q_stand.get("l_ank_roll", 0.0))
                     stand_r = float(lipm.q_stand.get("r_ank_roll", 0.0))
@@ -4399,6 +4532,7 @@ def measure_pred_clip(
         steer_out["fault"] = first_fault
         steer_out["fault_t"] = fault_t
         steer_out["end"] = end
+        steer_out["latches"] = ramp_latches
     return PredScore(
         name=name,
         clip=clip,
@@ -8110,13 +8244,18 @@ def _steer_turn_script() -> tuple[sw.DemoSegment, ...]:
     )
 
 
-def _steer_corners(tag: str, sole: dict[str, object], centre_mm: float) -> None:
+def _steer_corners(
+    tag: str,
+    sole: dict[str, object],
+    centre_mm: float,
+    name: str = "steer_turn",
+) -> None:
     corners = _corner_map(sole["corners"])
     for label in _CORNER_ORDER:
         z, off = corners[label]
         z_mm = z * 1000.0
         print(
-            f"PRED steer_turn corner {tag} {label} "
+            f"PRED {name} corner {tag} {label} "
             f"z_mm {z_mm:.6f} centre_minus_corner_mm {centre_mm - z_mm:.6f} "
             f"forward_mm {off * 1000.0:.1f}"
         )
@@ -8168,7 +8307,11 @@ def _steer_window(
     return out
 
 
-def _print_steer_tick(tag: str, packed: tuple[float, Tick, dict[str, object]]) -> float:
+def _print_steer_tick(
+    tag: str,
+    packed: tuple[float, Tick, dict[str, object]],
+    name: str = "steer_turn",
+) -> float:
     frac, row, surf = packed
     side = str(row.swing)
     plane = surf[side]
@@ -8179,39 +8322,108 @@ def _print_steer_tick(tag: str, packed: tuple[float, Tick, dict[str, object]]) -
     clear = float(plane["clear"]) * 1000.0
     margin, hundredths = _margin_hundredths(toe)
     print(
-        f"PRED steer_turn {tag} side {side} t {row.t:.3f} "
+        f"PRED {name} {tag} side {side} t {row.t:.3f} "
         f"frac {frac:.6f} seg {surf.get('seg', '')} "
         f"yaw {float(surf.get('yaw', 0.0)):+.5f} phase {surf.get('phase', '')} "
         f"toe_mm {toe:.6f} clear_mm {clear:.6f} "
         f"vs_plus2_mm {margin:.6f} margin_hundredths {hundredths:.2f} "
-        f"centre_mm {centre:.6f} scored {sole['scored_label']} lowest {sole['low_label']} "
+        f"centre_mm {centre:.6f} "
+        f"sole_roll {float(sole['roll']):+.5f} sole_pitch {float(sole['pitch']):+.5f} "
+        f"scored {sole['scored_label']} lowest {sole['low_label']} "
         f"contact {plane['contact']} geoms {plane['geoms']} "
         f"surface {plane['surface']} on_rug {plane['on_rug']}"
     )
-    _steer_corners(tag, sole, centre)
+    _steer_corners(tag, sole, centre, name)
     return toe
 
 
+def _steer_ramp_script() -> tuple[tuple[sw.DemoSegment, ...], float]:
+    """Same straight walk, then yaw on and off across two periods.
+
+    The bus vel stays non-zero so the walk approach stays on. The gait
+    command is the boundary latch, not this bus value. Stop and settle
+    publish forward so the bus does not snap to stand.
+    """
+    cap = sw.VX_FWD_CAP
+    yaw = sw.YAW_RATE_CAP
+    t = 8.2
+    segs = [
+        sw.DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+        sw.DemoSegment(t, "vel", cap, 0.0, "forward"),
+    ]
+
+    def add(dt: float, label: str, yaw_rate: float) -> None:
+        nonlocal t
+        t = round(t + dt, 3)
+        segs.append(sw.DemoSegment(t, "vel", cap, yaw_rate, label))
+
+    add(2.0, "stop", 0.0)
+    add(0.5, "settle", 0.0)
+    add(2.0, "yaw_left_on", yaw)
+    add(4.0, "yaw_left", yaw)
+    add(2.0, "stop", 0.0)
+    add(0.5, "settle", 0.0)
+    add(2.0, "yaw_right_on", -yaw)
+    add(4.0, "yaw_right", -yaw)
+    add(2.0, "stop", 0.0)
+    add(0.5, "settle", 0.0)
+    return tuple(segs), t
+
+
+def _seg_label(script: tuple[sw.DemoSegment, ...], t: float) -> str:
+    for seg in script:
+        if t < seg.t_end - 1e-9:
+            return seg.label
+    return script[-1].label
+
+
 def score_steer_turn() -> None:
+    """Snap-yaw bout. Logs the tilt, the damping split, and the kp/kv split."""
+    _score_steer(ramp=False)
+
+
+def score_steer_ramp() -> None:
+    """Boundary ramp of yaw and step length. The stand pose is not written."""
+    _score_steer(ramp=True)
+
+
+def _score_steer(*, ramp: bool) -> None:
     """Level trim plus foot-z 1.170, with ±0.25 yaw and starts/stops.
 
     Trim lead stays off. Less-crouch stays closed. The bar fails if a
     whole-walk 20-80% toe is under +2 mm, a rug clearance is under +2 mm,
     a floor knee, ankle, or hip roll is over 2.33 Nm, or the unclamped
-    hip-roll or knee ask on a turning step or a later stop is over 2.33 Nm.
+    hip-roll or knee ask on a turning step or a stop is over 2.33 Nm.
     """
-    script = _steer_turn_script()
-    print(
-        "PRED steer_turn_plan trim-lead is off. Less-crouch is not this copy. "
-        "Stack is the restored constant level trim plus foot-z 1.170 mm on A10+025. "
-        "Hip pitch lead stays 20 ms. Roll lead stays 0. Sag cancel stays off. "
-        "Period stays 0.500 s. "
-        "Script is stand, straight through 8.2 s, stop, "
-        f"yaw_left +{sw.YAW_RATE_CAP:.2f} rad/s, stop, "
-        f"yaw_right -{sw.YAW_RATE_CAP:.2f} rad/s, stop. "
-        "Unclamped ask is kp*(q_des-q)-kv*omega before the yaw budget and the stop clamp."
-    )
-    _require_plant("before", "steer_turn")
+    name = "steer_ramp" if ramp else "steer_turn"
+    if ramp:
+        script, end = _steer_ramp_script()
+        plan = (
+            "PRED steer_ramp_plan trim-lead is off. Less-crouch is not this copy. "
+            "Stack is the restored constant level trim plus foot-z 1.170 mm on A10+025. "
+            "Hip pitch lead stays 20 ms. Roll lead stays 0. Sag cancel stays off. "
+            "Period stays 0.500 s. Yaw on and off is latched at OP3 movement "
+            "boundaries and spread over 2 periods (1.000 s). "
+            "Stop ramps step length and yaw to 0 over those 2 periods, "
+            "then settles on the zero step for 1 period. hold_stand is not called. "
+            f"Cruise yaw stays ±{sw.YAW_RATE_CAP:.2f} rad/s. "
+            "Unclamped ask is kp*(q_des-q)-kv*omega."
+        )
+    else:
+        script = _steer_turn_script()
+        end = 21.6
+        plan = (
+            "PRED steer_turn_plan trim-lead is off. Less-crouch is not this copy. "
+            "Stack is the restored constant level trim plus foot-z 1.170 mm on A10+025. "
+            "Hip pitch lead stays 20 ms. Roll lead stays 0. Sag cancel stays off. "
+            "Period stays 0.500 s. "
+            "Script is stand, straight through 8.2 s, stop, "
+            f"yaw_left +{sw.YAW_RATE_CAP:.2f} rad/s, stop, "
+            f"yaw_right -{sw.YAW_RATE_CAP:.2f} rad/s, stop. "
+            "Unclamped ask is kp*(q_des-q)-kv*omega before the yaw budget and the stop clamp."
+        )
+    print(plan)
+    _require_plant("before", name)
     held: dict[str, object] = {}
     row = measure_pred_clip(
         clip=True,
@@ -8236,24 +8448,25 @@ def score_steer_turn() -> None:
         ank_log=True,
         roll_log=True,
         z_extra_m=_LEVEL_FOOTZ_UM / 1_000_000.0,
-        t_end=21.6,
+        t_end=end,
         segments=script,
         steer_out=held,
+        command_ramp=ramp,
     )
-    _require_plant("after", "steer_turn")
+    _require_plant("after", name)
     if "trimlead" in row.name:
         raise SystemExit(f"trim lead is still in the name {row.name}")
     surface = held["surface"]
     asks = held["asks"]
     assert isinstance(surface, list) and isinstance(asks, list)
-    swings = _steer_window(held["rows"], surface, 21.6 + 1.0)  # type: ignore[arg-type]
+    swings = _steer_window(held["rows"], surface, end + 1.0)  # type: ignore[arg-type]
     yaw_max = {"yaw_left": 0.0, "yaw_right": 0.0}
     for surf in surface:
         seg = str(surf.get("seg", ""))
         if seg in yaw_max:
             yaw_max[seg] = max(yaw_max[seg], abs(float(surf.get("yaw", 0.0))))
     print(
-        f"PRED steer_turn yaw_seen left {yaw_max['yaw_left']:+.5f} "
+        f"PRED {name} yaw_seen left {yaw_max['yaw_left']:+.5f} "
         f"right {yaw_max['yaw_right']:+.5f} "
         f"fault {held['fault'] or 'none'} t {float(held['fault_t']):.3f}"
     )
@@ -8276,13 +8489,13 @@ def score_steer_turn() -> None:
     for side in ("L", "R"):
         packed = foot_best.get(side)
         if packed is None:
-            print(f"PRED steer_turn foot {side} missed")
+            print(f"PRED {name} foot {side} missed")
             fails.append(f"{side} swing missed")
             continue
         item = packed["item"]
         assert isinstance(item, dict)
-        toe = _print_steer_tick(f"worst_{side}", item["worst"])
-        _print_steer_tick(f"liftoff_{side}", item["lift"])
+        toe = _print_steer_tick(f"worst_{side}", item["worst"], name)
+        _print_steer_tick(f"liftoff_{side}", item["lift"], name)
         margin, hundredths = _margin_hundredths(toe)
         if toe < 2.0:
             fails.append(
@@ -8290,17 +8503,17 @@ def score_steer_turn() -> None:
                 f"vs_plus2_mm {margin:.6f} margin_hundredths {hundredths:.2f}"
             )
     if rug_best is None:
-        print("PRED steer_turn rug missed")
+        print(f"PRED {name} rug missed")
         fails.append("rug swing missed")
     else:
         item = rug_best["item"]
         assert isinstance(item, dict)
-        _print_steer_tick("rug_worst", item["worst"])
-        _print_steer_tick("rug_liftoff", item["lift"])
+        _print_steer_tick("rug_worst", item["worst"], name)
+        _print_steer_tick("rug_liftoff", item["lift"], name)
         clear = float(rug_best["clear"]) * 1000.0
         margin, hundredths = _margin_hundredths(clear)
         print(
-            f"PRED steer_turn rug_clear_mm {clear:.6f} "
+            f"PRED {name} rug_clear_mm {clear:.6f} "
             f"vs_plus2_mm {margin:.6f} margin_hundredths {hundredths:.2f}"
         )
         if clear < 2.0:
@@ -8333,24 +8546,41 @@ def score_steer_turn() -> None:
         head_h = math.floor(head * 100.0 + 1e-9) / 100.0
         ge = int(abs(tau) >= KNEE_NM)
         print(
-            f"PRED steer_turn floor {act} {tau:+.4f} t {when:.3f} "
+            f"PRED {name} floor {act} {tau:+.4f} t {when:.3f} "
             f"contact {contact} seg {seg} ge_2.33 {ge} "
             f"headroom_nm {head:.6f} headroom_hundredths {head_h:.2f}"
         )
         if ge:
             fails.append(f"floor {act} {tau:+.4f} t {when:.3f} contact {contact} seg {seg}")
-    def _ask_peak(turning: bool) -> dict[str, tuple]:
+    turn_labels = {"yaw_left", "yaw_right", "yaw_left_on", "yaw_right_on"}
+    stop_labels = {"stop", "settle"}
+
+    def _ask_bucket(item: tuple) -> str:
+        t = float(item[0])
+        yaw = float(item[4])
+        phase = str(item[5])
+        if ramp:
+            seg = _seg_label(script, t)
+            if seg in turn_labels:
+                return "turn"
+            if seg in stop_labels:
+                return "stop"
+            return ""
+        turn = abs(yaw) > 1e-3 and phase != "stand"
+        if turn:
+            return "turn"
+        if phase == "stand" and t >= 1.2:
+            return "stop"
+        return ""
+
+    def _ask_peak(bucket: str) -> dict[str, tuple]:
         best: dict[str, tuple] = {}
         for item in asks:
-            t, jn, _qdes, ask, yaw, phase, kind, limit = item
-            turn = abs(float(yaw)) > 1e-3 and str(phase) != "stand"
-            if turn != turning:
+            if _ask_bucket(item) != bucket:
                 continue
-            if not turning and (str(phase) != "stand" or float(t) < 1.2):
-                continue
-            prev = best.get(str(jn))
-            if prev is None or abs(float(ask)) > abs(float(prev[3])):
-                best[str(jn)] = item
+            prev = best.get(str(item[1]))
+            if prev is None or abs(float(item[3])) > abs(float(prev[3])):
+                best[str(item[1])] = item
         return best
     def _near_surf(when: float) -> dict[str, object] | None:
         best: dict[str, object] | None = None
@@ -8364,14 +8594,45 @@ def score_steer_turn() -> None:
             return None
         return best
 
-    for label, turning in (("turn", True), ("stop", False)):
-        for jn, item in _ask_peak(turning).items():
-            t, _jn, qdes, ask, yaw, phase, kind, limit = item
+    for act, (tau, when, _contact, seg) in floor_peak.items():
+        if act not in ("l_knee", "r_knee", "l_hip_roll", "r_hip_roll"):
+            continue
+        near_f = _near_surf(when)
+        if near_f is None or f"{act}_damp" not in near_f:
+            continue
+        damp_f = float(near_f[f"{act}_damp"])
+        omega = float(near_f[f"{act}_omega"])
+        damp_c = float(near_f[f"{act}_damp_c"])
+        passive = float(near_f[f"{act}_passive"])
+        total = tau + damp_f
+        print(
+            f"PRED {name} split {act} t {float(near_f['t']):.3f} "
+            f"actuator {tau:+.4f} joint_damping {damp_f:+.4f} "
+            f"sum {total:+.4f} omega {omega:+.4f} "
+            f"dof_damping {damp_c:.4f} qfrc_passive {passive:+.4f} "
+            f"ge_2.33_actuator {int(abs(tau) >= KNEE_NM)} "
+            f"ge_2.33_sum {int(abs(total) >= KNEE_NM)} "
+            f"seg {seg}"
+        )
+
+    for label in ("turn", "stop"):
+        for jn, item in _ask_peak(label).items():
+            t = float(item[0])
+            qdes = float(item[2])
+            ask = float(item[3])
+            yaw = float(item[4])
+            phase = item[5]
+            kind = item[6]
+            limit = item[7]
+            kp_term = float(item[8]) if len(item) > 8 else float("nan")
+            kv_term = float(item[9]) if len(item) > 9 else float("nan")
+            omega = float(item[10]) if len(item) > 10 else float("nan")
+            dom = "kp" if abs(kp_term) >= abs(kv_term) else "kv"
             lim = "none" if limit is None else f"{float(limit):.2f}"
-            ge = int(abs(float(ask)) >= KNEE_NM)
-            head = KNEE_NM - abs(float(ask))
+            ge = int(abs(ask) >= KNEE_NM)
+            head = KNEE_NM - abs(ask)
             head_h = math.floor(head * 100.0 + 1e-9) / 100.0
-            near = _near_surf(float(t))
+            near = _near_surf(t)
             measured = float("nan")
             contact = "-"
             if near is not None and jn in near:
@@ -8381,16 +8642,19 @@ def score_steer_turn() -> None:
                 if isinstance(plane, dict):
                     contact = str(plane.get("contact", "-"))
             print(
-                f"PRED steer_turn unclamped {label} {jn} {float(ask):+.4f} "
-                f"t {float(t):.3f} q_des {float(qdes):+.5f} "
-                f"yaw {float(yaw):+.5f} phase {phase} kind {kind} limit {lim} "
+                f"PRED {name} unclamped {label} {jn} {ask:+.4f} "
+                f"t {t:.3f} q_des {qdes:+.5f} "
+                f"kp_term {kp_term:+.4f} kv_term {kv_term:+.4f} "
+                f"dominant {dom} omega {omega:+.4f} "
+                f"yaw {yaw:+.5f} phase {phase} kind {kind} limit {lim} "
+                f"seg {_seg_label(script, t)} "
                 f"measured {measured:+.4f} contact {contact} "
                 f"ge_2.33 {ge} headroom_nm {head:.6f} "
                 f"headroom_hundredths {head_h:.2f}"
             )
             if ge:
                 fails.append(
-                    f"unclamped {label} {jn} {float(ask):+.4f} t {float(t):.3f}"
+                    f"unclamped {label} {jn} {ask:+.4f} t {t:.3f}"
                 )
     if yaw_max["yaw_left"] < 0.20 or yaw_max["yaw_right"] < 0.20:
         fails.append(
@@ -8400,19 +8664,19 @@ def score_steer_turn() -> None:
         fails.append(f"fault {held['fault']} t {float(held['fault_t']):.3f}")
     if fails:
         print(
-            "PRED steer_turn Prefer FAIL. "
+            f"PRED {name} Prefer FAIL. "
             + " | ".join(fails)
             + ". Trim lead stayed off. Less-crouch was not opened. "
-            "Not kit-safe. Not go-anywhere."
+            "Foot-z was not raised. Not kit-safe. Not go-anywhere."
         )
         return
     print(
-        "PRED steer_turn bar_held. Whole-walk 20-80% toes and the rug clearance "
+        f"PRED {name} bar_held. Whole-walk 20-80% toes and the rug clearance "
         "are at or over +2 mm. Floor knee, ankle, and hip roll stay under 2.33 Nm. "
-        "Unclamped hip-roll and knee asks on turning steps and later stops "
+        "Unclamped hip-roll and knee asks on turning steps and stops "
         "stay under 2.33 Nm. "
         "Trim lead stayed off. Less-crouch was not opened. "
-        "Not kit-safe. Not go-anywhere."
+        "Foot-z was not raised. Not kit-safe. Not go-anywhere."
     )
 
 
