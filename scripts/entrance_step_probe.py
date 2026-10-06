@@ -4903,27 +4903,59 @@ def _note_walk_lateral(
         pose = float("nan")
         phase = "stand"
         joints = None
+        nox = None
         pel_r = 0.0
         pel_l = 0.0
         swap_y = 0.0
         ep_roll_r = 0.0
         ep_roll_l = 0.0
+        ep_x_r = float("nan")
+        ep_z_r = float("nan")
+        ep_x_l = float("nan")
+        ep_z_l = float("nan")
     else:
         pose = _cmd_time(walker)
         saved = float(walker.time)
         walker.time = pose
         joints, info = walker.joints_now()
         er, el, pel_r, pel_l, swap_y = walker.endpoints()
+        nox = None
+        if getattr(session, "_sag_split", False) and joints is not None:
+            saved_move = float(walker._x_move)
+            saved_swap = float(walker._x_swap)
+            walker._x_move = 0.0
+            walker._x_swap = 0.0
+            nox, _nox_info = walker.joints_now()
+            walker._x_move = saved_move
+            walker._x_swap = saved_swap
         walker.time = saved
         phase = str(info.phase) if joints is not None else "?"
         ep_roll_r = float(er[3])
         ep_roll_l = float(el[3])
+        ep_x_r = float(er[0])
+        ep_z_r = float(er[2])
+        ep_x_l = float(el[0])
+        ep_z_l = float(el[2])
     rug_gid = int(session.gid_rug)
 
     def _jn(name: str) -> float:
         if joints is None or name not in joints:
             return float("nan")
         return float(joints[name])
+
+    def _nox_q(name: str) -> float:
+        if nox is None or name not in nox:
+            return float("nan")
+        return float(nox[name])
+
+    def _stand_q(name: str) -> float:
+        table = lipm.q_stand
+        if name not in table:
+            return float("nan")
+        return float(table[name])
+
+    r_body = np.asarray(session.data.xmat[session.bid_body], dtype=np.float64).reshape(3, 3)
+    _body_roll, body_pitch, _body_yaw = _decompose_rpy(r_body)
 
     dir_l = float(walker.directions["l_hip_roll"])
     dir_r = float(walker.directions["r_hip_roll"])
@@ -4973,6 +5005,33 @@ def _note_walk_lateral(
         "gait_r_ank_roll": _jn("r_ank_roll"),
         "gait_l_hip_roll": _jn("l_hip_roll"),
         "gait_r_hip_roll": _jn("r_hip_roll"),
+        "gait_l_knee": _jn("l_knee"),
+        "gait_r_knee": _jn("r_knee"),
+        "gait_l_ank_pitch": _jn("l_ank_pitch"),
+        "gait_r_ank_pitch": _jn("r_ank_pitch"),
+        "gait_l_hip_pitch": _jn("l_hip_pitch"),
+        "gait_r_hip_pitch": _jn("r_hip_pitch"),
+        "nox_l_knee": _nox_q("l_knee"),
+        "nox_r_knee": _nox_q("r_knee"),
+        "nox_l_ank_pitch": _nox_q("l_ank_pitch"),
+        "nox_r_ank_pitch": _nox_q("r_ank_pitch"),
+        "nox_l_hip_pitch": _nox_q("l_hip_pitch"),
+        "nox_r_hip_pitch": _nox_q("r_hip_pitch"),
+        "stand_l_knee": _stand_q("l_knee"),
+        "stand_r_knee": _stand_q("r_knee"),
+        "stand_l_ank_pitch": _stand_q("l_ank_pitch"),
+        "stand_r_ank_pitch": _stand_q("r_ank_pitch"),
+        "stand_l_hip_pitch": _stand_q("l_hip_pitch"),
+        "stand_r_hip_pitch": _stand_q("r_hip_pitch"),
+        "ep_x_l": ep_x_l,
+        "ep_z_l": ep_z_l,
+        "ep_x_r": ep_x_r,
+        "ep_z_r": ep_z_r,
+        "x_cmd": float(walker.x_cmd),
+        "x_move": float(walker._x_move),
+        "body_pitch": float(body_pitch),
+        "sole_pitch_l": float(_sole_pitch(session, "L")),
+        "sole_pitch_r": float(_sole_pitch(session, "R")),
         "trim_l": trim_l,
         "trim_r": trim_r,
         "fn_l": fn_l,
@@ -5057,6 +5116,9 @@ def measure_pred_clip(
     sole_flat: bool = False,
     sole_flat_mode: str = "q",
     y_out_m: float | None = None,
+    x_scale: float = 1.0,
+    sag_slew_rad_s: float | None = None,
+    sag_split: bool = False,
 ) -> PredScore:
     """12 mm @ 20% with an optional swing-hip predicted-force clip.
 
@@ -5191,6 +5253,23 @@ def measure_pred_clip(
             f"y_offset {float(walker.y_offset):.4f} m. "
             "Foot placement only. The contact mesh is unchanged."
         )
+    if not (0.0 - 1e-12 <= float(x_scale) <= 1.0 + 1e-12):
+        raise SystemExit(f"x_scale {x_scale} is outside 0–1")
+    if abs(float(x_scale) - 1.0) > 1e-12:
+        orig_set = walker.set_command
+        scale = float(x_scale)
+
+        def set_command(x_amp: float, y_amp: float = 0.0, angle_rad: float = 0.0) -> None:
+            orig_set(float(x_amp) * scale, y_amp, angle_rad)
+
+        walker.set_command = set_command  # type: ignore[method-assign]
+        print(
+            f"PRED x_scale {scale:.3f}. Bus vx stays Day-1. "
+            "The step length is that scale times the bus x_amp. "
+            "Foot-z and the crouch stay put."
+        )
+    if sag_split:
+        session._sag_split = True  # type: ignore[attr-defined]
     end = T_END if t_end is None else float(t_end)
     if segments is None:
         segments = (
@@ -5326,6 +5405,9 @@ def measure_pred_clip(
     if sole_flat:
         # After the ask log, so the logged q_des is the sole-flat command.
         _install_sole_flat_stance(session, sole_flat_mode)
+    if sag_slew_rad_s is not None:
+        # After the ask log, so the logged q_des is the slowed stance command.
+        _install_sagittal_slew(session, float(sag_slew_rad_s))
     try:
         while float(session.data.time) < end - 1e-9:
             driver.publish(session.bus, float(session.data.time))
@@ -10695,6 +10777,108 @@ def _ask_q(item: tuple) -> float:
 _FLAT_SUF = ("hip_roll", "knee", "ank_roll", "ank_pitch")
 
 
+def _install_sagittal_slew(session: sw.SteerSession, rad_s: float) -> None:
+    """Slow the stance knee and the stance ankle pitch. Swing-z knee stays full.
+
+    The cap is radians per second on q_des. Double support limits both legs.
+    Single support limits the loaded leg only, so the airborne knee keeps
+    the swing-z schedule. The logged ask uses this slowed q_des.
+    """
+    lipm = session.lipm
+    if lipm is None or lipm.op3 is None:
+        raise RuntimeError("gait manager missing")
+    if rad_s < 0.0:
+        raise SystemExit(f"sagittal slew {rad_s} is negative")
+    walker = lipm.op3
+    orig = lipm.write_clipped
+    prev: dict[str, float] = {}
+    cap = float(rad_s) * float(ow.OP3_CTRL_S)
+
+    def _stance_prefix(t_cmd: float) -> str:
+        if float(walker.l_ssp_start) < t_cmd <= float(walker.l_ssp_end):
+            return "r_"
+        if float(walker.r_ssp_start) < t_cmd <= float(walker.r_ssp_end):
+            return "l_"
+        return "both"
+
+    def write(jn: str, q_des: float) -> None:
+        if jn.endswith(("knee", "ank_pitch")):
+            stance = _stance_prefix(_cmd_time(walker))
+            if stance == "both" or jn.startswith(stance):
+                old = prev.get(jn)
+                if old is not None:
+                    dq = float(q_des) - old
+                    if dq > cap:
+                        q_des = old + cap
+                    elif dq < -cap:
+                        q_des = old - cap
+            prev[jn] = float(q_des)
+        orig(jn, float(q_des))
+
+    lipm.write_clipped = write  # type: ignore[method-assign]
+    print(
+        f"PRED sag_slew {float(rad_s):.3f} rad/s on stance knee and stance ankle pitch. "
+        f"Per tick {cap:.5f} rad. The swing knee keeps the swing-z schedule. "
+        "Foot-z and less-crouch stay put."
+    )
+
+
+def _quiet_flat_toe(held: dict[str, object]) -> tuple[float, float, str, float]:
+    """Worst flat mid-swing toe from 2 s on. Rug-tagged swings stay out."""
+    rows = held.get("rows")
+    surface = held.get("surface")
+    if not isinstance(rows, list) or not rows:
+        return float("nan"), float("nan"), "", float("nan")
+    by_t: dict[float, dict[str, object]] = {}
+    if isinstance(surface, list):
+        for row in surface:
+            if isinstance(row, dict):
+                by_t[round(float(row["t"]), 5)] = row
+    cycles = _swing_cycles(rows, 1.0e9)
+    med_n, _last_n = _cycle_index(cycles)
+    best: tuple[float, float, str, float] | None = None
+    for step, cyc in enumerate(cycles):
+        n = len(cyc)
+        if n < 2 or med_n < 2:
+            continue
+        n_full = med_n if step == len(cycles) - 1 and n < med_n - 1 else n
+        mids: list[tuple[float, Tick, dict[str, object] | None]] = []
+        for j, row in enumerate(cyc):
+            if row.toe_z is None or row.swing is None or row.t < _WALK_STEADY_S:
+                continue
+            frac = j / (n_full - 1)
+            if not (0.20 - 1e-12 <= frac <= 0.80 + 1e-12):
+                continue
+            plane = None
+            surf = by_t.get(round(row.t, 5))
+            if isinstance(surf, dict):
+                packed = surf.get(row.swing)
+                if isinstance(packed, dict):
+                    plane = packed
+            mids.append((frac, row, plane))
+        if not mids:
+            continue
+        if any(plane is not None and int(plane["on_rug"]) for _frac, _row, plane in mids):
+            continue
+        frac, row, _plane = min(mids, key=lambda item: float(item[1].toe_z or 0.0))
+        toe = float(row.toe_z or 0.0)
+        if best is None or toe < best[0]:
+            best = (toe, row.t, row.swing or "", frac)
+    if best is None:
+        return float("nan"), float("nan"), "", float("nan")
+    return best[0] * 1000.0, best[1], best[2], best[3]
+
+
+def _steady_x(lateral: list[dict[str, float | str]]) -> float:
+    for row in lateral:
+        if not isinstance(row, dict) or "x_cmd" not in row:
+            continue
+        if float(row["t_ask"]) < _WALK_STEADY_S:
+            continue
+        return float(row["x_cmd"])
+    return float("nan")
+
+
 def _run_continuous_walk(
     y_swap_m: float,
     t_end: float = 6.5,
@@ -10702,6 +10886,10 @@ def _run_continuous_walk(
     y_out_m: float | None = None,
     sole_flat: bool = False,
     sole_flat_mode: str = "q",
+    x_scale: float = 1.0,
+    sag_slew_rad_s: float | None = None,
+    sag_split: bool = False,
+    surface_tag: bool = False,
 ) -> dict[str, object]:
     """Day-1 straight walk, yaw 0, no stop. Same stack as the stance-freeze bout."""
     held: dict[str, object] = {}
@@ -10735,11 +10923,22 @@ def _run_continuous_walk(
         sole_flat=sole_flat,
         sole_flat_mode=sole_flat_mode,
         y_out_m=y_out_m,
+        x_scale=x_scale,
+        sag_slew_rad_s=sag_slew_rad_s,
+        sag_split=sag_split,
+        surface_tag=surface_tag,
     )
     summary = _walk_lateral_summary(held, y_swap_m)
     summary["y_out"] = 0.005 if y_out_m is None else float(y_out_m)
     summary["sole_flat"] = int(sole_flat)
     summary["sole_mode"] = sole_flat_mode if sole_flat else ""
+    summary["x_scale"] = float(x_scale)
+    summary["sag_slew"] = float("nan") if sag_slew_rad_s is None else float(sag_slew_rad_s)
+    toe_mm, toe_t, toe_side, toe_frac = _quiet_flat_toe(held)
+    summary["flat_toe_mm"] = toe_mm
+    summary["flat_toe_t"] = toe_t
+    summary["flat_toe_side"] = toe_side
+    summary["flat_toe_frac"] = toe_frac
     return summary
 
 
@@ -11003,6 +11202,8 @@ def _walk_lateral_summary(held: dict[str, object], y_swap_m: float) -> dict[str,
         "dig_in": int(corner_z == corner_z and corner_z < -0.0005),
         "center_y_l": center_y_l,
         "center_y_r": center_y_r,
+        "x_cmd": _steady_x(lateral),
+        "lateral": lateral,
     }
 
 
@@ -11879,6 +12080,266 @@ def score_sole_flat() -> None:
         "Plant md5 stays 207f3d5e9c6a72e16f7aa0c8d224f75e."
     )
     _require_plant("after", "sole_flat")
+
+
+_SAG_NAMES = ("l_knee", "r_knee", "l_ank_pitch", "r_ank_pitch")
+
+
+def _sag_clear(bucket: object) -> bool:
+    if not isinstance(bucket, dict):
+        return False
+    for jn in _SAG_NAMES:
+        item = bucket.get(jn)
+        if item is None or abs(float(item[3])) > KNEE_NM + 1e-9:
+            return False
+    return True
+
+
+def _sag_pass(summary: dict[str, object]) -> bool:
+    return (
+        _sag_clear(summary.get("dsp"))
+        and _sag_clear(summary.get("mid_stance"))
+        and not _body_bad(summary)
+    )
+
+
+def _row_at(summary: dict[str, object], t: float) -> dict[str, float | str] | None:
+    lateral = summary.get("lateral")
+    if not isinstance(lateral, list):
+        return None
+    want = round(float(t), 5)
+    for row in lateral:
+        if isinstance(row, dict) and round(float(row["t_ask"]), 5) == want:
+            return row
+    return None
+
+
+def _print_sag_split(tag: str, item: object, summary: dict[str, object]) -> None:
+    if not isinstance(item, tuple):
+        print(f"PRED sag split {tag} missing")
+        return
+    row = _row_at(summary, float(item[0]))
+    if row is None:
+        print(f"PRED sag split {tag} row missing t {float(item[0]):.3f}")
+        return
+    jn = str(item[1])
+    side = "l" if jn.startswith("l_") else "r"
+    if jn.endswith("knee"):
+        kind = "knee"
+    elif jn.endswith("ank_pitch"):
+        kind = "ank_pitch"
+    else:
+        kind = "hip_pitch"
+    phase = str(row["phase"])
+    if phase == "L":
+        stance = "r"
+    elif phase == "R":
+        stance = "l"
+    else:
+        stance = "both"
+    role = "stance" if stance in (side, "both") else "swing"
+    pose = float(row["pose"])
+    if phase == "L":
+        frac = (pose - 0.025) / 0.200
+    elif phase == "R":
+        frac = (pose - 0.275) / 0.200
+    else:
+        frac = float("nan")
+    q = _ask_q(item)
+    qdes = float(item[2])
+    q_stand = float(row.get(f"stand_{side}_{kind}", float("nan")))
+    q_nox = float(row.get(f"nox_{side}_{kind}", float("nan")))
+    gait = float(row.get(f"gait_{side}_{kind}", float("nan")))
+    fn = float(row[f"fn_{side}"])
+    other = "r" if side == "l" else "l"
+    fn_other = float(row[f"fn_{other}"])
+    print(
+        f"PRED sag split {tag} {jn} ask {float(item[3]):+.4f} "
+        f"t {float(item[0]):.3f} pose {pose:.3f} phase {phase} "
+        f"frac {frac:.3f} role {role} "
+        f"q {q:+.5f} q_des {qdes:+.5f} gait {gait:+.5f} "
+        f"q_stand {q_stand:+.5f} q_nox {q_nox:+.5f} "
+        f"shape {qdes - q_stand:+.5f} step {qdes - q_nox:+.5f} "
+        f"crouch {q_nox - q_stand:+.5f} sag {q - qdes:+.5f} "
+        f"kp_term {float(item[8]):+.4f} kv_term {float(item[9]):+.4f} "
+        f"omega {float(item[10]):+.4f} kp {float(item[11]):.2f} kv {float(item[12]):.4f} "
+        f"fn {fn:.2f} fn_other {fn_other:.2f} "
+        f"ep_x {float(row.get(f'ep_x_{side}', float('nan'))):+.5f} "
+        f"ep_z {float(row.get(f'ep_z_{side}', float('nan'))):+.5f} "
+        f"body_pitch {float(row.get('body_pitch', float('nan'))):+.5f} "
+        f"sole_pitch {float(row.get(f'sole_pitch_{side}', float('nan'))):+.5f} "
+        f"hip_gait {float(row.get(f'gait_{side}_hip_pitch', float('nan'))):+.5f} "
+        f"hip_nox {float(row.get(f'nox_{side}_hip_pitch', float('nan'))):+.5f} "
+        f"hip_stand {float(row.get(f'stand_{side}_hip_pitch', float('nan'))):+.5f} "
+        f"x_cmd {float(row.get('x_cmd', float('nan'))):+.5f} "
+        f"x_move {float(row.get('x_move', float('nan'))):+.5f}"
+    )
+
+
+def _print_sag_row(summary: dict[str, object]) -> None:
+    dsp = summary.get("dsp")
+    mid = summary.get("mid_stance")
+    ssp = summary.get("ssp")
+    slew = float(summary.get("sag_slew", float("nan")))
+    slew_txt = "off" if slew != slew else f"{slew:.3f}"
+    toe = float(summary.get("flat_toe_mm", float("nan")))
+    print(
+        f"PRED sag row x_scale {float(summary.get('x_scale', float('nan'))):.3f} "
+        f"x_cmd {float(summary.get('x_cmd', float('nan'))):+.5f} "
+        f"slew {slew_txt} "
+        f"dsp_knee {_ask_brief(dsp, 'l_knee')} | {_ask_brief(dsp, 'r_knee')} "
+        f"dsp_ap {_ask_brief(dsp, 'l_ank_pitch')} | {_ask_brief(dsp, 'r_ank_pitch')} "
+        f"mid_knee {_ask_brief(mid, 'l_knee')} | {_ask_brief(mid, 'r_knee')} "
+        f"mid_ap {_ask_brief(mid, 'l_ank_pitch')} | {_ask_brief(mid, 'r_ank_pitch')} "
+        f"ssp_knee {_ask_brief(ssp, 'r_knee')} | {_ask_brief(ssp, 'l_knee')} "
+        f"mid_margin {float(summary['mid_margin']):+.5f} "
+        f"n_mid_out {int(summary['n_mid_out'])}/{int(summary['n_mid'])} "
+        f"flat_toe {toe:+.3f} mm t {float(summary.get('flat_toe_t', float('nan'))):.3f} "
+        f"side {summary.get('flat_toe_side') or '-'} "
+        f"frac {float(summary.get('flat_toe_frac', float('nan'))):.3f} "
+        f"toe_clear {int(toe > TOE_BAR_M * 1000.0)} "
+        f"sag_pass {int(_sag_pass(summary))} "
+        f"fault {summary.get('fault') or 'none'}"
+    )
+
+
+def _sag_worst(bucket: object, suffix: str) -> tuple | None:
+    if not isinstance(bucket, dict):
+        return None
+    best = None
+    for side in ("l", "r"):
+        item = bucket.get(f"{side}_{suffix}")
+        if item is None:
+            continue
+        if best is None or abs(float(item[3])) > abs(float(best[3])):
+            best = item
+    return best
+
+
+def score_sagittal() -> None:
+    """Mid-SS knee and ankle pitch at y_swap 0. Sole-flat stays on. Plant stays cold."""
+    print(
+        "PRED sag plan continuous straight walk. No stop. "
+        f"Day-1 vx {sw.VX_FWD_CAP:.3f} m/s. Yaw 0. Period 0.500 s. "
+        "y_swap 0. init_y 0.005 m. Foot-z 1.170 mm. Less-crouch closed. "
+        "Trim-lead off. Sole-flat stance ankle stays on. "
+        "Pass is DSP and mid-SS knee and ankle pitch at or under 2.33 Nm. "
+        "Hip roll and the CoM box are logged and are not this pass. "
+        "The swing-z knee stays parked. Plant, kp, and forcerange stay put."
+    )
+    _require_plant("before", "sag")
+    rows: list[dict[str, object]] = []
+
+    def run(
+        x_scale: float,
+        slew: float | None,
+        *,
+        detail: bool = False,
+    ) -> dict[str, object]:
+        summary = _run_continuous_walk(
+            0.0,
+            y_out_m=0.005,
+            sole_flat=True,
+            sole_flat_mode="q",
+            x_scale=x_scale,
+            sag_slew_rad_s=slew,
+            sag_split=True,
+            surface_tag=True,
+        )
+        rows.append(summary)
+        _print_sag_row(summary)
+        if detail and not _body_bad(summary):
+            mid = summary.get("mid_stance")
+            dsp = summary.get("dsp")
+            ssp = summary.get("ssp")
+            _print_sag_split("mid_knee", _sag_worst(mid, "knee"), summary)
+            _print_sag_split("mid_ap", _sag_worst(mid, "ank_pitch"), summary)
+            _print_sag_split("dsp_knee", _sag_worst(dsp, "knee"), summary)
+            _print_sag_split("dsp_ap", _sag_worst(dsp, "ank_pitch"), summary)
+            _print_sag_split("ssp_knee", _sag_worst(ssp, "knee"), summary)
+        return summary
+
+    base = run(1.0, None, detail=True)
+    if _sag_pass(base):
+        toe = float(base.get("flat_toe_mm", float("nan")))
+        print(
+            "PRED sag CLEAR at y_swap 0, x_scale 1.000, slew off. "
+            "DSP and mid-SS knee and ankle pitch stay at or under 2.33 Nm. "
+            f"Flat mid-swing toe {toe:+.3f} mm. "
+            f"toe_clear {int(toe > TOE_BAR_M * 1000.0)}. "
+            "Stop is not this bout. d_min is not rebuilt. "
+            "Foot-z stays 1.170 mm. Less-crouch stayed closed."
+        )
+        _require_plant("after", "sag")
+        return
+
+    print(
+        "PRED sag full step is over 2.33 Nm. "
+        "Cutting step length before slowing the stance pitch. "
+        "Bus vx stays 0.150 m/s."
+    )
+    for scale in (0.75, 0.50, 0.35, 0.25, 0.15, 0.00):
+        trial = run(scale, None)
+        if _body_bad(trial):
+            print(f"PRED sag x_scale {scale:.3f} left the body. Stopping the step cut.")
+            break
+    print(
+        "PRED sag pitch-rate cut at the full step. "
+        "Stance knee and stance ankle pitch q_des are rate limited. "
+        "The swing knee is not."
+    )
+    for rate in (1.50, 1.00, 0.60, 0.30):
+        trial = run(1.0, rate)
+        if _body_bad(trial):
+            print(f"PRED sag slew {rate:.2f} rad/s left the body. Stopping the rate cut.")
+            break
+
+    passing = [row for row in rows if _sag_pass(row)]
+    if passing:
+        def _mild(row: dict[str, object]) -> tuple:
+            slew = row.get("sag_slew")
+            slew_v = float(slew) if isinstance(slew, float) else float("nan")
+            # Full step outranks a cut. A faster slew outranks a slower one.
+            return (
+                float(row.get("x_scale") or 0.0),
+                0.0 if slew_v != slew_v else slew_v,
+            )
+        best = max(passing, key=_mild)
+        toe = float(best.get("flat_toe_mm", float("nan")))
+        slew = float(best.get("sag_slew", float("nan")))
+        slew_txt = "off" if slew != slew else f"{slew:.3f} rad/s"
+        print(
+            "PRED sag CLEAR. "
+            f"y_swap 0. x_scale {float(best.get('x_scale', float('nan'))):.3f} "
+            f"x_cmd {float(best.get('x_cmd', float('nan'))):+.5f} m "
+            f"slew {slew_txt}. "
+            "DSP and mid-SS knee and ankle pitch stay at or under 2.33 Nm. "
+            f"Flat mid-swing toe {toe:+.3f} mm "
+            f"t {float(best.get('flat_toe_t', float('nan'))):.3f} "
+            f"side {best.get('flat_toe_side') or '-'}. "
+            f"toe_clear {int(toe > TOE_BAR_M * 1000.0)}. "
+            "Hip roll and the CoM box are not this pass. "
+            "The swing-z knee stayed parked. "
+            "Foot-z stays 1.170 mm. Less-crouch stayed closed. "
+            "d_min is not rebuilt. "
+            "Plant md5 stays 207f3d5e9c6a72e16f7aa0c8d224f75e."
+        )
+        _require_plant("after", "sag")
+        return
+
+    print("PRED sag pareto x_scale slew vs knee and ankle pitch")
+    for summary in rows:
+        _print_sag_row(summary)
+    print(
+        "PRED sag Prefer FAIL. "
+        "No step-length cut and no stance pitch-rate cut kept DSP and mid-SS "
+        "knee and ankle pitch at or under 2.33 Nm at y_swap 0. "
+        "The contact box was not widened. Foot-z stayed 1.170 mm. "
+        "Less-crouch stayed closed. The swing-z knee stayed parked. "
+        "d_min is not rebuilt. "
+        "Plant md5 stays 207f3d5e9c6a72e16f7aa0c8d224f75e."
+    )
+    _require_plant("after", "sag")
 
 
 def main() -> None:
