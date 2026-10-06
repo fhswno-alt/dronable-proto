@@ -1617,11 +1617,6 @@ against a true gap of 0.197 m, short by 0.015 m. The buffered stops
 happen before that frame. The post-stop clearance above is real, and
 it is not a measured 3 cm of kit margin. Not kit-safe.
 
-The column-aware ray is not in this gate. No AI tip has the full-pixel
-floor estimator yet, so the Day-1 stop is not latched to one, and this
-branch does not start a second ray. Buffer size is not taken from the
-wrong-leg clears above.
-
 The corridor half-widths are the outer edges of `l_foot_contact` and
 `r_foot_contact` at the stand pose, in the body frame. The plant box
 half-width is 0.0380 m and the geom pos is already 0.014 m outboard,
@@ -1630,8 +1625,30 @@ outer edges are **+0.0867 m** and **−0.0867 m**. The inboard edges are
 +0.0096 m and −0.0096 m. On `vel(+0.150, ±0.25)` the outside foot's
 outer edge goes **0.021 m** past that stand edge, so that side's
 half-width is 0.108 m. Left and right match. The kitchen command is
-yaw −0.25, so the outside foot is the left foot. These are the widths
-for the latch. They are not a stop.
+yaw −0.25, so the outside foot is the left foot.
+
+The Day-1 latch calls `ray_corridor.estimate_hazard` and sends `stop`
+when the hit is inside that corridor and `toe_gap_m` is at or under
+`d_min`. `toe_gap_m` already subtracts the frozen 20 mm pad and the
+live step offset (+0.017 m on this walk). No 3–5 cm buffer is added.
+The pixel is still the sim projection of a stool-leg floor point, not
+an RGB finder.
+
+On the kitchen yaw −0.25 walk the latch is `col_chair_stool_b_leg_2`,
+the leg the ankle hits. `leg_0` still reaches a forward `toe_gap` near
+`d_min`, at a sideways offset of about −0.24 m, and the corridor
+leaves it out. Eye range matches the true camera-to-floor gap at the
+reported precision. At `T_detect` = 0 the stop is 5.904 s, `toe_gap`
+0.125 m, eye 0.180 m against a true gap of 0.180 m. Prop contacts are
+0. The closest foot-to-leg-floor after the stop is 0.158 m. The stop
+peak is +2.280 Nm on the left hip pitch. Settle is 0.668 s. The same
+latch at `T_detect` 0.033 s stops at 5.888 s (foot–leg 0.160 m, settle
+0.788 s, min up_z 0.932) and at 0.100 s stops at 5.856 s (foot–leg
+0.165 m, settle 0.642 s). No stop-window leg joint crosses 2.33 Nm.
+These settles do not raise the 0.842 s `T_stop`. The forward gap
+without the 20 mm pad is still about 0.145 m, above the 0.1263 m
+floor, so the stop is the pad. That pad is a stand-in, not a measured
+leg. Not kit-safe. The 3–5 cm buffer is not sized from this clear.
 
 A −10° `head_tilt` walk is not enabled. On that pose the near edge is
 0.077 m at `cam_z` 0.326 m. #67 checked the wood rule at that session
