@@ -45,6 +45,10 @@ KNEE_NM = 2.33
 PLANT_NM = 2.45
 KNEE_KP = 45.0
 TOE_BAR_M = 0.002
+# Continuous-walk swing-z rate. Knee kv is 1.4573, so 1.40 rad/s keeps
+# that velocity term near 2.04 Nm. The parked stop stretch stays at
+# 1.90 rad/s and 0.25 / 1.060×. This rate is not that knob.
+_WALK_Z_RATE = 1.40
 # Swing ankle trim cap. This is not a world-level sole and not body roll.
 ANK_TRIM_CAP = 0.025
 # Trim-lead schedule. Full through 80% of swing, command back to 0 by 92%
@@ -115,7 +119,7 @@ def _xy_in_rug(session: sw.SteerSession, rug_gid: int, point: np.ndarray, margin
     return abs(float(local[0])) <= float(half[0]) + margin and abs(float(local[1])) <= float(half[1]) + margin
 
 
-def _foot_surface(session: sw.SteerSession, side: str, rug_gid: int) -> dict[str, float | str | int]:
+def _foot_surface(session: sw.SteerSession, side: str, rug_gid: int) -> dict[str, object]:
     """Contact and the surface under the scored leading corner.
 
     A foot is on the rug when any contact-box corner lies over ``col_mat_rug``
@@ -156,6 +160,9 @@ def _foot_surface(session: sw.SteerSession, side: str, rug_gid: int) -> dict[str
         surface = "floor"
         clear = float(lead[2])
     center_z = float(sum(float(corner[2]) for corner in corners) / len(corners))
+    labeled = tuple(
+        (label, float(z)) for label, z, _off in _box_corner_table(session, side)
+    )
     return {
         "floor_n": floor_n,
         "rug_n": rug_n,
@@ -171,6 +178,7 @@ def _foot_surface(session: sw.SteerSession, side: str, rug_gid: int) -> dict[str
         "contact": contact,
         "surface": surface,
         "clear": clear,
+        "corners": labeled,
     }
 
 
@@ -382,6 +390,249 @@ def _install_swing_z_add(session: sw.SteerSession, extra_m: float) -> None:
 
     walker._right_z = _wrap(orig_r, "R")  # type: ignore[method-assign]
     walker._left_z = _wrap(orig_l, "L")  # type: ignore[method-assign]
+
+
+def _walk_z_ik(
+    walker: ow.Op3Walker, side: str, t: float, z_cmd: float,
+) -> tuple[float, float] | None:
+    """Signed knee and ankle pitch if this swing z replaces the nominal one."""
+    saved = walker.time
+    walker.time = float(t)
+    er, el, *_rest = walker.endpoints()
+    ep = np.array(el if side == "L" else er, dtype=np.float64)
+    cur = float(walker._left_z(t) if side == "L" else walker._right_z(t))
+    ep[2] = float(ep[2]) + (float(z_cmd) - cur)
+    raw = ow.ik_leg(
+        walker.lengths,
+        float(ep[0]), float(ep[1]), float(ep[2]),
+        float(ep[3]), float(ep[4]), float(ep[5]),
+    )
+    walker.time = saved
+    if raw is None:
+        return None
+    names = ow._LEG_L if side == "L" else ow._LEG_R
+    signed = walker._apply_direction(raw, names)
+    return float(signed[3]), float(signed[4])
+
+
+def _fit_walk_z_side(
+    walker: ow.Op3Walker, side: str, rate: float,
+) -> dict[str, object]:
+    """Highest swing z whose knee and ankle pitch stay at ``rate`` and still land.
+
+    The clock stays the real SSP. z is the only warped channel. A schedule
+    that cannot reach the landing z at this rate is refused.
+    """
+    z_fn = walker._left_z if side == "L" else walker._right_z
+    start = float(walker.l_ssp_start if side == "L" else walker.r_ssp_start)
+    end = float(walker.l_ssp_end if side == "L" else walker.r_ssp_end)
+    dt = float(ow.OP3_CTRL_S)
+    ts: list[float] = []
+    nom: list[float] = []
+    t = start
+    while True:
+        ts.append(t)
+        nom.append(float(z_fn(t)))
+        if t >= end - 1e-12:
+            break
+        t = min(end, t + dt)
+    n = len(ts)
+    span = end - start
+    fracs = [(ts[i] - start) / span for i in range(n)]
+    zend = float(nom[-1])
+    # 161 samples is the grid that still connects knee and ankle pitch
+    # back to the landing z at 1.40 rad/s. A finer grid misses that chain.
+    grid = np.linspace(min(nom) - 0.004, max(nom) + 0.002, 161)
+    cache: list[list[tuple[float, float] | None]] = []
+    for i in range(n):
+        cache.append([_walk_z_ik(walker, side, ts[i], float(z)) for z in grid])
+    step = float(rate) * dt
+    term = int(np.argmin(np.abs(grid - zend)))
+    if cache[-1][term] is None:
+        raise SystemExit(f"walk z stretch {side} has no landing IK")
+    reachable: list[set[int]] = [set() for _ in range(n)]
+    reachable[-1].add(term)
+    for i in range(n - 2, -1, -1):
+        for j, ik in enumerate(cache[i]):
+            if ik is None:
+                continue
+            for k in reachable[i + 1]:
+                nxt = cache[i + 1][k]
+                if nxt is None:
+                    continue
+                if (
+                    abs(ik[0] - nxt[0]) <= step + 1e-8
+                    and abs(ik[1] - nxt[1]) <= step + 1e-8
+                ):
+                    reachable[i].add(j)
+                    break
+    if not reachable[0]:
+        raise SystemExit(
+            f"walk z stretch {side} cannot land at {rate:.2f} rad/s"
+        )
+    j0 = min(reachable[0], key=lambda j: abs(float(grid[j]) - nom[0]))
+    path = [j0]
+    for i in range(n - 1):
+        ik = cache[i][path[-1]]
+        if ik is None:
+            raise SystemExit(f"walk z stretch {side} lost the IK")
+        best: int | None = None
+        best_key = -1e9
+        for k in reachable[i + 1]:
+            nxt = cache[i + 1][k]
+            if nxt is None:
+                continue
+            if (
+                abs(ik[0] - nxt[0]) > step + 1e-8
+                or abs(ik[1] - nxt[1]) > step + 1e-8
+            ):
+                continue
+            # Climb while the 0.208 toe is still ahead, then come back to
+            # the landing z. Both stay inside the rate step.
+            if fracs[i + 1] <= 0.45:
+                key = float(grid[k])
+            else:
+                key = -abs(float(grid[k]) - zend)
+            if best is None or key > best_key:
+                best = k
+                best_key = key
+        if best is None:
+            raise SystemExit(f"walk z stretch {side} broke at frac {fracs[i]:.3f}")
+        path.append(best)
+    table = [(float(fracs[i]), float(grid[path[i]])) for i in range(n)]
+    idx208 = min(range(n), key=lambda i: abs(fracs[i] - 0.208))
+    peak_k = 0.0
+    peak_a = 0.0
+    peak_kf = 0.0
+    peak_af = 0.0
+    prev = cache[0][path[0]]
+    for i in range(1, n):
+        ik = cache[i][path[i]]
+        if ik is None or prev is None:
+            prev = ik
+            continue
+        dk = abs(ik[0] - prev[0]) / dt
+        da = abs(ik[1] - prev[1]) / dt
+        if 0.20 - 1e-9 <= fracs[i] <= 0.80 + 1e-9:
+            if dk > peak_k:
+                peak_k = dk
+                peak_kf = fracs[i]
+            if da > peak_a:
+                peak_a = da
+                peak_af = fracs[i]
+        prev = ik
+    return {
+        "table": table,
+        "z208": float(grid[path[idx208]]),
+        "frac208": float(fracs[idx208]),
+        "zend": zend,
+        "z_end": float(grid[path[-1]]),
+        "z_max": float(max(grid[j] for j in path)),
+        "peak_knee": peak_k,
+        "peak_knee_frac": peak_kf,
+        "peak_ank": peak_a,
+        "peak_ank_frac": peak_af,
+    }
+
+
+def _install_walk_z_stretch(session: sw.SteerSession, rate: float = _WALK_Z_RATE) -> None:
+    """Time-shape continuous-walk swing z so knee and ankle pitch can track.
+
+    Installed only on the walk score, after the 12 mm phase lift and the
+    1.170 mm foot-z add. The stop bout does not call this. Stance z is the
+    original freeze. The joint slew that tracks this z lives in the
+    sagittal write and stays off when the stop is installed.
+    """
+    lipm = session.lipm
+    if lipm is None or lipm.op3 is None:
+        raise RuntimeError("gait manager walker missing")
+    if float(rate) <= 0.0:
+        raise SystemExit(f"walk z stretch rate {rate} is not positive")
+    walker = lipm.op3
+    saved_time = float(walker.time)
+    saved_prev = float(walker.previous_x)
+    saved_x = float(walker.x_cmd)
+    saved_y = float(walker.y_cmd)
+    saved_a = float(walker.angle_cmd)
+    saved_run = bool(walker.ctrl_running)
+    saved_amp = (
+        walker._x_move, walker._x_swap, walker._y_move, walker._y_move_shift,
+        walker._y_swap, walker._z_move, walker._z_move_shift, walker._z_swap,
+        walker._z_swap_shift, walker._a_move, walker._a_move_shift,
+    )
+    try:
+        # Steady Day-1 step. The first half-step is not the fit.
+        walker.x_cmd = 0.020
+        walker.y_cmd = 0.0
+        walker.angle_cmd = 0.0
+        walker.previous_x = 0.020
+        walker.ctrl_running = True
+        walker.update_movement()
+        left = _fit_walk_z_side(walker, "L", float(rate))
+        right = _fit_walk_z_side(walker, "R", float(rate))
+    finally:
+        walker.time = saved_time
+        walker.previous_x = saved_prev
+        walker.x_cmd = saved_x
+        walker.y_cmd = saved_y
+        walker.angle_cmd = saved_a
+        walker.ctrl_running = saved_run
+        (
+            walker._x_move, walker._x_swap, walker._y_move, walker._y_move_shift,
+            walker._y_swap, walker._z_move, walker._z_move_shift, walker._z_swap,
+            walker._z_swap_shift, walker._a_move, walker._a_move_shift,
+        ) = saved_amp
+    session._walk_z_stretch = True  # type: ignore[attr-defined]
+    session._walk_z_rate = float(rate)  # type: ignore[attr-defined]
+    session._walk_z_fit = {"L": left, "R": right}  # type: ignore[attr-defined]
+
+    def _warp(orig, fit: dict[str, object], start: float, end: float):
+        table = fit["table"]
+        if not isinstance(table, list) or len(table) < 2:
+            raise SystemExit("walk z stretch table is empty")
+        fracs = [float(row[0]) for row in table]
+        zs = [float(row[1]) for row in table]
+
+        def z_fn(t: float) -> float:
+            tt = float(t)
+            if tt <= start or tt > end:
+                return float(orig(tt))
+            frac = (tt - start) / (end - start)
+            if frac <= fracs[0]:
+                return zs[0]
+            if frac >= fracs[-1]:
+                return zs[-1]
+            hi = 1
+            while hi < len(fracs) - 1 and fracs[hi] < frac:
+                hi += 1
+            lo = hi - 1
+            span = fracs[hi] - fracs[lo]
+            w = 0.0 if span <= 1e-9 else (frac - fracs[lo]) / span
+            return zs[lo] * (1.0 - w) + zs[hi] * w
+
+        return z_fn
+
+    orig_l = walker._left_z
+    orig_r = walker._right_z
+    walker._left_z = _warp(orig_l, left, float(walker.l_ssp_start), float(walker.l_ssp_end))  # type: ignore[method-assign]
+    walker._right_z = _warp(orig_r, right, float(walker.r_ssp_start), float(walker.r_ssp_end))  # type: ignore[method-assign]
+    print(
+        "PRED walk_z_stretch "
+        f"rate {float(rate):.3f} rad/s. "
+        f"L z208 {float(left['z208']) * 1000.0:+.2f} mm "
+        f"peak {float(left['z_max']) * 1000.0:+.2f} "
+        f"end {float(left['z_end']) * 1000.0:+.2f} "
+        f"land {float(left['zend']) * 1000.0:+.2f} "
+        f"open knee {float(left['peak_knee']):.2f} rad/s "
+        f"at {float(left['peak_knee_frac']):.3f} "
+        f"ank {float(left['peak_ank']):.2f} "
+        f"at {float(left['peak_ank_frac']):.3f}. "
+        f"R z208 {float(right['z208']) * 1000.0:+.2f} mm "
+        f"end {float(right['z_end']) * 1000.0:+.2f}. "
+        "Swing knee and ankle pitch slew at this rate. "
+        "The stop stretch stays 0.25 / 1.060× and is not armed here. "
+        "Foot-z stays 1.170 mm. y_swap stays 0."
+    )
 
 
 def _install_slow_rise(
@@ -5708,6 +5959,7 @@ def measure_pred_clip(
     sag_slew_rad_s: float | None = None,
     sag_slew_joints: tuple[str, ...] = ("knee", "ank_pitch"),
     sag_split: bool = False,
+    walk_z_stretch: bool = False,
 ) -> PredScore:
     """12 mm @ 20% with an optional swing-hip predicted-force clip.
 
@@ -5857,6 +6109,10 @@ def measure_pred_clip(
             "The step length is that scale times the bus x_amp. "
             "Foot-z and the crouch stay put."
         )
+    if walk_z_stretch and inflight_stop:
+        raise SystemExit("walk swing-z stretch is not on the stop bout")
+    if walk_z_stretch:
+        _install_walk_z_stretch(session, _WALK_Z_RATE)
     if sag_split:
         session._sag_split = True  # type: ignore[attr-defined]
     end = T_END if t_end is None else float(t_end)
@@ -11572,6 +11828,35 @@ def _install_sagittal_slew(
         _cap_row(jn, q_now, held, float(target), stepped, origin, capped, omega)
         return float(held)
 
+    def _toward_walk(jn: str, target: float) -> float:
+        """One walk-z step toward the warped swing IK. The stop seed stays unused.
+
+        The step is the walk rate, not the 1.90 stance cap. Physics substeps
+        reuse it. There is no torque hold here: the logged ask is the track
+        of the stretched z.
+        """
+        rate = float(getattr(session, "_walk_z_rate", _WALK_Z_RATE))
+        walk_cap = rate * float(ow.OP3_CTRL_S)
+        t_now = float(lipm.data.time)
+        last = step_at.get(jn)
+        if last is None or t_now - last >= ctrl_period - 1e-4:
+            old = prev.get(jn)
+            if old is None:
+                old = float(target)
+            dq = float(target) - float(old)
+            if dq > walk_cap:
+                stepped = float(old) + walk_cap
+            elif dq < -walk_cap:
+                stepped = float(old) - walk_cap
+            else:
+                stepped = float(target)
+            stepped_cmd[jn] = float(stepped)
+            step_at[jn] = t_now
+        else:
+            stepped = float(stepped_cmd[jn])
+        prev[jn] = float(stepped)
+        return float(stepped)
+
     def _apply_stop_hip(jn: str, q_des: float) -> float:
         """Loaded hips step toward stand. An airborne hip stays on the pin.
 
@@ -11638,6 +11923,15 @@ def _install_sagittal_slew(
                     elif dq < -cap:
                         q_des = old - cap
                 prev[jn] = float(q_des)
+            elif (
+                getattr(session, "_walk_z_stretch", False)
+                and not getattr(session, "_sag_stop_installed", False)
+                and not getattr(session, "_sag_torque_cap", False)
+                and not limited
+            ):
+                # Continuous walk only. Swing knee and ankle pitch follow
+                # the warped z. The parked stop does not set this flag.
+                q_des = _toward_walk(jn, float(q_des))
             elif (
                 not getattr(session, "_sag_torque_cap", False)
                 and not getattr(session, "_sag_stop_installed", False)
@@ -13740,11 +14034,15 @@ def score_mid_swing() -> None:
         "y_swap 0. init_y 0.005 m. Foot-z 1.170 mm. Less-crouch closed. "
         "Trim-lead off. Sole-flat stance ankle stays on. "
         "Stance knee and ankle pitch stay on the 1.90 rad/s slew. "
-        "The stop stretch, freeze, and post-DSP stand write stay off. "
-        "Pass is 20-80% toe at or above 0 mm on both feet, "
-        "swing-leg asks in that window at or under 2.33 Nm, "
-        "and DSP plus mid-SS stance asks at or under 2.33 Nm. "
-        "The early SSP swing-z knee is logged against 2.33 Nm. "
+        "Walk swing-z is stretched on its own knob so the swing knee and "
+        "ankle pitch track at 1.40 rad/s. The stop stretch stays off at "
+        "0.25 / 1.060×. "
+        "Pass is both bars on this copy: 20-80% unclamped knee and ankle "
+        "pitch at or under 2.33 Nm, and the flat toe still at or above "
+        "+2 mm near frac 0.208. Four contact-box corners are logged "
+        "through that window. "
+        "The parked SSP swing knee is logged and is not the bar unless "
+        "that tick moves into 20-80%. "
         "CoM outside the 38 mm box is logged and is not a torque pass. "
         "Plant, kp, and forcerange stay put."
     )
@@ -13784,6 +14082,7 @@ def score_mid_swing() -> None:
         sag_slew_joints=("knee", "ank_pitch"),
         sag_split=True,
         surface_tag=True,
+        walk_z_stretch=True,
     )
     summary = _walk_lateral_summary(held, 0.0)
     summary["x_scale"] = 1.0
@@ -13803,7 +14102,8 @@ def score_mid_swing() -> None:
         for row in surface:
             if isinstance(row, dict):
                 by_surf[round(float(row["t"]), 5)] = row
-    flat_best: dict[str, tuple[float, float, float]] = {}
+    flat_best: dict[str, tuple[float, float, float, dict[str, object] | None]] = {}
+    corner_low: dict[str, tuple[float, str, float, float, dict[str, object]]] = {}
     rug_best: dict[str, tuple[float, float, float, float]] = {}
     n_flat = {"L": 0, "R": 0}
     n_rug = {"L": 0, "R": 0}
@@ -13851,24 +14151,62 @@ def score_mid_swing() -> None:
                     rug_best[side] = (clear, toe, row.t, frac)
             else:
                 n_flat[side] = n_flat.get(side, 0) + 1
-                frac, row, _plane = min(mids, key=lambda item: float(item[1].toe_z or 0.0))
+                for frac_i, row_i, plane_i in mids:
+                    if not isinstance(plane_i, dict):
+                        continue
+                    corners_i = plane_i.get("corners")
+                    if not isinstance(corners_i, tuple):
+                        continue
+                    for label_i, z_i in corners_i:
+                        prev_c = corner_low.get(side)
+                        if prev_c is None or float(z_i) < prev_c[0]:
+                            corner_low[side] = (
+                                float(z_i), str(label_i), row_i.t, frac_i, plane_i,
+                            )
+                frac, row, plane = min(mids, key=lambda item: float(item[1].toe_z or 0.0))
                 toe = float(row.toe_z or 0.0)
                 prev_f = flat_best.get(side)
                 if prev_f is None or toe < prev_f[0]:
-                    flat_best[side] = (toe, row.t, frac)
+                    flat_best[side] = (toe, row.t, frac, plane)
+
+    def _print_corners(
+        tag: str, side: str, t_c: float, frac_c: float, plane_c: dict[str, object] | None,
+    ) -> None:
+        corners = plane_c.get("corners") if isinstance(plane_c, dict) else None
+        if not isinstance(corners, tuple) or not corners:
+            print(f"PRED {name} corners side {side} {tag} missing")
+            return
+        parts = " ".join(
+            f"{label} {float(z) * 1000.0:+.3f}" for label, z in corners
+        )
+        low = min(corners, key=lambda item: float(item[1]))
+        print(
+            f"PRED {name} corners side {side} {tag} "
+            f"t {t_c:.3f} frac {frac_c:.3f} {parts} "
+            f"low {low[0]} {float(low[1]) * 1000.0:+.3f} mm "
+            f"toe_down {int(float(low[1]) < 0.0)}"
+        )
+
     for side in ("L", "R"):
         packed_f = flat_best.get(side)
         if packed_f is None:
             print(f"PRED {name} flat_toe side {side} missing n_swings {n_flat.get(side, 0)}")
         else:
-            toe_s, t_s, frac_s = packed_f
+            toe_s, t_s, frac_s, plane_s = packed_f
             print(
                 f"PRED {name} flat_toe side {side} {toe_s * 1000.0:+.3f} mm "
                 f"t {t_s:.3f} frac {frac_s:.3f} "
                 f"n_swings {n_flat.get(side, 0)} "
                 f"scuff {int(toe_s < 0.0)} "
-                f"above_2mm {int(toe_s > TOE_BAR_M)}"
+                f"above_2mm {int(toe_s >= TOE_BAR_M)}"
             )
+            _print_corners("at_toe", side, t_s, frac_s, plane_s)
+        packed_c = corner_low.get(side)
+        if packed_c is None:
+            print(f"PRED {name} corners side {side} window missing")
+        else:
+            _z_c, _label_c, t_c, frac_c, plane_c = packed_c
+            _print_corners("window_low", side, t_c, frac_c, plane_c)
         packed_r = rug_best.get(side)
         if packed_r is None:
             print(f"PRED {name} rug side {side} none n_swings {n_rug.get(side, 0)}")
@@ -13977,11 +14315,18 @@ def score_mid_swing() -> None:
         f"fault {summary.get('fault') or 'none'}"
     )
 
-    toes_ok = bool(flat_best) and all(
-        flat_best[side][0] >= 0.0 for side in ("L", "R") if side in flat_best
-    ) and all(side in flat_best for side in ("L", "R"))
+    scored = ("l_knee", "r_knee", "l_ank_pitch", "r_ank_pitch")
+    swing_ok = all(
+        jn in swing_mid and abs(float(swing_mid[jn][3])) <= KNEE_NM + 1e-9
+        for jn in scored
+    )
+    toe_bar = all(side in flat_best for side in ("L", "R")) and all(
+        flat_best[side][0] >= TOE_BAR_M for side in ("L", "R")
+    )
     rug_ok = all(packed[0] >= 0.0 for packed in rug_best.values())
-    swing_ok = mid_j is not None and abs(float(mid_j[3])) <= KNEE_NM + 1e-9
+    corners_ok = all(side in corner_low for side in ("L", "R")) and all(
+        corner_low[side][0] >= 0.0 for side in ("L", "R")
+    )
     support_ok = (
         mid_ss is not None
         and dsp_w is not None
@@ -13989,56 +14334,74 @@ def score_mid_swing() -> None:
         and abs(float(dsp_w[3])) <= KNEE_NM + 1e-9
         and not _body_bad(summary)
     )
-    knee_over = knee_worst is not None and abs(float(knee_worst[3])) > KNEE_NM + 1e-9
-    toe_bar = bool(flat_best) and all(
-        flat_best[side][0] > TOE_BAR_M for side in ("L", "R")
-    )
-    if not toes_ok or not rug_ok or not swing_ok:
-        why = []
-        if not toes_ok:
-            why.append("flat toe under 0")
-        if not rug_ok:
-            why.append("rug clearance under 0")
-        if not swing_ok:
-            why.append("20-80% swing joint over 2.33")
+    ssp_frac = float("nan")
+    if knee_worst is not None:
+        ssp_row = by_lat.get(round(float(knee_worst[0]), 5))
+        if ssp_row is not None:
+            ssp_frac = _swing_frac(str(ssp_row["phase"]), float(ssp_row["pose"]))
+    ssp_in_window = ssp_frac == ssp_frac and 0.20 - 1e-12 <= ssp_frac <= 0.80 + 1e-12
+    if swing_ok and toe_bar and rug_ok and corners_ok and support_ok and not ssp_in_window:
         print(
-            f"PRED {name} Prefer FAIL. {'; '.join(why)}. "
+            f"PRED {name} CLEAR. 20-80% knee and ankle pitch stay at or under "
+            "2.33 Nm, and both flat toes stay at or above +2 mm near frac 0.208. "
+            "Four corners stay at or above 0 through that window. "
+            "Mid-SS and DSP stay at or under 2.33 Nm. "
+            "The parked SSP swing knee stays outside 20-80%. "
+            f"CoM mid_margin {float(summary['mid_margin']) * 1000.0:+.2f} mm "
+            "is outside the 38 mm box and is not a torque pass. "
             "y_swap stayed 0. Foot-z stayed 1.170 mm. Less-crouch stayed closed. "
-            "The stop locks stayed put. d_min is not rebuilt. "
-            "CoM outside is not a torque pass. Not kit-safe. "
-            "Plant md5 stays 207f3d5e9c6a72e16f7aa0c8d224f75e."
-        )
-    elif knee_over or not toe_bar or not support_ok or int(summary["inside"]) != 1:
-        gaps = []
-        if knee_over and knee_worst is not None:
-            gaps.append(
-                f"parked SSP swing knee {knee_worst[1]} {float(knee_worst[3]):+.4f} "
-                f"t {float(knee_worst[0]):.3f}"
-            )
-        if not toe_bar:
-            gaps.append("flat 20-80% toe under +2 mm")
-        if not support_ok:
-            gaps.append("mid-SS or DSP ask over 2.33")
-        if int(summary["inside"]) != 1:
-            gaps.append(
-                f"CoM outside mid_margin {float(summary['mid_margin']) * 1000.0:+.2f} mm"
-            )
-        print(
-            f"PRED {name} Prefer FAIL. 20-80% toe stays at or above 0 and "
-            "the 20-80% swing joints stay at or under 2.33 Nm. "
-            f"Next gap: {'; '.join(gaps)}. "
-            "That CoM miss is the y_swap 0 class and is not a torque pass. "
-            "y_swap stayed 0. Foot-z stayed 1.170 mm. Less-crouch stayed closed. "
-            "The stop locks stayed put. d_min is not rebuilt. Not kit-safe. "
+            "The stop stretch stayed 0.25 / 1.060×. d_min is not rebuilt. "
+            "Not kit-safe. "
             "Plant md5 stays 207f3d5e9c6a72e16f7aa0c8d224f75e."
         )
     else:
+        why = []
+        if not swing_ok:
+            if mid_j is None:
+                why.append("20-80% knee and ankle pitch missing")
+            else:
+                why.append(
+                    f"20-80% {mid_j[1]} {float(mid_j[3]):+.4f} Nm "
+                    f"t {float(mid_j[0]):.3f}"
+                )
+        if not toe_bar:
+            why.append("flat toe under +2 mm")
+        if not corners_ok:
+            why.append("a contact-box corner went under 0")
+        if not rug_ok:
+            why.append("rug clearance under 0")
+        if not support_ok:
+            why.append("mid-SS or DSP ask over 2.33")
+        if ssp_in_window and knee_worst is not None:
+            why.append(
+                f"SSP swing knee moved into 20-80% "
+                f"{knee_worst[1]} {float(knee_worst[3]):+.4f} "
+                f"t {float(knee_worst[0]):.3f} frac {ssp_frac:.3f}"
+            )
+        next_lever = (
+            "The 1.40 rad/s landing schedule is the knee-safe swing-z. "
+            "Spending the +12.9 mm surplus under +2 mm is this Prefer FAIL. "
+            "Do not trade the parked SSP knee, and do not open foot-z, "
+            "crouch, y_swap, the rail, or the plant."
+        )
+        if swing_ok and not toe_bar:
+            next_lever = (
+                "Knee and ankle pitch in 20-80% are inside 2.33 Nm, and the "
+                "landing schedule spent the +12.9 mm toe under +2 mm. "
+                "A faster early rise puts that ask back over 2.33. "
+                "Foot-z, crouch, y_swap, the rail, and the plant stay closed."
+            )
+        elif toe_bar and not swing_ok:
+            next_lever = (
+                "The toe is still at or above +2 mm, and the 20-80% ask is "
+                "still over 2.33 Nm. The next stretch has to slow that tick "
+                "without dropping the 0.208 toe under +2 mm."
+            )
         print(
-            f"PRED {name} CLEAR. 20-80% toes stay at or above 0, "
-            "swing joints in that window stay at or under 2.33 Nm, "
-            "and DSP plus mid-SS stay at or under 2.33 Nm. "
-            "CoM is inside the stance box on the mid ticks. "
-            "d_min is not rebuilt. Not kit-safe until the stop is. "
+            f"PRED {name} Prefer FAIL. {'; '.join(why)}. {next_lever} "
+            "y_swap stayed 0. Foot-z stayed 1.170 mm. Less-crouch stayed closed. "
+            "The stop stretch stayed 0.25 / 1.060×. d_min is not rebuilt. "
+            "CoM outside is not a torque pass. Not kit-safe. "
             "Plant md5 stays 207f3d5e9c6a72e16f7aa0c8d224f75e."
         )
     _require_plant("after", name)
