@@ -42,7 +42,24 @@ Scored spawns are the doorway xy turned **±90°** from the door-facing yaw, sti
 
 While yaw is commanded, both hip yaw joints and both hip roll joints are logged against 2.33 Nm. The bout peak names its joint. A #71 stop on the speckled kitchen or bathroom shadow with no prop in frame is a false stop and is not a #71 pass.
 
-The typed caller still refuses a room phrase. The scored table is whatever `scripts/voice_goto_rooms.py` writes. Not kit-safe and not go-anywhere unless that file says so.
+The typed caller still refuses a room phrase. The scored run is **Prefer FAIL**. Soft-pass is off. `reached_all` is false. `wrong_yes_any` is true. `false_stop_any` is false. `go_anywhere` is false. `kit_safe` is false. All 10 bouts started outside the named room box. None finished inside. Min up_z is 0.934. No #71 latch pass. Every one of the 15 asks has `applied_yaw_at_capture` 0, and the logged heading equals `heading_at_capture`.
+
+Seven yeses fired with the asked room under 1% of `kit_cam` (empty hall, living when the question was kitchen or bathroom, or kitchen when the question was entrance). Those bouts published no forward velocity. Three correct yeses committed an oblique capture heading, about 0.36 rad of search rather than a heading centered on the door, then `vel(+0.056, 0)` walked into a wall. That is the score. The 1% bar, the 0.70 s settle, the prompt, the latch, and the turn sign stay as they were.
+
+| Room | Offset | Door frac | First yes t / tick / heading | Yaw at capture | Asked frac / visible | Yes confidence | Result | Peak joint | Contact |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| kitchen | +90° | 0 | 1.000 / 125 / +1.571 | 0 | 0 / living | 0.560 | wrong yes, no vel | +1.262 `r_ank_pitch` | none |
+| kitchen | −90° | 0 | 3.800 / 475 / −1.208 | 0 | 0.046 / kitchen | 0.774 | correct yes, not inside | −2.280 `l_knee` | `wall_hall_e_0` 2.6 N at 39.688 s |
+| bathroom | +90° | 0 | 6.600 / 825 / +2.297 | 0 | 0 / living | 0.817 | wrong yes, no vel | +2.280 `r_knee` | none |
+| bathroom | −90° | 0 | 1.000 / 125 / −1.571 | 0 | 0 / none | 0.616 | wrong yes, no vel | +1.262 `r_ank_pitch` | none |
+| living | +90° | 0 | 1.000 / 125 / −1.571 | 0 | 0 / none | 0.748 | wrong yes, no vel | +1.262 `r_ank_pitch` | none |
+| living | −90° | 0 | 3.800 / 475 / +1.933 | 0 | 0.055 / living | 0.737 | correct yes, not inside | +2.280 `r_knee` | `wall_outer_n` 5.9 N at 24.656 s |
+| bedroom | +90° | 0 | 1.000 / 125 / +1.571 | 0 | 0 / none | 0.628 | wrong yes, no vel | +1.262 `r_ank_pitch` | none |
+| bedroom | −90° | 0 | 3.800 / 475 / −1.208 | 0 | 0.059 / bedroom | 0.792 | correct yes, not inside | −2.280 `l_knee` | `wall_outer_s` 2.5 N at 16.640 s |
+| entrance | +90° | 0 | 1.000 / 125 / −1.571 | 0 | 0 / none | 0.665 | wrong yes, no vel | +1.262 `r_ank_pitch` | none |
+| entrance | −90° | 0 | 1.000 / 125 / +1.571 | 0 | 0 / kitchen | 0.785 | wrong yes, no vel | +1.262 `r_ank_pitch` | none |
+
+The four bouts that commanded yaw (kitchen −90°, bathroom +90°, living −90°, bedroom −90°) logged hip yaw about −0.606 / +0.548 Nm and both hip rolls at +2.280 Nm. `over_2_33` is false: 2.280 Nm is the leg stop rail, 0.05 under 2.33. The six stand-only peaks are `r_ank_pitch` at +1.262 Nm. Speckled patches were sighted on six bouts and the finder did not emit; no stop landed on a patch, including the bathroom −90° sighting that had no prop in frame. Not kit-safe. Not go-anywhere.
 
 ```bash
 MUJOCO_GL=osmesa python scripts/voice_goto_rooms.py
