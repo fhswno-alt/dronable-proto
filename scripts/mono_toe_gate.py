@@ -49,8 +49,11 @@ that move. The radius is a constant frozen before the run. Sim leg
 names are not an input; a name is attached only when the stop is
 reported. ``stop`` is sent when the shortest remaining gap is at or
 under ``d_min``, or when a cue sets ``too_close``. The pad stays
-0.020. No 3–5 cm buffer is added. The older row-model stress remains
-in this file and is not the latch.
+0.020. No 3–5 cm buffer is added. ``finder-long`` is a stress on
+that latch: the frame after the gap first falls to ``d_min + 0.05``
+adds 0.10 m to that floor point's toe gap, then the finder is
+normal again. The older row-model stress remains in this file and
+is not the latch.
 """
 from __future__ import annotations
 
@@ -950,6 +953,13 @@ FINDER_MATCH_PX = 48.0
 # after this tick's x/y/yaw re-read, are within this distance. Sim
 # leg names are not a key. The kit has no leg ids.
 TRACK_JOIN_M = 0.035
+# Long-read stress. Not a pad and not the 3–5 cm slip buffer.
+# The arm is the first frame whose shortest in-corridor gap is at
+# or under d_min + LONG_ARM_M. The next frame adds LONG_READ_M to
+# the toe gap of a cue that joins that floor point. One frame, then
+# the finder is normal again.
+LONG_READ_M = 0.10
+LONG_ARM_M = 0.05
 
 
 @dataclass
@@ -995,9 +1005,16 @@ def _pose_gap(
 # Sim-projection latch times on this same walk, pad 0.020. The finder
 # report compares against these. They are not a second gate.
 SIM_LATCH_S = {0.0: 5.904, 0.033: 5.888, 0.100: 5.856}
+# Cue-only finder latch on this walk, before the shortest-gap rule.
+# Report comparison only. Not a second gate.
+CUE_LATCH_S = {0.0: 5.864, 0.033: 5.848, 0.100: 5.736}
 
 
-def walk_finder(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
+def walk_finder(
+    t_detect: float,
+    t_end: float = 9.0,
+    long_read_m: float = 0.0,
+) -> dict[str, object]:
     """Day-1 stop on the shortest in-corridor finder gap. Pad stays 0.020.
 
     A world floor point is kept per hit. A new frame can only move that
@@ -1006,6 +1023,11 @@ def walk_finder(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
     only inside TRACK_JOIN_M. ``too_close`` still stops. A stool-leg
     name is written into the report after the stop, from the saved
     floor point, and is not used to keep or clear a track.
+
+    ``long_read_m`` is the one-frame stress. Zero leaves the latch
+    alone. A positive value adds that many metres to the toe gap of
+    the floor point that first reached d_min + 0.05, on the next
+    frame only. The match is the floor position, not a leg name.
     """
     if not SCENE.is_file():
         raise SystemExit(f"missing kitchen scene {SCENE}")
@@ -1089,10 +1111,17 @@ def walk_finder(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
     cross: dict[float, str] = {}
     cross_levels = (0.0, 0.033, 0.100)
     tracks: list[_GapTrack] = []
+    arm_xy: tuple[float, float] | None = None
+    arm_gap: float | None = None
+    arm_t: float | None = None
+    inject_next = False
+    inject_note = ""
     try:
         while float(session.data.time) < t_end - 1e-9:
             now = float(session.data.time)
             if issued is None and now >= 1.0 - 1e-9:
+                inject_this = inject_next
+                inject_next = False
                 data = session.data
                 tilt = float(data.qpos[int(model.jnt_qposadr[jid])])
                 pan = 0.0 if pan_id < 0 else float(data.qpos[int(model.jnt_qposadr[pan_id])])
@@ -1217,6 +1246,14 @@ def walk_finder(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
                     eye_bias, gap_bias = track(est, name, dist, true_m, gt_gap)
                     if est.in_corridor:
                         hit = est.hit_xy_m
+                        offer_gap = est.toe_gap_m
+                        injected = False
+                        apart_arm = 1e9
+                        if inject_this and arm_xy is not None and long_read_m > 0.0:
+                            apart_arm = math.hypot(hit[0] - arm_xy[0], hit[1] - arm_xy[1])
+                            if apart_arm <= TRACK_JOIN_M:
+                                offer_gap = est.toe_gap_m + long_read_m
+                                injected = True
                         joined: _GapTrack | None = None
                         joined_d = TRACK_JOIN_M
                         for held in tracks:
@@ -1225,12 +1262,23 @@ def walk_finder(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
                                 joined_d = apart
                                 joined = held
                         if joined is None:
-                            tracks.append(_GapTrack(hit, est.toe_gap_m, est.sideways_m, now))
-                        elif est.toe_gap_m < joined.gap_m:
+                            outcome = "new_track"
+                            tracks.append(_GapTrack(hit, offer_gap, est.sideways_m, now))
+                        elif offer_gap < joined.gap_m:
+                            outcome = f"replaced {joined.gap_m:.3f}"
                             joined.hit_xy = hit
-                            joined.gap_m = est.toe_gap_m
+                            joined.gap_m = offer_gap
                             joined.side_m = est.sideways_m
                             joined.t_s = now
+                        else:
+                            outcome = f"kept={joined.gap_m:.3f}"
+                        if injected and inject_note == "":
+                            inject_note = (
+                                f"arm_t={arm_t:.3f} arm_gap={arm_gap:.3f} "
+                                f"inject_t={now:.3f} real={est.toe_gap_m:.3f} "
+                                f"offered={offer_gap:.3f} {outcome} "
+                                f"join={apart_arm:.3f}"
+                            )
                     elif (not est.in_corridor) and est.toe_gap_m <= gate and false_early == "":
                         false_early = (
                             f"{name} px={dist:.1f} toe_gap={est.toe_gap_m:.3f} "
@@ -1251,6 +1299,32 @@ def walk_finder(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
                                 f"side={chosen.side_m:+.3f} born={chosen.t_s:.3f} "
                                 f"tracks={len(tracks)}"
                             )
+                if inject_this and inject_note == "":
+                    inject_note = (
+                        f"arm_t={arm_t:.3f} arm_gap={arm_gap:.3f} "
+                        f"inject_t={now:.3f} no_join"
+                    )
+                if (
+                    long_read_m > 0.0
+                    and arm_xy is None
+                    and chosen is not None
+                    and chosen.gap_m <= gate + LONG_ARM_M
+                ):
+                    arm_xy = chosen.hit_xy
+                    arm_gap = chosen.gap_m
+                    arm_t = now
+                    inject_next = True
+                if (
+                    long_read_m > 0.0
+                    and inject_note == ""
+                    and arm_t is not None
+                    and abs(arm_t - now) < 1e-6
+                    and chosen is not None
+                    and chosen.gap_m <= gate
+                ):
+                    inject_note = (
+                        f"arm_t={arm_t:.3f} arm_gap={arm_gap:.3f} same_frame_as_stop"
+                    )
                 if chosen is not None and chosen.gap_m <= gate:
                     def report_leg(hit_xy: tuple[float, float]) -> tuple[str, float]:
                         best_name = "none"
@@ -1297,7 +1371,8 @@ def walk_finder(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
                         f"assoc={TRACK_JOIN_M:.3f} tracks={len(tracks)} "
                         f"[{'; '.join(reports)}] "
                         f"step_off={step_off:+.3f} {step_side} "
-                        f"pad={rc.HAZARD_PAD_M:.3f}"
+                        f"pad={rc.HAZARD_PAD_M:.3f} long={long_read_m:.3f} "
+                        f"inject=[{inject_note or 'none'}]"
                     )
                     too_close = clipped is not None
                     matched = reason
@@ -1344,6 +1419,8 @@ def walk_finder(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
     ]
     sim_t = SIM_LATCH_S.get(t_detect)
     late = None if issued is None or sim_t is None else issued - sim_t
+    cue_t = CUE_LATCH_S.get(t_detect)
+    late_cue = None if issued is None or cue_t is None else issued - cue_t
     return {
         "plant": sw._md5(sw.PLANT_XML),
         "t_detect": t_detect,
@@ -1364,6 +1441,11 @@ def walk_finder(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
         "head_tilt_peak": head_tilt_peak,
         "yaw": math.degrees(session.yaw()),
         "late_vs_sim_s": late,
+        "late_vs_cue_s": late_cue,
+        "long_read": long_read_m,
+        "arm_t": arm_t,
+        "arm_gap": arm_gap,
+        "inject_note": inject_note,
         "fire_eye_bias": fire_eye_bias,
         "fire_gap_bias": fire_gap_bias,
         "fire_true": fire_true,
@@ -1393,6 +1475,9 @@ def _print_finder(result: dict[str, object]) -> None:
         f"step_off={step[0]:+.3f} {step[1]} t={step[2]:.3f} "
         f"path={result['path']} too_close={result['too_close']} "
         f"issued={result['issued']} late_vs_sim_s={result['late_vs_sim_s']} "
+        f"late_vs_cue_s={result['late_vs_cue_s']} long={result['long_read']} "
+        f"arm_t={result['arm_t']} arm_gap={result['arm_gap']} "
+        f"inject=[{result['inject_note'] or 'none'}] "
         f"reason={result['reason']} false_early={result['false_early'] or 'none'} "
         f"contact={result['contact']} T_stop_run={result['t_stop']} "
         f"min_up_z={result['min_up_z']:.3f} min_foot_leg={result['min_foot_leg']} "
@@ -1435,6 +1520,13 @@ def main() -> None:
         rc.self_check()
         for t_detect in (0.0, 0.033, 0.100):
             _print_finder(walk_finder(t_detect))
+        return
+    if mode == "finder-long":
+        # One injected long frame. Not the shipped latch and not a buffer.
+        hf.self_check()
+        rc.self_check()
+        for t_detect in (0.0, 0.033, 0.100):
+            _print_finder(walk_finder(t_detect, long_read_m=LONG_READ_M))
         return
     if mode == "latch":
         rc.self_check()
