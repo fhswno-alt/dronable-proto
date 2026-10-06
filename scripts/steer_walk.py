@@ -175,14 +175,21 @@ Forcerange stays ±2.45 Nm. The stop hold limits every leg joint
 2.28 Nm prediction, rewritten each physics step from the live q and
 ω. Measured peaks on that hold are 2.280 Nm, 0.05 under 2.33. A
 command written once per tick left hip pitch at 2.309 Nm on one
-phase. The bus is stood on the next 8 ms tick. Body settle, T_stop,
-is 0.832 s on the straight walk stopped at gait clock 0.322 s, with
-8.2 cm of COM path. That replaces 0.830 s. Clear distance stays
-d_min = v × (T_detect + T_stop) with v = 0.150 m/s. T_detect is not
-filled in. The 0.342 ms RGB compute and a 33 ms frame are not kit
-T_detect, and 0.125 m / 0.129 m are not a locked margin. Camera
-world pitch for a mono range is IMU torso pitch plus head_tilt at
-the frame, not head_tilt alone. Not go-anywhere. Soft-pass is off.
+phase. The bus is stood on the next 8 ms tick. Body settle, T_stop, is
+0.832 s on the empty-plant straight walk stopped at gait clock
+0.322 s, with 8.2 cm of COM path. The kitchen body-COM settle of the
+toe-gap stop is 0.842 s, and that longer sample is the T_stop in
+d_min. Clear distance stays d_min = v × (T_detect + T_stop) with
+v = 0.150 m/s, compared as toe_gap = eye_range − toe_offset.
+toe_offset is the further-ahead sole minus kit_cam along body
+forward: −0.016 m at stand, +0.006 m / −0.036 m (leading / swing) at
+t = 5.90 s. T_detect is not filled in. The 0.342 ms RGB compute and
+a 33 ms frame are not kit T_detect, and 0.1263 m at T_detect = 0 is
+not a locked margin. Camera world pitch for a mono range is IMU torso
+pitch plus head_tilt at the frame, not head_tilt alone. The kitchen
+gate on T_detect = 0 stops at 6.192 s by dead-reckon after the floor
+leaves the frame, with 0 prop contacts and a stop peak of −2.280 Nm.
+The row is a sim projection. Not go-anywhere. Soft-pass is off.
 """
 from __future__ import annotations
 

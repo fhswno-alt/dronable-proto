@@ -1483,15 +1483,23 @@ min up_z stays 0.930–0.934. Every leg joint on those stops measures
 2.280 Nm. Nothing on the hold crosses 2.33 Nm. Settled
 `|q − q_stand|` is 0.006 rad on the right knee and body z is 0.211.
 The larger error at the stop instant, up to 0.231 rad, is the walk
-pose being left. `v × T_stop` = 0.150 × 0.832 = 0.1248 m, longer than
-the 0.082 m COM path, because the body is already slowing down.
-0.832 s replaces 0.830 s. The old 0.830 s is not kept.
+pose being left. On that empty-plant grid, `v × 0.832` = 0.1248 m,
+longer than the 0.082 m COM path, because the body is already slowing
+down. 0.832 s replaces 0.830 s on the empty plant. The old 0.830 s is
+not kept.
+
+The kitchen stop is timed on `subtree_com` of `body_link`. The world
+subtree includes the room and reads a false ~0.20 s. One issue,
+stopped at 6.200 s with `d_min` taken from the 0.832 s grid, settled
+in 0.842 s. The rerun that puts 0.842 s into `d_min` (stop at 6.192 s)
+settled in 0.810 s. The worst measured settle is 0.842 s. That is the
+`T_stop` in the formula below. The empty-plant grid max stays 0.832 s.
 
 Clear distance, with `v` the commanded 0.150 m/s:
 
 `d_min = v × (T_detect + T_stop)`
 
-`T_stop` = 0.832 s. `T_detect` is the time from the first-visible frame
+`T_stop` = 0.842 s. `T_detect` is the time from the first-visible frame
 to an RGB-only detector firing on `kit_cam`, on the detector the kit
 would run, including Pi and camera frame latency. It is a parameter.
 It is not filled in here. A numeric `d_min` is not locked. 0.125 m and
@@ -1536,19 +1544,51 @@ ground gap 0.227 m. Live pitch −18.29° estimates 0.229 m. Stand
 pitch −14.84° estimates 0.260 m, 3.3 cm long. `head_tilt` alone
 estimates 0.439 m.
 
-That leg's floor contact leaves the frame at t = 6.06 s. The last
-in-frame live estimate is 0.138 m at t = 6.04 s (stand pitch 0.142 m,
-gap 0.147 m). `d_min` at `T_detect` = 0 is 0.1248 m. Adding the
-0.342 ms compute and a 33 ms frame, which is still not kit
-`T_detect`, gives 0.1298 m. Both thresholds are under 0.138 m, so
-the live estimate does not cross `d_min` before the row leaves. The
-range gate does not stop. The foot still hits
-`col_chair_stool_b_leg_2` at 6.82 s and 20.4 N, hip pitch reaches
-−2.450 Nm at 7.81 s, and min up_z is 0.921. A later leg's row does
-cross, and the gate writes `stop` at 8.78 s, after the contact.
+The floor leaves the frame before an eye-only `d_min`. At about
+−15.6° world pitch the bottom row is an eye range of about 0.14 m.
+`d_min` at `T_detect` = 0 is 0.1263 m, so the in-frame compare only
+has a sliver. A kit `T_detect` of 0.1 s or more puts that `d_min` at
+or past the bottom row, and an in-frame-only gate cannot fire.
+Soft-pass is off. With the gate off, the left ankle still hits
+`col_chair_stool_b_leg_2` at 6.82 s and 20.4 N.
+
+The foot is not ahead of the eye on this plant. The forward offset is
+the leading bottom corner of `l_foot_contact` / `r_foot_contact`
+minus `kit_cam`, dotted with body forward. Positive means the toe is
+ahead of the camera. At stand (t = 1.00 s) both soles are −0.016 m:
+the lean puts the eye 1.6 cm ahead of the sole. At t = 5.90 s the
+left sole, which is not swinging, is +0.006 m and the right swing
+sole is −0.036 m. The gate uses the further-ahead sole. The foot that
+hit was the one that was not swinging.
+
+    eye_range = 0.335 / tan(depression(row, IMU + head_tilt))
+    toe_gap = eye_range − toe_offset
+    d_min = 0.150 × (T_detect + 0.842)
+
+`T_detect` stays open. 0.1263 m is `v × T_stop` at `T_detect` = 0. It
+is not a locked margin. If the row is in the bottom 32 pixels, the
+compare also fires when `toe_gap` is within `(eye_range − range at
+the last row)` of `d_min`. After a leg last seen in that band leaves
+the frame, the gate dead-reckons: latched `toe_gap` minus body travel
+along the latched forward. Day-1 `stop` only. The head is not tilted
+down. `head_tilt` stays at the stand angle.
+
+On `T_detect` = 0 the in-frame `toe_gap` does not cross `d_min`. A
+negative offset makes `toe_gap` larger than the eye range, so the
+in-frame compare is later, not earlier. The dead-reckon fires. Stop
+is issued at 6.192 s on `col_chair_stool_b_leg_2` (`toe_gap` 0.126 m,
+advance 0.026 m, offset +0.000 m). Prop contacts are 0. min up_z is
+0.934. End xy is +0.528, −0.423, yaw −56.9°. The closest
+foot-to-leg-floor after the stop is 0.139 m. At the stop pose the
+closest foot to that leg's floor is 0.144 m, so the estimate is about
+2 cm short. The stop peak is −2.280 Nm on `l_hip_pitch`. No
+stop-window leg joint crosses 2.33 Nm. This run's body-COM settle is
+0.810 s. The longer adjacent sample, 0.842 s, is the `T_stop` above.
+The row is still the sim projection of the group-3 leg bottom, not an
+RGB finder.
 
 A Day-1 stop at the cue (issued at 1.904 s) has 0 prop contacts,
 min up_z 0.934, end xy +0.088, −0.005, yaw −5.9°, and a stop peak of
-+2.280 Nm on the right knee. That stop is first-sight. It is not the
-range gate. Soft-pass is off. Not go-anywhere.
++2.280 Nm on the right knee. That stop is first-sight. It is not this
+gate. Soft-pass is off. Not go-anywhere.
 
