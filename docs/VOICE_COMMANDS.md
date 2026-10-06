@@ -34,23 +34,32 @@ Caps stay `vx` **+0.056 / −0.032** m/s and yaw **±0.25** rad/s. This caller d
 
 ## Five-room go-to on the joined apartment (Prefer FAIL)
 
-Reach was written into `previews/voice_goto_rooms_summary.json` before the five doorway bouts. A reach is body COM inside that room's `floor_box` from `mujoco/room_apartment.json`, the same COM having started outside it, min up_z at least 0.90, zero prop contacts, and the bout ending by 53.0 s. The box is the named room. The plant floor from −3 m to +3 m is not the box. Each bout starts at that room's doorway spawn. Voice vx stays **+0.056** m/s and yaw **±0.25**. The spawn already faces the opening, so a matched label publishes `vel(+0.056, +0.000)`. `d_min = 0.150 × (T_detect + T_stop)` with `T_detect = 0` and `T_stop = 0.842` s, so `d_min = 0.1263` m. 0.150 is that hardware bound, not the voice cap. Soft-pass is off. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` is unchanged.
+Reach was written into `previews/voice_goto_rooms_summary.json` before the bouts. A reach is body COM inside that room's `floor_box` from `mujoco/room_apartment.json`, the same COM having started outside it, min up_z at least 0.90, zero prop contacts, the bout ending by 53.0 s, and a correct per-target yes having committed the go-to. The box is the named room. The plant floor from −3 m to +3 m is not the box. Voice vx stays **+0.056** m/s and yaw **±0.25**. `d_min = 0.150 × (T_detect + T_stop)` with `T_detect = 0` and `T_stop = 0.842` s, so `d_min = 0.1263` m. 0.150 is that hardware bound, not the voice cap. Soft-pass is off. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` is unchanged. `kit_cam` is not moved.
 
-The typed caller still refuses a room phrase. This measure asks pinned Moondream2 (`vikhyatk/moondream2` revision `5d6c926f44e26b07957b0dd315bbedcb4c17a5fe`) on one `kit_cam` still after the 1 s stand. A label that is the asked room is the only path that publishes `vel` and arms the #71 latch. A label that is some other word does not walk.
+The open-set question ("which room is this?") is not this measure. From the 0.70 m doorway the hall fills most of the frame, so "entrance" is a fair answer and is not pushed off the label set. The question is per target: "Is there a kitchen through the doorway ahead?" (living is asked as "living room"). A yes counts only when that room's furniture covers at least 1% of `kit_cam`. Any other yes is a wrong yes: no forward velocity, and that bout fails.
 
-| Room | Moondream | Spawn COM | Started outside | Commanded vel | Stop | d_min | Reached |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| kitchen | entrance | +0.352, −0.110 | true | none | none | 0.1263 m | false |
-| bathroom | entrance | +0.352, +1.880 | true | none | none | 0.1263 m | false |
-| living | living | −0.352, +1.520 | true | +0.056, yaw 0 | inside at 12.592 s | 0.1263 m | true |
-| bedroom | entrance | +0.352, −1.990 | true | none | none | 0.1263 m | false |
-| entrance | entrance | −0.352, −1.440 | true | +0.056, yaw 0 | inside at 12.592 s | 0.1263 m | true |
+Scored spawns are the doorway xy turned **±90°** from the door-facing yaw, still outside the room box. A geometric census, taken before the model runs, logs the doorway fraction at 0°, ±60°, ±75°, and ±90°. ±60° and ±75° still see the opening, so they are not the search spawns. ±90° is the heading in that band where the opening fraction is 0. After the 1 s stand the body turns in place at `vel(0, +0.25)`. The sign is not taken from the door bearing. Every 20° the turn stops (`yaw 0`) and the body settles for 0.70 s, which covers the 0.40 rad/s² slew from 0.25 rad/s. The yes/no is asked only after that settle. The logged heading is the heading at capture, not the heading when the answer returns. The first yes ends the search. A correct yes publishes `vel(+0.056, +0.000)` along that capture heading and arms the #71 latch. The straight 12.592 s walk with yaw 0 is not a bout here.
 
-Kitchen, bathroom, and bedroom were named entrance, so the recogniser did label a room and the bout still did not walk. Living and entrance matched, finished inside the named box, contacts none, min up_z 0.934. The arrival stop peaked at +2.280 Nm (`l_hip_pitch_pos`) and −2.280 Nm (`l_knee_pos`). The #71 latch was armed on those two walks and did not fire, so neither bout is a #71 pass. The three stands that did not walk peaked at +1.262 Nm on `r_ank_pitch_pos`, contact none, min up_z 0.934.
+While yaw is commanded, both hip yaw joints and both hip roll joints are logged against 2.33 Nm. The bout peak names its joint. A #71 stop on the speckled kitchen or bathroom shadow with no prop in frame is a false stop and is not a #71 pass.
 
-The speckled shadow on the hall checker in front of the kitchen and bathroom doorways was in frame at 1.0 s (kitchen column near u 320, luminance std 10.6; bathroom near u 531, std 8.6). The finder did not emit a cue on either patch. Furniture was in the frame at that look (prop_in_frame true). No stop fired there, so there is no false stop and nothing to count as a #71 pass.
+The typed caller still refuses a room phrase. The scored run is **Prefer FAIL**. Soft-pass is off. `reached_all` is false. `wrong_yes_any` is true. `false_stop_any` is false. `go_anywhere` is false. `kit_safe` is false. All 10 bouts started outside the named room box. None finished inside. Min up_z is 0.934. No #71 latch pass. Every one of the 15 asks has `applied_yaw_at_capture` 0, and the logged heading equals `heading_at_capture`.
 
-Two of five reached. Prefer FAIL. Not kit-safe. Not go-anywhere.
+Seven yeses fired with the asked room under 1% of `kit_cam` (empty hall, living when the question was kitchen or bathroom, or kitchen when the question was entrance). Those bouts published no forward velocity. Three correct yeses committed an oblique capture heading, about 0.36 rad of search rather than a heading centered on the door, then `vel(+0.056, 0)` walked into a wall. That is the score. The 1% bar, the 0.70 s settle, the prompt, the latch, and the turn sign stay as they were.
+
+| Room | Offset | Door frac | First yes t / tick / heading | Yaw at capture | Asked frac / visible | Yes confidence | Result | Peak joint | Contact |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| kitchen | +90° | 0 | 1.000 / 125 / +1.571 | 0 | 0 / living | 0.560 | wrong yes, no vel | +1.262 `r_ank_pitch` | none |
+| kitchen | −90° | 0 | 3.800 / 475 / −1.208 | 0 | 0.046 / kitchen | 0.774 | correct yes, not inside | −2.280 `l_knee` | `wall_hall_e_0` 2.6 N at 39.688 s |
+| bathroom | +90° | 0 | 6.600 / 825 / +2.297 | 0 | 0 / living | 0.817 | wrong yes, no vel | +2.280 `r_knee` | none |
+| bathroom | −90° | 0 | 1.000 / 125 / −1.571 | 0 | 0 / none | 0.616 | wrong yes, no vel | +1.262 `r_ank_pitch` | none |
+| living | +90° | 0 | 1.000 / 125 / −1.571 | 0 | 0 / none | 0.748 | wrong yes, no vel | +1.262 `r_ank_pitch` | none |
+| living | −90° | 0 | 3.800 / 475 / +1.933 | 0 | 0.055 / living | 0.737 | correct yes, not inside | +2.280 `r_knee` | `wall_outer_n` 5.9 N at 24.656 s |
+| bedroom | +90° | 0 | 1.000 / 125 / +1.571 | 0 | 0 / none | 0.628 | wrong yes, no vel | +1.262 `r_ank_pitch` | none |
+| bedroom | −90° | 0 | 3.800 / 475 / −1.208 | 0 | 0.059 / bedroom | 0.792 | correct yes, not inside | −2.280 `l_knee` | `wall_outer_s` 2.5 N at 16.640 s |
+| entrance | +90° | 0 | 1.000 / 125 / −1.571 | 0 | 0 / none | 0.665 | wrong yes, no vel | +1.262 `r_ank_pitch` | none |
+| entrance | −90° | 0 | 1.000 / 125 / +1.571 | 0 | 0 / kitchen | 0.785 | wrong yes, no vel | +1.262 `r_ank_pitch` | none |
+
+The four bouts that commanded yaw (kitchen −90°, bathroom +90°, living −90°, bedroom −90°) logged hip yaw about −0.606 / +0.548 Nm and both hip rolls at +2.280 Nm. `over_2_33` is false: 2.280 Nm is the leg stop rail, 0.05 under 2.33. The six stand-only peaks are `r_ank_pitch` at +1.262 Nm. Speckled patches were sighted on six bouts and the finder did not emit; no stop landed on a patch, including the bathroom −90° sighting that had no prop in frame. Not kit-safe. Not go-anywhere.
 
 ```bash
 MUJOCO_GL=osmesa python scripts/voice_goto_rooms.py

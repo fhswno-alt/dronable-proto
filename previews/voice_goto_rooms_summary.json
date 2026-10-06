@@ -15,16 +15,368 @@
     "d_min": "d_min = 0.150 * (T_detect + T_stop). 0.150 is the hardware bound in that formula, not the voice vx cap. T_detect = 0.000 s. T_stop = 0.842 s.",
     "d_min_m": 0.1263,
     "false_stop": "A #71 stop whose floor point lies on the speckled shadow patch in front of the kitchen or bathroom doorway, with no furniture prop in the kit_cam frame. That stop is not a #71 pass. Walls are not props.",
+    "yes_no": "Per asked room: 'Is there a {room} through the doorway ahead?' yes or no. Not an open-set room name. A yes is correct only when that room's furniture covers at least 1% of kit_cam. Any other yes is a wrong yes and does not publish forward vel.",
+    "search": "Spawn yaw is the door-facing yaw plus or minus 90 degrees. After the stand, vel(0, +0.25) turns in place. No forward vel until a correct yes. Every 20 degrees the turn stops (yaw 0) and the body settles for 0.70 s. The question is asked only then. The logged heading is the heading at capture, not the heading when the answer returns. The turn sign is not taken from the door bearing. kit_cam is not moved.",
+    "hip_bar_nm": 2.33,
     "soft_pass": false
   },
   "scene": "room_apartment.xml",
   "joined_scene": true,
   "doorway_spawn": true,
+  "kit_cam_moved": false,
   "recogniser": {
     "model": "vikhyatk/moondream2",
     "revision": "5d6c926f44e26b07957b0dd315bbedcb4c17a5fe",
-    "prompt": "Which room is this? Answer with one word: kitchen, bathroom, living, bedroom, entrance, or none."
+    "prompt": "Is there a {name} through the doorway ahead? Answer yes or no.",
+    "open_set_prompt_not_used": "Which room is this? Answer with one word: kitchen, bathroom, living, bedroom, entrance, or none.",
+    "room_visible_frac": 0.01,
+    "ask_step_rad": 0.3490658503988659,
+    "settle_s": 0.7,
+    "search_yaw": 0.25,
+    "search_sweep_rad": 6.283185307179586,
+    "spawn_offsets_rad": [
+      1.5707963267948966,
+      -1.5707963267948966
+    ]
   },
+  "doorway_census": [
+    {
+      "room": "kitchen",
+      "offset_deg": 0,
+      "doorway_fraction": 0.28875,
+      "asked_fraction": 0.056868489583333334,
+      "visible_rooms": [
+        "kitchen"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "kitchen",
+      "offset_deg": 60,
+      "doorway_fraction": 0.26104166666666667,
+      "asked_fraction": 0.09712890625000001,
+      "visible_rooms": [
+        "kitchen"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "kitchen",
+      "offset_deg": -60,
+      "doorway_fraction": 0.27145833333333336,
+      "asked_fraction": 0.09707356770833334,
+      "visible_rooms": [
+        "kitchen"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "kitchen",
+      "offset_deg": 75,
+      "doorway_fraction": 0.16604166666666667,
+      "asked_fraction": 0.040374348958333334,
+      "visible_rooms": [
+        "kitchen"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "kitchen",
+      "offset_deg": -75,
+      "doorway_fraction": 0.16770833333333332,
+      "asked_fraction": 0.040621744791666664,
+      "visible_rooms": [
+        "kitchen"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "kitchen",
+      "offset_deg": 90,
+      "doorway_fraction": 0.0,
+      "asked_fraction": 0.0,
+      "visible_rooms": [],
+      "started_outside": true
+    },
+    {
+      "room": "kitchen",
+      "offset_deg": -90,
+      "doorway_fraction": 0.0,
+      "asked_fraction": 0.0,
+      "visible_rooms": [
+        "entrance"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "bathroom",
+      "offset_deg": 0,
+      "doorway_fraction": 0.28875,
+      "asked_fraction": 0.06208658854166667,
+      "visible_rooms": [
+        "bathroom"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "bathroom",
+      "offset_deg": 60,
+      "doorway_fraction": 0.26104166666666667,
+      "asked_fraction": 0.1073828125,
+      "visible_rooms": [
+        "bathroom"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "bathroom",
+      "offset_deg": -60,
+      "doorway_fraction": 0.27145833333333336,
+      "asked_fraction": 0.10221354166666667,
+      "visible_rooms": [
+        "bathroom"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "bathroom",
+      "offset_deg": 75,
+      "doorway_fraction": 0.16604166666666667,
+      "asked_fraction": 0.027099609375,
+      "visible_rooms": [
+        "bathroom"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "bathroom",
+      "offset_deg": -75,
+      "doorway_fraction": 0.16770833333333332,
+      "asked_fraction": 0.05172200520833334,
+      "visible_rooms": [
+        "bathroom"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "bathroom",
+      "offset_deg": 90,
+      "doorway_fraction": 0.0,
+      "asked_fraction": 0.0,
+      "visible_rooms": [],
+      "started_outside": true
+    },
+    {
+      "room": "bathroom",
+      "offset_deg": -90,
+      "doorway_fraction": 0.0,
+      "asked_fraction": 0.0,
+      "visible_rooms": [],
+      "started_outside": true
+    },
+    {
+      "room": "living",
+      "offset_deg": 0,
+      "doorway_fraction": 0.28875,
+      "asked_fraction": 0.04164713541666666,
+      "visible_rooms": [
+        "living"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "living",
+      "offset_deg": 60,
+      "doorway_fraction": 0.26104166666666667,
+      "asked_fraction": 0.05558919270833333,
+      "visible_rooms": [
+        "living"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "living",
+      "offset_deg": -60,
+      "doorway_fraction": 0.27145833333333336,
+      "asked_fraction": 0.0592578125,
+      "visible_rooms": [
+        "living"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "living",
+      "offset_deg": 75,
+      "doorway_fraction": 0.16604166666666667,
+      "asked_fraction": 0.03374674479166667,
+      "visible_rooms": [
+        "living"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "living",
+      "offset_deg": -75,
+      "doorway_fraction": 0.16770833333333332,
+      "asked_fraction": 0.05224283854166666,
+      "visible_rooms": [
+        "living"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "living",
+      "offset_deg": 90,
+      "doorway_fraction": 0.0,
+      "asked_fraction": 0.0,
+      "visible_rooms": [],
+      "started_outside": true
+    },
+    {
+      "room": "living",
+      "offset_deg": -90,
+      "doorway_fraction": 0.0,
+      "asked_fraction": 0.0,
+      "visible_rooms": [],
+      "started_outside": true
+    },
+    {
+      "room": "bedroom",
+      "offset_deg": 0,
+      "doorway_fraction": 0.28875,
+      "asked_fraction": 0.048639322916666665,
+      "visible_rooms": [
+        "bedroom"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "bedroom",
+      "offset_deg": 60,
+      "doorway_fraction": 0.26104166666666667,
+      "asked_fraction": 0.06500325520833333,
+      "visible_rooms": [
+        "bedroom"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "bedroom",
+      "offset_deg": -60,
+      "doorway_fraction": 0.27145833333333336,
+      "asked_fraction": 0.09590169270833333,
+      "visible_rooms": [
+        "bedroom"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "bedroom",
+      "offset_deg": 75,
+      "doorway_fraction": 0.16604166666666667,
+      "asked_fraction": 0.021695963541666665,
+      "visible_rooms": [
+        "bedroom"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "bedroom",
+      "offset_deg": -75,
+      "doorway_fraction": 0.16770833333333332,
+      "asked_fraction": 0.053196614583333336,
+      "visible_rooms": [
+        "bedroom"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "bedroom",
+      "offset_deg": 90,
+      "doorway_fraction": 0.0,
+      "asked_fraction": 0.0,
+      "visible_rooms": [
+        "entrance"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "bedroom",
+      "offset_deg": -90,
+      "doorway_fraction": 0.0,
+      "asked_fraction": 0.0,
+      "visible_rooms": [],
+      "started_outside": true
+    },
+    {
+      "room": "entrance",
+      "offset_deg": 0,
+      "doorway_fraction": 0.28875,
+      "asked_fraction": 0.059755859375000005,
+      "visible_rooms": [
+        "entrance"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "entrance",
+      "offset_deg": 60,
+      "doorway_fraction": 0.26104166666666667,
+      "asked_fraction": 0.07095052083333332,
+      "visible_rooms": [
+        "entrance"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "entrance",
+      "offset_deg": -60,
+      "doorway_fraction": 0.27145833333333336,
+      "asked_fraction": 0.07098632812500001,
+      "visible_rooms": [
+        "entrance"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "entrance",
+      "offset_deg": 75,
+      "doorway_fraction": 0.16604166666666667,
+      "asked_fraction": 0.06380208333333333,
+      "visible_rooms": [
+        "entrance"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "entrance",
+      "offset_deg": -75,
+      "doorway_fraction": 0.16770833333333332,
+      "asked_fraction": 0.06383138020833333,
+      "visible_rooms": [
+        "entrance"
+      ],
+      "started_outside": true
+    },
+    {
+      "room": "entrance",
+      "offset_deg": 90,
+      "doorway_fraction": 0.0,
+      "asked_fraction": 0.0,
+      "visible_rooms": [],
+      "started_outside": true
+    },
+    {
+      "room": "entrance",
+      "offset_deg": -90,
+      "doorway_fraction": 0.0,
+      "asked_fraction": 0.0,
+      "visible_rooms": [
+        "kitchen"
+      ],
+      "started_outside": true
+    }
+  ],
   "shadow_patches": [
     {
       "room": "kitchen",
@@ -46,18 +398,27 @@
       "room": "kitchen",
       "scene": "room_apartment.xml",
       "phrase": "go to the kitchen",
+      "question": "Is there a kitchen through the doorway ahead? Answer yes or no.",
+      "yaw_offset_rad": 1.5707963267948966,
       "voice_parse": "refuse",
       "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
       "generic_caller": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
       "matched_room_words": [
         "kitchen"
       ],
-      "recogniser_label": "entrance",
-      "recogniser_raw": "entrance",
-      "recogniser_confidence": 0.6040073037147522,
-      "recogniser_seconds": 5.713494845000014,
+      "recogniser_label": "yes",
+      "recogniser_raw": "yes",
+      "recogniser_confidence": 0.56037437915802,
+      "recogniser_seconds": 6.954784002999986,
       "commanded_vx": null,
       "commanded_yaw": null,
+      "search_yaw_rate": 0.25,
+      "yaw_turned_rad": 0.0,
+      "first_yes_t": 1.0000000000000007,
+      "first_yes_tick": 125,
+      "first_yes_heading_rad": 1.5707973140879086,
+      "wrong_yes": true,
+      "committed": false,
       "d_min_m": 0.1263,
       "d_min_v_mps": 0.15,
       "t_detect_s": 0.0,
@@ -66,22 +427,47 @@
       "latch_pass": false,
       "false_stop": false,
       "prop_in_frame_at_stop": null,
-      "stop_path": "",
-      "stop_reason": "",
+      "stop_path": "wrong_yes",
+      "stop_reason": "wrong yes; kitchen covers 0.000 of kit_cam, under 0.01; visible rooms: living",
       "stop_hit_xy": null,
       "stop_on_shadow": false,
       "shadow_first_sightings": [
         {
-          "patch": "kitchen",
+          "patch": "bathroom",
           "t": 1.0000000000000007,
-          "u": 320.23438735583983,
-          "v": 353.6093791966117,
-          "lum_mean": 63.216,
-          "lum_std": 10.564683809750294,
+          "u": 335.8658025491321,
+          "v": 225.33459563950876,
+          "lum_mean": 68.9808,
+          "lum_std": 11.147862187881584,
           "speckled": true,
           "finder_emitted": false,
           "prop_in_frame": true,
           "hit_xy": null
+        }
+      ],
+      "doorway_fraction": 0.0,
+      "asked_fraction": 0.0,
+      "visible_rooms": [
+        "living"
+      ],
+      "asks": [
+        {
+          "t": 1.0000000000000007,
+          "t_capture": 1.0000000000000007,
+          "tick": 125,
+          "heading_rad": 1.5707973140879086,
+          "heading_at_capture": 1.5707973140879086,
+          "applied_yaw_at_capture": 0.0,
+          "yaw_from_spawn_rad": 0.0,
+          "doorway_fraction": 0.0,
+          "asked_fraction": 0.0,
+          "visible_rooms": [
+            "living"
+          ],
+          "answer": "yes",
+          "raw": "yes",
+          "confidence": 0.56037437915802,
+          "seconds": 6.954784002999986
         }
       ],
       "spawn": {
@@ -89,17 +475,17 @@
         "doorway_y": -0.11,
         "doorway_yaw": 0.0,
         "qpos_xyz": [
-          0.3465273324123641,
-          -0.10999162472908056,
-          0.21093215861409745
+          0.290001809873598,
+          -0.053472494459549,
+          0.21093208831942253
         ],
-        "yaw_rad": 0.00015782501287047446,
+        "yaw_rad": 1.5707973140879086,
         "com_xyz": [
-          0.3519593590473371,
-          -0.11001105208655107,
-          0.18342730754005485
+          0.2900220882026212,
+          -0.048040445643870944,
+          0.18342726910409618
         ],
-        "up_z": 0.9667228207290409
+        "up_z": 0.966723571342037
       },
       "floor_box": {
         "source": "room_apartment.json",
@@ -111,29 +497,240 @@
       "started_outside": true,
       "finished_inside": false,
       "reached": false,
-      "reach_block": "recogniser label 'entrance' is not kitchen; no vel was published",
+      "reach_block": "wrong yes; kitchen covers 0.000 of kit_cam, under 0.01; visible rooms: living",
       "contact": "none",
-      "peak_nm": 1.2623284696532018,
+      "peak_nm": 1.2621482283921743,
       "peak_actuator": "r_ank_pitch_pos",
-      "min_up_z": 0.93415459431212,
-      "t_end": 1.0000000000000007
+      "peak_joint": "r_ank_pitch",
+      "hip_while_yawing": [
+        {
+          "joint": "l_hip_yaw",
+          "actuator": "l_hip_yaw_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        },
+        {
+          "joint": "r_hip_yaw",
+          "actuator": "r_hip_yaw_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        },
+        {
+          "joint": "l_hip_roll",
+          "actuator": "l_hip_roll_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        },
+        {
+          "joint": "r_hip_roll",
+          "actuator": "r_hip_roll_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        }
+      ],
+      "min_up_z": 0.9341731871694676,
+      "t_end": 1.0000000000000007,
+      "end_qpos_xyz": [
+        0.290001809873598,
+        -0.053472494459549,
+        0.21093208831942253
+      ],
+      "end_yaw_rad": 1.5707973140879086
+    },
+    {
+      "room": "kitchen",
+      "scene": "room_apartment.xml",
+      "phrase": "go to the kitchen",
+      "question": "Is there a kitchen through the doorway ahead? Answer yes or no.",
+      "yaw_offset_rad": -1.5707963267948966,
+      "voice_parse": "vel",
+      "voice_line": "vel(+0.056, +0.000)",
+      "generic_caller": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
+      "matched_room_words": [
+        "kitchen"
+      ],
+      "recogniser_label": "yes",
+      "recogniser_raw": "yes",
+      "recogniser_confidence": 0.7737537026405334,
+      "recogniser_seconds": 6.277825442999983,
+      "commanded_vx": 0.056,
+      "commanded_yaw": 0.0,
+      "search_yaw_rate": 0.25,
+      "yaw_turned_rad": 0.36216840652143967,
+      "first_yes_t": 3.799999999999803,
+      "first_yes_tick": 475,
+      "first_yes_heading_rad": -1.2084700952605856,
+      "wrong_yes": false,
+      "committed": true,
+      "d_min_m": 0.1263,
+      "d_min_v_mps": 0.15,
+      "t_detect_s": 0.0,
+      "t_stop_s": 0.842,
+      "latch_applied": true,
+      "latch_pass": false,
+      "false_stop": false,
+      "prop_in_frame_at_stop": null,
+      "stop_path": "contact",
+      "stop_reason": "wall_hall_e_0 2.6 N",
+      "stop_hit_xy": null,
+      "stop_on_shadow": false,
+      "shadow_first_sightings": [
+        {
+          "patch": "kitchen",
+          "t": 3.799999999999803,
+          "u": 143.18631018073916,
+          "v": 298.12224795212694,
+          "lum_mean": 81.6624,
+          "lum_std": 45.02478901938353,
+          "speckled": true,
+          "finder_emitted": false,
+          "prop_in_frame": true,
+          "hit_xy": null
+        }
+      ],
+      "doorway_fraction": 0.0,
+      "asked_fraction": 0.0,
+      "visible_rooms": [
+        "entrance"
+      ],
+      "asks": [
+        {
+          "t": 1.0000000000000007,
+          "t_capture": 1.0000000000000007,
+          "tick": 125,
+          "heading_rad": -1.5706385017820281,
+          "heading_at_capture": -1.5706385017820281,
+          "applied_yaw_at_capture": 0.0,
+          "yaw_from_spawn_rad": 0.0,
+          "doorway_fraction": 0.0,
+          "asked_fraction": 0.0,
+          "visible_rooms": [
+            "entrance"
+          ],
+          "answer": "no",
+          "raw": "no",
+          "confidence": 0.6492000818252563,
+          "seconds": 6.349770251999871
+        },
+        {
+          "t": 3.799999999999803,
+          "t_capture": 3.799999999999803,
+          "tick": 475,
+          "heading_rad": -1.2084700952605856,
+          "heading_at_capture": -1.2084700952605856,
+          "applied_yaw_at_capture": 0.0,
+          "yaw_from_spawn_rad": 0.3621684065214428,
+          "doorway_fraction": 0.12895833333333334,
+          "asked_fraction": 0.045670572916666666,
+          "visible_rooms": [
+            "kitchen"
+          ],
+          "answer": "yes",
+          "raw": "yes",
+          "confidence": 0.7737537026405334,
+          "seconds": 6.277825442999983
+        }
+      ],
+      "spawn": {
+        "doorway_x": 0.29,
+        "doorway_y": -0.11,
+        "doorway_yaw": 0.0,
+        "qpos_xyz": [
+          0.29000837527091916,
+          -0.16652733241236375,
+          0.21093215861409761
+        ],
+        "yaw_rad": -1.5706385017820281,
+        "com_xyz": [
+          0.2899889479134486,
+          -0.1719593590473368,
+          0.18342730754005498
+        ],
+        "up_z": 0.9667228207290421
+      },
+      "floor_box": {
+        "source": "room_apartment.json",
+        "xmin": 1.07,
+        "xmax": 2.92,
+        "ymin": -0.98,
+        "ymax": 0.76
+      },
+      "started_outside": true,
+      "finished_inside": false,
+      "reached": false,
+      "reach_block": "COM did not finish inside the named box (contact)",
+      "contact": "wall_hall_e_0 2.6 N",
+      "peak_nm": -2.2800000000000082,
+      "peak_actuator": "l_knee_pos",
+      "peak_joint": "l_knee",
+      "hip_while_yawing": [
+        {
+          "joint": "l_hip_yaw",
+          "actuator": "l_hip_yaw_pos",
+          "peak_nm": -0.6063588893682339,
+          "abs_nm": 0.6063588893682339,
+          "over_2_33": false
+        },
+        {
+          "joint": "r_hip_yaw",
+          "actuator": "r_hip_yaw_pos",
+          "peak_nm": 0.5480749113065315,
+          "abs_nm": 0.5480749113065315,
+          "over_2_33": false
+        },
+        {
+          "joint": "l_hip_roll",
+          "actuator": "l_hip_roll_pos",
+          "peak_nm": 2.2800000000000007,
+          "abs_nm": 2.2800000000000007,
+          "over_2_33": false
+        },
+        {
+          "joint": "r_hip_roll",
+          "actuator": "r_hip_roll_pos",
+          "peak_nm": 2.2800000000000007,
+          "abs_nm": 2.2800000000000007,
+          "over_2_33": false
+        }
+      ],
+      "min_up_z": 0.9341545943121209,
+      "t_end": 39.68800000000254,
+      "end_qpos_xyz": [
+        1.1261732977532077,
+        -2.3286549514283874,
+        0.20898870353030313
+      ],
+      "end_yaw_rad": -1.235305223030029
     },
     {
       "room": "bathroom",
       "scene": "room_apartment.xml",
       "phrase": "go to the bathroom",
+      "question": "Is there a bathroom through the doorway ahead? Answer yes or no.",
+      "yaw_offset_rad": 1.5707963267948966,
       "voice_parse": "refuse",
       "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
       "generic_caller": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
       "matched_room_words": [
         "bathroom"
       ],
-      "recogniser_label": "entrance",
-      "recogniser_raw": "entrance",
-      "recogniser_confidence": 0.757535994052887,
-      "recogniser_seconds": 4.789840298999934,
+      "recogniser_label": "yes",
+      "recogniser_raw": "yes",
+      "recogniser_confidence": 0.8174293041229248,
+      "recogniser_seconds": 5.06064926199997,
       "commanded_vx": null,
       "commanded_yaw": null,
+      "search_yaw_rate": 0.25,
+      "yaw_turned_rad": 0.7263475722516106,
+      "first_yes_t": 6.599999999999495,
+      "first_yes_tick": 825,
+      "first_yes_heading_rad": 2.2971448863395194,
+      "wrong_yes": true,
+      "committed": false,
       "d_min_m": 0.1263,
       "d_min_v_mps": 0.15,
       "t_detect_s": 0.0,
@@ -142,22 +739,64 @@
       "latch_pass": false,
       "false_stop": false,
       "prop_in_frame_at_stop": null,
-      "stop_path": "",
-      "stop_reason": "",
+      "stop_path": "wrong_yes",
+      "stop_reason": "wrong yes; bathroom covers 0.000 of kit_cam, under 0.01; visible rooms: living",
       "stop_hit_xy": null,
       "stop_on_shadow": false,
-      "shadow_first_sightings": [
+      "shadow_first_sightings": [],
+      "doorway_fraction": 0.0,
+      "asked_fraction": 0.0,
+      "visible_rooms": [],
+      "asks": [
         {
-          "patch": "bathroom",
           "t": 1.0000000000000007,
-          "u": 531.3092666700007,
-          "v": 353.6353281796389,
-          "lum_mean": 33.7296,
-          "lum_std": 8.558065426251426,
-          "speckled": true,
-          "finder_emitted": false,
-          "prop_in_frame": true,
-          "hit_xy": null
+          "t_capture": 1.0000000000000007,
+          "tick": 125,
+          "heading_rad": 1.5707973140879077,
+          "heading_at_capture": 1.5707973140879077,
+          "applied_yaw_at_capture": 0.0,
+          "yaw_from_spawn_rad": 0.0,
+          "doorway_fraction": 0.0,
+          "asked_fraction": 0.0,
+          "visible_rooms": [],
+          "answer": "no",
+          "raw": "no",
+          "confidence": 0.7725093364715576,
+          "seconds": 6.355361507999987
+        },
+        {
+          "t": 3.799999999999803,
+          "t_capture": 3.799999999999803,
+          "tick": 475,
+          "heading_rad": 1.9329658696701228,
+          "heading_at_capture": 1.9329658696701228,
+          "applied_yaw_at_capture": 0.0,
+          "yaw_from_spawn_rad": 0.3621685555822154,
+          "doorway_fraction": 0.0,
+          "asked_fraction": 0.0,
+          "visible_rooms": [],
+          "answer": "no",
+          "raw": "no",
+          "confidence": 0.8032199740409851,
+          "seconds": 5.162508469999921
+        },
+        {
+          "t": 6.599999999999495,
+          "t_capture": 6.599999999999495,
+          "tick": 825,
+          "heading_rad": 2.2971448863395194,
+          "heading_at_capture": 2.2971448863395194,
+          "applied_yaw_at_capture": 0.0,
+          "yaw_from_spawn_rad": 0.726347572251612,
+          "doorway_fraction": 0.0,
+          "asked_fraction": 0.0,
+          "visible_rooms": [
+            "living"
+          ],
+          "answer": "yes",
+          "raw": "yes",
+          "confidence": 0.8174293041229248,
+          "seconds": 5.06064926199997
         }
       ],
       "spawn": {
@@ -165,17 +804,17 @@
         "doorway_y": 1.88,
         "doorway_yaw": 0.0,
         "qpos_xyz": [
-          0.3465273324123639,
-          1.8800083752709231,
-          0.21093215861409778
+          0.2900018098735977,
+          1.9365275055404518,
+          0.2109320883194225
         ],
-        "yaw_rad": 0.00015782501287100298,
+        "yaw_rad": 1.5707973140879077,
         "com_xyz": [
-          0.3519593590473369,
-          1.8799889479134522,
-          0.1834273075400551
+          0.2900220882026209,
+          1.9419595543561292,
+          0.18342726910409612
         ],
-        "up_z": 0.9667228207290429
+        "up_z": 0.966723571342037
       },
       "floor_box": {
         "source": "room_apartment.json",
@@ -187,59 +826,282 @@
       "started_outside": true,
       "finished_inside": false,
       "reached": false,
-      "reach_block": "recogniser label 'entrance' is not bathroom; no vel was published",
+      "reach_block": "wrong yes; bathroom covers 0.000 of kit_cam, under 0.01; visible rooms: living",
+      "contact": "none",
+      "peak_nm": 2.2800000000000082,
+      "peak_actuator": "r_knee_pos",
+      "peak_joint": "r_knee",
+      "hip_while_yawing": [
+        {
+          "joint": "l_hip_yaw",
+          "actuator": "l_hip_yaw_pos",
+          "peak_nm": -0.6083864625088249,
+          "abs_nm": 0.6083864625088249,
+          "over_2_33": false
+        },
+        {
+          "joint": "r_hip_yaw",
+          "actuator": "r_hip_yaw_pos",
+          "peak_nm": 0.5480950837256073,
+          "abs_nm": 0.5480950837256073,
+          "over_2_33": false
+        },
+        {
+          "joint": "l_hip_roll",
+          "actuator": "l_hip_roll_pos",
+          "peak_nm": 2.2800000000000007,
+          "abs_nm": 2.2800000000000007,
+          "over_2_33": false
+        },
+        {
+          "joint": "r_hip_roll",
+          "actuator": "r_hip_roll_pos",
+          "peak_nm": 2.2800000000000007,
+          "abs_nm": 2.2800000000000007,
+          "over_2_33": false
+        }
+      ],
+      "min_up_z": 0.9341731871694678,
+      "t_end": 6.599999999999495,
+      "end_qpos_xyz": [
+        0.24773348263394268,
+        1.9664066390636272,
+        0.21097492441125068
+      ],
+      "end_yaw_rad": 2.2971448863395194
+    },
+    {
+      "room": "bathroom",
+      "scene": "room_apartment.xml",
+      "phrase": "go to the bathroom",
+      "question": "Is there a bathroom through the doorway ahead? Answer yes or no.",
+      "yaw_offset_rad": -1.5707963267948966,
+      "voice_parse": "refuse",
+      "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
+      "generic_caller": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
+      "matched_room_words": [
+        "bathroom"
+      ],
+      "recogniser_label": "yes",
+      "recogniser_raw": "yes",
+      "recogniser_confidence": 0.6161516308784485,
+      "recogniser_seconds": 5.3460204759999215,
+      "commanded_vx": null,
+      "commanded_yaw": null,
+      "search_yaw_rate": 0.25,
+      "yaw_turned_rad": 0.0,
+      "first_yes_t": 1.0000000000000007,
+      "first_yes_tick": 125,
+      "first_yes_heading_rad": -1.5706385017820286,
+      "wrong_yes": true,
+      "committed": false,
+      "d_min_m": 0.1263,
+      "d_min_v_mps": 0.15,
+      "t_detect_s": 0.0,
+      "t_stop_s": 0.842,
+      "latch_applied": false,
+      "latch_pass": false,
+      "false_stop": false,
+      "prop_in_frame_at_stop": null,
+      "stop_path": "wrong_yes",
+      "stop_reason": "wrong yes; bathroom covers 0.000 of kit_cam, under 0.01; visible rooms: none",
+      "stop_hit_xy": null,
+      "stop_on_shadow": false,
+      "shadow_first_sightings": [
+        {
+          "patch": "kitchen",
+          "t": 1.0000000000000007,
+          "u": 282.7626051000644,
+          "v": 218.85890854707597,
+          "lum_mean": 69.056,
+          "lum_std": 29.62256005142027,
+          "speckled": true,
+          "finder_emitted": false,
+          "prop_in_frame": false,
+          "hit_xy": null
+        }
+      ],
+      "doorway_fraction": 0.0,
+      "asked_fraction": 0.0,
+      "visible_rooms": [],
+      "asks": [
+        {
+          "t": 1.0000000000000007,
+          "t_capture": 1.0000000000000007,
+          "tick": 125,
+          "heading_rad": -1.5706385017820286,
+          "heading_at_capture": -1.5706385017820286,
+          "applied_yaw_at_capture": 0.0,
+          "yaw_from_spawn_rad": 0.0,
+          "doorway_fraction": 0.0,
+          "asked_fraction": 0.0,
+          "visible_rooms": [],
+          "answer": "yes",
+          "raw": "yes",
+          "confidence": 0.6161516308784485,
+          "seconds": 5.3460204759999215
+        }
+      ],
+      "spawn": {
+        "doorway_x": 0.29,
+        "doorway_y": 1.88,
+        "doorway_yaw": 0.0,
+        "qpos_xyz": [
+          0.29000837527091927,
+          1.8234726675876356,
+          0.21093215861409761
+        ],
+        "yaw_rad": -1.5706385017820286,
+        "com_xyz": [
+          0.2899889479134487,
+          1.818040640952662,
+          0.18342730754005493
+        ],
+        "up_z": 0.9667228207290421
+      },
+      "floor_box": {
+        "source": "room_apartment.json",
+        "xmin": 1.07,
+        "xmax": 2.92,
+        "ymin": 0.84,
+        "ymax": 2.92
+      },
+      "started_outside": true,
+      "finished_inside": false,
+      "reached": false,
+      "reach_block": "wrong yes; bathroom covers 0.000 of kit_cam, under 0.01; visible rooms: none",
       "contact": "none",
       "peak_nm": 1.2623284696531982,
       "peak_actuator": "r_ank_pitch_pos",
-      "min_up_z": 0.9341545943121201,
-      "t_end": 1.0000000000000007
+      "peak_joint": "r_ank_pitch",
+      "hip_while_yawing": [
+        {
+          "joint": "l_hip_yaw",
+          "actuator": "l_hip_yaw_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        },
+        {
+          "joint": "r_hip_yaw",
+          "actuator": "r_hip_yaw_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        },
+        {
+          "joint": "l_hip_roll",
+          "actuator": "l_hip_roll_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        },
+        {
+          "joint": "r_hip_roll",
+          "actuator": "r_hip_roll_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        }
+      ],
+      "min_up_z": 0.9341545943121208,
+      "t_end": 1.0000000000000007,
+      "end_qpos_xyz": [
+        0.29000837527091927,
+        1.8234726675876356,
+        0.21093215861409761
+      ],
+      "end_yaw_rad": -1.5706385017820286
     },
     {
       "room": "living",
       "scene": "room_apartment.xml",
       "phrase": "go to the living room",
-      "voice_parse": "vel",
-      "voice_line": "vel(+0.056, +0.000)",
+      "question": "Is there a living room through the doorway ahead? Answer yes or no.",
+      "yaw_offset_rad": 1.5707963267948966,
+      "voice_parse": "refuse",
+      "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
       "generic_caller": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
       "matched_room_words": [
         "living",
         "room"
       ],
-      "recogniser_label": "living",
-      "recogniser_raw": "living",
-      "recogniser_confidence": 0.5594255328178406,
-      "recogniser_seconds": 4.313469462000057,
-      "commanded_vx": 0.056,
-      "commanded_yaw": 0.0,
+      "recogniser_label": "yes",
+      "recogniser_raw": "yes",
+      "recogniser_confidence": 0.7476828098297119,
+      "recogniser_seconds": 6.501359510999919,
+      "commanded_vx": null,
+      "commanded_yaw": null,
+      "search_yaw_rate": 0.25,
+      "yaw_turned_rad": 0.0,
+      "first_yes_t": 1.0000000000000007,
+      "first_yes_tick": 125,
+      "first_yes_heading_rad": -1.5706381555695754,
+      "wrong_yes": true,
+      "committed": false,
       "d_min_m": 0.1263,
       "d_min_v_mps": 0.15,
       "t_detect_s": 0.0,
       "t_stop_s": 0.842,
-      "latch_applied": true,
+      "latch_applied": false,
       "latch_pass": false,
       "false_stop": false,
       "prop_in_frame_at_stop": null,
-      "stop_path": "inside",
-      "stop_reason": "COM finished inside the named room box",
+      "stop_path": "wrong_yes",
+      "stop_reason": "wrong yes; living covers 0.000 of kit_cam, under 0.01; visible rooms: none",
       "stop_hit_xy": null,
       "stop_on_shadow": false,
-      "shadow_first_sightings": [],
+      "shadow_first_sightings": [
+        {
+          "patch": "kitchen",
+          "t": 1.0000000000000007,
+          "u": 250.14453435334048,
+          "v": 223.8075569808647,
+          "lum_mean": 67.4432,
+          "lum_std": 17.647854650353395,
+          "speckled": true,
+          "finder_emitted": false,
+          "prop_in_frame": true,
+          "hit_xy": null
+        }
+      ],
+      "doorway_fraction": 0.0,
+      "asked_fraction": 0.0,
+      "visible_rooms": [],
+      "asks": [
+        {
+          "t": 1.0000000000000007,
+          "t_capture": 1.0000000000000007,
+          "tick": 125,
+          "heading_rad": -1.5706381555695754,
+          "heading_at_capture": -1.5706381555695754,
+          "applied_yaw_at_capture": 0.0,
+          "yaw_from_spawn_rad": 0.0,
+          "doorway_fraction": 0.0,
+          "asked_fraction": 0.0,
+          "visible_rooms": [],
+          "answer": "yes",
+          "raw": "yes",
+          "confidence": 0.7476828098297119,
+          "seconds": 6.501359510999919
+        }
+      ],
       "spawn": {
         "doorway_x": -0.29,
         "doorway_y": 1.52,
         "doorway_yaw": 3.141593,
         "qpos_xyz": [
-          -0.34652733240946415,
-          1.5199916051646263,
-          0.21093215861409695
+          -0.28999160516462824,
+          1.4634726675905363,
+          0.21093215861409725
         ],
-        "yaw_rad": -3.141434482364475,
+        "yaw_rad": -1.5706381555695754,
         "com_xyz": [
-          -0.351959359051163,
-          1.520011030641464,
-          0.18342730754005446
+          -0.29001103064146627,
+          1.4580406409488373,
+          0.18342730754005473
         ],
-        "up_z": 0.9667228207290443
+        "up_z": 0.9667228207290457
       },
       "floor_box": {
         "source": "room_apartment.json",
@@ -249,31 +1111,226 @@
         "ymax": 2.92
       },
       "started_outside": true,
-      "finished_inside": true,
-      "reached": true,
-      "reach_block": "",
+      "finished_inside": false,
+      "reached": false,
+      "reach_block": "wrong yes; living covers 0.000 of kit_cam, under 0.01; visible rooms: none",
       "contact": "none",
-      "peak_nm": 2.280000000000001,
-      "peak_actuator": "l_hip_pitch_pos",
-      "min_up_z": 0.9341545943121579,
-      "t_end": 12.592000000000874
+      "peak_nm": 1.262328469630642,
+      "peak_actuator": "r_ank_pitch_pos",
+      "peak_joint": "r_ank_pitch",
+      "hip_while_yawing": [
+        {
+          "joint": "l_hip_yaw",
+          "actuator": "l_hip_yaw_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        },
+        {
+          "joint": "r_hip_yaw",
+          "actuator": "r_hip_yaw_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        },
+        {
+          "joint": "l_hip_roll",
+          "actuator": "l_hip_roll_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        },
+        {
+          "joint": "r_hip_roll",
+          "actuator": "r_hip_roll_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        }
+      ],
+      "min_up_z": 0.9341545943121563,
+      "t_end": 1.0000000000000007,
+      "end_qpos_xyz": [
+        -0.28999160516462824,
+        1.4634726675905363,
+        0.21093215861409725
+      ],
+      "end_yaw_rad": -1.5706381555695754
+    },
+    {
+      "room": "living",
+      "scene": "room_apartment.xml",
+      "phrase": "go to the living room",
+      "question": "Is there a living room through the doorway ahead? Answer yes or no.",
+      "yaw_offset_rad": -1.5707963267948966,
+      "voice_parse": "vel",
+      "voice_line": "vel(+0.056, +0.000)",
+      "generic_caller": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
+      "matched_room_words": [
+        "living",
+        "room"
+      ],
+      "recogniser_label": "yes",
+      "recogniser_raw": "yes",
+      "recogniser_confidence": 0.7365623712539673,
+      "recogniser_seconds": 5.747356872000182,
+      "commanded_vx": 0.056,
+      "commanded_yaw": 0.0,
+      "search_yaw_rate": 0.25,
+      "yaw_turned_rad": 0.36216855598061715,
+      "first_yes_t": 3.799999999999803,
+      "first_yes_tick": 475,
+      "first_yes_heading_rad": 1.9329662163125803,
+      "wrong_yes": false,
+      "committed": true,
+      "d_min_m": 0.1263,
+      "d_min_v_mps": 0.15,
+      "t_detect_s": 0.0,
+      "t_stop_s": 0.842,
+      "latch_applied": true,
+      "latch_pass": false,
+      "false_stop": false,
+      "prop_in_frame_at_stop": null,
+      "stop_path": "contact",
+      "stop_reason": "wall_outer_n 5.9 N",
+      "stop_hit_xy": null,
+      "stop_on_shadow": false,
+      "shadow_first_sightings": [],
+      "doorway_fraction": 0.0,
+      "asked_fraction": 0.0,
+      "visible_rooms": [],
+      "asks": [
+        {
+          "t": 1.0000000000000007,
+          "t_capture": 1.0000000000000007,
+          "tick": 125,
+          "heading_rad": 1.5707976603319667,
+          "heading_at_capture": 1.5707976603319667,
+          "applied_yaw_at_capture": 0.0,
+          "yaw_from_spawn_rad": 0.0,
+          "doorway_fraction": 0.0,
+          "asked_fraction": 0.0,
+          "visible_rooms": [],
+          "answer": "no",
+          "raw": "no",
+          "confidence": 0.8489906787872314,
+          "seconds": 5.552750807000393
+        },
+        {
+          "t": 3.799999999999803,
+          "t_capture": 3.799999999999803,
+          "tick": 475,
+          "heading_rad": 1.9329662163125803,
+          "heading_at_capture": 1.9329662163125803,
+          "applied_yaw_at_capture": 0.0,
+          "yaw_from_spawn_rad": 0.3621685559806136,
+          "doorway_fraction": 0.12895833333333334,
+          "asked_fraction": 0.05473958333333333,
+          "visible_rooms": [
+            "living"
+          ],
+          "answer": "yes",
+          "raw": "yes",
+          "confidence": 0.7365623712539673,
+          "seconds": 5.747356872000182
+        }
+      ],
+      "spawn": {
+        "doorway_x": -0.29,
+        "doorway_y": 1.52,
+        "doorway_yaw": 3.141593,
+        "qpos_xyz": [
+          -0.2899982096894426,
+          1.5765275055377395,
+          0.21093208831944074
+        ],
+        "yaw_rad": 1.5707976603319667,
+        "com_xyz": [
+          -0.2899779332412268,
+          1.5819595543604201,
+          0.1834272691040921
+        ],
+        "up_z": 0.9667235713414022
+      },
+      "floor_box": {
+        "source": "room_apartment.json",
+        "xmin": -2.92,
+        "xmax": -1.07,
+        "ymin": 0.12,
+        "ymax": 2.92
+      },
+      "started_outside": true,
+      "finished_inside": false,
+      "reached": false,
+      "reach_block": "COM did not finish inside the named box (contact)",
+      "contact": "wall_outer_n 5.9 N",
+      "peak_nm": 2.2800000000000082,
+      "peak_actuator": "r_knee_pos",
+      "peak_joint": "r_knee",
+      "hip_while_yawing": [
+        {
+          "joint": "l_hip_yaw",
+          "actuator": "l_hip_yaw_pos",
+          "peak_nm": -0.6063581061687419,
+          "abs_nm": 0.6063581061687419,
+          "over_2_33": false
+        },
+        {
+          "joint": "r_hip_yaw",
+          "actuator": "r_hip_yaw_pos",
+          "peak_nm": 0.5480950453291746,
+          "abs_nm": 0.5480950453291746,
+          "over_2_33": false
+        },
+        {
+          "joint": "l_hip_roll",
+          "actuator": "l_hip_roll_pos",
+          "peak_nm": 2.2800000000000007,
+          "abs_nm": 2.2800000000000007,
+          "over_2_33": false
+        },
+        {
+          "joint": "r_hip_roll",
+          "actuator": "r_hip_roll_pos",
+          "peak_nm": 2.2800000000000002,
+          "abs_nm": 2.2800000000000002,
+          "over_2_33": false
+        }
+      ],
+      "min_up_z": 0.9341731871555013,
+      "t_end": 24.655999999997213,
+      "end_qpos_xyz": [
+        -0.7760122979762337,
+        2.8282248871643954,
+        0.20940386767991923
+      ],
+      "end_yaw_rad": 1.912495106526732
     },
     {
       "room": "bedroom",
       "scene": "room_apartment.xml",
       "phrase": "go to the bedroom",
+      "question": "Is there a bedroom through the doorway ahead? Answer yes or no.",
+      "yaw_offset_rad": 1.5707963267948966,
       "voice_parse": "refuse",
       "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
       "generic_caller": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
       "matched_room_words": [
         "bedroom"
       ],
-      "recogniser_label": "entrance",
-      "recogniser_raw": "entrance",
-      "recogniser_confidence": 0.5892140865325928,
-      "recogniser_seconds": 5.088549343000068,
+      "recogniser_label": "yes",
+      "recogniser_raw": "yes",
+      "recogniser_confidence": 0.6281912326812744,
+      "recogniser_seconds": 7.961337599000217,
       "commanded_vx": null,
       "commanded_yaw": null,
+      "search_yaw_rate": 0.25,
+      "yaw_turned_rad": 0.0,
+      "first_yes_t": 1.0000000000000007,
+      "first_yes_tick": 125,
+      "first_yes_heading_rad": 1.5707973140879077,
+      "wrong_yes": true,
+      "committed": false,
       "d_min_m": 0.1263,
       "d_min_v_mps": 0.15,
       "t_detect_s": 0.0,
@@ -282,27 +1339,61 @@
       "latch_pass": false,
       "false_stop": false,
       "prop_in_frame_at_stop": null,
-      "stop_path": "",
-      "stop_reason": "",
+      "stop_path": "wrong_yes",
+      "stop_reason": "wrong yes; bedroom covers 0.000 of kit_cam, under 0.01; visible rooms: none",
       "stop_hit_xy": null,
       "stop_on_shadow": false,
-      "shadow_first_sightings": [],
+      "shadow_first_sightings": [
+        {
+          "patch": "kitchen",
+          "t": 1.0000000000000007,
+          "u": 384.81137027603063,
+          "v": 239.32081329575345,
+          "lum_mean": 68.4896,
+          "lum_std": 12.55172863951416,
+          "speckled": true,
+          "finder_emitted": false,
+          "prop_in_frame": true,
+          "hit_xy": null
+        }
+      ],
+      "doorway_fraction": 0.0,
+      "asked_fraction": 0.0,
+      "visible_rooms": [],
+      "asks": [
+        {
+          "t": 1.0000000000000007,
+          "t_capture": 1.0000000000000007,
+          "tick": 125,
+          "heading_rad": 1.5707973140879077,
+          "heading_at_capture": 1.5707973140879077,
+          "applied_yaw_at_capture": 0.0,
+          "yaw_from_spawn_rad": 0.0,
+          "doorway_fraction": 0.0,
+          "asked_fraction": 0.0,
+          "visible_rooms": [],
+          "answer": "yes",
+          "raw": "yes",
+          "confidence": 0.6281912326812744,
+          "seconds": 7.961337599000217
+        }
+      ],
       "spawn": {
         "doorway_x": 0.29,
         "doorway_y": -1.99,
         "doorway_yaw": 0.0,
         "qpos_xyz": [
-          0.34652733241236394,
-          -1.989991624729077,
-          0.21093215861409745
+          0.29000180987359786,
+          -1.933472494459548,
+          0.21093208831942223
         ],
-        "yaw_rad": 0.00015782501287090757,
+        "yaw_rad": 1.5707973140879077,
         "com_xyz": [
-          0.35195935904733694,
-          -1.9900110520865473,
-          0.18342730754005482
+          0.290022088202621,
+          -1.9280404456438693,
+          0.18342726910409593
         ],
-        "up_z": 0.9667228207290409
+        "up_z": 0.9667235713420358
       },
       "floor_box": {
         "source": "room_apartment.json",
@@ -314,27 +1405,75 @@
       "started_outside": true,
       "finished_inside": false,
       "reached": false,
-      "reach_block": "recogniser label 'entrance' is not bedroom; no vel was published",
+      "reach_block": "wrong yes; bedroom covers 0.000 of kit_cam, under 0.01; visible rooms: none",
       "contact": "none",
-      "peak_nm": 1.2623284696531982,
+      "peak_nm": 1.2621482283921708,
       "peak_actuator": "r_ank_pitch_pos",
-      "min_up_z": 0.9341545943121201,
-      "t_end": 1.0000000000000007
+      "peak_joint": "r_ank_pitch",
+      "hip_while_yawing": [
+        {
+          "joint": "l_hip_yaw",
+          "actuator": "l_hip_yaw_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        },
+        {
+          "joint": "r_hip_yaw",
+          "actuator": "r_hip_yaw_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        },
+        {
+          "joint": "l_hip_roll",
+          "actuator": "l_hip_roll_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        },
+        {
+          "joint": "r_hip_roll",
+          "actuator": "r_hip_roll_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        }
+      ],
+      "min_up_z": 0.9341731871694678,
+      "t_end": 1.0000000000000007,
+      "end_qpos_xyz": [
+        0.29000180987359786,
+        -1.933472494459548,
+        0.21093208831942223
+      ],
+      "end_yaw_rad": 1.5707973140879077
     },
     {
-      "room": "entrance",
+      "room": "bedroom",
       "scene": "room_apartment.xml",
-      "phrase": "go to the entrance",
+      "phrase": "go to the bedroom",
+      "question": "Is there a bedroom through the doorway ahead? Answer yes or no.",
+      "yaw_offset_rad": -1.5707963267948966,
       "voice_parse": "vel",
       "voice_line": "vel(+0.056, +0.000)",
       "generic_caller": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
-      "matched_room_words": [],
-      "recogniser_label": "entrance",
-      "recogniser_raw": "entrance",
-      "recogniser_confidence": 0.908092200756073,
-      "recogniser_seconds": 4.350469573000055,
+      "matched_room_words": [
+        "bedroom"
+      ],
+      "recogniser_label": "yes",
+      "recogniser_raw": "yes",
+      "recogniser_confidence": 0.7924069166183472,
+      "recogniser_seconds": 5.938278922999871,
       "commanded_vx": 0.056,
       "commanded_yaw": 0.0,
+      "search_yaw_rate": 0.25,
+      "yaw_turned_rad": 0.36216840652144144,
+      "first_yes_t": 3.799999999999803,
+      "first_yes_tick": 475,
+      "first_yes_heading_rad": -1.2084700952605858,
+      "wrong_yes": false,
+      "committed": true,
       "d_min_m": 0.1263,
       "d_min_v_mps": 0.15,
       "t_detect_s": 0.0,
@@ -343,27 +1482,194 @@
       "latch_pass": false,
       "false_stop": false,
       "prop_in_frame_at_stop": null,
-      "stop_path": "inside",
-      "stop_reason": "COM finished inside the named room box",
+      "stop_path": "contact",
+      "stop_reason": "wall_outer_s 2.5 N",
       "stop_hit_xy": null,
       "stop_on_shadow": false,
       "shadow_first_sightings": [],
+      "doorway_fraction": 0.0,
+      "asked_fraction": 0.0,
+      "visible_rooms": [],
+      "asks": [
+        {
+          "t": 1.0000000000000007,
+          "t_capture": 1.0000000000000007,
+          "tick": 125,
+          "heading_rad": -1.570638501782028,
+          "heading_at_capture": -1.570638501782028,
+          "applied_yaw_at_capture": 0.0,
+          "yaw_from_spawn_rad": 0.0,
+          "doorway_fraction": 0.0,
+          "asked_fraction": 0.0,
+          "visible_rooms": [],
+          "answer": "no",
+          "raw": "no",
+          "confidence": 0.7766699194908142,
+          "seconds": 5.6634177900000395
+        },
+        {
+          "t": 3.799999999999803,
+          "t_capture": 3.799999999999803,
+          "tick": 475,
+          "heading_rad": -1.2084700952605858,
+          "heading_at_capture": -1.2084700952605858,
+          "applied_yaw_at_capture": 0.0,
+          "yaw_from_spawn_rad": 0.3621684065214419,
+          "doorway_fraction": 0.12895833333333334,
+          "asked_fraction": 0.05872721354166666,
+          "visible_rooms": [
+            "bedroom"
+          ],
+          "answer": "yes",
+          "raw": "yes",
+          "confidence": 0.7924069166183472,
+          "seconds": 5.938278922999871
+        }
+      ],
+      "spawn": {
+        "doorway_x": 0.29,
+        "doorway_y": -1.99,
+        "doorway_yaw": 0.0,
+        "qpos_xyz": [
+          0.2900083752709192,
+          -2.046527332412365,
+          0.21093215861409764
+        ],
+        "yaw_rad": -1.570638501782028,
+        "com_xyz": [
+          0.28998894791344865,
+          -2.0519593590473377,
+          0.18342730754005498
+        ],
+        "up_z": 0.9667228207290424
+      },
+      "floor_box": {
+        "source": "room_apartment.json",
+        "xmin": 1.07,
+        "xmax": 2.92,
+        "ymin": -2.92,
+        "ymax": -1.06
+      },
+      "started_outside": true,
+      "finished_inside": false,
+      "reached": false,
+      "reach_block": "COM did not finish inside the named box (contact)",
+      "contact": "wall_outer_s 2.5 N",
+      "peak_nm": -2.280000000000001,
+      "peak_actuator": "l_knee_pos",
+      "peak_joint": "l_knee",
+      "hip_while_yawing": [
+        {
+          "joint": "l_hip_yaw",
+          "actuator": "l_hip_yaw_pos",
+          "peak_nm": -0.6063588893682305,
+          "abs_nm": 0.6063588893682305,
+          "over_2_33": false
+        },
+        {
+          "joint": "r_hip_yaw",
+          "actuator": "r_hip_yaw_pos",
+          "peak_nm": 0.5480749113065331,
+          "abs_nm": 0.5480749113065331,
+          "over_2_33": false
+        },
+        {
+          "joint": "l_hip_roll",
+          "actuator": "l_hip_roll_pos",
+          "peak_nm": 2.2800000000000007,
+          "abs_nm": 2.2800000000000007,
+          "over_2_33": false
+        },
+        {
+          "joint": "r_hip_roll",
+          "actuator": "r_hip_roll_pos",
+          "peak_nm": 2.2800000000000002,
+          "abs_nm": 2.2800000000000002,
+          "over_2_33": false
+        }
+      ],
+      "min_up_z": 0.9341545943121192,
+      "t_end": 16.640000000001656,
+      "end_qpos_xyz": [
+        0.606242606032847,
+        -2.807233356561483,
+        0.2091009544558026
+      ],
+      "end_yaw_rad": -1.2337985699989966
+    },
+    {
+      "room": "entrance",
+      "scene": "room_apartment.xml",
+      "phrase": "go to the entrance",
+      "question": "Is there a entrance through the doorway ahead? Answer yes or no.",
+      "yaw_offset_rad": 1.5707963267948966,
+      "voice_parse": "refuse",
+      "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
+      "generic_caller": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
+      "matched_room_words": [],
+      "recogniser_label": "yes",
+      "recogniser_raw": "yes",
+      "recogniser_confidence": 0.6653099656105042,
+      "recogniser_seconds": 6.953480616999968,
+      "commanded_vx": null,
+      "commanded_yaw": null,
+      "search_yaw_rate": 0.25,
+      "yaw_turned_rad": 0.0,
+      "first_yes_t": 1.0000000000000007,
+      "first_yes_tick": 125,
+      "first_yes_heading_rad": -1.570638155569576,
+      "wrong_yes": true,
+      "committed": false,
+      "d_min_m": 0.1263,
+      "d_min_v_mps": 0.15,
+      "t_detect_s": 0.0,
+      "t_stop_s": 0.842,
+      "latch_applied": false,
+      "latch_pass": false,
+      "false_stop": false,
+      "prop_in_frame_at_stop": null,
+      "stop_path": "wrong_yes",
+      "stop_reason": "wrong yes; entrance covers 0.000 of kit_cam, under 0.01; visible rooms: none",
+      "stop_hit_xy": null,
+      "stop_on_shadow": false,
+      "shadow_first_sightings": [],
+      "doorway_fraction": 0.0,
+      "asked_fraction": 0.0,
+      "visible_rooms": [],
+      "asks": [
+        {
+          "t": 1.0000000000000007,
+          "t_capture": 1.0000000000000007,
+          "tick": 125,
+          "heading_rad": -1.570638155569576,
+          "heading_at_capture": -1.570638155569576,
+          "applied_yaw_at_capture": 0.0,
+          "yaw_from_spawn_rad": 0.0,
+          "doorway_fraction": 0.0,
+          "asked_fraction": 0.0,
+          "visible_rooms": [],
+          "answer": "yes",
+          "raw": "yes",
+          "confidence": 0.6653099656105042,
+          "seconds": 6.953480616999968
+        }
+      ],
       "spawn": {
         "doorway_x": -0.29,
         "doorway_y": -1.44,
         "doorway_yaw": 3.141593,
         "qpos_xyz": [
-          -0.34652733240946415,
-          -1.4400083948353737,
-          0.21093215861409695
+          -0.28999160516462824,
+          -1.4965273324094643,
+          0.21093215861409725
         ],
-        "yaw_rad": -3.141434482364475,
+        "yaw_rad": -1.570638155569576,
         "com_xyz": [
-          -0.351959359051163,
-          -1.4399889693585353,
-          0.18342730754005446
+          -0.29001103064146627,
+          -1.501959359051163,
+          0.18342730754005473
         ],
-        "up_z": 0.9667228207290443
+        "up_z": 0.9667228207290457
       },
       "floor_box": {
         "source": "room_apartment.json",
@@ -373,16 +1679,199 @@
         "ymax": 0.04
       },
       "started_outside": true,
-      "finished_inside": true,
-      "reached": true,
-      "reach_block": "",
+      "finished_inside": false,
+      "reached": false,
+      "reach_block": "wrong yes; entrance covers 0.000 of kit_cam, under 0.01; visible rooms: none",
       "contact": "none",
-      "peak_nm": -2.280000000000001,
-      "peak_actuator": "l_knee_pos",
-      "min_up_z": 0.9341545943121579,
-      "t_end": 12.592000000000874
+      "peak_nm": 1.262328469630642,
+      "peak_actuator": "r_ank_pitch_pos",
+      "peak_joint": "r_ank_pitch",
+      "hip_while_yawing": [
+        {
+          "joint": "l_hip_yaw",
+          "actuator": "l_hip_yaw_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        },
+        {
+          "joint": "r_hip_yaw",
+          "actuator": "r_hip_yaw_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        },
+        {
+          "joint": "l_hip_roll",
+          "actuator": "l_hip_roll_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        },
+        {
+          "joint": "r_hip_roll",
+          "actuator": "r_hip_roll_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        }
+      ],
+      "min_up_z": 0.9341545943121563,
+      "t_end": 1.0000000000000007,
+      "end_qpos_xyz": [
+        -0.28999160516462824,
+        -1.4965273324094643,
+        0.21093215861409725
+      ],
+      "end_yaw_rad": -1.570638155569576
+    },
+    {
+      "room": "entrance",
+      "scene": "room_apartment.xml",
+      "phrase": "go to the entrance",
+      "question": "Is there a entrance through the doorway ahead? Answer yes or no.",
+      "yaw_offset_rad": -1.5707963267948966,
+      "voice_parse": "refuse",
+      "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
+      "generic_caller": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
+      "matched_room_words": [],
+      "recogniser_label": "yes",
+      "recogniser_raw": "yes",
+      "recogniser_confidence": 0.7853238582611084,
+      "recogniser_seconds": 5.532245981999949,
+      "commanded_vx": null,
+      "commanded_yaw": null,
+      "search_yaw_rate": 0.25,
+      "yaw_turned_rad": 0.0,
+      "first_yes_t": 1.0000000000000007,
+      "first_yes_tick": 125,
+      "first_yes_heading_rad": 1.5707976603319669,
+      "wrong_yes": true,
+      "committed": false,
+      "d_min_m": 0.1263,
+      "d_min_v_mps": 0.15,
+      "t_detect_s": 0.0,
+      "t_stop_s": 0.842,
+      "latch_applied": false,
+      "latch_pass": false,
+      "false_stop": false,
+      "prop_in_frame_at_stop": null,
+      "stop_path": "wrong_yes",
+      "stop_reason": "wrong yes; entrance covers 0.000 of kit_cam, under 0.01; visible rooms: kitchen",
+      "stop_hit_xy": null,
+      "stop_on_shadow": false,
+      "shadow_first_sightings": [
+        {
+          "patch": "kitchen",
+          "t": 1.0000000000000007,
+          "u": 431.2082943710211,
+          "v": 243.11335379569735,
+          "lum_mean": 67.9776,
+          "lum_std": 10.858779776752083,
+          "speckled": true,
+          "finder_emitted": false,
+          "prop_in_frame": true,
+          "hit_xy": null
+        }
+      ],
+      "doorway_fraction": 0.0,
+      "asked_fraction": 0.0,
+      "visible_rooms": [
+        "kitchen"
+      ],
+      "asks": [
+        {
+          "t": 1.0000000000000007,
+          "t_capture": 1.0000000000000007,
+          "tick": 125,
+          "heading_rad": 1.5707976603319669,
+          "heading_at_capture": 1.5707976603319669,
+          "applied_yaw_at_capture": 0.0,
+          "yaw_from_spawn_rad": 0.0,
+          "doorway_fraction": 0.0,
+          "asked_fraction": 0.0,
+          "visible_rooms": [
+            "kitchen"
+          ],
+          "answer": "yes",
+          "raw": "yes",
+          "confidence": 0.7853238582611084,
+          "seconds": 5.532245981999949
+        }
+      ],
+      "spawn": {
+        "doorway_x": -0.29,
+        "doorway_y": -1.44,
+        "doorway_yaw": 3.141593,
+        "qpos_xyz": [
+          -0.28999820968944257,
+          -1.3834724944622607,
+          0.2109320883194406
+        ],
+        "yaw_rad": 1.5707976603319669,
+        "com_xyz": [
+          -0.28997793324122667,
+          -1.3780404456395798,
+          0.18342726910409196
+        ],
+        "up_z": 0.9667235713414017
+      },
+      "floor_box": {
+        "source": "room_apartment.json",
+        "xmin": -2.92,
+        "xmax": -1.07,
+        "ymin": -2.92,
+        "ymax": 0.04
+      },
+      "started_outside": true,
+      "finished_inside": false,
+      "reached": false,
+      "reach_block": "wrong yes; entrance covers 0.000 of kit_cam, under 0.01; visible rooms: kitchen",
+      "contact": "none",
+      "peak_nm": 1.262148228268817,
+      "peak_actuator": "r_ank_pitch_pos",
+      "peak_joint": "r_ank_pitch",
+      "hip_while_yawing": [
+        {
+          "joint": "l_hip_yaw",
+          "actuator": "l_hip_yaw_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        },
+        {
+          "joint": "r_hip_yaw",
+          "actuator": "r_hip_yaw_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        },
+        {
+          "joint": "l_hip_roll",
+          "actuator": "l_hip_roll_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        },
+        {
+          "joint": "r_hip_roll",
+          "actuator": "r_hip_roll_pos",
+          "peak_nm": 0.0,
+          "abs_nm": 0.0,
+          "over_2_33": false
+        }
+      ],
+      "min_up_z": 0.9341731871555012,
+      "t_end": 1.0000000000000007,
+      "end_qpos_xyz": [
+        -0.28999820968944257,
+        -1.3834724944622607,
+        0.2109320883194406
+      ],
+      "end_yaw_rad": 1.5707976603319669
     }
   ],
   "reached_all": false,
-  "false_stop_any": false
+  "false_stop_any": false,
+  "wrong_yes_any": true
 }

@@ -28,6 +28,11 @@ PROMPT = (
 )
 ROOMS = ("kitchen", "bathroom", "living", "bedroom", "entrance")
 NONE_WORDS = ("none", "unknown", "unsure", "undecided")
+# Doorway measure. Not the open-set prompt above. The hall fills most of
+# a 0.70 m doorway frame, so "entrance" stays a fair open-set answer.
+YES_NO_PROMPT = "Is there a {name} through the doorway ahead? Answer yes or no."
+YES_WORDS = ("yes", "yeah")
+NO_WORDS = ("no", "nope")
 
 
 def parse_answer(raw: str) -> str | None:
@@ -54,6 +59,27 @@ def parse_answer(raw: str) -> str | None:
     return None
 
 
+def yes_no_prompt(room: str) -> str:
+    """Per-target question. Living is asked as 'living room'."""
+    name = "living room" if room == "living" else room
+    return YES_NO_PROMPT.format(name=name)
+
+
+def parse_yes_no(raw: str) -> str | None:
+    """'yes' or 'no' when that is the only decision. A hedge is None."""
+    text = raw.strip().lower()
+    for mark in ".!?:;\"'":
+        text = text.replace(mark, " ")
+    tokens = [token for token in text.split() if token]
+    yes = [token for token in tokens if token in YES_WORDS]
+    no = [token for token in tokens if token in NO_WORDS]
+    if yes and not no:
+        return "yes"
+    if no and not yes:
+        return "no"
+    return None
+
+
 class RoomAsk:
     """One pinned Moondream2. query() is the only call. No paid API."""
 
@@ -70,7 +96,7 @@ class RoomAsk:
         )
         self.model.eval()
 
-    def ask(self, frame) -> dict[str, object]:
+    def _query(self, frame, prompt: str) -> tuple[str, float | None, float]:
         from PIL import Image
 
         image = Image.fromarray(frame)
@@ -89,20 +115,33 @@ class RoomAsk:
             inner._prefill_prompt = _wrapped
         started = time.perf_counter()
         try:
-            result = self.model.query(image, PROMPT)
+            result = self.model.query(image, prompt)
         finally:
             if original is not None:
                 inner._prefill_prompt = original
             elapsed = time.perf_counter() - started
         raw = str(result.get("answer", result) if isinstance(result, dict) else result)
+        confidence = captured[-1] if captured else None
+        return raw.strip(), confidence, elapsed
+
+    def ask(self, frame) -> dict[str, object]:
+        raw, confidence, elapsed = self._query(frame, PROMPT)
         room = parse_answer(raw)
         # First answer token from the prompt prefill. A hedge keeps the
         # probability for the log and still returns no room.
-        confidence = captured[-1] if captured else None
         return {
             "room": room,
             "confidence": confidence,
-            "raw": raw.strip(),
+            "raw": raw,
+            "seconds": elapsed,
+        }
+
+    def ask_yes_no(self, frame, prompt: str) -> dict[str, object]:
+        raw, confidence, elapsed = self._query(frame, prompt)
+        return {
+            "answer": parse_yes_no(raw),
+            "confidence": confidence,
+            "raw": raw,
             "seconds": elapsed,
         }
 
@@ -130,6 +169,25 @@ def self_test() -> int:
             failures.append(f"{raw!r} -> {got!r}, expected {expected!r}")
     if "none" not in PROMPT:
         failures.append("prompt has no none")
+    yes_no_cases = {
+        "yes": "yes",
+        "No.": "no",
+        "yeah": "yes",
+        "nope": "no",
+        "yes no": None,
+        "maybe": None,
+        "there is no kitchen": "no",
+        "": None,
+    }
+    for raw, expected in yes_no_cases.items():
+        got = parse_yes_no(raw)
+        if got != expected:
+            failures.append(f"yes/no {raw!r} -> {got!r}, expected {expected!r}")
+    kitchen_q = yes_no_prompt("kitchen")
+    if kitchen_q != "Is there a kitchen through the doorway ahead? Answer yes or no.":
+        failures.append(f"kitchen question moved: {kitchen_q}")
+    if "living room" not in yes_no_prompt("living"):
+        failures.append("living question dropped living room")
     if MODEL_SHA != "5d6c926f44e26b07957b0dd315bbedcb4c17a5fe":
         failures.append("revision pin moved")
     if not WEIGHTS_SHA256.startswith("70a7d94c"):
