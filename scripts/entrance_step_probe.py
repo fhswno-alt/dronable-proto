@@ -47,6 +47,10 @@ KNEE_KP = 45.0
 TOE_BAR_M = 0.002
 # Swing ankle trim cap. This is not a world-level sole and not body roll.
 ANK_TRIM_CAP = 0.025
+# Trim-lead schedule. Full through 80% of swing, command back to 0 by 92%
+# so the lookahead is off before touchdown. Not the toe-up ramp.
+TRIM_HOLD_FRAC = 0.80
+TRIM_OFF_FRAC = 0.92
 # "About 0.6 mm" for the centre minus front-outside drop. Outside this, no trim.
 SOLE_FO_LO_MM = 0.50
 SOLE_FO_HI_MM = 0.70
@@ -1015,18 +1019,47 @@ def _install_yswap_lead(session: sw.SteerSession, lead_s: float) -> None:
     walker._swap_y_before_swing = led  # type: ignore[method-assign]
 
 
+def _trim_lead_shape(frac: float, on_frac: float) -> float:
+    """Unit trim vs swing fraction. 0 before lift-off, 0 again before touchdown."""
+    if frac < on_frac:
+        return 0.0
+    if frac <= TRIM_HOLD_FRAC:
+        return 1.0
+    if frac >= TRIM_OFF_FRAC:
+        return 0.0
+    u = (frac - TRIM_HOLD_FRAC) / (TRIM_OFF_FRAC - TRIM_HOLD_FRAC)
+    return 1.0 - u * u * (3.0 - 2.0 * u)
+
+
+def _compiled_ank_lag(session: sw.SteerSession, jn: str) -> tuple[float, float, float]:
+    """Compiled kv, kp, and kv/kp for one ankle joint. kv is not invented."""
+    _q, _qd, idx = _joint_q_qd(session, jn)
+    kv = -float(session.model.actuator_biasprm[idx, 2])
+    kp = float(session.model.actuator_gainprm[idx, 0])
+    if abs(kp - 35.0) > 1e-3:
+        raise SystemExit(f"compiled kp for {jn} is {kp:.4f}, expected 35")
+    if kv <= 0.0:
+        raise SystemExit(f"compiled kv for {jn} is {kv:.4f}")
+    return kv, kp, kv / kp
+
+
 def _install_swing_ank_roll_trim(
     session: sw.SteerSession,
     add_l: float,
     add_r: float,
     pitch_l: float = 0.0,
     pitch_r: float = 0.0,
+    lead: bool = False,
+    on_frac: float = 0.208,
 ) -> None:
-    """Add a constant to the swing ankle ctrl. Stance is not rewritten.
+    """Add the leftover-sole trim on the swing ankle. Stance is not rewritten.
 
     Roll and pitch adds are the leftover sole at the first scored tick,
     in joint radians, each capped at ±0.025. Pitch stays 0 on a roll-only
     copy. This is not a world-level sole and it does not cancel body roll.
+    ``lead`` advances only that add by the ankle's own kv/kp. The toe-up,
+    the IK ankle, and the hip stay on their own clocks. The add stays 0
+    before ``on_frac``, so the lookahead cannot push a loaded foot.
     """
     if abs(add_l) > ANK_TRIM_CAP + 1e-12 or abs(add_r) > ANK_TRIM_CAP + 1e-12:
         raise SystemExit(
@@ -1036,6 +1069,8 @@ def _install_swing_ank_roll_trim(
         raise SystemExit(
             f"ankle-pitch trim L {pitch_l} R {pitch_r} exceeds ±{ANK_TRIM_CAP:.3f}"
         )
+    if lead and not (0.0 < on_frac < TRIM_HOLD_FRAC):
+        raise SystemExit(f"ankle trim on fraction {on_frac} is not inside 0-80%")
     pitch_on = abs(pitch_l) > 1e-12 or abs(pitch_r) > 1e-12
     if pitch_on:
         print(
@@ -1055,8 +1090,36 @@ def _install_swing_ank_roll_trim(
     lipm = session.lipm
     if lipm is None or lipm.op3 is None:
         raise RuntimeError("gait manager walker missing")
+    lags: dict[str, float] = {}
+    if lead:
+        for jn in ("l_ank_roll", "r_ank_roll", "l_ank_pitch", "r_ank_pitch"):
+            kv, kp, lag = _compiled_ank_lag(session, jn)
+            lags[jn] = lag
+            note = ""
+            if jn.endswith("ank_roll") and abs(kv - 1.1876) > 1e-3:
+                note = " kv_note compiled_not_1.1876"
+            print(
+                f"PRED trim_lead {jn} kp {kp:.4f} kv {kv:.4f} "
+                f"lag {lag * 1000:.2f} ms{note}"
+            )
+        for kind in ("ank_roll", "ank_pitch"):
+            split_ms = (lags["l_" + kind] - lags["r_" + kind]) * 1000.0
+            if abs(split_ms) > 1.0:
+                print(
+                    f"PRED trim_lead {kind} lag_split {split_ms:+.2f} ms. "
+                    "Each foot uses its own compiled lag."
+                )
+        print(
+            f"PRED trim_lead on_frac {on_frac:.6f} "
+            f"hold_through {TRIM_HOLD_FRAC:.2f} off_by {TRIM_OFF_FRAC:.2f}. "
+            "Trim weight is 0 before on_frac. "
+            "Lookahead does not start the trim on a loaded foot. "
+            "The add is led. The toe-up, the IK ankle, and the hip are not. "
+            f"Cap ±{ANK_TRIM_CAP:.3f} rad."
+        )
     roll_adds = {"L": float(add_l), "R": float(add_r)}
     pitch_adds = {"L": float(pitch_l), "R": float(pitch_r)}
+    walker = lipm.op3
     orig = lipm._tick_gait_manager
 
     def wrapped(walking: bool) -> None:
@@ -1066,12 +1129,28 @@ def _install_swing_ank_roll_trim(
         swing = lipm._gm_swing
         if swing not in ("L", "R"):
             return
-        delta = roll_adds[swing]
+        if lead:
+            frac = _mid_frac(walker, swing, _cmd_time(walker))
+            if frac is None or frac < on_frac - 1e-6:
+                return
+            if swing == "L":
+                span = float(walker.l_ssp_end) - float(walker.l_ssp_start)
+            else:
+                span = float(walker.r_ssp_end) - float(walker.r_ssp_start)
+            if span <= 1e-6:
+                return
+            pref = "l_" if swing == "L" else "r_"
+            w_roll = _trim_lead_shape(frac + lags[pref + "ank_roll"] / span, on_frac)
+            w_pitch = _trim_lead_shape(frac + lags[pref + "ank_pitch"] / span, on_frac)
+        else:
+            w_roll = 1.0
+            w_pitch = 1.0
+        delta = roll_adds[swing] * w_roll
         if abs(delta) > 1e-12:
             act = ("l_" if swing == "L" else "r_") + "ank_roll_pos"
             idx = session.act_idx[act]
             session.data.ctrl[idx] = float(session.data.ctrl[idx]) + delta
-        pdelta = pitch_adds[swing]
+        pdelta = pitch_adds[swing] * w_pitch
         if abs(pdelta) > 1e-12:
             act = ("l_" if swing == "L" else "r_") + "ank_pitch_pos"
             idx = session.act_idx[act]
@@ -3474,6 +3553,7 @@ class PredScore:
     roll_hx_over: str = ""
     sole_ticks: tuple = ()
     ank_hx_over: str = ""
+    floor_chain: tuple = ()
 
 
 def _check_compiled_kv(session: sw.SteerSession) -> None:
@@ -3547,6 +3627,8 @@ def measure_pred_clip(
     ank_pitch_trim_l: float = 0.0,
     ank_pitch_trim_r: float = 0.0,
     ank_log: bool = False,
+    ank_trim_lead: bool = False,
+    ank_trim_on_frac: float = 0.208,
 ) -> PredScore:
     """12 mm @ 20% with an optional swing-hip predicted-force clip.
 
@@ -3592,6 +3674,12 @@ def measure_pred_clip(
     )
     if world_level and trim_on:
         raise SystemExit("ankle trim is not a world-level sole")
+    if ank_trim_lead and not trim_on:
+        raise SystemExit("ankle trim lead needs a trim add")
+    if ank_trim_lead and not (0.0 < ank_trim_on_frac < TRIM_HOLD_FRAC):
+        raise SystemExit(
+            f"ankle trim on fraction {ank_trim_on_frac} is not inside 0-80%"
+        )
     cfg = sw.locked_kit_config()
     if move_s is not None:
         cfg = replace(cfg, gm_move_s=float(move_s))
@@ -3647,6 +3735,7 @@ def measure_pred_clip(
     ):
         _install_swing_ank_roll_trim(
             session, ank_trim_l, ank_trim_r, ank_pitch_trim_l, ank_pitch_trim_r,
+            lead=ank_trim_lead, on_frac=ank_trim_on_frac,
         )
     lipm = session.lipm
     if lipm is None or lipm.op3 is None:
@@ -3671,6 +3760,12 @@ def measure_pred_clip(
     ank_chain = ("l_ank_roll_pos", "r_ank_roll_pos") if ank_log else ()
     ank_flat = {act: (0.0, 0.0, "") for act in ank_chain}
     ank_rug = {act: (0.0, 0.0, "") for act in ank_chain}
+    floor_acts = (
+        "l_knee_pos", "r_knee_pos",
+        "l_ank_pitch_pos", "r_ank_pitch_pos",
+        "l_ank_roll_pos", "r_ank_roll_pos",
+    )
+    floor_peak = {act: (0.0, 0.0, "") for act in floor_acts}
     ka_names = hx_chain + roll_chain + ank_chain
     ka_hits: list[str] = []
     ka_checked = 0
@@ -3888,6 +3983,15 @@ def measure_pred_clip(
                     prev, _when, _contact = _hx_parts(bucket[act])
                     if abs(tau) > abs(prev):
                         bucket[act] = (tau, t, contact)
+                for act in floor_acts:
+                    tau = float(session.data.actuator_force[session.act_idx[act]])
+                    foot = planes["L" if act.startswith("l_") else "R"]
+                    contact = str(foot["contact"])
+                    if contact not in ("floor", "floor+rug"):
+                        continue
+                    prev, _when, _contact = _hx_parts(floor_peak[act])
+                    if abs(tau) > abs(prev):
+                        floor_peak[act] = (tau, t, contact)
             rows.append(Tick(
                 t, swing if swing in ("L", "R") else None, toe_z, 0.0, first_fault,
             ))
@@ -3968,6 +4072,7 @@ def measure_pred_clip(
         or yswap_lead_s > 0.0 or abs(toe_full_frac - 0.15) > 1e-9
         or abs(ank_trim_l) > 1e-12 or abs(ank_trim_r) > 1e-12
         or abs(ank_pitch_trim_l) > 1e-12 or abs(ank_pitch_trim_r) > 1e-12
+        or ank_trim_lead
     ):
         parts = ["clip" if clip else "base"]
         parts.append("pitchoff" if pitch_move_off else f"move{used_move * 1000:.0f}")
@@ -4015,6 +4120,8 @@ def measure_pred_clip(
             parts.append("leveltrim")
         elif abs(ank_trim_l) > 1e-12 or abs(ank_trim_r) > 1e-12:
             parts.append("anktrim")
+        if ank_trim_lead:
+            parts.append("trimlead")
         name = "_".join(parts)
     else:
         name = f"{'clip' if clip else 'base'}_move{used_move * 1000:.0f}"
@@ -4278,6 +4385,10 @@ def measure_pred_clip(
         roll_hx_over=", ".join(roll_hits),
         sole_ticks=sole_ticks,
         ank_hx_over=", ".join(ank_hits),
+        floor_chain=tuple(
+            (act, float(tau), float(when), contact)
+            for act, (tau, when, contact) in floor_peak.items()
+        ),
     )
 
 
@@ -6123,6 +6234,12 @@ def _sole_tick_capture(session: sw.SteerSession, side: str) -> dict[str, object]
     if fo is None:
         raise SystemExit("front-outside corner missing")
     pref = "l_" if side == "L" else "r_"
+    gait_frac = float("nan")
+    lipm = session.lipm
+    if lipm is not None and lipm.op3 is not None:
+        got = _mid_frac(lipm.op3, side, _cmd_time(lipm.op3))
+        if got is not None:
+            gait_frac = float(got)
     return {
         "roll": float(roll),
         "pitch": float(_sole_pitch(session, side)),
@@ -6140,6 +6257,7 @@ def _sole_tick_capture(session: sw.SteerSession, side: str) -> dict[str, object]
         "ank_ctrl": float(session.data.ctrl[session.act_idx[pref + "ank_roll_pos"]]),
         "ank_pitch_ctrl": float(session.data.ctrl[session.act_idx[pref + "ank_pitch_pos"]]),
         "qpos": np.array(session.data.qpos, dtype=np.float64, copy=True),
+        "gait_frac": gait_frac,
     }
 
 
@@ -6149,6 +6267,7 @@ def _emit_sole_208(name: str, tag: str, pack: dict[str, object]) -> None:
     print(
         f"PRED {name} {tag} side {pack['side']} t {float(pack['t']):.3f} "
         f"frac {float(pack['frac']):.3f} "
+        f"gait_frac {float(pack.get('gait_frac', float('nan'))):.6f} "
         f"sole_roll {float(pack['roll']):+.5f} rad "
         f"sole_pitch {float(pack['pitch']):+.5f} rad "
         f"inside {pack['inside']} "
@@ -6262,6 +6381,7 @@ def _print_sole_208(
             "ank_ctrl": float(sole["ank_ctrl"]),
             "ank_pitch_ctrl": float(sole["ank_pitch_ctrl"]),
             "qpos": sole["qpos"],
+            "gait_frac": float(sole.get("gait_frac", float("nan"))),
             "is_worst": 0,
         }
         prev = foot_best.get(side)
@@ -7319,6 +7439,444 @@ def score_level_trim() -> None:
         f"ank_hx {lifted.ank_hx_over or 'under'}. "
         "Pitch lead stays 20 ms. Period stays 0.500 s. "
         "Not kit-safe. Not go-anywhere."
+    )
+
+
+_FLOOR_ACTS = (
+    "l_knee_pos", "r_knee_pos",
+    "l_ank_pitch_pos", "r_ank_pitch_pos",
+    "l_ank_roll_pos", "r_ank_roll_pos",
+)
+# Foot-z sweep cap. 0.170 mm plus twenty 0.1 mm steps.
+_Z_SWEEP_CAP_UM = 2170
+
+
+def _margin_hundredths(toe_mm: float) -> tuple[float, float]:
+    """Raw +2 gap, and that gap floored to a hundredth of a millimetre."""
+    margin = 2.0 - float(toe_mm)
+    hundredths = math.floor(margin * 100.0 + 1e-9) / 100.0
+    return margin, hundredths
+
+
+def _floor_over(row: PredScore) -> str:
+    """Floor or floor+rug knee and ankle peaks at or over 2.33 Nm."""
+    hits: list[str] = []
+    for item in row.floor_chain:
+        act, tau, when, contact = item
+        if str(contact) not in ("floor", "floor+rug"):
+            continue
+        if act not in _FLOOR_ACTS:
+            continue
+        if abs(float(tau)) < KNEE_NM:
+            continue
+        hits.append(
+            f"{act} {float(tau):+.4f} t {float(when):.3f} contact {contact}"
+        )
+    return ", ".join(hits)
+
+
+def _print_floor_chain(tag: str, row: PredScore) -> str:
+    over = _floor_over(row)
+    if not row.floor_chain:
+        print(f"PRED trim_lead {tag} floor missing")
+        return over
+    for item in row.floor_chain:
+        act, tau, when, contact = item
+        ge = int(
+            str(contact) in ("floor", "floor+rug") and abs(float(tau)) >= KNEE_NM
+        )
+        print(
+            f"PRED trim_lead {tag} floor {act} {float(tau):+.4f} "
+            f"t {float(when):.3f} contact {contact or '-'} ge_2.33 {ge}"
+        )
+    return over
+
+
+def _print_exact_208(tag: str, tick: dict[str, object], flat_toe_mm: float) -> None:
+    """0.208 sample in raw millimetres. The margin hundredth is floored."""
+    roll = float(tick["roll"])
+    pitch = float(tick["pitch"])
+    centre = float(tick["center_z"]) * 1000.0
+    toe = float(tick["toe_z"]) * 1000.0
+    margin, hundredths = _margin_hundredths(toe)
+    flat_margin, flat_h = _margin_hundredths(flat_toe_mm)
+    under = int(abs(roll) < 5e-4 and abs(pitch) < 5e-4)
+    print(
+        f"PRED trim_lead exact {tag} side {tick['side']} "
+        f"t {float(tick['t']):.3f} "
+        f"cycle_frac {float(tick['frac']):.6f} "
+        f"gait_frac {float(tick.get('gait_frac', float('nan'))):.6f} "
+        f"sole_roll {roll:+.8f} rad sole_pitch {pitch:+.8f} rad "
+        f"under_0.0005 {under} "
+        f"centre_mm {centre:.6f} "
+        f"tick_toe_mm {toe:.6f} "
+        f"flat_toe_mm {flat_toe_mm:.6f} "
+        f"vs_plus2_mm {margin:.6f} "
+        f"margin_hundredths {hundredths:.2f} "
+        f"flat_vs_plus2_mm {flat_margin:.6f} "
+        f"flat_margin_hundredths {flat_h:.2f} "
+        f"scored {tick['scored_label']} lowest {tick['low_label']} "
+        f"ank_ctrl {float(tick['ank_ctrl']):+.5f} "
+        f"ank_pitch_ctrl {float(tick['ank_pitch_ctrl']):+.5f}"
+    )
+    corners = _corner_map(tick["corners"])
+    for label in _CORNER_ORDER:
+        z, off = corners[label]
+        z_mm = z * 1000.0
+        print(
+            f"PRED trim_lead exact {tag} corner {label} "
+            f"z_mm {z_mm:.6f} centre_minus_corner_mm {centre - z_mm:.6f} "
+            f"forward_mm {off * 1000.0:.1f} "
+            f"scored {int(label == tick['scored_label'])} "
+            f"lowest {int(label == tick['low_label'])}"
+        )
+
+
+def _trim_lead_copy(
+    ank_trim_l: float = 0.0,
+    ank_trim_r: float = 0.0,
+    ank_pitch_trim_l: float = 0.0,
+    ank_pitch_trim_r: float = 0.0,
+    z_extra_m: float = 0.000170,
+    lead: bool = False,
+    on_frac: float = 0.208,
+) -> PredScore:
+    """A10+025, level trim, foot-z, and an optional swing-only trim lead."""
+    return measure_pred_clip(
+        clip=True,
+        move_s=None,
+        pitch_move_off=True,
+        toe_up_rad=0.025,
+        toe_up_shape="front",
+        toe_full_frac=0.10,
+        hip_lead=True,
+        lead_roll_scale=0.0,
+        lead_pitch_scale=_pitch_lead_scale(20.0),
+        whole_toe=True,
+        surface_tag=True,
+        ka_log=True,
+        sag_cancel=False,
+        z_profile="phase",
+        sole_corner_log=True,
+        ank_trim_l=ank_trim_l,
+        ank_trim_r=ank_trim_r,
+        ank_pitch_trim_l=ank_pitch_trim_l,
+        ank_pitch_trim_r=ank_pitch_trim_r,
+        ank_log=True,
+        z_extra_m=z_extra_m,
+        ank_trim_lead=lead,
+        ank_trim_on_frac=on_frac,
+    )
+
+
+def _gate_on_frac(row: PredScore) -> float | None:
+    """Gait fraction of the cycle-0.208 sample. The smaller foot opens both."""
+    fracs: list[float] = []
+    for side in ("L", "R"):
+        foot = _foot_tick(row, side)
+        if foot is None:
+            print(f"PRED trim_lead gait_frac side {side} missed")
+            continue
+        gait = float(foot.get("gait_frac", float("nan")))
+        print(
+            f"PRED trim_lead gait_frac side {side} {gait:.6f} "
+            f"cycle_frac {float(foot['frac']):.6f}"
+        )
+        if gait == gait:
+            fracs.append(gait)
+    if len(fracs) < 2:
+        return None
+    on_frac = min(fracs)
+    print(
+        f"PRED trim_lead gate_on_gait {on_frac:.6f} cycle_frac 0.208 "
+        "trim weight 0 before gate_on_gait"
+    )
+    return on_frac
+
+
+def _print_ctrl_delta(
+    measured: PredScore,
+    led: PredScore,
+    adds: dict[str, dict[str, float]],
+) -> None:
+    for side in ("L", "R"):
+        before = _foot_tick(measured, side)
+        after = _foot_tick(led, side)
+        if before is None or after is None:
+            print(f"PRED trim_lead ctrl_delta side {side} missed")
+            continue
+        droll = float(after["ank_ctrl"]) - float(before["ank_ctrl"])
+        dpitch = float(after["ank_pitch_ctrl"]) - float(before["ank_pitch_ctrl"])
+        print(
+            f"PRED trim_lead ctrl_delta side {side} "
+            f"roll {droll:+.5f} add {adds[side]['roll']:+.5f} "
+            f"pitch {dpitch:+.5f} add {adds[side]['pitch']:+.5f} "
+            f"gait_frac {float(after.get('gait_frac', float('nan'))):.6f}"
+        )
+
+
+def _less_crouch_next(why: str) -> None:
+    print(
+        "PRED trim_lead less_crouch_next 1. "
+        f"{why} init_z_offset was not invented. "
+        "Less-crouch was not run. Not kit-safe. Not go-anywhere."
+    )
+
+
+def score_trim_lead() -> None:
+    """Lead the leftover-sole trim from lift-off, then a 0.1 mm foot-z sweep.
+
+    The lead is the trim add only. Hip pitch stays at 20 ms and hip roll
+    lead stays 0. The add is off before the lift-off fraction and ramps
+    out before touchdown. Less-crouch is named only if both steps stall.
+    """
+    print(
+        "PRED trim_lead_plan A10+030 was not run. y_swap was not re-run. "
+        "The roll-only 0.6 mm trim was not re-run. Sag cancel stays off. "
+        "Less-crouch is not this copy unless the lead and the foot-z sweep "
+        "both stall. "
+        "Base is level trim plus 0.170 mm foot-z on A10+025: "
+        "toe-up 0.025 rad full by 10%, held through 80%, "
+        "20 ms hip pitch lead, roll lead 0, period 0.500 s, swing-hip clip, "
+        "hip pitch off the 20 ms approach. "
+        "Step 1 leads only the leftover sole roll and pitch adds by each "
+        "ankle joint's compiled kv/kp. The toe-up, the IK ankle, and the hip "
+        "are not led. Trim weight is 0 before the lift-off gait fraction and "
+        f"the schedule is 0 by {TRIM_OFF_FRAC:.2f}, before touchdown. "
+        f"Each add stays inside ±{ANK_TRIM_CAP:.3f} rad. "
+        "Step 2, if the lead is still short of +2 mm and no floor knee or "
+        "ankle is over 2.33 Nm, continues foot-z from 0.170 mm in 0.1 mm "
+        f"steps and stops at the first floor knee or ankle over 2.33 Nm "
+        f"or at {_Z_SWEEP_CAP_UM / 1000.0:.3f} mm."
+    )
+    _require_plant("before", "trim_lead")
+    measured = _trim_lead_copy()
+    _require_plant("after_measure", "trim_lead")
+    tick = _worst_tick(measured)
+    print(
+        f"PRED trim_lead measure {measured.name} "
+        f"flat_worst {measured.flat_toe_mm:+.6f} mm "
+        f"t {measured.flat_toe_t:.3f} side {measured.flat_toe_side} "
+        f"flat_hx {measured.flat_hx_over or 'under'} "
+        f"ank_hx {measured.ank_hx_over or 'under'} "
+        f"{_geom_bits(tick)}"
+    )
+    on_frac = _gate_on_frac(measured)
+    if on_frac is None:
+        print(
+            "PRED trim_lead STOP gait fraction at cycle 0.208 was missing. "
+            "The lead was not run. Foot-z sweep was not run. "
+            "Less-crouch was not run. Not kit-safe. Not go-anywhere."
+        )
+        return
+    model = mj.MjModel.from_xml_path(SCENE)
+    data = mj.MjData(model)
+    view = _sole_view(model, data)
+    print("PRED trim_lead sign_ticks_before_lead 1 z_mm 0.170")
+    chosen: dict[str, dict[str, object]] = {}
+    for side in ("L", "R"):
+        foot = _foot_tick(measured, side)
+        if foot is None:
+            print(
+                f"PRED trim_lead STOP side {side} sole_208_foot missed. "
+                "The lead was not run. Foot-z sweep was not run. "
+                "Less-crouch was not run. Not kit-safe. Not go-anywhere."
+            )
+            return
+        picked = _choose_level_add(model, data, view, foot)
+        if picked is None:
+            print(
+                "PRED trim_lead Prefer FAIL. "
+                "The sign check refused the trim before the lead. "
+                f"measure flat_worst {measured.flat_toe_mm:+.6f} mm "
+                f"{_geom_bits(tick)}. "
+                "The lead was not run. Foot-z sweep was not run. "
+                "Less-crouch was not run. Not kit-safe. Not go-anywhere."
+            )
+            return
+        chosen[side] = picked
+    adds = _match_level_mirror(model, data, view, chosen, str(tick["side"]))
+    for side in ("L", "R"):
+        row = chosen[side]
+        qpos = np.asarray(row["qpos"], dtype=np.float64)
+        after = _pose_level(
+            model, data, view, qpos,
+            int(row["roll_adr"]), int(row["pitch_adr"]),
+            side, adds[side]["roll"], adds[side]["pitch"],
+        )
+        base = row["base"]
+        if not isinstance(base, dict):
+            raise SystemExit(f"trim lead base pose missing for {side}")
+        _print_level_sign(
+            "apply", side, float(row["t"]),
+            float(row["bout_roll"]), float(row["bout_pitch"]),
+            base, after, float(row["droll"]), float(row["dpitch"]),
+            float(row["raw_roll"]), float(row["raw_pitch"]),
+            adds[side]["roll"], adds[side]["pitch"],
+            int(row["flip_roll"]), int(row["flip_pitch"]),
+            float(row["ank_ctrl"]), float(row["ank_pitch_ctrl"]),
+        )
+    led = _trim_lead_copy(
+        adds["L"]["roll"], adds["R"]["roll"],
+        adds["L"]["pitch"], adds["R"]["pitch"],
+        0.000170, True, on_frac,
+    )
+    _require_plant("after_lead", "trim_lead")
+    tick_b = _worst_tick(led)
+    _print_ctrl_delta(measured, led, adds)
+    _print_exact_208("step1", tick_b, led.flat_toe_mm)
+    for side in ("L", "R"):
+        foot = _foot_tick(led, side)
+        if foot is None:
+            print(f"PRED trim_lead exact step1_foot side {side} missed")
+            continue
+        if foot is tick_b:
+            continue
+        _print_exact_208(f"step1_foot_{side}", foot, float(foot["toe_z"]) * 1000.0)
+    over = _print_floor_chain("step1", led)
+    print(
+        f"PRED trim_lead step1 {led.name} "
+        f"flat_worst {led.flat_toe_mm:+.6f} mm "
+        f"t {led.flat_toe_t:.3f} side {led.flat_toe_side} "
+        f"flat_hx {led.flat_hx_over or 'under'} "
+        f"ank_hx {led.ank_hx_over or 'under'} "
+        f"floor_over {over or 'under'} "
+        f"adds_roll L {adds['L']['roll']:+.5f} R {adds['R']['roll']:+.5f} "
+        f"adds_pitch L {adds['L']['pitch']:+.5f} R {adds['R']['pitch']:+.5f} "
+        f"on_frac {on_frac:.6f} "
+        f"{_geom_bits(tick_b)}"
+    )
+    if over:
+        print(
+            "PRED trim_lead STOP floor knee or ankle over 2.33 on the lead: "
+            f"{over}. Foot-z sweep was not run. "
+            "Less-crouch was not opened. Step 2 did not stall. "
+            f"step1 flat_worst {led.flat_toe_mm:+.6f} mm "
+            f"t {led.flat_toe_t:.3f} side {led.flat_toe_side} "
+            f"flat_hx {led.flat_hx_over or 'under'} "
+            f"ank_hx {led.ank_hx_over or 'under'}. "
+            "Not kit-safe. Not go-anywhere."
+        )
+        _require_plant("after_stop", "trim_lead")
+        return
+    if _bar_clear(led):
+        print(
+            "PRED trim_lead clear "
+            f"{led.name} flat_worst {led.flat_toe_mm:.6f} mm "
+            f"t {led.flat_toe_t:.3f} side {led.flat_toe_side}. "
+            "Plus 2 mm cleared with knees, ankle pitch, and ankle roll "
+            "at or under 2.33 Nm on floor contact. Foot-z sweep was not run. "
+            "Not kit-safe. Not go-anywhere."
+        )
+        _require_plant("after_clear", "trim_lead")
+        return
+    if led.flat_toe_mm >= 2.0:
+        print(
+            "PRED trim_lead STOP. The lead toe is not short of +2 mm, "
+            "and a joint is over 2.33 Nm. That over is not a floor knee "
+            "or ankle, so the foot-z sweep was not run. "
+            "Less-crouch was not opened. "
+            f"step1 flat_worst {led.flat_toe_mm:+.6f} mm "
+            f"flat_hx {led.flat_hx_over or 'under'} "
+            f"ank_hx {led.ank_hx_over or 'under'}. "
+            "Not kit-safe. Not go-anywhere."
+        )
+        _require_plant("after_stop", "trim_lead")
+        return
+    print(
+        "PRED trim_lead sweep_from 0.270 mm step 0.100 mm "
+        f"cap {_Z_SWEEP_CAP_UM / 1000.0:.3f} mm. "
+        "Same trim lead. Same adds. "
+        "Stop at the first floor-contact knee or ankle over 2.33 Nm."
+    )
+    last = led
+    last_um = 170
+    stopped = ""
+    for um in range(270, _Z_SWEEP_CAP_UM + 1, 100):
+        z_m = um / 1_000_000.0
+        row = _trim_lead_copy(
+            adds["L"]["roll"], adds["R"]["roll"],
+            adds["L"]["pitch"], adds["R"]["pitch"],
+            z_m, True, on_frac,
+        )
+        step_tick = _worst_tick(row)
+        tag = f"z{um / 1000.0:.3f}"
+        _print_exact_208(tag, step_tick, row.flat_toe_mm)
+        step_over = _print_floor_chain(tag, row)
+        print(
+            f"PRED trim_lead sweep {row.name} "
+            f"z_mm {um / 1000.0:.3f} "
+            f"flat_worst {row.flat_toe_mm:+.6f} mm "
+            f"t {row.flat_toe_t:.3f} side {row.flat_toe_side} "
+            f"centre_mm {float(step_tick['center_z']) * 1000.0:.6f} "
+            f"flat_hx {row.flat_hx_over or 'under'} "
+            f"ank_hx {row.ank_hx_over or 'under'} "
+            f"floor_over {step_over or 'under'} "
+            f"plus2_under_2.33 {int(_bar_clear(row))}"
+        )
+        last = row
+        last_um = um
+        if step_over:
+            stopped = "torque"
+            break
+        if _bar_clear(row):
+            stopped = "clear"
+            break
+        if row.flat_toe_mm >= 2.0:
+            stopped = "toe"
+            break
+    else:
+        stopped = "cap"
+    _require_plant("after_sweep", "trim_lead")
+    if stopped == "clear":
+        print(
+            "PRED trim_lead clear "
+            f"{last.name} flat_worst {last.flat_toe_mm:.6f} mm "
+            f"t {last.flat_toe_t:.3f} side {last.flat_toe_side} "
+            f"z_mm {last_um / 1000.0:.3f}. "
+            "Plus 2 mm cleared with knees, ankle pitch, and ankle roll "
+            "at or under 2.33 Nm on floor contact. "
+            "Not kit-safe. Not go-anywhere."
+        )
+        return
+    if stopped == "torque":
+        short = int(last.flat_toe_mm < 2.0)
+        print(
+            "PRED trim_lead STOP floor knee or ankle over 2.33 "
+            f"on foot-z {last_um / 1000.0:.3f} mm: {_floor_over(last)}. "
+            f"flat_worst {last.flat_toe_mm:+.6f} mm "
+            f"t {last.flat_toe_t:.3f} side {last.flat_toe_side} "
+            f"still_short {short} "
+            f"flat_hx {last.flat_hx_over or 'under'} "
+            f"ank_hx {last.ank_hx_over or 'under'}."
+        )
+        if short:
+            _less_crouch_next(
+                "The trim lead and the foot-z sweep both stalled short of +2 mm."
+            )
+        else:
+            print(
+                "PRED trim_lead less_crouch_next 0. "
+                "The toe is not short. The bar did not clear. "
+                "init_z_offset was not invented. Not kit-safe. Not go-anywhere."
+            )
+        return
+    if stopped == "toe":
+        print(
+            "PRED trim_lead STOP. Foot-z reached +2 mm and a joint is over "
+            "2.33 Nm. That over is not a floor knee or ankle, so no further "
+            "foot-z was added. Less-crouch was not opened. "
+            f"z_mm {last_um / 1000.0:.3f} "
+            f"flat_worst {last.flat_toe_mm:+.6f} mm "
+            f"flat_hx {last.flat_hx_over or 'under'} "
+            f"ank_hx {last.ank_hx_over or 'under'}. "
+            "Not kit-safe. Not go-anywhere."
+        )
+        return
+    _less_crouch_next(
+        "The trim lead and the foot-z sweep both stalled short of +2 mm "
+        f"under 2.33 Nm. Last foot-z was {last_um / 1000.0:.3f} mm, "
+        f"flat worst {last.flat_toe_mm:+.6f} mm."
     )
 
 
