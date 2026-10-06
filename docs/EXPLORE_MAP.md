@@ -138,3 +138,39 @@ Questions on the remeasure, same poses as the phase table:
 An earlier pass at those same four stops, before the budget stop asked, answered **none** every time (conf 0.472, 0.680, 0.677, 0.359; 4.72 s, 4.67 s, 4.68 s, 4.67 s). The arc-right frame then said **none** and on the remeasure said **living**. The body trace did not change. The label is not stable on the empty plant. The single **living** was the first copy of that word, so the resume stayed `vel(+0.150, 0)`. A second **living** would have inserted the 2 s reverse. That reverse did not run.
 
 CPU time on these asks ran from **3.94 s** to **5.69 s**. This is not go-anywhere and not arrival. Yellow ≥ 0.50 and torso-to-kitchen ≤ 0.25 m are still both required, and this loop did not meet them. The furnished 8 s right was not re-walked; those scenes are the stand rows above.
+
+## Living collapse (Prefer FAIL)
+
+The frozen prompt stays. Labels stay `kitchen`, `bathroom`, `living`, `bedroom`, `entrance`, and `none`. Hub pin stays `5d6c926f44e26b07957b0dd315bbedcb4c17a5fe`, apache-2.0. The same 55 fresh stills from the Moondream score were rescored on these pixels, plus the six current-plant stand frames from the table above, saved and scored as files. The frozen prompt reproduced that score: fresh living-collapse **6/44**, named hits **47**, empty plant **none**. The current-plant stand still answers kitchen, bathroom, and bedroom as **living** (**3/3**).
+
+Two other wordings were scored with the same pin and the same parser. Neither is wired.
+
+The furniture prompt told the model not to guess living, defined each label by visible furniture, and still required one frozen word. On the 61 frames, living-collapse went from **6/44** to **36/44** on the fresh stills, named hits from **47** to **19**, and the empty plant from **none** to **living**. The current-plant trio stayed **3/3** living, and the empty stand also became **living**. CPU median **3.96 s** (range 1.65–5.23) against **3.84 s** (range 1.56–5.52) for the frozen prompt on the same pass.
+
+The shorter choice-order prompt was scored on the 36-frame collapse subset (iTHOR kitchen, bedroom, and bathroom; Places bathroom and bedroom; both kit sets). Living-collapse on that subset went from **7** to **8**. Named hits went from **26** to **24**. Both empty frames went from **none** to **bedroom**. The current-plant kitchen left living and landed on **bedroom**. Bathroom and bedroom stayed **living**. CPU median **4.21 s** (range 1.83–4.61).
+
+OWLv2 `google/owlv2-base-patch16-ensemble` (`cfd3195ba4ea9592eec887ded089f4c08eff231d`, apache-2.0) was the tie-break only when the frozen prompt said living or hedged. Cutoff **0.10** was the processor default, set before the scores. Objects map only onto the frozen labels: bed to bedroom, toilet or bathtub to bathroom, stove, oven, or refrigerator to kitchen, sofa or television to living. A door is logged and is not a room. Two rooms at the cutoff return none. The tie-break is not wired.
+
+| Set | Frozen prompt | After tie-break |
+|-----|---------------|-----------------|
+| Fresh living-collapse | 6/44 | 1/44 |
+| Fresh named hits | 47 | 42 |
+| Empty plant, secondary alone | none | none |
+| Current-plant kitchen / bathroom / bedroom | living / living / living | none / none / living |
+| True labels on that trio | 0/3 | 0/3 |
+
+The five fresh hit losses are living rooms whose sofa or television fired together with a bed, a toilet, or a stove, so the tie-break returned none. The current-plant bedroom stayed living on a television score of **0.312** with the bed at **0.027**. The collapse count dropped because answers became none, not because kitchen, bathroom, and bedroom separated. Empty stays none. This is Prefer FAIL. The primary model stays Moondream2 with the frozen prompt.
+
+## Post-stop settle (separate envelope)
+
+`ASK_STOP_S` stays **0.20 s**. A 1.0 s stand before the ask was measured with `ask_hold_s` on the empty plant, frozen prompt, same five vel windows. No backtrack was inserted. min up_z **0.934**. No fault. End mode stand. World at the stop **+2.944 m, +3.134 m**, yaw **+9.34 deg**. After the 1.2 s settle, **+2.944 m, +3.134 m**, yaw **+9.35 deg**. Plant md5 stayed `207f3d5e9c6a72e16f7aa0c8d224f75e`.
+
+| Phase | 0.20 s interrupt | 1.0 s stand | No-ask unload |
+|-------|------------------|-------------|----------------|
+| approach 15 s | +2.210 m / +1.39 deg | +2.210 m / +1.39 deg | +2.210 m / +1.4 deg |
+| left 12.5 s | +0.184 m / +153.05 deg | +0.154 m / +154.45 deg | +0.420 m / +145.1 deg |
+| mid 6 s | +0.785 m / −0.58 deg | +0.784 m / −0.89 deg | +0.944 m / +12.3 deg |
+| right 11 s | +0.295 m / −132.23 deg | +0.308 m / −131.62 deg | +0.466 m / −138.6 deg |
+| resume 6 s | +0.785 m / −2.16 deg | +0.785 m / −2.04 deg | +0.958 m / −2.5 deg |
+
+The no-ask column is the uninterrupted Measured table. It is not replaced by either ask row. The 1.0 s left arc is **+154.45 deg**. That does not close the no-ask left of **+145.1 deg** or the no-ask right of **−138.6 deg**. The five answers were none, none, none, living, none. The stand did not remove the living label. CPU on those five asks was 5.40, 4.77, 4.43, 3.98, and 4.46 s.
