@@ -12336,6 +12336,9 @@ def _install_sagittal_slew(
         """
         t_now = float(lipm.data.time)
         last = land_at.get(jn)
+        # The engage catch must not resume this joint from its stale
+        # command once the leg is stance again.
+        entrance_done.add(jn)
         if last is None or t_now - last >= ctrl_period - 1e-4:
             old = land_cmd.get(jn)
             if old is None:
@@ -12363,8 +12366,9 @@ def _install_sagittal_slew(
                     land_done.add(jn)
             land_cmd[jn] = float(stepped)
             land_at[jn] = t_now
-            if jn.endswith(("knee", "ank_pitch")):
-                prev[jn] = float(stepped)
+            # Hip pitch too. Sealing the engage catch leaves the next
+            # loaded tick on the stance slew, which starts from prev.
+            prev[jn] = float(stepped)
         return float(land_cmd[jn])
 
     def _toward_approach(jn: str, target: float) -> float:
