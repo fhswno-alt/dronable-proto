@@ -196,7 +196,11 @@ under d_min. That gap already includes the 20 mm pad and the step
 offset. No 3–5 cm buffer is added. On this walk the latch is the
 hitting stool leg, not the off-axis one. A stress with the pad frozen
 at 0.035 m stops earlier on that same leg and still leaves the
-off-axis leg outside the corridor. Not kit-safe. The row source
+off-axis leg outside the corridor. The Day-1 kitchen stop reads
+hazard_finder cues on the kit_cam frame and also stops on too_close.
+On this walk the cue path stops on the hitting leg before too_close,
+earlier than the sim-projection latch because the RGB read is short.
+Not kit-safe. The row source
 is still a sim projection. Not go-anywhere. Soft-pass is off.
 """
 from __future__ import annotations

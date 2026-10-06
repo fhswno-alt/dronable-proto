@@ -32,13 +32,18 @@ the true camera-to-floor gap. That early trip is not a calibrated
 toe gap. Near the center, leg_2 at t = 5.824 s reads 0.015 m short.
 The head is not tilted. A −10° walk stays off.
 
-Day-1 stop for the kitchen walk is ``walk_latch``. It calls
-``ray_corridor.estimate_hazard`` and stops when ``in_corridor`` and
-``toe_gap_m <= d_min``. That ``toe_gap_m`` already includes the 20 mm
-pad and the live step offset. No 3–5 cm buffer is added. ``latch-pad``
-reruns the same walk with a frozen pad of 0.035 m and does not replace
-the 0.020 m latch. The older row-model stress remains in this file
-and is not the latch.
+``walk_latch`` is the sim projection of a stool-leg floor point. It
+stops when ``in_corridor`` and ``toe_gap_m <= d_min``. That gap already
+includes the 20 mm pad and the live step offset. ``latch-pad`` reruns
+that projection with a frozen pad of 0.035 m and does not replace the
+0.020 m pad.
+
+Day-1 stop for the kitchen walk is ``walk_finder``. The pixel comes
+from ``hazard_finder.find_hazard_cues`` on the kit_cam RGB frame.
+``stop`` is sent when a cue is inside the corridor and ``toe_gap_m``
+is at or under ``d_min``, or when a cue sets ``too_close``. The pad
+stays 0.020. No 3–5 cm buffer is added. The older row-model stress
+remains in this file and is not the latch.
 """
 from __future__ import annotations
 
@@ -59,6 +64,7 @@ import mujoco as mj
 import numpy as np
 
 import gait_manager_traj as gm
+import hazard_finder as hf
 import ray_corridor as rc
 import steer_walk as sw
 
@@ -929,6 +935,263 @@ def walk_latch(
     }
 
 
+# #69 match window. Used only to name the geom after the stop. The stop
+# itself does not read a projected floor point.
+FINDER_MATCH_PX = 48.0
+# Sim-projection latch times on this same walk, pad 0.020. The finder
+# report compares against these. They are not a second gate.
+SIM_LATCH_S = {0.0: 5.904, 0.033: 5.888, 0.100: 5.856}
+
+
+def walk_finder(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
+    """Day-1 stop on the RGB finder. Pad stays 0.020. Head tilt stays off.
+
+    Every cue is ranged. The primary pixel alone is late on this walk:
+    from 5.75 s to 5.90 s the lowest blob is the off-axis leg. A cue
+    with no pixel and ``too_close`` set is a stop by itself.
+    """
+    if not SCENE.is_file():
+        raise SystemExit(f"missing kitchen scene {SCENE}")
+    if abs(rc.HAZARD_PAD_M - 0.020) > 1e-12:
+        raise SystemExit(f"pad moved to {rc.HAZARD_PAD_M}")
+    session = sw.SteerSession(video=False, scene_xml=SCENE, lipm=sw.locked_kit_config())
+    model = session.model
+    cid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_CAMERA, "kit_cam")
+    jid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, "head_tilt")
+    pan_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, "head_pan")
+    renderer = mj.Renderer(model, height=rc.HEIGHT, width=rc.WIDTH)
+    peaks: dict[str, tuple[float, float]] = {}
+    stop_peaks: dict[str, tuple[float, float]] = {}
+    real = mj.mj_step
+    contact: tuple[float, str, str, float] | None = None
+    stop_mark: dict[str, float | None] = {"t": None}
+    com_hist: list[tuple[float, float, float, float]] = []
+    prev_com: np.ndarray | None = None
+    prev_t: float | None = None
+
+    def hook(m: mj.MjModel, d: mj.MjData) -> None:
+        nonlocal contact, prev_com, prev_t
+        real(m, d)
+        t_now = float(d.time)
+        com = np.asarray(d.subtree_com[session.bid_body, :2], dtype=np.float64).copy()
+        speed = 0.0
+        if prev_com is not None and prev_t is not None and t_now > prev_t:
+            speed = float(np.linalg.norm(com - prev_com) / (t_now - prev_t))
+        com_hist.append((t_now, float(com[0]), float(com[1]), speed))
+        prev_com = com
+        prev_t = t_now
+        hit = _prop_hit(m, d)
+        if hit is not None and contact is None:
+            contact = (t_now, hit[0], hit[1], hit[2])
+        for i in range(m.nu):
+            name = mj.mj_id2name(m, mj.mjtObj.mjOBJ_ACTUATOR, i) or ""
+            if not any(tok in name for tok in LEG_TOKS):
+                continue
+            force = float(d.actuator_force[i])
+            prev = peaks.get(name)
+            if prev is None or abs(force) > abs(prev[0]):
+                peaks[name] = (force, t_now)
+            mark = stop_mark["t"]
+            if mark is not None and t_now + 1e-9 >= float(mark):
+                prev_s = stop_peaks.get(name)
+                if prev_s is None or abs(force) > abs(prev_s[0]):
+                    stop_peaks[name] = (force, t_now)
+
+    mj.mj_step = hook
+    driver = sw.ScriptedDriver((
+        sw.DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+        sw.DemoSegment(t_end, "vel", sw.VX_FWD_CAP, -sw.YAW_RATE_CAP, "turn"),
+    ))
+    gate = rc.d_min(t_detect)
+    reach: list[tuple[float, float, float]] = []
+    issued: float | None = None
+    reason = ""
+    path = ""
+    matched = ""
+    too_close = False
+    false_early = ""
+    min_foot_leg = 1e9
+    head_tilt_peak = 0.0
+    try:
+        while float(session.data.time) < t_end - 1e-9:
+            now = float(session.data.time)
+            if issued is None and now >= 1.0 - 1e-9:
+                data = session.data
+                tilt = float(data.qpos[int(model.jnt_qposadr[jid])])
+                pan = 0.0 if pan_id < 0 else float(data.qpos[int(model.jnt_qposadr[pan_id])])
+                head_tilt_peak = max(head_tilt_peak, abs(tilt))
+                body_rot = np.asarray(data.xmat[session.bid_body], dtype=np.float64).reshape(3, 3)
+                yaw, pitch, roll = rc.imu_from_body(body_rot)
+                cam = np.asarray(data.cam_xpos[cid], dtype=np.float64)
+                fwd = body_forward_xy(data, session.bid_body)
+                toes = toe_samples(session, cid)
+                reach.append((
+                    now,
+                    next(row.offset_m for row in toes if row.side == "L"),
+                    next(row.offset_m for row in toes if row.side == "R"),
+                ))
+                step_off, step_side, _when = _high_water(reach)
+                body = rc.BodyFrame((float(data.qpos[0]), float(data.qpos[1])), (float(fwd[0]), float(fwd[1])))
+                pose = rc.KitCamPose((float(cam[0]), float(cam[1]), float(cam[2])))
+                yaw_rate = float(session.bus.applied_yaw_rate)
+                rot = rc.camera_rotation_from_imu(yaw, pitch, roll, tilt, pan)
+                renderer.disable_segmentation_rendering()
+                renderer.disable_depth_rendering()
+                renderer.update_scene(data, camera="kit_cam")
+                rgb = np.asarray(renderer.render(), dtype=np.uint8).copy()
+                cues = hf.find_hazard_cues(rgb)
+                primary = cues[0] if cues else None
+
+                def nearest(u: float, v: float) -> tuple[str, float, float | None, float | None]:
+                    best_px: tuple[str, float, float | None, float | None] | None = None
+                    for name, point in _leg_floor_centers(model, data):
+                        pix = rc.project_point(point, cam, rot)
+                        if pix is None:
+                            continue
+                        dist = math.hypot(pix[0] - u, pix[1] - v)
+                        gt = rc.estimate_hazard(
+                            pix[0], pix[1],
+                            cam=pose, body=body,
+                            imu_roll_rad=roll, imu_pitch_rad=pitch,
+                            head_tilt_rad=tilt, yaw_rate=yaw_rate,
+                            step_off_m=step_off, hazard_pad_m=rc.HAZARD_PAD_M,
+                            head_pan_rad=pan,
+                        )
+                        eye = None if gt is None else gt.eye_range
+                        gap = None if gt is None else gt.toe_gap_m
+                        if best_px is None or dist < best_px[1]:
+                            best_px = (name, dist, eye, gap)
+                    if best_px is None:
+                        return ("none", 1e9, None, None)
+                    return best_px
+
+                ranged: tuple[float, str, str] | None = None
+                clipped: hf.HazardCue | None = None
+                for index, cue in enumerate(cues):
+                    if cue.too_close and clipped is None:
+                        clipped = cue
+                    if cue.u is None or cue.v is None or cue.too_close:
+                        continue
+                    est = rc.estimate_hazard(
+                        cue.u, cue.v,
+                        cam=pose, body=body,
+                        imu_roll_rad=roll, imu_pitch_rad=pitch,
+                        head_tilt_rad=tilt, yaw_rate=yaw_rate,
+                        step_off_m=step_off, hazard_pad_m=rc.HAZARD_PAD_M,
+                        head_pan_rad=pan,
+                    )
+                    if est is None:
+                        continue
+                    label = "pixel" if index == 0 else "cues"
+                    if est.in_corridor and est.toe_gap_m <= gate:
+                        if ranged is None or est.toe_gap_m < ranged[0]:
+                            name, dist, gt_eye, gt_gap = nearest(cue.u, cue.v)
+                            named = name if dist <= FINDER_MATCH_PX else f"unmatched {name}"
+                            ranged = (
+                                est.toe_gap_m,
+                                label,
+                                f"{label} {named} px={dist:.1f} toe_gap={est.toe_gap_m:.3f} "
+                                f"eye={est.eye_range:.3f} gt_eye={gt_eye} gt_gap={gt_gap} "
+                                f"side={est.sideways_m:+.3f} u={cue.u:.1f} v={cue.v:.1f} "
+                                f"step_off={step_off:+.3f} {step_side} pad={rc.HAZARD_PAD_M:.3f}",
+                            )
+                    elif (not est.in_corridor) and est.toe_gap_m <= gate and false_early == "":
+                        name, dist, gt_eye, _gt_gap = nearest(cue.u, cue.v)
+                        false_early = (
+                            f"{name} px={dist:.1f} toe_gap={est.toe_gap_m:.3f} "
+                            f"eye={est.eye_range:.3f} gt_eye={gt_eye} side={est.sideways_m:+.3f}"
+                        )
+                if ranged is not None:
+                    session.bus.stop(now)
+                    issued = now
+                    stop_mark["t"] = now
+                    path = ranged[1]
+                    reason = ranged[2]
+                    too_close = clipped is not None
+                    matched = reason
+                elif clipped is not None:
+                    u = float(clipped.column) + 0.5
+                    v = float(clipped.contact_row) + 0.5
+                    name, dist, gt_eye, gt_gap = nearest(u, v)
+                    named = name if dist <= FINDER_MATCH_PX else f"unmatched {name}"
+                    session.bus.stop(now)
+                    issued = now
+                    stop_mark["t"] = now
+                    path = "too_close"
+                    too_close = True
+                    reason = (
+                        f"too_close {named} px={dist:.1f} col={clipped.column} "
+                        f"row={clipped.contact_row} gt_eye={gt_eye} gt_gap={gt_gap} "
+                        f"step_off={step_off:+.3f} {step_side}"
+                    )
+                    matched = reason
+                    if primary is not None and primary is not clipped:
+                        reason += (
+                            f" primary_row={primary.contact_row} "
+                            f"primary_too_close={primary.too_close}"
+                        )
+            if issued is None:
+                driver.publish(session.bus, now)
+            session.step()
+            if issued is not None:
+                for _name, point in _leg_floors(model, session.data):
+                    for row in toe_samples(session, cid):
+                        dist = math.hypot(point[0] - row.toe_xy[0], point[1] - row.toe_xy[1])
+                        if dist < min_foot_leg:
+                            min_foot_leg = dist
+            if contact is not None and issued is None:
+                break
+    finally:
+        mj.mj_step = real
+        renderer.close()
+
+    stop_worst = max(stop_peaks.items(), key=lambda kv: abs(kv[1][0])) if stop_peaks else None
+    stop_over = [
+        (n, f, t) for n, (f, t) in stop_peaks.items()
+        if abs(f) > sw.lipm_gait.LEG_STOP_NM + 1e-3
+    ]
+    sim_t = SIM_LATCH_S.get(t_detect)
+    late = None if issued is None or sim_t is None else issued - sim_t
+    return {
+        "plant": sw._md5(sw.PLANT_XML),
+        "t_detect": t_detect,
+        "d_min": gate,
+        "issued": issued,
+        "path": path,
+        "reason": reason,
+        "matched": matched,
+        "too_close": too_close,
+        "false_early": false_early,
+        "contact": contact,
+        "t_stop": _settle(com_hist, issued),
+        "min_up_z": session.min_up_z,
+        "min_foot_leg": None if min_foot_leg > 10 else min_foot_leg,
+        "stop_worst": None if stop_worst is None else (stop_worst[0], stop_worst[1][0], stop_worst[1][1]),
+        "stop_over": len(stop_over),
+        "step_off": _high_water(reach),
+        "head_tilt_peak": head_tilt_peak,
+        "yaw": math.degrees(session.yaw()),
+        "late_vs_sim_s": late,
+    }
+
+
+def _print_finder(result: dict[str, object]) -> None:
+    step = result["step_off"]
+    assert isinstance(step, tuple)
+    print(
+        f"plant {result['plant']} mode=finder T_detect={result['t_detect']} "
+        f"d_min={result['d_min']:.4f} buffer=0 pad={rc.HAZARD_PAD_M:.3f} "
+        f"step_off={step[0]:+.3f} {step[1]} t={step[2]:.3f} "
+        f"path={result['path']} too_close={result['too_close']} "
+        f"issued={result['issued']} late_vs_sim_s={result['late_vs_sim_s']} "
+        f"reason={result['reason']} false_early={result['false_early'] or 'none'} "
+        f"contact={result['contact']} T_stop_run={result['t_stop']} "
+        f"min_up_z={result['min_up_z']:.3f} min_foot_leg={result['min_foot_leg']} "
+        f"yaw={result['yaw']:+.1f} head_tilt_peak={result['head_tilt_peak']:.4f} "
+        f"stop_worst={result['stop_worst']} stop_over={result['stop_over']}"
+    )
+
+
 def _print_latch(result: dict[str, object]) -> None:
     step = result["step_off"]
     assert isinstance(step, tuple)
@@ -949,6 +1212,12 @@ def _print_latch(result: dict[str, object]) -> None:
 
 def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else "gate"
+    if mode == "finder":
+        hf.self_check()
+        rc.self_check()
+        for t_detect in (0.0, 0.033, 0.100):
+            _print_finder(walk_finder(t_detect))
+        return
     if mode == "latch":
         rc.self_check()
         for t_detect in (0.0, 0.033, 0.100):

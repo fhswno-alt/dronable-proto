@@ -1674,6 +1674,35 @@ without this pad, at that frame, is 0.161 m, still above the 0.1263 m
 floor, so the stop is still the pad. Not kit-safe. The 3–5 cm buffer
 is not sized from this clear.
 
+The Day-1 stop now reads `hazard_finder.find_hazard_cues` on the
+kit_cam RGB frame and sends `stop` when a cue is inside the corridor
+and `toe_gap_m` is at or under `d_min`, or when a cue sets
+`too_close`. The pad stays 0.020. The buffer stays off. The head stays
+level. The leg name below is a match within 48 px of the sim-projected
+floor point. That projection is not the stop input.
+
+| `T_detect` | stop | path | latch | eye / sim eye | foot–leg | settle | stop peak |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 | 5.864 s | cues | `leg_2` | 0.181 / 0.191 m | 0.163 m | 0.680 s | left hip pitch +2.280 Nm |
+| 0.033 s | 5.848 s | cues | `leg_2` | 0.184 / 0.194 m | 0.167 m | 0.624 s | left hip pitch +2.280 Nm |
+| 0.100 s | 5.736 s | pixel | `leg_2` | 0.180 / 0.193 m | 0.198 m | 0.540 s | left knee −2.280 Nm |
+
+`too_close` does not fire on these stops. Prop contacts are 0. min
+up_z is 0.934. No stop-window leg joint crosses 2.33 Nm. These settles
+do not raise the 0.842 s `T_stop`. `leg_0` stays outside the corridor.
+On the first two runs its forward gap is already under `d_min` at a
+sideways offset of −0.270 m, and the corridor leaves it out.
+
+The stops are earlier than the sim-projection latch (5.904 s, 5.888 s,
+5.856 s) by 0.040 s, 0.040 s, and 0.120 s. At the `T_detect` = 0 frame
+the finder eye is 0.181 m and the sim eye is 0.191 m. The sim
+`toe_gap` at that frame is 0.139 m, still above 0.1263 m, so the lead
+is the short RGB read. The finder gap without the 20 mm pad is 0.146 m,
+still above that floor, so the stop is still the pad. Not kit-safe.
+The 3–5 cm buffer is not sized from this clear. On the first two runs
+the winning cue is not the lowest blob, so `find_hazard_pixel` alone
+would not have stopped on that frame.
+
 A −10° `head_tilt` walk is not enabled. On that pose the near edge is
 0.077 m at `cam_z` 0.326 m. #67 checked the wood rule at that session
 tilt: the foot contact boxes project to rows 643–749, below the
