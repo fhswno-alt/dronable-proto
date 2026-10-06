@@ -1725,6 +1725,19 @@ t = 5.312 s on `leg_2` (finder eye 0.384 m, true 0.268 m, finder
 under 0.1263 m while the finder `toe_gap` is still above it. The
 frames that fire the stop are the short ones. Not kit-safe.
 
+The Day-1 stop keeps the shortest in-corridor floor point. A later
+frame can replace that point only when the gap gets shorter. Each
+tick re-reads the point in the current body x, y, and yaw, and drops
+it when the point leaves the corridor. On this kitchen yaw the fire
+does not move. The point that crosses `d_min` is born on the fire
+tick, except at `T_detect` = 0.100 s, where it is born one tick
+earlier and still crosses at the same 5.736 s. The latch is
+`leg_2`. The saved point sits 0.013–0.014 m from that leg's floor.
+`leg_0` is not the stop. `too_close` does not fire. Prop contacts
+are 0. The stop peaks stay at 2.280 Nm. At the fire the finder eye
+is still short of the true camera-to-floor range by 0.011 m, 0.011 m,
+and 0.013 m. Not kit-safe.
+
 A −10° `head_tilt` walk is not enabled. On that pose the near edge is
 0.077 m at `cam_z` 0.326 m. #67 checked the wood rule at that session
 tilt: the foot contact boxes project to rows 643–749, below the

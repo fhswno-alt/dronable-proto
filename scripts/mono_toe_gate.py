@@ -40,10 +40,13 @@ that projection with a frozen pad of 0.035 m and does not replace the
 
 Day-1 stop for the kitchen walk is ``walk_finder``. The pixel comes
 from ``hazard_finder.find_hazard_cues`` on the kit_cam RGB frame.
-``stop`` is sent when a cue is inside the corridor and ``toe_gap_m``
-is at or under ``d_min``, or when a cue sets ``too_close``. The pad
-stays 0.020. No 3–5 cm buffer is added. The older row-model stress
-remains in this file and is not the latch.
+Each in-corridor hit keeps a world floor point. A later frame may
+replace that point only when the gap gets shorter. Every tick the
+point is re-read in the current body x, y, and yaw. It is dropped
+when that reading leaves the corridor. ``stop`` is sent when the
+shortest remaining gap is at or under ``d_min``, or when a cue sets
+``too_close``. The pad stays 0.020. No 3–5 cm buffer is added. The
+older row-model stress remains in this file and is not the latch.
 """
 from __future__ import annotations
 
@@ -938,17 +941,61 @@ def walk_latch(
 # #69 match window. Used only to name the geom after the stop. The stop
 # itself does not read a projected floor point.
 FINDER_MATCH_PX = 48.0
+# Same-leg join for the shortest-gap latch. Stool legs are farther
+# apart than this along the floor. A long RGB hit of one leg stays
+# inside it, so it cannot open a second track that raises the gap.
+TRACK_JOIN_M = 0.20
+
+
+@dataclass
+class _GapTrack:
+    """World floor point. The gap is recomputed from body x, y, and yaw."""
+
+    hit_xy: tuple[float, float]
+    gap_m: float
+    side_m: float
+    label: str
+    t_s: float
+
+
+def _pose_gap(
+    hit_xy: tuple[float, float],
+    cam_xy: tuple[float, float],
+    body: rc.BodyFrame,
+    yaw_rate: float,
+    step_off_m: float,
+) -> tuple[float, float, float, bool]:
+    """Toe gap of a fixed floor point in the current body pose.
+
+    Forward is from the camera. Sideways is from the body origin.
+    Both use the current heading, so yaw is in the reading. This is
+    not a forward-only subtract.
+    """
+    fx, fy = body.forward_xy
+    norm = math.hypot(fx, fy)
+    if norm < 1e-9:
+        return (1e9, 0.0, 0.0, False)
+    forward_xy = (fx / norm, fy / norm)
+    left_xy = rc.left_from_forward(forward_xy)
+    dx = hit_xy[0] - cam_xy[0]
+    dy = hit_xy[1] - cam_xy[1]
+    forward = dx * forward_xy[0] + dy * forward_xy[1]
+    ox, oy = body.origin_xy_m
+    sideways = (hit_xy[0] - ox) * left_xy[0] + (hit_xy[1] - oy) * left_xy[1]
+    inside = rc.in_foot_corridor(sideways, rc.corridor_edges(yaw_rate), rc.HAZARD_PAD_M)
+    toe_gap = forward - rc.HAZARD_PAD_M - step_off_m
+    return (toe_gap, forward, sideways, inside)
 # Sim-projection latch times on this same walk, pad 0.020. The finder
 # report compares against these. They are not a second gate.
 SIM_LATCH_S = {0.0: 5.904, 0.033: 5.888, 0.100: 5.856}
 
 
 def walk_finder(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
-    """Day-1 stop on the RGB finder. Pad stays 0.020. Head tilt stays off.
+    """Day-1 stop on the shortest in-corridor finder gap. Pad stays 0.020.
 
-    Every cue is ranged. The primary pixel alone is late on this walk:
-    from 5.75 s to 5.90 s the lowest blob is the off-axis leg. A cue
-    with no pixel and ``too_close`` set is a stop by itself.
+    A world floor point is kept per hit. A new frame can only move that
+    point closer. Each tick re-reads it with body x, y, and yaw, and
+    drops it when it leaves the corridor. ``too_close`` still stops.
     """
     if not SCENE.is_file():
         raise SystemExit(f"missing kitchen scene {SCENE}")
@@ -1031,6 +1078,7 @@ def walk_finder(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
     fire_true: float | None = None
     cross: dict[float, str] = {}
     cross_levels = (0.0, 0.033, 0.100)
+    tracks: list[_GapTrack] = []
     try:
         while float(session.data.time) < t_end - 1e-9:
             now = float(session.data.time)
@@ -1054,6 +1102,18 @@ def walk_finder(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
                 pose = rc.KitCamPose((float(cam[0]), float(cam[1]), float(cam[2])))
                 yaw_rate = float(session.bus.applied_yaw_rate)
                 rot = rc.camera_rotation_from_imu(yaw, pitch, roll, tilt, pan)
+                cam_xy = (float(cam[0]), float(cam[1]))
+                alive: list[_GapTrack] = []
+                for held in tracks:
+                    gap_now, _forward, side_now, inside = _pose_gap(
+                        held.hit_xy, cam_xy, body, yaw_rate, step_off,
+                    )
+                    if not inside:
+                        continue
+                    held.gap_m = gap_now
+                    held.side_m = side_now
+                    alive.append(held)
+                tracks = alive
                 renderer.disable_segmentation_rendering()
                 renderer.disable_depth_rendering()
                 renderer.update_scene(data, camera="kit_cam")
@@ -1127,10 +1187,8 @@ def walk_finder(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
                                 delay_note = note
                     return (eye_bias, gap_bias)
 
-                ranged: tuple[float, str, str, float | None, float | None, float | None] | None = None
                 clipped: hf.HazardCue | None = None
-                frame_best: tuple[float, str] | None = None
-                for index, cue in enumerate(cues):
+                for cue in cues:
                     if cue.too_close and clipped is None:
                         clipped = cue
                     if cue.u is None or cue.v is None or cue.too_close:
@@ -1147,52 +1205,75 @@ def walk_finder(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
                         continue
                     name, dist, true_m, gt_eye, gt_gap = nearest(cue.u, cue.v)
                     eye_bias, gap_bias = track(est, name, dist, true_m, gt_gap)
-                    label = "pixel" if index == 0 else "cues"
                     named = name if dist <= FINDER_MATCH_PX else f"unmatched {name}"
-                    if est.in_corridor and (
-                        frame_best is None or est.toe_gap_m < frame_best[0]
-                    ):
-                        frame_best = (
-                            est.toe_gap_m,
-                            f"t={now:.3f} {label} {named} toe_gap={est.toe_gap_m:.3f} "
-                            f"gt_gap={gt_gap} eye={est.eye_range:.3f} true={true_m} "
-                            f"eye_bias={eye_bias} gap_bias={gap_bias} side={est.sideways_m:+.3f}",
-                        )
-                    if est.in_corridor and est.toe_gap_m <= gate:
-                        if ranged is None or est.toe_gap_m < ranged[0]:
-                            ranged = (
-                                est.toe_gap_m,
-                                label,
-                                f"{label} {named} px={dist:.1f} toe_gap={est.toe_gap_m:.3f} "
-                                f"gt_gap={gt_gap} eye={est.eye_range:.3f} true={true_m} "
-                                f"eye_bias={eye_bias} gap_bias={gap_bias} "
-                                f"side={est.sideways_m:+.3f} u={cue.u:.1f} v={cue.v:.1f} "
-                                f"step_off={step_off:+.3f} {step_side} pad={rc.HAZARD_PAD_M:.3f}",
-                                eye_bias,
-                                gap_bias,
-                                true_m,
-                            )
+                    if est.in_corridor:
+                        hit = est.hit_xy_m
+                        joined: _GapTrack | None = None
+                        joined_d = TRACK_JOIN_M
+                        for held in tracks:
+                            apart = math.hypot(hit[0] - held.hit_xy[0], hit[1] - held.hit_xy[1])
+                            if apart < joined_d:
+                                joined_d = apart
+                                joined = held
+                        if joined is None:
+                            tracks.append(_GapTrack(hit, est.toe_gap_m, est.sideways_m, named, now))
+                        elif est.toe_gap_m < joined.gap_m:
+                            joined.hit_xy = hit
+                            joined.gap_m = est.toe_gap_m
+                            joined.side_m = est.sideways_m
+                            joined.label = named
+                            joined.t_s = now
                     elif (not est.in_corridor) and est.toe_gap_m <= gate and false_early == "":
                         false_early = (
                             f"{name} px={dist:.1f} toe_gap={est.toe_gap_m:.3f} "
                             f"gt_gap={gt_gap} eye={est.eye_range:.3f} true={true_m} "
                             f"eye_bias={eye_bias} gap_bias={gap_bias} side={est.sideways_m:+.3f}"
                         )
-                if frame_best is not None:
+                chosen: _GapTrack | None = None
+                for held in tracks:
+                    if chosen is None or held.gap_m < chosen.gap_m:
+                        chosen = held
+                if chosen is not None:
                     for level in cross_levels:
                         if level in cross:
                             continue
-                        if frame_best[0] <= rc.d_min(level):
-                            cross[level] = frame_best[1]
-                if ranged is not None:
+                        if chosen.gap_m <= rc.d_min(level):
+                            cross[level] = (
+                                f"t={now:.3f} {chosen.label} gap={chosen.gap_m:.3f} "
+                                f"side={chosen.side_m:+.3f} born={chosen.t_s:.3f}"
+                            )
+                if chosen is not None and chosen.gap_m <= gate:
+                    leg_name = "none"
+                    leg_dist = 1e9
+                    true_m = None
+                    gt_gap = None
+                    for leg, point in _leg_floor_centers(model, data):
+                        apart = math.hypot(chosen.hit_xy[0] - point[0], chosen.hit_xy[1] - point[1])
+                        if apart < leg_dist:
+                            leg_dist = apart
+                            leg_name = leg
+                            true_m = float(math.hypot(point[0] - cam[0], point[1] - cam[1]))
+                            gt_gap = _pose_gap(
+                                (float(point[0]), float(point[1])),
+                                cam_xy, body, yaw_rate, step_off,
+                            )[0]
+                    finder_eye = math.hypot(chosen.hit_xy[0] - cam[0], chosen.hit_xy[1] - cam[1])
+                    fire_eye_bias = None if true_m is None else finder_eye - true_m
+                    fire_gap_bias = None if gt_gap is None else chosen.gap_m - gt_gap
+                    fire_true = true_m
                     session.bus.stop(now)
                     issued = now
                     stop_mark["t"] = now
-                    path = ranged[1]
-                    reason = ranged[2]
-                    fire_eye_bias = ranged[3]
-                    fire_gap_bias = ranged[4]
-                    fire_true = ranged[5]
+                    path = "shortest"
+                    reason = (
+                        f"shortest {leg_name} world={leg_dist:.3f} "
+                        f"toe_gap={chosen.gap_m:.3f} gt_gap={gt_gap} "
+                        f"eye={finder_eye:.3f} true={true_m} "
+                        f"eye_bias={fire_eye_bias} gap_bias={fire_gap_bias} "
+                        f"side={chosen.side_m:+.3f} born={chosen.t_s:.3f} "
+                        f"label={chosen.label} step_off={step_off:+.3f} {step_side} "
+                        f"pad={rc.HAZARD_PAD_M:.3f}"
+                    )
                     too_close = clipped is not None
                     matched = reason
                 elif clipped is not None:

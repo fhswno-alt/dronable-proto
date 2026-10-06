@@ -202,7 +202,10 @@ On this walk the cue path stops on the hitting leg before too_close,
 earlier than the sim-projection latch because the firing frame reads
 about 1 cm short. Earlier samples on the same walk read long, including
 an in-corridor leg_2 sample of +0.116 m at 5.312 s, while the true gap
-is still above d_min. Not kit-safe. The row source
+is still above d_min. The shortest-gap latch carries that floor point
+in body x, y, and yaw and drops it outside the corridor. On this walk
+it fires at the same time as the cue latch, on the hitting leg, and
+the firing eye stays short. Not kit-safe. The row source
 is still a sim projection. Not go-anywhere. Soft-pass is off.
 """
 from __future__ import annotations
