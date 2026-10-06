@@ -152,6 +152,13 @@ class LipmConfig:
     gm_z_swap_m: float = gm.GM_Z_SWAP_M
     gm_step_fb: float = gm.GM_STEP_FB
     gm_pelvis_deg: float = gm.GM_PELVIS_DEG
+    # First swing after stand. "L" is the published clock (time 0). "R"
+    # starts in the double support before the right swing. Not a clamp.
+    gm_start_lead: str = "L"
+    # After a nonzero yaw target returns to 0, the next double support
+    # lines up the outside foot (right after +yaw, left after −yaw).
+    # "keep" leaves the clock alone. "L" or "R" forces that swing.
+    gm_resume_lead: str = "outside"
     gm_arm_deg: float = gm.GM_ARM_DEG
     # Kit hip_pitch_offset, on the stand pose and the walk. 15° takes
     # the 0.025 m crouch from hip pitch +0.504 rad to +0.766 rad.
@@ -283,6 +290,14 @@ class LipmWalker:
                 self.q_stand[name] = val
         self.phase: PhaseName = "stand"
         self.stance: Side = "L"
+        lead = str(cfg.gm_start_lead)
+        self.start_lead: Side = "R" if lead == "R" else "L"
+        self.resume_lead = str(cfg.gm_resume_lead)
+        self.yaw_target = 0.0
+        self._move_entered = False
+        self._yaw_sign = 0
+        self._pending_lead: str | None = None
+        self._resume_latched = False
         self.lat = 0.0
         self.phase_t = 0.0
         self.swing_s = 0.0
@@ -450,6 +465,39 @@ class LipmWalker:
         self._write_arms()
         self._write_unused()
 
+    def _arm_resume_lead(self, walker: op3_walk.Op3Walker) -> None:
+        """After a yaw target returns to 0, swing the outside foot next.
+
+        Applied only in double support, once per resume. A foot already
+        in single support waits. ``keep`` does not move the clock.
+        """
+        if self._pending_lead is not None:
+            upcoming = walker.next_swing()
+            if upcoming is None:
+                return
+            if upcoming != self._pending_lead:
+                walker.arm_swing(self._pending_lead)
+            self._pending_lead = None
+            self._resume_latched = True
+            return
+        policy = self.resume_lead
+        yaw = float(self.yaw_target)
+        if abs(yaw) > 1e-3:
+            self._yaw_sign = 1 if yaw > 0.0 else -1
+            self._pending_lead = None
+            self._resume_latched = False
+            return
+        if policy == "keep" or self._resume_latched or self._yaw_sign == 0:
+            return
+        if policy in ("L", "R"):
+            lead = policy
+        elif policy == "outside":
+            # +yaw is a left turn. The outside foot is the right foot.
+            lead = "R" if self._yaw_sign > 0 else "L"
+        else:
+            return
+        self._pending_lead = lead
+
     def _tick_gait_manager(self, walking: bool) -> None:
         """OP3 cartesian foot targets through the plant-length IK.
 
@@ -465,11 +513,20 @@ class LipmWalker:
         if not walking:
             walker.stop()
             self._gm_swing = None
+            self._move_entered = False
+            self._yaw_sign = 0
+            self._pending_lead = None
+            self._resume_latched = False
             self.hold_stand()
             return
         x_amp, angle = kit_bus_step(self.cmd_vx, self.cmd_yaw, self.cfg.gm_period_s)
         # No vy. Cycle yaw is the bus yaw_rate; vx scales the step length.
         walker.set_command(x_amp, 0.0, angle)
+        if not self._move_entered:
+            # Stand has just released a clock at 0. Arm the cold lead once.
+            self._move_entered = True
+            walker.arm_swing(self.start_lead)
+        self._arm_resume_lead(walker)
         joints, info = walker.step(op3_walk.OP3_CTRL_S)
         phase = info.phase
         if phase == "L":

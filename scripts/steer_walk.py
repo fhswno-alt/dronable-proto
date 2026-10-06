@@ -151,7 +151,12 @@ swings left first. Δyaw is −1.46° at 6 s, +1.39° at 15 s, +0.50° at
 about −2.9° to +1.9°. The +3° to +4° windows are that rock, not a
 steady left bias. An extra 0.25 s of stand does not change the lead
 foot. Starting the clock half a period later (probe only) swings the
-right foot first and the 30 s net is −2.55°.
+right foot first and the 30 s net is −2.55°. Cold stand→forward
+stays left-first: right-first Δyaw at 30 s is −2.60°, and the first
+right-lead step knees are 1.749 / 1.152 Nm, under 2.33. After a yaw
+target returns to 0 the next double support swings the outside foot.
+That cuts the post-left 6 s from +12.1° to +2.2°. The post-right 6 s
+was already swinging left and stays −0.6°.
 """
 from __future__ import annotations
 
@@ -162,7 +167,7 @@ import math
 import os
 import sys
 import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Literal
 
@@ -713,6 +718,8 @@ def locked_kit_config() -> LipmConfig:
         gm_z_swap_m=0.006,
         gm_pelvis_deg=5.0,
         gm_hip_pitch_deg=15.0,
+        gm_start_lead="L",
+        gm_resume_lead="outside",
         gm_crouch_m=0.025,
         gm_move_s=0.020,
     )
@@ -1290,6 +1297,7 @@ class SteerSession:
                 holding = True
             else:
                 walking = report.mode == "move"
+                self.lipm.yaw_target = self.bus.target_yaw
                 self.lipm.tick(vx, report.applied_yaw_rate, walking)
                 holding = not walking
             # A hold is already the force-limited stand command. Slewing
@@ -3354,16 +3362,75 @@ def _bus_kit_reverse() -> tuple[list[str], list[str]]:
     return failures, lines
 
 
+def _bus_kit_first_step_knee() -> tuple[list[str], list[str]]:
+    """First swing after stand, left lead and right lead. Knee sag bar."""
+    failures: list[str] = []
+    lines: list[str] = []
+    for lead in ("L", "R"):
+        cfg = replace(locked_kit_config(), gm_start_lead=lead, gm_resume_lead="keep")
+        session = SteerSession(video=False, lipm=cfg)
+        peaks = {"l_knee_pos": 0.0, "r_knee_pos": 0.0}
+        seen = {"on": False, "done": False}
+        real_step = mj.mj_step
+
+        def _step(model: mj.MjModel, data: mj.MjData, _lead=lead) -> None:
+            real_step(model, data)
+            walker = session.lipm.op3 if session.lipm is not None else None
+            if walker is None or seen["done"]:
+                return
+            t = walker.time
+            in_ssp = (
+                walker.l_ssp_start < t <= walker.l_ssp_end
+                if _lead == "L"
+                else walker.r_ssp_start < t <= walker.r_ssp_end
+            )
+            if in_ssp:
+                seen["on"] = True
+                for name in peaks:
+                    force = abs(float(data.actuator_force[session.act_idx[name]]))
+                    peaks[name] = max(peaks[name], force)
+            elif seen["on"]:
+                seen["done"] = True
+
+        mj.mj_step = _step
+        last_send = -1.0
+        try:
+            while float(session.data.time) < 2.0 - 1e-9 and not seen["done"]:
+                now = float(session.data.time)
+                if now < 0.40 - 1e-9:
+                    if last_send < 0.0:
+                        session.bus.stand(now)
+                        last_send = now
+                elif (now - last_send) >= (VEL_RESEND_S - 1e-9):
+                    session.bus.vel(VX_FWD_CAP, 0.0, now)
+                    last_send = now
+                session.step()
+        finally:
+            mj.mj_step = real_step
+        session.assert_plant_unchanged()
+        _expect(seen["on"], f"{lead}-lead first swing did not start", failures)
+        for name, force in peaks.items():
+            if force > lipm_gait.KNEE_SAG_NM + 1e-3:
+                failures.append(f"{lead}-lead first step {name} {force:.3f} Nm")
+        lines.append(
+            f"first {lead}-lead step knee L {peaks['l_knee_pos']:.3f} Nm  "
+            f"R {peaks['r_knee_pos']:.3f} Nm"
+        )
+    return failures, lines
+
+
 def bus_kit_check() -> int:
     """Day-1 bus on the locked kit row. Non-zero means the Prefer FAIL bar broke."""
     contract_fail, lines = _bus_kit_contract()
     torque_fail, torque_lines = _bus_kit_forward_stop()
     yaw_fail, yaw_lines = _bus_kit_yaw()
     rev_fail, rev_lines = _bus_kit_reverse()
-    failures = contract_fail + torque_fail + yaw_fail + rev_fail
+    lead_fail, lead_lines = _bus_kit_first_step_knee()
+    failures = contract_fail + torque_fail + yaw_fail + rev_fail + lead_fail
     lines.extend(torque_lines)
     lines.extend(yaw_lines)
     lines.extend(rev_lines)
+    lines.extend(lead_lines)
     print("[bus-kit] Day-1 CommandBus on locked kit500")
     for line in lines:
         print(f"[bus-kit] {line}")

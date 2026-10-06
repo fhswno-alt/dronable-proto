@@ -367,6 +367,34 @@ class Op3Walker:
         self.previous_x = 0.0
         self.update_movement()
 
+    def next_swing(self) -> str | None:
+        """``L`` or ``R`` when the clock is in the double support before that swing.
+
+        ``None`` while a foot is already in single support. The cycle at
+        time 0 is the double support before the left swing.
+        """
+        t = self.time
+        if t <= self.l_ssp_start or t > self.r_ssp_end:
+            return "L"
+        if self.l_ssp_end < t <= self.r_ssp_start:
+            return "R"
+        return None
+
+    def arm_swing(self, swing: str) -> None:
+        """Place the clock in double support so the next swing is ``swing``.
+
+        ``L`` is time 0, the published start. ``R`` is the double support
+        between the two single supports. Does not change a step length,
+        a gain, or the plant.
+        """
+        if swing not in ("L", "R"):
+            raise ValueError(f"swing lead must be L or R, got {swing}")
+        if swing == "L":
+            self.time = 0.0
+        else:
+            self.time = 0.5 * (self.l_ssp_end + self.r_ssp_start)
+        self.update_movement()
+
     def process_phase(self, dt: float) -> None:
         half = dt / 2.0
         if self.time == 0.0:

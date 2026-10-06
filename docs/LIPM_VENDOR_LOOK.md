@@ -1404,3 +1404,15 @@ straight windows above are that rock, not a steady left bias. An extra
 right foot first and the 30 s net is −2.55°. A pelvis-0 probe still
 nets +0.22° at 30 s with the left foot leading. Soft-pass is off.
 
+Lead foot is a choice, not a permanent lock. Cold stand→forward stays
+left-first: right-first over the same 30 s is −0.14° / −3.33° / −2.60°
+at 6 / 15 / 30 s, and |Δ30| is larger (2.60° versus 0.50°). First-step
+knees after stand, left-lead L 1.152 / R 1.749 Nm, right-lead L 1.749 /
+R 1.152 Nm. Both are under 2.33 Nm. The later walk still sits on
+2.330 Nm. After a yaw target returns to 0, the next double support
+swings the outside foot: right after +yaw, left after −yaw. On the
+isolated windows that cuts the post-left 6 s from +12.1° to +2.2°.
+The post-right 6 s was already going to swing the left foot and stays
+−0.6°. Those arcs stay +145° and −136°. Knees on the walks stay under
+2.33 Nm. Soft-pass is off.
+

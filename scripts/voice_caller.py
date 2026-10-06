@@ -39,9 +39,11 @@ vel(+0.150, 0) already curves +4.2° over 27–33 s and +3.5° over
 28.5–34.5 s. Hip-yaw targets are 0 in that stretch. Stop snaps yaw to 0
 in one tick; after a right turn the heading kick runs about +11° to
 −10° across 0.37 s of step phase. Five cold straight walks net +0.50°
-over 30 s and always swing the left foot first. The +4° slices are
-that rock, not a steady left bias. This file still publishes the 0.056
-phrases.
+over 30 s and the cold start still swings the left foot first. After
+a turn the straight resume swings the outside foot: post-left 6 s
+drops from +12.1° to +2.2°, post-right stays −0.6°. First right-lead
+step knees after stand are 1.749 / 1.152 Nm, under 2.33. This file
+still publishes the 0.056 phrases.
 
 Go to the kitchen, the bathroom, anywhere, SLAM, a map, a waypoint, or
 a strafe is refused. Kitchen and bathroom finders are other scripts.
