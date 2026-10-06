@@ -3,8 +3,12 @@
 
 This is not a room finder and not go-anywhere. The only commands are
 stand, stop, and vel(vx, yaw_rate) on CommandBus in scripts/steer_walk.py,
-resent at 10 Hz. Caps stay +0.056 / -0.032 m/s and yaw ±0.25 rad/s.
-On the empty plant the walk still starts with the claimed nav-multi
+resent at 10 Hz. Caps stay +0.150 / -0.032 m/s and yaw ±0.25 rad/s.
+Finder half-cap is 0.075. The vel(+0.056) windows below are the older
+measured schedule, not the command this file sends now. --self-test
+and --demo use SteerSession without locked_kit_config, so they are
+the CPG, not steer_walk.py --bus-kit. A CPG tip is not a kit-gait FAIL.
+The older measured empty-plant schedule started with the claimed nav-multi
 prefix: a 1.0 s stand so the left arc starts at t = 16 s, then
 vel(+0.056, 0) for 15 s and vel(+0.056, +0.25) for 12.5 s. After
 that the dense frontier rim picks the next held window. When the
@@ -99,13 +103,11 @@ SETTLE_S = 1.20
 PERCEPT_S = 0.40
 FRAME_EVERY_S = 0.20
 UP_Z_ABORT = 0.90
-# Claimed walk speed. Half-cap (+0.028) stays upright, but a left yaw
-# on that speed is swallowed. The windows below are the ones Controls
-# already measured: left ~+75.7 deg in 12.5 s, chained right ~-55 deg
-# in 11 s. Caps are not raised.
+# Live command is the locked Day1 forward cap (0.150 m/s). Caps are
+# not raised here. The older measured windows used 0.056 m/s.
 EXPLORE_VX = steer_walk.VX_FWD_CAP
-# Finder last-mile stays at half the forward cap. Full-cap finder
-# bursts crossed up_z 0.90. This is not the explore schedule.
+# Finder last-mile stays at half the forward cap (0.075 at 0.150).
+# This is not the explore schedule.
 FINDER_HALF_VX = steer_walk.VX_FWD_CAP * 0.5
 # A yaw arc "tracked" when realized heading moves more than this on
 # the commanded side. The swallowed left command was about -12 deg.
@@ -2077,24 +2079,74 @@ def _stand_integrate(scene: SceneName) -> tuple[ExploreMap, IntegrateResult, np.
         cam.close()
 
 
+@dataclass(frozen=True)
+class MeshStandPaint:
+    """One CPG stand frame on a mesh room. Not a go-to and not arrival.
+
+    Measured once on the default SteerSession (no locked_kit_config).
+    Wood and wall textures can trip the yellow mask and paint a floor
+    cell. A room can have no frontier. The box-scene contract (kitchen
+    yellow stays off the floor, other rooms have no yellow, every room
+    has frontiers) does not describe these files.
+    """
+
+    free_cells: int
+    feature_cells: int
+    frontier_cells: int
+    yellow_seen: bool
+    paints_floor_cell: bool
+    yellow_frac: float
+    bearing_rad: float | None
+
+
+# Frozen from one _stand_integrate pass. Do not retune after a failure.
+MESH_STAND_PAINT: dict[str, MeshStandPaint] = {
+    "plant": MeshStandPaint(248, 0, 67, False, False, 0.0, None),
+    "kitchen": MeshStandPaint(10, 210, 7, True, True, 0.0753, -0.5238),
+    "bathroom": MeshStandPaint(3, 244, 0, True, True, 0.0218, -0.8735),
+    "living": MeshStandPaint(44, 173, 17, True, True, 0.1448, 0.4613),
+    "bedroom": MeshStandPaint(1, 238, 0, False, False, 0.0022, None),
+    "entrance": MeshStandPaint(2, 195, 2, True, True, 0.2119, 0.4201),
+}
+
+
 def test_stand_scenes() -> list[str]:
+    """Mesh-room stand paint. Yellow on the floor is not a waypoint."""
     failures: list[str] = []
     for scene in STAND_SCENES:
+        expected = MESH_STAND_PAINT[scene]
         feature_map, result, _frame = _stand_integrate(scene)
         yellow = feature_map.query_kitchen_like_yellow()
-        _expect(result.free_cells > 20, f"{scene} free cells {result.free_cells}", failures)
-        if scene == "kitchen":
-            _expect(yellow.seen, f"kitchen yellow not seen ({yellow.max_fraction:.4f})", failures)
-            _expect(0.02 <= yellow.max_fraction <= 0.12, f"kitchen yellow frac {yellow.max_fraction:.4f}", failures)
-            _expect(yellow.ground_cell_ij is None, f"kitchen yellow painted a cell {yellow.ground_cell_ij}", failures)
-            _expect(yellow.bearing_rad is not None and abs(yellow.bearing_rad) < 0.35, f"kitchen bearing {yellow.bearing_rad}", failures)
+        _expect(result.free_cells == expected.free_cells, f"{scene} free cells {result.free_cells}", failures)
+        _expect(
+            result.feature_cells == expected.feature_cells,
+            f"{scene} feature cells {result.feature_cells}",
+            failures,
+        )
+        _expect(
+            result.frontier_cells == expected.frontier_cells,
+            f"{scene} frontiers {result.frontier_cells}",
+            failures,
+        )
+        _expect(yellow.seen is expected.yellow_seen, f"{scene} yellow seen {yellow.seen} frac {yellow.max_fraction:.4f}", failures)
+        _expect(
+            (yellow.ground_cell_ij is not None) is expected.paints_floor_cell,
+            f"{scene} yellow floor cell {yellow.ground_cell_ij}",
+            failures,
+        )
+        _expect(
+            abs(yellow.max_fraction - expected.yellow_frac) < 5e-4,
+            f"{scene} yellow frac {yellow.max_fraction:.4f}",
+            failures,
+        )
+        if expected.bearing_rad is None:
+            _expect(yellow.bearing_rad is None, f"{scene} bearing {yellow.bearing_rad}", failures)
         else:
-            _expect(not yellow.seen, f"{scene} yellow seen {yellow.max_fraction:.4f}", failures)
-        if scene == "plant":
-            _expect(result.feature_cells == 0, f"plant feature cells {result.feature_cells}", failures)
-        if scene == "entrance":
-            _expect(result.feature_cells > 0, f"entrance mat did not paint a feature cell ({result.feature_cells})", failures)
-        _expect(result.frontier_cells > 0, f"{scene} has no frontiers", failures)
+            _expect(
+                yellow.bearing_rad is not None and abs(yellow.bearing_rad - expected.bearing_rad) < 5e-3,
+                f"{scene} bearing {yellow.bearing_rad}",
+                failures,
+            )
     return failures
 
 
@@ -2126,12 +2178,13 @@ def test_caps_and_plant() -> list[str]:
     failures: list[str] = []
     digest = _md5(PLANT_XML)
     _expect(digest == steer_walk.PLANT_MD5, f"plant md5 {digest}", failures)
-    _expect(abs(EXPLORE_VX - 0.056) < 1e-9, f"explore vx {EXPLORE_VX}", failures)
-    _expect(abs(FINDER_HALF_VX - 0.028) < 1e-9, f"finder half vx {FINDER_HALF_VX}", failures)
+    _expect(abs(EXPLORE_VX - steer_walk.VX_FWD_CAP) < 1e-12, f"explore vx {EXPLORE_VX}", failures)
+    _expect(abs(FINDER_HALF_VX - (steer_walk.VX_FWD_CAP * 0.5)) < 1e-12, f"finder half vx {FINDER_HALF_VX}", failures)
     _expect(abs(steer_walk.CLAIMED_LEFT_ARC_S - 12.5) < 1e-9, "left window moved", failures)
     _expect(abs(steer_walk.CLAIMED_RIGHT_ARC_S - 11.0) < 1e-9, "right window moved", failures)
-    _expect(steer_walk.VX_FWD_CAP == 0.056 and steer_walk.VX_BACK_CAP == 0.032, "vx caps", failures)
-    _expect(steer_walk.YAW_RATE_CAP == 0.25, "yaw cap", failures)
+    _expect(abs(steer_walk.VX_FWD_CAP - 0.150) < 1e-12, f"fwd cap {steer_walk.VX_FWD_CAP}", failures)
+    _expect(abs(steer_walk.VX_BACK_CAP - 0.032) < 1e-12, f"back cap {steer_walk.VX_BACK_CAP}", failures)
+    _expect(abs(steer_walk.YAW_RATE_CAP - 0.25) < 1e-12, "yaw cap", failures)
     _expect(abs(steer_walk.VEL_RESEND_S - 0.10) < 1e-9, "resend", failures)
     _expect(steer_walk.KIT_CAM_POS == (0.050, 0.019, 0.007), "kit_cam pos", failures)
     return failures

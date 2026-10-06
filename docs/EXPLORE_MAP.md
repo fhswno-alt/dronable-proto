@@ -65,6 +65,27 @@ MUJOCO_GL=osmesa python scripts/explore_map.py --self-test
 MUJOCO_GL=osmesa python scripts/explore_map.py --demo
 ```
 
+## Mesh-room self-test
+
+The live Day1 caps are forward **+0.150** m/s, reverse **−0.032** m/s, yaw **±0.25** rad/s. `EXPLORE_VX` is that forward cap. Finder half-cap is **0.075**. The paragraphs above that say **+0.056** and **+0.028** are the older measured schedule. This file now sends the locked cap. The cap was not raised in this change.
+
+`--self-test` and `--demo` construct `SteerSession` without `locked_kit_config`. That is the CPG. It is not `steer_walk.py --bus-kit`. The 2 s empty walk inside `--self-test` stays up (min up_z **0.978**, no fault, end stand, `vel(+0.150, 0)`). The long `--demo` still tips: empty min up_z **−1.000**, kitchen **−0.897**, bathroom **−0.955**, from the mesh-port measurement. That tip is not a locked-kit gait FAIL. The gait was not peeled. Stop and furnished-walk Prefer FAIL stay held until furniture collisions are on. Room geoms stay `contype="0"` `conaffinity="0"`.
+
+Stand Moondream labels on the kit crouch (kitchen, bathroom, and bedroom no longer all answer living) are a label win. They are not a go-to and not arrival.
+
+The stand paint below is one 1.0 s CPG stand per mesh room, frozen in `MESH_STAND_PAINT`. It replaces the box-scene checks (kitchen yellow stays off the floor, other rooms have no yellow, every room has a frontier and more than 20 free cells). Yellow on a floor cell is the texture mask. It is not a waypoint.
+
+| Scene | Free | Feature | Frontiers | Yellow | Floor cell | Bearing |
+|-------|------|---------|-----------|--------|------------|---------|
+| empty plant | 248 | 0 | 67 | none | no | — |
+| kitchen | 10 | 210 | 7 | 0.075 | yes | −0.524 rad |
+| bathroom | 3 | 244 | 0 | 0.022 | yes | −0.874 rad |
+| living | 44 | 173 | 17 | 0.145 | yes | +0.461 rad |
+| bedroom | 1 | 238 | 0 | 0.002 (not logged) | no | — |
+| entrance | 2 | 195 | 2 | 0.212 | yes | +0.420 rad |
+
+`--self-test` passes on that table. Bathroom and bedroom having no frontier is the measurement, not a failure that was deleted. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` unchanged.
+
 `--demo` walks the empty plant on the claimed left prefix plus the frontier windows, and the kitchen and bathroom on the 8 s right-first window. It then runs a 20 s half-cap probe toward the frozen soft XY in the kitchen. Each run stops and settles 1.2 s. It writes `previews/explore_map_summary.json`, kit_cam and map stills, `previews/explore_map_kitchen.mp4`, and `previews/explore_map_kitchen_soft.mp4`. Exit status is non-zero if the plant md5 changes, if `up_z` drops below 0.90, or if a `vx = 0` yaw is sent. A passing exit still prints Prefer FAIL for go-anywhere and for arrival.
 
 ## Measured
