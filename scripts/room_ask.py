@@ -33,6 +33,8 @@ NONE_WORDS = ("none", "unknown", "unsure", "undecided")
 YES_NO_PROMPT = "Is there a {name} through the doorway ahead? Answer yes or no."
 YES_WORDS = ("yes", "yeah")
 NO_WORDS = ("no", "nope")
+# Doorway-first gate. Detect this object before the yes/no. Frozen.
+DOOR_OBJECT = "doorway"
 
 
 def parse_answer(raw: str) -> str | None:
@@ -145,6 +147,17 @@ class RoomAsk:
             "seconds": elapsed,
         }
 
+    def detect_doorway(self, frame) -> dict[str, object]:
+        """Local detect of DOOR_OBJECT. Boxes are normalized 0–1. No paid API."""
+        from PIL import Image
+
+        image = Image.fromarray(frame)
+        started = time.perf_counter()
+        result = self.model.detect(image, DOOR_OBJECT)
+        elapsed = time.perf_counter() - started
+        objects = result.get("objects", []) if isinstance(result, dict) else []
+        return {"objects": list(objects), "seconds": elapsed}
+
     def close(self) -> None:
         del self.model
 
@@ -188,6 +201,8 @@ def self_test() -> int:
         failures.append(f"kitchen question moved: {kitchen_q}")
     if "living room" not in yes_no_prompt("living"):
         failures.append("living question dropped living room")
+    if DOOR_OBJECT != "doorway":
+        failures.append(f"door object moved: {DOOR_OBJECT}")
     if MODEL_SHA != "5d6c926f44e26b07957b0dd315bbedcb4c17a5fe":
         failures.append("revision pin moved")
     if not WEIGHTS_SHA256.startswith("70a7d94c"):
