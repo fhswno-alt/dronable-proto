@@ -1950,6 +1950,380 @@ def _install_ik_track(session: sw.SteerSession, *, hips_only: bool = False) -> N
     session._lipm_substep = substep  # type: ignore[method-assign]
 
 
+# Compiled kv from dampratio 1 on this plant. The clip reads the model.
+# These are the check, not a second source written into the actuator.
+_COMPILED_KV: dict[str, float] = {
+    "hip_roll": 1.7027,
+    "hip_pitch": 1.8102,
+}
+
+
+def _kv_kind(jn: str) -> str:
+    if jn.endswith("hip_roll"):
+        return "hip_roll"
+    if jn.endswith("hip_pitch"):
+        return "hip_pitch"
+    raise ValueError(f"swing-hip clip is only hip_roll and hip_pitch, got {jn}")
+
+
+def _joint_q_qd(session: sw.SteerSession, jn: str) -> tuple[float, float, int]:
+    model = session.model
+    data = session.data
+    jid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, jn)
+    q = float(data.qpos[int(model.jnt_qposadr[jid])])
+    qd = float(data.qvel[int(model.jnt_dofadr[jid])])
+    return q, qd, session.act_idx[jn + "_pos"]
+
+
+def _clamp_ctrl_predicted(session: sw.SteerSession, jn: str, limit_nm: float) -> float:
+    """Pull ``data.ctrl`` in so kp·(ctrl−q) − kv·q̇ stays inside ±limit.
+
+    q̇ is the live joint velocity. The desired command is whatever is
+    already in ctrl, so this only tightens. kp and kv come from the
+    compiled actuator. The plant file is not edited.
+    """
+    q, qd, idx = _joint_q_qd(session, jn)
+    model = session.model
+    kp = float(model.actuator_gainprm[idx, 0])
+    kv = -float(model.actuator_biasprm[idx, 2])
+    ctrl = float(session.data.ctrl[idx])
+    if kp < 1e-6:
+        return 0.0
+    e_lo = (-limit_nm + kv * qd) / kp
+    e_hi = (limit_nm + kv * qd) / kp
+    if e_lo > e_hi:
+        e_lo, e_hi = e_hi, e_lo
+    cmd = q + min(e_hi, max(e_lo, ctrl - q))
+    lo = float(model.actuator_ctrlrange[idx, 0])
+    hi = float(model.actuator_ctrlrange[idx, 1])
+    cmd = min(hi, max(lo, cmd))
+    session.data.ctrl[idx] = cmd
+    return kp * (cmd - q) - kv * qd
+
+
+def _install_swing_pred_clip(session: sw.SteerSession) -> None:
+    """Sim-only predicted-force clip on the swing hip roll and hip pitch.
+
+    Replaces the kp·(ctrl−q) band for those two joints while that leg is
+    swinging. Stance hips keep the existing write. The kit position servo
+    does not have this limiter. kp, kv, and dampratio stay.
+    """
+    lipm = session.lipm
+    if lipm is None:
+        return
+    orig_write = lipm.write_clipped
+
+    def write(jn: str, q_des: float) -> None:
+        swing = lipm._gm_swing
+        side = "L" if jn.startswith("l_") else "R" if jn.startswith("r_") else ""
+        if (
+            swing in ("L", "R")
+            and side == swing
+            and jn.endswith(("hip_roll", "hip_pitch"))
+        ):
+            lipm.write_force_limited(jn, float(q_des), KNEE_NM)
+            return
+        orig_write(jn, q_des)
+
+    lipm.write_clipped = write  # type: ignore[method-assign]
+
+
+@dataclass
+class PredSnap:
+    t: float
+    joint: str
+    ik: float
+    ctrl: float
+    q: float
+    qd: float
+    predicted: float
+    force: float
+
+
+@dataclass
+class PredScore:
+    name: str
+    clip: bool
+    move_s: float
+    toe_mm: float
+    toe_t: float
+    toe_frac: float
+    toe_side: str
+    x_m: float
+    fault: str
+    legs_under: bool
+    pred_under: bool
+    toe_clear: bool
+    holds_bar: bool
+    snaps: list[PredSnap]
+    trace: list[PredSnap]
+
+
+def _check_compiled_kv(session: sw.SteerSession) -> None:
+    for jn, kind in (
+        ("r_hip_roll", "hip_roll"),
+        ("l_hip_roll", "hip_roll"),
+        ("r_hip_pitch", "hip_pitch"),
+        ("l_hip_pitch", "hip_pitch"),
+    ):
+        _q, _qd, idx = _joint_q_qd(session, jn)
+        kv = -float(session.model.actuator_biasprm[idx, 2])
+        kp = float(session.model.actuator_gainprm[idx, 0])
+        want = _COMPILED_KV[kind]
+        if abs(kv - want) > 1e-3:
+            raise SystemExit(f"compiled kv for {jn} is {kv:.4f}, expected {want:.4f}")
+        want_kp = 40.0 if kind == "hip_roll" else 45.0
+        if abs(kp - want_kp) > 1e-3:
+            raise SystemExit(f"compiled kp for {jn} is {kp:.4f}, expected {want_kp:.1f}")
+
+
+def measure_pred_clip(*, clip: bool, move_s: float | None) -> PredScore:
+    """12 mm @ 20% with an optional swing-hip predicted-force clip.
+
+    ``move_s`` None keeps the locked 20 ms approach. ``0`` turns that
+    approach off (one control tick, still inside the 5.5 rad/s cap).
+    The 0.98 spring band is not widened.
+    """
+    cfg = sw.locked_kit_config()
+    if move_s is not None:
+        cfg = replace(cfg, gm_move_s=float(move_s))
+    session = sw.SteerSession(video=False, scene_xml=Path(SCENE), lipm=cfg)
+    _check_compiled_kv(session)
+    _install_phase_lift(session, 0.012, 0.20, 0.0)
+    if clip:
+        _install_swing_pred_clip(session)
+    lipm = session.lipm
+    if lipm is None or lipm.op3 is None:
+        raise RuntimeError("gait manager walker missing")
+    walker = lipm.op3
+    driver = sw.ScriptedDriver((
+        sw.DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+        sw.DemoSegment(T_END, "vel", sw.VX_FWD_CAP, 0.0, "forward"),
+    ))
+    rows: list[Tick] = []
+    leg8 = {name: (0.0, 0.0) for name in LEG8}
+    swing_force: dict[str, tuple[float, float]] = {
+        name: (0.0, 0.0) for name in (
+            "l_hip_roll", "r_hip_roll", "l_hip_pitch", "r_hip_pitch",
+        )
+    }
+    swing_pred: dict[str, tuple[float, float]] = {
+        name: (0.0, 0.0) for name in swing_force
+    }
+    last: dict[str, tuple[float, float, float, float]] = {}
+    clip_n = 0
+    real_step = mj.mj_step
+
+    def _hook(model: mj.MjModel, data: mj.MjData) -> None:
+        nonlocal clip_n
+        swing = lipm._gm_swing
+        if clip and swing in ("L", "R"):
+            pref = "l_" if swing == "L" else "r_"
+            for suffix in ("hip_roll", "hip_pitch"):
+                jn = pref + suffix
+                idx = session.act_idx[jn + "_pos"]
+                before = float(data.ctrl[idx])
+                _clamp_ctrl_predicted(session, jn, KNEE_NM)
+                if abs(float(data.ctrl[idx]) - before) > 1e-5:
+                    clip_n += 1
+        pre_t = float(data.time)
+        pre: dict[str, tuple[float, float, float, float]] = {}
+        if swing in ("L", "R"):
+            pref = "l_" if swing == "L" else "r_"
+            for suffix in ("hip_roll", "hip_pitch"):
+                jn = pref + suffix
+                q, qd, idx = _joint_q_qd(session, jn)
+                kp = float(model.actuator_gainprm[idx, 0])
+                kv = -float(model.actuator_biasprm[idx, 2])
+                ctrl = float(data.ctrl[idx])
+                pre[jn] = (q, qd, ctrl, kp * (ctrl - q) - kv * qd)
+        real_step(model, data)
+        if swing in ("L", "R"):
+            for jn, (q, qd, ctrl, pred) in pre.items():
+                idx = session.act_idx[jn + "_pos"]
+                force = float(data.actuator_force[idx])
+                last[jn] = (q, qd, ctrl, force)
+                prev_f, _when = swing_force[jn]
+                if abs(force) > abs(prev_f):
+                    swing_force[jn] = (force, float(data.time))
+                prev_p, _tp = swing_pred[jn]
+                if abs(pred) > abs(prev_p):
+                    swing_pred[jn] = (pred, pre_t)
+
+    mj.mj_step = _hook
+    snaps: list[PredSnap] = []
+    trace: list[PredSnap] = []
+    first_fault = ""
+    try:
+        while float(session.data.time) < T_END - 1e-9:
+            driver.publish(session.bus, float(session.data.time))
+            session.step()
+            t = float(session.data.time)
+            swing = lipm._gm_swing if lipm._gm_swing in ("L", "R") else None
+            toe_z = _leading_toe_z(session, swing) if swing in ("L", "R") else None
+            if not session.bus.fault:
+                for name in leg8:
+                    idx = session.act_idx[name]
+                    tau = float(session.data.actuator_force[idx])
+                    prev, _when = leg8[name]
+                    if abs(tau) > abs(prev):
+                        leg8[name] = (tau, t)
+            if session.bus.fault and not first_fault:
+                first_fault = session.bus.fault_reason or ""
+            rows.append(Tick(
+                t, swing if swing in ("L", "R") else None, toe_z, 0.0, first_fault,
+            ))
+            if swing in ("L", "R") and last:
+                saved_t = float(walker.time)
+                walker.time = _cmd_time(walker)
+                joints, _info = walker.joints_now()
+                walker.time = saved_t
+                if joints is not None:
+                    pref = "l_" if swing == "L" else "r_"
+                    for suffix in ("hip_roll", "hip_pitch"):
+                        jn = pref + suffix
+                        if jn not in last:
+                            continue
+                        q, qd, ctrl, force = last[jn]
+                        ik = float(joints[jn])
+                        _qq, _qd, idx = _joint_q_qd(session, jn)
+                        kp = float(session.model.actuator_gainprm[idx, 0])
+                        kv = -float(session.model.actuator_biasprm[idx, 2])
+                        pred = kp * (ctrl - q) - kv * qd
+                        snap = PredSnap(t, jn, ik, ctrl, q, qd, pred, force)
+                        snaps.append(snap)
+                        trace.append(snap)
+            last.clear()
+    finally:
+        mj.mj_step = real_step
+    toe_min, toe_t, _p90, _n_mid, _n_cyc, toe_frac, toe_side = _mid_swing(rows)
+    over = [name for name, (tau, _when) in leg8.items() if abs(tau) >= KNEE_NM]
+    pred_over = [name for name, (tau, _when) in swing_pred.items() if abs(tau) > KNEE_NM + 1e-3]
+    legs_under = not over
+    pred_under = not pred_over
+    toe_clear = bool(toe_min > TOE_BAR_M)
+    used_move = float(cfg.gm_move_s)
+    name = f"{'clip' if clip else 'base'}_move{used_move * 1000:.0f}"
+    print(
+        f"PRED {name} toe {toe_min * 1000:.3f} mm t {toe_t:.3f} "
+        f"frac {toe_frac:.3f} side {toe_side} x {float(session.data.qpos[0]):.3f} "
+        f"fault {first_fault or 'none'} clip_binds {clip_n} "
+        f"eff_move_s {max(used_move, float(session.ctrl_dt)):.3f}"
+    )
+    for act, (tau, when) in leg8.items():
+        print(f"PRED {name} leg {act} {tau:+.4f} t {when:.3f}")
+    for jn, (tau, when) in swing_force.items():
+        pred, pred_t = swing_pred[jn]
+        print(
+            f"PRED {name} swing {jn} force {tau:+.4f} t {when:.3f} "
+            f"predicted {pred:+.4f} t {pred_t:.3f}"
+        )
+    print(f"PRED {name} over_2_33 {over} pred_over {pred_over}")
+    _print_pred_sample(name, snaps, 2.872)
+    if abs(toe_t - 2.872) > session.ctrl_dt:
+        _print_pred_sample(name, snaps, toe_t)
+    session.assert_plant_unchanged()
+    return PredScore(
+        name=name,
+        clip=clip,
+        move_s=used_move,
+        toe_mm=toe_min * 1000.0,
+        toe_t=toe_t,
+        toe_frac=toe_frac,
+        toe_side=toe_side,
+        x_m=float(session.data.qpos[0]),
+        fault=first_fault,
+        legs_under=legs_under,
+        pred_under=pred_under,
+        toe_clear=toe_clear,
+        holds_bar=bool(legs_under and pred_under),
+        snaps=snaps,
+        trace=trace,
+    )
+
+
+def _print_pred_sample(name: str, snaps: list[PredSnap], t_want: float) -> None:
+    near = [row for row in snaps if abs(row.t - t_want) <= 0.008 * 0.51]
+    if not near:
+        print(f"PRED {name} sample missed {t_want:.3f}")
+        return
+    print(f"PRED {name} sample t {near[0].t:.3f}")
+    for row in near:
+        toward = (row.ik - row.q) * row.qd > 0.0
+        print(
+            f"PRED {name} {row.joint} ik {row.ik:.6f} ctrl {row.ctrl:.6f} "
+            f"q {row.q:.6f} qd {row.qd:.6f} predicted {row.predicted:.4f} "
+            f"force {row.force:.4f} ctrl_minus_ik {row.ctrl - row.ik:.6f} "
+            f"ctrl_minus_q {row.ctrl - row.q:.6f} toward {int(toward)}"
+        )
+
+
+def _write_pred_trace(score: PredScore) -> None:
+    """Per-tick swing-hip ctrl−q and q̇ for the kit bench.
+
+    The clip is sim-only. A closed position servo does not apply it.
+    """
+    path = Path(__file__).resolve().parents[1] / "previews" / "swing_hip_pred_clip_trace.txt"
+    lines = [
+        f"# {score.name} sim-only predicted clip at ±{KNEE_NM:.2f} Nm",
+        "# The kit HX-35H position servo has no force clip. Do not rely on this limiter.",
+        "# t joint ctrl_minus_q qd ik ctrl q predicted force",
+    ]
+    for row in score.trace:
+        lines.append(
+            f"{row.t:.3f} {row.joint} {row.ctrl - row.q:.6f} {row.qd:.6f} "
+            f"{row.ik:.6f} {row.ctrl:.6f} {row.q:.6f} {row.predicted:.4f} {row.force:.4f}"
+        )
+    path.write_text("\n".join(lines) + "\n")
+    print(f"PRED trace {path} rows {len(score.trace)}")
+
+
+def score_swing_pred_clip() -> None:
+    """Baseline, then the swing-hip clip at 20 ms, then move off if the bar holds."""
+    base = measure_pred_clip(clip=False, move_s=None)
+    held = measure_pred_clip(clip=True, move_s=None)
+    opened: PredScore | None = None
+    if held.holds_bar:
+        opened = measure_pred_clip(clip=True, move_s=0.0)
+    else:
+        print("PRED move_off skipped; clip at 20 ms did not hold ±2.33")
+    _compare_pred_gaps(base, held)
+    if opened is not None:
+        _compare_pred_gaps(base, opened)
+    for score in (held, opened):
+        if score is not None and score.toe_clear and score.holds_bar:
+            _write_pred_trace(score)
+    best = base
+    for score in (held, opened):
+        if score is None or not score.holds_bar:
+            continue
+        if score.toe_mm > best.toe_mm:
+            best = score
+    print(
+        f"PRED best_under_2_33 {best.name} toe {best.toe_mm:.3f} mm "
+        f"t {best.toe_t:.3f} side {best.toe_side} "
+        f"ctrl_tracks_ik {int(best.clip and best.holds_bar and best.toe_clear)}"
+    )
+
+
+def _compare_pred_gaps(base: PredScore, other: PredScore) -> None:
+    base_at = [row for row in base.snaps if abs(row.t - 2.872) <= 0.004]
+    new_at = [row for row in other.snaps if abs(row.t - 2.872) <= 0.004]
+    by_base = {row.joint: row for row in base_at}
+    for row in new_at:
+        prev = by_base.get(row.joint)
+        if prev is None:
+            continue
+        prev_gap = abs(prev.ctrl - prev.ik)
+        new_gap = abs(row.ctrl - row.ik)
+        toward = (row.ik - row.q) * row.qd > 0.0
+        print(
+            f"PRED gap {other.name} {row.joint} |ctrl-ik| {new_gap:.6f} "
+            f"base {prev_gap:.6f} closer {int(new_gap < prev_gap - 1e-4)} "
+            f"toward {int(toward)}"
+        )
+
+
 def _prior_lead_lines(span_s: float) -> list[str]:
     """What the scored ±lead / 8 ms / 12 ms copies actually moved.
 
