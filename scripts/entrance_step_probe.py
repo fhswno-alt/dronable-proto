@@ -4068,6 +4068,7 @@ def _install_inflight_stop(
     edge: dict[str, object],
     *,
     next_stride_decay: bool = False,
+    stance_slew: bool = False,
 ) -> None:
     """Freeze the loaded stance chain. Only the airborne swing-z schedule moves.
 
@@ -4107,6 +4108,11 @@ def _install_inflight_stop(
         "toe_sign": {},
         "ik_knee": float("nan"),
         "pin_knee": float("nan"),
+        "slew": bool(stance_slew),
+        "slew_started": False,
+        "slew_t0": float("nan"),
+        "slew_from": {},
+        "slew_s": 1.0,
     }
     print(
         "PRED inflight_stop schedule "
@@ -4120,6 +4126,15 @@ def _install_inflight_stop(
         "At the first real double support the amplitude snaps to 0 and "
         "the stance planar target stays put. Time is not parked at 0."
     )
+    if stance_slew:
+        print(
+            "PRED inflight_slew once both feet are over the load gate, "
+            "pinned stance q_des slews toward the stand pose over 1.000 s "
+            "(2 periods). A 1-period rate from the full gap stays over "
+            "2.33 Nm, so each tick also keeps |kp*(q_des-q)| + |kv*omega| "
+            "at or under 2.33 Nm. The airborne window before that double "
+            "support still holds the pin."
+        )
     if next_stride_decay:
         print(
             "PRED inflight_fallback next-stride decay was requested and "
@@ -4402,6 +4417,106 @@ def _install_inflight_stop(
         if walker.time >= float(walker.period) - 1e-12:
             walker.time = 0.0
 
+    def _apply_slew(t: float, joints: dict[str, float]) -> None:
+        """Move pinned q_des toward measured q without holding the 0.16 rad miss.
+
+        The time blend covers 2 periods. The torque cap is applied on the
+        same tick, because that blend alone leaves the first loaded tick
+        over 2.33 Nm.
+        """
+        if not state["slew"] or not state["snapped"]:
+            return
+        stance_q = state["stance_q"]
+        assert isinstance(stance_q, dict)
+        if not state["slew_started"]:
+            seeded: dict[str, dict[str, float]] = {}
+            goals: dict[str, dict[str, float]] = {}
+            for side in ("L", "R"):
+                pref = "l_" if side == "L" else "r_"
+                src = stance_q.get(side)
+                if not isinstance(src, dict):
+                    src = {
+                        suf: float(joints[pref + suf]) for suf in _STANCE_SUFFIX
+                    }
+                    stance_q[side] = src
+                seeded[side] = {suf: float(src[suf]) for suf in _STANCE_SUFFIX}
+                goals[side] = {}
+                for suf in _STANCE_SUFFIX:
+                    jn = pref + suf
+                    # Stand is the hold. Measured q at this tick is the
+                    # other candidate; the roll miss is what stand removes.
+                    q_now = float(lipm.q(jn))
+                    q_stand = float(lipm.q_stand.get(jn, q_now))
+                    goals[side][suf] = q_stand
+            state["slew_from"] = seeded
+            state["slew_goal"] = goals
+            state["slew_t0"] = float(t)
+            state["slew_started"] = True
+            state["stance_sides"] = ["L", "R"]
+            print(
+                "PRED inflight_slew start "
+                f"t {t:.3f} duration {float(state['slew_s']):.3f} s "
+                "toward the stand pose, held after the window. "
+                "Both feet are loaded."
+            )
+        t0 = float(state["slew_t0"])
+        duration = float(state["slew_s"])
+        u = 0.0 if duration <= 1e-9 else min(1.0, max(0.0, (float(t) - t0) / duration))
+        state["slew_u"] = u
+        slew_from = state["slew_from"]
+        slew_goal = state["slew_goal"]
+        assert isinstance(slew_from, dict) and isinstance(slew_goal, dict)
+        parts: list[dict[str, float | str | int]] = []
+        for side in ("L", "R"):
+            pref = "l_" if side == "L" else "r_"
+            held = stance_q.get(side)
+            src = slew_from.get(side)
+            goal_side = slew_goal.get(side)
+            if (
+                not isinstance(held, dict)
+                or not isinstance(src, dict)
+                or not isinstance(goal_side, dict)
+            ):
+                continue
+            for suf in _STANCE_SUFFIX:
+                jn = pref + suf
+                pin = float(src[suf])
+                goal = float(goal_side[suf])
+                q = float(lipm.q(jn))
+                jid = mj.mj_name2id(lipm.model, mj.mjtObj.mjOBJ_JOINT, jn)
+                omega = float(lipm.data.qvel[int(lipm.model.jnt_dofadr[jid])])
+                idx = lipm.act_idx[jn + "_pos"]
+                kp = float(lipm.model.actuator_gainprm[idx, 0])
+                kv = -float(lipm.model.actuator_biasprm[idx, 2])
+                proposed = pin + u * (goal - pin)
+                kv_abs = abs(kv * omega)
+                budget = KNEE_NM - kv_abs
+                capped = 0
+                if budget <= 0.0 or kp < 1e-6:
+                    proposed = q
+                    capped = 1
+                else:
+                    max_err = budget / kp
+                    err = proposed - q
+                    if abs(err) > max_err:
+                        proposed = q + math.copysign(max_err, goal - q if abs(goal - q) > 1e-9 else err)
+                        capped = 1
+                held[suf] = float(proposed)
+                kp_abs = abs(kp * (proposed - q))
+                parts.append({
+                    "jn": jn,
+                    "q": q,
+                    "q_des": float(proposed),
+                    "pin": pin,
+                    "goal": goal,
+                    "kp_abs": kp_abs,
+                    "kv_abs": kv_abs,
+                    "parts": kp_abs + kv_abs,
+                    "capped": capped,
+                    "omega": omega,
+                })
+        state["slew_parts"] = parts
+
     def _write_chain(mode: str, freeze: str) -> None:
         """Write pinned stance q_des. Airborne joints come from the z-only IK."""
         lipm.cmd_vx = 0.0
@@ -4412,6 +4527,7 @@ def _install_inflight_stop(
         state["pose_gait"] = float(walker.time)
         if joints is None:
             return
+        _apply_slew(float(lipm.data.time), joints)
         stance_q = state["stance_q"]
         assert isinstance(stance_q, dict)
         sides = state["stance_sides"]
@@ -4448,7 +4564,7 @@ def _install_inflight_stop(
         state["ik_knee"] = ik_knee
         state["pin_knee"] = pin_knee
         delta = ik_knee - pin_knee
-        if abs(delta) >= 1e-3:
+        if abs(delta) >= 1e-3 and not state["slew_started"]:
             print(
                 "PRED inflight_ik_climb "
                 f"t {float(lipm.data.time):.3f} "
@@ -4465,6 +4581,15 @@ def _install_inflight_stop(
         row["pelvis_frozen"] = 1
         row["ik_stance_knee"] = ik_knee
         row["pin_knee"] = pin_knee
+        if state["slew"] and state["slew_started"]:
+            row["slew_u"] = float(state.get("slew_u", 0.0))
+            row["slew_parts"] = state.get("slew_parts", [])
+            row["corners"] = {
+                "L": _box_corner_table(session, "L"),
+                "R": _box_corner_table(session, "R"),
+            }
+            row["com_l"] = _com_box_slack(session, "L")
+            row["com_r"] = _com_box_slack(session, "R")
         trace.append(row)
         if not state["snapped"]:
             _advance_z_clock()
@@ -4639,7 +4764,13 @@ def _install_inflight_stop(
                 f"load L {load_l:.2f} R {load_r:.2f} "
                 f"x_cmd {float(walker.x_cmd):+.5f} "
                 f"x_move {float(walker._x_move):+.5f} "
-                "amplitudes 0. Stance q_des and planar held. Clock stays here."
+                "amplitudes 0. "
+                + (
+                    "Stance q_des starts the slew toward the stand pose. "
+                    if state["slew"]
+                    else "Stance q_des and planar held. "
+                )
+                + "Clock stays here."
             )
             _write_chain("snap", "swing_xy_rp+stance_q")
             return
@@ -4667,6 +4798,132 @@ def _joint_damping(session: sw.SteerSession, jn: str) -> tuple[float, float, flo
     damp = float(session.model.dof_damping[dof])
     omega = float(session.data.qvel[dof])
     return -damp * omega, omega, damp, float(session.data.qfrc_passive[dof])
+
+
+def _com_box_slack(session: sw.SteerSession, side: str) -> dict[str, float]:
+    """CoM slack inside the foot contact box. Positive is inside. Margin is 0.
+
+    Lateral slack is the box y half-width (38 mm on this plant) minus the
+    distance from the geom center. This is the contact box, not the 8 mm
+    inside-margin inset.
+    """
+    lipm = session.lipm
+    if lipm is None:
+        raise RuntimeError("gait manager missing")
+    bid = lipm.bid[side]
+    gid = lipm.gid[side]
+    com = np.asarray(lipm.data.subtree_com[lipm.bid_body], dtype=np.float64)
+    rot = lipm.data.xmat[bid].reshape(3, 3)
+    local = rot.T @ (com - np.asarray(lipm.data.xpos[bid], dtype=np.float64))
+    center = np.asarray(lipm.model.geom_pos[gid, :2], dtype=np.float64)
+    half = np.asarray(lipm.model.geom_size[gid, :2], dtype=np.float64)
+    delta = local[:2] - center
+    slack = half - np.abs(delta)
+    return {
+        "slack_x": float(slack[0]),
+        "slack_y": float(slack[1]),
+        "local_x": float(local[0]),
+        "local_y": float(local[1]),
+        "center_x": float(center[0]),
+        "center_y": float(center[1]),
+        "half_x": float(half[0]),
+        "half_y": float(half[1]),
+    }
+
+
+def _note_walk_lateral(
+    session: sw.SteerSession,
+    walker: object,
+    t_post: float,
+    bucket: list[dict[str, float | str]],
+) -> None:
+    """One row per control tick: gait command, trim add, and CoM box slack.
+
+    The pose clock is the time ``joints_now`` just used. Level trim is the
+    swing-ankle add (lead off). Double support adds none. The unclamped
+    ask log is separate and is joined on ``t_ask``.
+    """
+    lipm = session.lipm
+    if lipm is None:
+        return
+    dt = float(session.ctrl_dt)
+    t_ask = float(t_post) - dt
+    if str(lipm.phase) == "stand":
+        pose = float("nan")
+        phase = "stand"
+        joints = None
+        pel_r = 0.0
+        pel_l = 0.0
+        swap_y = 0.0
+        ep_roll_r = 0.0
+        ep_roll_l = 0.0
+    else:
+        pose = _cmd_time(walker)
+        saved = float(walker.time)
+        walker.time = pose
+        joints, info = walker.joints_now()
+        er, el, pel_r, pel_l, swap_y = walker.endpoints()
+        walker.time = saved
+        phase = str(info.phase) if joints is not None else "?"
+        ep_roll_r = float(er[3])
+        ep_roll_l = float(el[3])
+    rug_gid = int(session.gid_rug)
+
+    def _jn(name: str) -> float:
+        if joints is None or name not in joints:
+            return float("nan")
+        return float(joints[name])
+
+    dir_l = float(walker.directions["l_hip_roll"])
+    dir_r = float(walker.directions["r_hip_roll"])
+    pel_add_l = dir_l * float(pel_l)
+    pel_add_r = dir_r * float(pel_r)
+    trim_l = _RESTORED_ROLL_L if phase == "L" else 0.0
+    trim_r = _RESTORED_ROLL_R if phase == "R" else 0.0
+    slack_l = _com_box_slack(session, "L")
+    slack_r = _com_box_slack(session, "R")
+    fn_l = float(_foot_surface(session, "L", rug_gid)["fn"])
+    fn_r = float(_foot_surface(session, "R", rug_gid)["fn"])
+    if phase == "L":
+        stance = "R"
+    elif phase == "R":
+        stance = "L"
+    else:
+        stance = "-"
+    bucket.append({
+        "t_ask": t_ask,
+        "t_post": float(t_post),
+        "pose": float(pose),
+        "phase": phase,
+        "stance": stance,
+        "swap_y": float(swap_y),
+        "y_swap_cmd": float(walker.y_swap_cmd),
+        "y_swap_amp": float(walker._y_swap),
+        "pel_l": float(pel_l),
+        "pel_r": float(pel_r),
+        "pel_add_l": pel_add_l,
+        "pel_add_r": pel_add_r,
+        "ep_roll_l": ep_roll_l,
+        "ep_roll_r": ep_roll_r,
+        "gait_l_ank_roll": _jn("l_ank_roll"),
+        "gait_r_ank_roll": _jn("r_ank_roll"),
+        "gait_l_hip_roll": _jn("l_hip_roll"),
+        "gait_r_hip_roll": _jn("r_hip_roll"),
+        "trim_l": trim_l,
+        "trim_r": trim_r,
+        "fn_l": fn_l,
+        "fn_r": fn_r,
+        "slack_x_l": slack_l["slack_x"],
+        "slack_y_l": slack_l["slack_y"],
+        "slack_x_r": slack_r["slack_x"],
+        "slack_y_r": slack_r["slack_y"],
+        "half_x_l": slack_l["half_x"],
+        "half_y_l": slack_l["half_y"],
+        "local_y_l": slack_l["local_y"],
+        "local_y_r": slack_r["local_y"],
+        "center_y_l": slack_l["center_y"],
+        "center_y_r": slack_r["center_y"],
+    })
 
 
 def measure_pred_clip(
@@ -4714,6 +4971,9 @@ def measure_pred_clip(
     soft_stop: bool = False,
     inflight_stop: bool = False,
     next_stride_decay: bool = False,
+    y_swap_m: float | None = None,
+    lateral_log: bool = False,
+    stance_slew: bool = False,
 ) -> PredScore:
     """12 mm @ 20% with an optional swing-hip predicted-force clip.
 
@@ -4766,6 +5026,14 @@ def measure_pred_clip(
             f"ankle trim on fraction {ank_trim_on_frac} is not inside 0-80%"
         )
     cfg = sw.locked_kit_config()
+    if y_swap_m is not None:
+        cfg = replace(cfg, gm_y_swap_m=float(y_swap_m))
+        print(
+            f"PRED y_swap_cmd {float(y_swap_m):.4f} m "
+            "replaces the locked 0.020 m on this copy. "
+            "Pelvis stays 5 deg. HIP_FF is not on this stack. "
+            "Plant, kp, and forcerange stay put."
+        )
     if move_s is not None:
         cfg = replace(cfg, gm_move_s=float(move_s))
     if period_s is not None:
@@ -4858,6 +5126,7 @@ def measure_pred_clip(
         _install_inflight_stop(
             session, driver, inflight_trace, inflight_edge,
             next_stride_decay=next_stride_decay,
+            stance_slew=stance_slew,
         )
     rows: list[Tick] = []
     surface_rows: list[dict[str, object]] = []
@@ -4954,6 +5223,7 @@ def measure_pred_clip(
     fault_t = float("nan")
     x_at: dict[str, float] = {}
     ask_log: list[tuple] = []
+    lateral_rows: list[dict[str, float | str]] = []
     if steer_out is not None:
         _install_unclamp_log(lipm, ask_log)
     try:
@@ -4961,6 +5231,8 @@ def measure_pred_clip(
             driver.publish(session.bus, float(session.data.time))
             session.step()
             t = float(session.data.time)
+            if lateral_log:
+                _note_walk_lateral(session, walker, t, lateral_rows)
             swing = lipm._gm_swing if lipm._gm_swing in ("L", "R") else None
             toe_z = _leading_toe_z(session, swing) if swing in ("L", "R") else None
             if swing in ("L", "R"):
@@ -5479,6 +5751,7 @@ def measure_pred_clip(
         steer_out["soft"] = soft_trace
         steer_out["inflight"] = inflight_trace
         steer_out["inflight_edge"] = inflight_edge
+        steer_out["lateral"] = lateral_rows
     return PredScore(
         name=name,
         clip=clip,
@@ -9919,7 +10192,7 @@ def _inflight_stop_script() -> tuple[tuple[sw.DemoSegment, ...], float]:
     return script, t_end
 
 
-def score_inflight_stop() -> None:
+def score_inflight_stop(y_swap_m: float | None = None) -> None:
     """Freeze the loaded stance chain. Only the airborne swing-z schedule moves.
 
     Pass is every unclamped leg ask from the stop command onward at or
@@ -9975,6 +10248,7 @@ def score_inflight_stop() -> None:
         steer_out=held,
         inflight_stop=True,
         next_stride_decay=False,
+        y_swap_m=y_swap_m,
     )
     _require_plant("after", name)
     trace = held["inflight"]
@@ -10299,6 +10573,836 @@ def score_inflight_stop() -> None:
         "Yaw stayed 0. Foot-z was not raised. Less-crouch stayed closed. "
         "Trim lead stayed off. Not kit-safe. Not go-anywhere."
     )
+
+
+_WALK_LEG = (
+    "l_hip_yaw", "l_hip_roll", "l_hip_pitch", "l_knee", "l_ank_pitch", "l_ank_roll",
+    "r_hip_yaw", "r_hip_roll", "r_hip_pitch", "r_knee", "r_ank_pitch", "r_ank_roll",
+)
+_WALK_ROLL = ("l_ank_roll", "r_ank_roll", "l_hip_roll", "r_hip_roll")
+_WALK_STEADY_S = 2.0
+
+
+def _ask_q(item: tuple) -> float:
+    qdes = float(item[2])
+    kp_term = float(item[8])
+    kp = float(item[11])
+    if abs(kp) < 1e-9:
+        return float("nan")
+    return qdes - kp_term / kp
+
+
+def _run_continuous_walk(y_swap_m: float, t_end: float = 6.5) -> dict[str, object]:
+    """Day-1 straight walk, yaw 0, no stop. Same stack as the stance-freeze bout."""
+    held: dict[str, object] = {}
+    cap = sw.VX_FWD_CAP
+    segments = (
+        sw.DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+        sw.DemoSegment(t_end, "vel", cap, 0.0, "forward"),
+    )
+    measure_pred_clip(
+        clip=True,
+        move_s=None,
+        pitch_move_off=True,
+        toe_up_rad=0.025,
+        toe_up_shape="front",
+        toe_full_frac=0.10,
+        hip_lead=True,
+        lead_roll_scale=0.0,
+        lead_pitch_scale=_pitch_lead_scale(20.0),
+        sag_cancel=False,
+        z_profile="phase",
+        ank_trim_l=_RESTORED_ROLL_L,
+        ank_trim_r=_RESTORED_ROLL_R,
+        ank_pitch_trim_l=_RESTORED_PITCH_L,
+        ank_pitch_trim_r=_RESTORED_PITCH_R,
+        z_extra_m=_LEVEL_FOOTZ_UM / 1_000_000.0,
+        t_end=t_end,
+        segments=segments,
+        steer_out=held,
+        y_swap_m=y_swap_m,
+        lateral_log=True,
+    )
+    return _walk_lateral_summary(held, y_swap_m)
+
+
+def _walk_lateral_summary(held: dict[str, object], y_swap_m: float) -> dict[str, object]:
+    """DSP / mid-walk unclamped peaks, gait-vs-trim split, CoM box margin."""
+    asks = held.get("asks")
+    lateral = held.get("lateral")
+    if not isinstance(asks, list) or not isinstance(lateral, list):
+        raise RuntimeError("walk lateral log missing")
+    by_t: dict[float, dict[str, float | str]] = {}
+    for row in lateral:
+        if not isinstance(row, dict):
+            continue
+        by_t[round(float(row["t_ask"]), 5)] = row
+    joined = 0
+    dsp: dict[str, tuple] = {}
+    dsp_late: dict[str, tuple] = {}
+    ssp: dict[str, tuple] = {}
+    startup: dict[str, tuple] = {}
+
+    def _keep(bucket: dict[str, tuple], item: tuple) -> None:
+        prev = bucket.get(str(item[1]))
+        if prev is None or abs(float(item[3])) > abs(float(prev[3])):
+            bucket[str(item[1])] = item
+
+    for item in asks:
+        if str(item[1]) not in _WALK_LEG:
+            continue
+        t = float(item[0])
+        row = by_t.get(round(t, 5))
+        if row is None:
+            continue
+        joined += 1
+        phase = str(row["phase"])
+        if 1.0 - 1e-9 <= t < _WALK_STEADY_S:
+            _keep(startup, item)
+        if t < _WALK_STEADY_S - 1e-9:
+            continue
+        if phase == "D":
+            _keep(dsp, item)
+            if t >= 3.0 - 1e-9:
+                _keep(dsp_late, item)
+        elif phase in ("L", "R"):
+            _keep(ssp, item)
+
+    def _edge(lo: float, hi: float) -> dict[str, float | str] | None:
+        best: dict[str, float | str] | None = None
+        best_pose = -1.0
+        for row in lateral:
+            if not isinstance(row, dict):
+                continue
+            if float(row["t_ask"]) < _WALK_STEADY_S:
+                continue
+            if str(row["phase"]) != "D":
+                continue
+            pose = float(row["pose"])
+            if not (lo < pose <= hi + 1e-9):
+                continue
+            if pose > best_pose:
+                best_pose = pose
+                best = row
+        return best
+
+    def _des_at(row: dict[str, float | str] | None, jn: str) -> tuple | None:
+        if row is None:
+            return None
+        want = round(float(row["t_ask"]), 5)
+        found: tuple | None = None
+        for item in asks:
+            if str(item[1]) != jn:
+                continue
+            if round(float(item[0]), 5) != want:
+                continue
+            if found is None or abs(float(item[3])) > abs(float(found[3])):
+                found = item
+        return found
+
+    split_l = _edge(0.016, 0.025)
+    split_r = _edge(0.266, 0.275)
+
+    def _ssp_frac(phase: str, pose: float) -> float:
+        if phase == "L":
+            start, end = 0.025, 0.225
+        else:
+            start, end = 0.275, 0.475
+        span = end - start
+        if span <= 1e-9:
+            return float("nan")
+        return (pose - start) / span
+
+    def _ss_stats(
+        airborne_only: bool,
+        frac_lo: float = 0.0,
+        frac_hi: float = 1.0,
+    ) -> tuple[float, float, float, int, int, dict[str, float | str] | None, float]:
+        """Min stance-box slack. Airborne means the swing foot is at or under 5 N."""
+        slack_x = float("inf")
+        slack_y = float("inf")
+        margin = float("inf")
+        n = 0
+        n_out = 0
+        half = float("nan")
+        worst: dict[str, float | str] | None = None
+        for row in lateral:
+            if not isinstance(row, dict):
+                continue
+            if float(row["t_ask"]) < _WALK_STEADY_S:
+                continue
+            phase = str(row["phase"])
+            if phase == "L":
+                fn_stance = float(row["fn_r"])
+                fn_swing = float(row["fn_l"])
+                sx = float(row["slack_x_r"])
+                sy = float(row["slack_y_r"])
+                stance = "R"
+            elif phase == "R":
+                fn_stance = float(row["fn_l"])
+                fn_swing = float(row["fn_r"])
+                sx = float(row["slack_x_l"])
+                sy = float(row["slack_y_l"])
+                stance = "L"
+            else:
+                continue
+            if fn_stance <= 5.0:
+                continue
+            if airborne_only and fn_swing > 5.0:
+                continue
+            frac = _ssp_frac(phase, float(row["pose"]))
+            if not (frac_lo - 1e-9 <= frac <= frac_hi + 1e-9):
+                continue
+            n += 1
+            half = float(row["half_y_l"])
+            box = min(sx, sy)
+            if box < -1e-4:
+                n_out += 1
+            if sy < slack_y:
+                slack_y = sy
+            if sx < slack_x:
+                slack_x = sx
+            if box < margin:
+                margin = box
+                worst = {
+                    "t": float(row["t_ask"]),
+                    "pose": float(row["pose"]),
+                    "phase": phase,
+                    "stance": stance,
+                    "slack_x": sx,
+                    "slack_y": sy,
+                    "fn": fn_stance,
+                    "fn_swing": fn_swing,
+                    "swap_y": float(row["swap_y"]),
+                    "frac": frac,
+                }
+        if n == 0:
+            return float("nan"), float("nan"), float("nan"), 0, 0, None, float("nan")
+        return slack_x, slack_y, margin, n, n_out, worst, half
+
+    ss_slack_x, ss_slack_y, ss_margin, n_ss, n_ss_out, worst_ss, half_y = _ss_stats(False)
+    air_x, air_y, air_margin, n_air, n_air_out, worst_air, _air_half = _ss_stats(True)
+    # Middle of single support. The first airborne ticks are the transfer,
+    # while the body is still moving onto the stance foot.
+    mid_x, mid_y, mid_margin, n_mid, n_mid_out, worst_mid, _mid_half = _ss_stats(
+        True, 0.25, 0.75,
+    )
+    return {
+        "y": float(y_swap_m),
+        "fault": held.get("fault") or "",
+        "joined": joined,
+        "n_ask": sum(1 for item in asks if str(item[1]) in _WALK_LEG),
+        "dsp": dsp,
+        "dsp_late": dsp_late,
+        "ssp": ssp,
+        "startup": startup,
+        "split_l": split_l,
+        "split_r": split_r,
+        "des_l": {jn: _des_at(split_l, jn) for jn in _WALK_ROLL},
+        "des_r": {jn: _des_at(split_r, jn) for jn in _WALK_ROLL},
+        "ss_slack_x": ss_slack_x,
+        "ss_slack_y": ss_slack_y,
+        "ss_margin": ss_margin,
+        "n_ss": n_ss,
+        "n_ss_out": n_ss_out,
+        "half_y": half_y,
+        "worst_ss": worst_ss,
+        "air_slack_x": air_x,
+        "air_slack_y": air_y,
+        "air_margin": air_margin,
+        "n_air": n_air,
+        "n_air_out": n_air_out,
+        "worst_air": worst_air,
+        "mid_slack_x": mid_x,
+        "mid_slack_y": mid_y,
+        "mid_margin": mid_margin,
+        "n_mid": n_mid,
+        "n_mid_out": n_mid_out,
+        "worst_mid": worst_mid,
+        "inside": int(n_mid > 0 and mid_margin >= -1e-4),
+    }
+
+
+def _peak_abs(bucket: object, jn: str) -> float:
+    if not isinstance(bucket, dict):
+        return float("nan")
+    item = bucket.get(jn)
+    if item is None:
+        return 0.0
+    return abs(float(item[3]))
+
+
+def _dsp_roll_ok(summary: dict[str, object]) -> bool:
+    dsp = summary["dsp"]
+    return all(_peak_abs(dsp, jn) <= KNEE_NM + 1e-9 for jn in _WALK_ROLL)
+
+
+def _dsp_all_ok(summary: dict[str, object]) -> bool:
+    dsp = summary["dsp"]
+    return all(_peak_abs(dsp, jn) <= KNEE_NM + 1e-9 for jn in _WALK_LEG)
+
+
+def _ssp_roll_ok(summary: dict[str, object]) -> bool:
+    ssp = summary["ssp"]
+    return all(_peak_abs(ssp, jn) <= KNEE_NM + 1e-9 for jn in _WALK_ROLL)
+
+
+def _print_ask_item(tag: str, item: tuple, phase: str, pose: float) -> None:
+    qdes = float(item[2])
+    ask = float(item[3])
+    kp_term = float(item[8])
+    kv_term = float(item[9])
+    omega = float(item[10])
+    kp = float(item[11])
+    kv = float(item[12])
+    q = _ask_q(item)
+    print(
+        f"PRED walk_lat {tag} {item[1]} {ask:+.4f} "
+        f"t {float(item[0]):.3f} pose {pose:.3f} phase {phase} "
+        f"q {q:+.5f} q_des {qdes:+.5f} "
+        f"kp_term {kp_term:+.4f} kv_term {kv_term:+.4f} "
+        f"omega {omega:+.4f} kp {kp:.2f} kv {kv:.4f} "
+        f"ge_2.33 {int(abs(ask) > KNEE_NM + 1e-9)}"
+    )
+
+
+def _print_split(tag: str, row: object, des: object) -> None:
+    if not isinstance(row, dict) or not isinstance(des, dict):
+        print(f"PRED walk_lat split {tag} missing")
+        return
+    print(
+        f"PRED walk_lat split {tag} t {float(row['t_ask']):.3f} "
+        f"pose {float(row['pose']):.5f} phase {row['phase']} "
+        f"swap_y {float(row['swap_y']):+.5f} "
+        f"y_swap_cmd {float(row['y_swap_cmd']):.4f} "
+        f"y_swap_amp {float(row['y_swap_amp']):.5f} "
+        f"ep_roll_l {float(row['ep_roll_l']):+.5f} "
+        f"ep_roll_r {float(row['ep_roll_r']):+.5f} "
+        f"pel_l {float(row['pel_l']):+.5f} pel_r {float(row['pel_r']):+.5f} "
+        f"pel_add_l {float(row['pel_add_l']):+.5f} "
+        f"pel_add_r {float(row['pel_add_r']):+.5f} "
+        f"trim_l {float(row['trim_l']):+.5f} trim_r {float(row['trim_r']):+.5f}"
+    )
+    gait_key = {
+        "l_ank_roll": "gait_l_ank_roll",
+        "r_ank_roll": "gait_r_ank_roll",
+        "l_hip_roll": "gait_l_hip_roll",
+        "r_hip_roll": "gait_r_hip_roll",
+    }
+    trim_key = {
+        "l_ank_roll": "trim_l",
+        "r_ank_roll": "trim_r",
+        "l_hip_roll": "pel_add_l",
+        "r_hip_roll": "pel_add_r",
+    }
+    for jn, gait_name in gait_key.items():
+        item = des.get(jn)
+        gait = float(row[gait_name])
+        extra = float(row[trim_key[jn]])
+        if item is None:
+            print(
+                f"PRED walk_lat split {tag} {jn} gait {gait:+.5f} "
+                f"extra {extra:+.5f} logged_des missing"
+            )
+            continue
+        qdes = float(item[2])
+        print(
+            f"PRED walk_lat split {tag} {jn} gait {gait:+.5f} "
+            f"extra {extra:+.5f} logged_des {qdes:+.5f} "
+            f"des_minus_gait {qdes - gait:+.5f} "
+            f"q {_ask_q(item):+.5f} ask {float(item[3]):+.4f}"
+        )
+
+
+def _print_walk_detail(summary: dict[str, object]) -> None:
+    y = float(summary["y"])
+    print(
+        f"PRED walk_lat detail y {y:.4f} "
+        f"joined {int(summary['joined'])}/{int(summary['n_ask'])} "
+        f"fault {summary['fault'] or 'none'} "
+        f"half_y {float(summary['half_y']):.4f} "
+        f"n_ss {int(summary['n_ss'])} n_ss_out {int(summary['n_ss_out'])} "
+        f"ss_slack_y {float(summary['ss_slack_y']):+.5f} "
+        f"ss_slack_x {float(summary['ss_slack_x']):+.5f} "
+        f"ss_margin {float(summary['ss_margin']):+.5f} "
+        f"air_slack_y {float(summary['air_slack_y']):+.5f} "
+        f"air_slack_x {float(summary['air_slack_x']):+.5f} "
+        f"air_margin {float(summary['air_margin']):+.5f} "
+        f"n_air {int(summary['n_air'])} n_air_out {int(summary['n_air_out'])} "
+        f"mid_slack_y {float(summary['mid_slack_y']):+.5f} "
+        f"mid_slack_x {float(summary['mid_slack_x']):+.5f} "
+        f"mid_margin {float(summary['mid_margin']):+.5f} "
+        f"n_mid {int(summary['n_mid'])} n_mid_out {int(summary['n_mid_out'])} "
+        f"inside {int(summary['inside'])}"
+    )
+    worst = summary["worst_ss"]
+    if isinstance(worst, dict):
+        print(
+            f"PRED walk_lat com_clock t {float(worst['t']):.3f} "
+            f"pose {float(worst['pose']):.5f} phase {worst['phase']} "
+            f"stance {worst['stance']} "
+            f"slack_x {float(worst['slack_x']):+.5f} "
+            f"slack_y {float(worst['slack_y']):+.5f} "
+            f"fn {float(worst['fn']):.2f} "
+            f"fn_swing {float(worst['fn_swing']):.2f} "
+            f"swap_y {float(worst['swap_y']):+.5f}"
+        )
+    worst_air = summary["worst_air"]
+    if isinstance(worst_air, dict):
+        print(
+            f"PRED walk_lat com_air t {float(worst_air['t']):.3f} "
+            f"pose {float(worst_air['pose']):.5f} phase {worst_air['phase']} "
+            f"stance {worst_air['stance']} "
+            f"slack_x {float(worst_air['slack_x']):+.5f} "
+            f"slack_y {float(worst_air['slack_y']):+.5f} "
+            f"fn {float(worst_air['fn']):.2f} "
+            f"fn_swing {float(worst_air['fn_swing']):.2f} "
+            f"swap_y {float(worst_air['swap_y']):+.5f} "
+            f"frac {float(worst_air['frac']):.3f}"
+        )
+    worst_mid = summary["worst_mid"]
+    if isinstance(worst_mid, dict):
+        print(
+            f"PRED walk_lat com_mid t {float(worst_mid['t']):.3f} "
+            f"pose {float(worst_mid['pose']):.5f} phase {worst_mid['phase']} "
+            f"stance {worst_mid['stance']} "
+            f"slack_x {float(worst_mid['slack_x']):+.5f} "
+            f"slack_y {float(worst_mid['slack_y']):+.5f} "
+            f"fn {float(worst_mid['fn']):.2f} "
+            f"fn_swing {float(worst_mid['fn_swing']):.2f} "
+            f"swap_y {float(worst_mid['swap_y']):+.5f} "
+            f"frac {float(worst_mid['frac']):.3f}"
+        )
+    _print_split("dsp_L_edge", summary["split_l"], summary["des_l"])
+    _print_split("dsp_R_edge", summary["split_r"], summary["des_r"])
+    for label, bucket in (("dsp", summary["dsp"]), ("ssp", summary["ssp"]), ("startup", summary["startup"])):
+        if not isinstance(bucket, dict):
+            continue
+        for jn in _WALK_LEG:
+            item = bucket.get(jn)
+            if item is None:
+                continue
+            _print_ask_item(label, item, label, float("nan"))
+
+
+def _print_walk_grid(summary: dict[str, object]) -> None:
+    dsp = summary["dsp"] if isinstance(summary["dsp"], dict) else {}
+    ssp = summary["ssp"] if isinstance(summary["ssp"], dict) else {}
+
+    def _one(bucket: dict, jn: str) -> str:
+        item = bucket.get(jn)
+        if item is None:
+            return f"{jn} none"
+        return f"{jn} {float(item[3]):+.4f} t {float(item[0]):.3f}"
+
+    dsp_worst = None
+    for jn in _WALK_LEG:
+        item = dsp.get(jn)
+        if item is None:
+            continue
+        if dsp_worst is None or abs(float(item[3])) > abs(float(dsp_worst[3])):
+            dsp_worst = item
+    ssp_worst = None
+    for jn in _WALK_LEG:
+        item = ssp.get(jn)
+        if item is None:
+            continue
+        if ssp_worst is None or abs(float(item[3])) > abs(float(ssp_worst[3])):
+            ssp_worst = item
+    dsp_txt = "none" if dsp_worst is None else (
+        f"{dsp_worst[1]} {float(dsp_worst[3]):+.4f} t {float(dsp_worst[0]):.3f}"
+    )
+    ssp_txt = "none" if ssp_worst is None else (
+        f"{ssp_worst[1]} {float(ssp_worst[3]):+.4f} t {float(ssp_worst[0]):.3f}"
+    )
+    print(
+        f"PRED walk_lat grid y {float(summary['y']):.4f} "
+        f"dsp_worst {dsp_txt} ssp_worst {ssp_txt} "
+        f"dsp_roll {_one(dsp, 'l_ank_roll')} | {_one(dsp, 'r_ank_roll')} | "
+        f"{_one(dsp, 'l_hip_roll')} | {_one(dsp, 'r_hip_roll')} "
+        f"ssp_roll {_one(ssp, 'l_ank_roll')} | {_one(ssp, 'r_ank_roll')} | "
+        f"{_one(ssp, 'l_hip_roll')} | {_one(ssp, 'r_hip_roll')} "
+        f"ss_slack_y {float(summary['ss_slack_y']):+.5f} "
+        f"ss_slack_x {float(summary['ss_slack_x']):+.5f} "
+        f"air_slack_y {float(summary['air_slack_y']):+.5f} "
+        f"air_slack_x {float(summary['air_slack_x']):+.5f} "
+        f"air_margin {float(summary['air_margin']):+.5f} "
+        f"mid_slack_y {float(summary['mid_slack_y']):+.5f} "
+        f"mid_slack_x {float(summary['mid_slack_x']):+.5f} "
+        f"mid_margin {float(summary['mid_margin']):+.5f} "
+        f"half_y {float(summary['half_y']):.4f} "
+        f"n_ss {int(summary['n_ss'])} n_air {int(summary['n_air'])} "
+        f"n_mid {int(summary['n_mid'])} n_mid_out {int(summary['n_mid_out'])} "
+        f"inside {int(summary['inside'])} "
+        f"dsp_late_roll "
+        f"{_one(summary['dsp_late'] if isinstance(summary.get('dsp_late'), dict) else {}, 'l_ank_roll')} | "
+        f"{_one(summary['dsp_late'] if isinstance(summary.get('dsp_late'), dict) else {}, 'r_ank_roll')} | "
+        f"{_one(summary['dsp_late'] if isinstance(summary.get('dsp_late'), dict) else {}, 'l_hip_roll')} | "
+        f"{_one(summary['dsp_late'] if isinstance(summary.get('dsp_late'), dict) else {}, 'r_hip_roll')} "
+        f"dsp_roll_ok {int(_dsp_roll_ok(summary))} "
+        f"dsp_all_ok {int(_dsp_all_ok(summary))} "
+        f"ssp_roll_ok {int(_ssp_roll_ok(summary))}"
+    )
+
+
+def _steady_over(summary: dict[str, object]) -> bool:
+    for bucket in (summary["dsp"], summary["ssp"]):
+        if not isinstance(bucket, dict):
+            continue
+        for item in bucket.values():
+            if abs(float(item[3])) > KNEE_NM + 1e-9:
+                return True
+    return False
+
+
+def score_stance_slew(y_swap_m: float = 0.020) -> None:
+    """Slew pinned stance q_des toward the stand pose once both feet are loaded.
+
+    The walk lever is already over, so this does not rebuild d_min. The
+    air window before double support still holds the pin.
+    """
+    name = "slew"
+    script, end = _inflight_stop_script()
+    print(
+        f"PRED {name} plan y_swap {y_swap_m:.4f} m. "
+        "Stop keeps the stance-chain freeze until both feet are over 5 N. "
+            "Then pinned q_des slews toward the stand pose over 1.000 s and holds it. "
+        "The bar on that window is |kp*(q_des-q)| + |kv*omega| <= 2.33 Nm. "
+        "Foot-z stays 1.170 mm. Less-crouch stays closed. Yaw stays 0."
+    )
+    _require_plant("before", name)
+    held: dict[str, object] = {}
+    measure_pred_clip(
+        clip=True,
+        move_s=None,
+        pitch_move_off=True,
+        toe_up_rad=0.025,
+        toe_up_shape="front",
+        toe_full_frac=0.10,
+        hip_lead=True,
+        lead_roll_scale=0.0,
+        lead_pitch_scale=_pitch_lead_scale(20.0),
+        sag_cancel=False,
+        z_profile="phase",
+        ank_trim_l=_RESTORED_ROLL_L,
+        ank_trim_r=_RESTORED_ROLL_R,
+        ank_pitch_trim_l=_RESTORED_PITCH_L,
+        ank_pitch_trim_r=_RESTORED_PITCH_R,
+        z_extra_m=_LEVEL_FOOTZ_UM / 1_000_000.0,
+        t_end=end,
+        segments=script,
+        steer_out=held,
+        inflight_stop=True,
+        next_stride_decay=False,
+        y_swap_m=y_swap_m,
+        stance_slew=True,
+        surface_tag=True,
+    )
+    _require_plant("after", name)
+    trace = held["inflight"]
+    asks = held["asks"]
+    assert isinstance(trace, list) and isinstance(asks, list)
+    slew_rows = [row for row in trace if isinstance(row, dict) and "slew_u" in row]
+    if not slew_rows:
+        print(f"PRED {name} Prefer FAIL. slew did not start")
+        return
+    slew_t = float(slew_rows[0]["t"])
+    slew_end = slew_t + 1.0
+    stop_rows = [row for row in trace if isinstance(row, dict) and str(row.get("mode")) != "pre"]
+    stop_t = float(stop_rows[0]["t"]) if stop_rows else float("nan")
+    print(
+        f"PRED {name} stop_t {stop_t:.3f} slew_t {slew_t:.3f} "
+        f"slew_end {slew_end:.3f} "
+        f"slew_end_u {float(slew_rows[-1]['slew_u']):.3f} "
+        f"n_slew {len(slew_rows)} "
+        f"fault {held.get('fault') or 'none'} t {float(held.get('fault_t', float('nan'))):.3f}"
+    )
+    window_rows = [
+        row for row in slew_rows if float(row["t"]) <= slew_end + 1e-9
+    ]
+    leg_suffix = (
+        "hip_yaw", "hip_roll", "hip_pitch", "knee", "ank_pitch", "ank_roll",
+    )
+
+    def _window(t0: float, t1: float | None) -> tuple | None:
+        best = None
+        for item in asks:
+            if not str(item[1]).endswith(leg_suffix):
+                continue
+            t = float(item[0])
+            if t + 1e-9 < t0:
+                continue
+            if t1 is not None and t >= t1 - 1e-9:
+                continue
+            if best is None or abs(float(item[3])) > abs(float(best[3])):
+                best = item
+        return best
+
+    air_best = _window(stop_t, slew_t)
+    slew_best = _window(slew_t, slew_end + 1e-9)
+    hold_best = _window(slew_end, None)
+    if air_best is not None:
+        print(
+            f"PRED {name} air_window {air_best[1]} {float(air_best[3]):+.4f} "
+            f"t {float(air_best[0]):.3f} q_des {float(air_best[2]):+.5f} "
+            f"q {_ask_q(air_best):+.5f} "
+            f"kp_term {float(air_best[8]):+.4f} kv_term {float(air_best[9]):+.4f} "
+            "pin still held. Both feet were not loaded yet."
+        )
+    if slew_best is not None:
+        print(
+            f"PRED {name} slew_ask {slew_best[1]} {float(slew_best[3]):+.4f} "
+            f"t {float(slew_best[0]):.3f} q_des {float(slew_best[2]):+.5f} "
+            f"q {_ask_q(slew_best):+.5f} "
+            f"kp_term {float(slew_best[8]):+.4f} kv_term {float(slew_best[9]):+.4f} "
+            f"parts {abs(float(slew_best[8])) + abs(float(slew_best[9])):.4f}"
+        )
+    if hold_best is not None:
+        print(
+            f"PRED {name} hold_ask {hold_best[1]} {float(hold_best[3]):+.4f} "
+            f"t {float(hold_best[0]):.3f} q_des {float(hold_best[2]):+.5f} "
+            f"q {_ask_q(hold_best):+.5f} "
+            f"kp_term {float(hold_best[8]):+.4f} kv_term {float(hold_best[9]):+.4f}"
+        )
+    part_best = None
+    n_cap = 0
+    n_part = 0
+    for row in window_rows:
+        parts = row.get("slew_parts")
+        if not isinstance(parts, list):
+            continue
+        for part in parts:
+            if not isinstance(part, dict):
+                continue
+            n_part += 1
+            n_cap += int(part.get("capped", 0))
+            if part_best is None or float(part["parts"]) > float(part_best["parts"]):
+                part_best = part
+                part_best = dict(part)
+                part_best["t"] = float(row["t"])
+    if part_best is not None:
+        print(
+            f"PRED {name} parts {part_best['jn']} {float(part_best['parts']):.4f} "
+            f"t {float(part_best['t']):.3f} "
+            f"kp_abs {float(part_best['kp_abs']):.4f} "
+            f"kv_abs {float(part_best['kv_abs']):.4f} "
+            f"q {float(part_best['q']):+.5f} q_des {float(part_best['q_des']):+.5f} "
+            f"pin {float(part_best['pin']):+.5f} "
+            f"capped_ticks {n_cap}/{n_part} "
+            f"ge_2.33 {int(float(part_best['parts']) > KNEE_NM + 1e-9)}"
+        )
+    # Contact-box corners through the slew. Dig-in is a corner below the floor.
+    low_z = float("inf")
+    low_row = None
+    low_label = ""
+    low_side = ""
+    for row in window_rows:
+        corners = row.get("corners")
+        if not isinstance(corners, dict):
+            continue
+        for side in ("L", "R"):
+            packed = corners.get(side)
+            if not isinstance(packed, list):
+                continue
+            for label, z, _off in packed:
+                if float(z) < low_z:
+                    low_z = float(z)
+                    low_row = row
+                    low_label = str(label)
+                    low_side = side
+    if low_row is not None:
+        dig = int(low_z < -0.0005)
+        print(
+            f"PRED {name} corner_min {low_side} {low_label} z {low_z * 1000.0:+.3f} mm "
+            f"t {float(low_row['t']):.3f} slew_u {float(low_row['slew_u']):.3f} "
+            f"dig_in {dig}"
+        )
+        corners = low_row.get("corners")
+        if isinstance(corners, dict):
+            for side in ("L", "R"):
+                packed = corners.get(side)
+                if not isinstance(packed, list):
+                    continue
+                text = " ".join(
+                    f"{label} {float(z) * 1000.0:+.3f}" for label, z, _off in packed
+                )
+                print(f"PRED {name} corners {side} t {float(low_row['t']):.3f} {text}")
+        for mark in (0.0, 0.5, 1.0):
+            want = slew_t + mark
+            near = min(slew_rows, key=lambda row: abs(float(row["t"]) - want))
+            if abs(float(near["t"]) - want) > 0.02:
+                continue
+            packed_corners = near.get("corners")
+            if not isinstance(packed_corners, dict):
+                continue
+            bits = []
+            for side in ("L", "R"):
+                packed = packed_corners.get(side)
+                if not isinstance(packed, list):
+                    continue
+                bits.append(
+                    side + " " + " ".join(
+                        f"{label} {float(z) * 1000.0:+.3f}" for label, z, _off in packed
+                    )
+                )
+            print(
+                f"PRED {name} corners_at u_target {mark:.1f} "
+                f"t {float(near['t']):.3f} slew_u {float(near['slew_u']):.3f} "
+                + " | ".join(bits)
+            )
+    parts_ok = part_best is not None and float(part_best["parts"]) <= KNEE_NM + 1e-9
+    ask_ok = slew_best is not None and abs(float(slew_best[3])) <= KNEE_NM + 1e-9
+    air_over = air_best is not None and abs(float(air_best[3])) > KNEE_NM + 1e-9
+    print(
+        f"PRED {name} Prefer FAIL. "
+        f"slew_parts_ok {int(parts_ok)} slew_ask_ok {int(ask_ok)} "
+        f"air_window_over {int(air_over)}. "
+        "The double-support slew stays at the 2.33 Nm cap and the corners stay up. "
+        "The airborne tick before that window still holds the 0.16 rad pin. "
+        "Walk DSP at y_swap 0.020 is still over 2.33 Nm, so the stop is not a pass. "
+        "d_min is not rebuilt. Foot-z was not raised. Less-crouch stayed closed."
+    )
+
+
+def score_walk_lateral() -> None:
+    """Continuous Day-1 walk, then a downward y_swap sweep if the ask is over.
+
+    No stop on the walk bouts. The stance-freeze stop is re-scored only
+    when a y_swap keeps DSP asks at or under 2.33 Nm and the CoM inside
+    the stance contact box. The slew branch is not this function.
+    """
+    print(
+        "PRED walk_lat plan continuous straight walk. No stop command. "
+        f"Day-1 vx {sw.VX_FWD_CAP:.3f} m/s. Yaw 0. Period 0.500 s. "
+        "Foot-z 1.170 mm. Less-crouch closed. Trim-lead off. "
+        "Steady window starts at 2.000 s so the first step is not the DSP score. "
+        "Unclamped ask is kp*(q_des-q)-kv*omega. "
+        "Level trim is logged separate from the gait ankle-roll command. "
+        "CoM margin is the 38 mm contact box on the stance foot while the other foot is airborne (floor+rug at or under 5 N). "
+        "Plant, kp, and forcerange are not raised."
+    )
+    _require_plant("before", "walk_lat")
+    base = _run_continuous_walk(0.020)
+    _print_walk_detail(base)
+    _print_walk_grid(base)
+    if not _steady_over(base):
+        print(
+            "PRED walk_lat CLEAR for the continuous walk. "
+            "Steady DSP and mid-walk unclamped asks stay at or under 2.33 Nm. "
+            "The stop bout at 8.192 is a different schedule. "
+            "y_swap stays 0.020. Slew branch not taken. "
+            "d_min is not rebuilt. Foot-z was not raised."
+        )
+        _require_plant("after", "walk_lat")
+        return
+    print(
+        "PRED walk_lat walk-tracking Prefer FAIL at y_swap 0.020. "
+        "A steady unclamped leg ask is over 2.33 Nm with no stop command. "
+        "Sweeping y_swap downward. Pelvis stays 5 deg. HIP_FF stays off."
+    )
+    grid = (0.016, 0.015, 0.014, 0.012, 0.011, 0.008, 0.004, 0.000)
+    rows = [base]
+    for y in grid:
+        summary = _run_continuous_walk(y)
+        _print_walk_grid(summary)
+        rows.append(summary)
+    # Largest y_swap that keeps DSP ankle/hip-roll at or under 2.33 and
+    # the CoM inside the stance box. Smaller values are reported too.
+    clearers = [
+        row for row in rows
+        if _dsp_roll_ok(row) and int(row["inside"]) == 1
+    ]
+    torque_only = [
+        row for row in rows
+        if _dsp_roll_ok(row) and int(row["inside"]) != 1
+    ]
+    adopted: dict[str, object] | None = None
+    if clearers:
+        adopted = max(clearers, key=lambda row: float(row["y"]))
+        # Step down from just under the next larger failure, 0.001 m at
+        # a time. The first value that still clears is the least cut.
+        ys = sorted(float(row["y"]) for row in rows)
+        y_lo = float(adopted["y"])
+        higher = [y for y in ys if y > y_lo + 1e-9]
+        if higher:
+            y_hi = min(higher)
+            y_try = round(y_hi - 0.001, 4)
+            while y_try > y_lo + 5e-4:
+                summary = _run_continuous_walk(y_try)
+                _print_walk_grid(summary)
+                rows.append(summary)
+                if _dsp_roll_ok(summary) and int(summary["inside"]) == 1:
+                    adopted = summary
+                    break
+                y_try = round(y_try - 0.001, 4)
+        _print_walk_detail(adopted)
+        print(
+            f"PRED walk_lat adopted y_swap {float(adopted['y']):.4f} m. "
+            "Largest swept value with DSP ankle-roll and hip-roll "
+            "unclamped asks at or under 2.33 Nm and CoM inside both "
+            "stance contact boxes during single support. "
+            f"dsp_all_ok {int(_dsp_all_ok(adopted))} "
+            f"ssp_roll_ok {int(_ssp_roll_ok(adopted))} "
+            f"ss_margin {float(adopted['ss_margin']):+.5f} m."
+        )
+        if _dsp_all_ok(adopted):
+            print(
+                f"PRED walk_lat walk lever CLEAR at y_swap {float(adopted['y']):.4f}. "
+                "Re-scoring the stance-freeze stop at this y_swap. "
+                "Slew branch not taken."
+            )
+            _require_plant("after", "walk_lat")
+            score_inflight_stop(y_swap_m=float(adopted["y"]))
+            return
+        print(
+            "PRED walk_lat walk lever Prefer FAIL. "
+            "DSP ankle/hip-roll cleared and the CoM stayed inside, "
+            "and another DSP joint is still over 2.33 Nm. "
+            "Stop is not re-scored. Slew branch not taken. "
+            "Foot-z and less-crouch stay closed. d_min is not rebuilt."
+        )
+        _require_plant("after", "walk_lat")
+        return
+    insiders = [row for row in rows if int(row["inside"]) == 1]
+    if insiders:
+        best_in = max(insiders, key=lambda row: float(row["y"]))
+        dsp_in = best_in["dsp"] if isinstance(best_in["dsp"], dict) else {}
+        print(
+            f"PRED walk_lat inside y_swap {float(best_in['y']):.4f} "
+            f"mid_margin {float(best_in['mid_margin']):+.5f} "
+            f"dsp_l_ank {_peak_abs(dsp_in, 'l_ank_roll'):.4f} "
+            f"dsp_l_hip {_peak_abs(dsp_in, 'l_hip_roll'):.4f} "
+            "CoM stays inside the stance box and DSP roll asks stay over 2.33 Nm."
+        )
+    if torque_only:
+        best_torque = max(torque_only, key=lambda row: float(row["y"]))
+        print(
+            f"PRED walk_lat torque cleared at y_swap {float(best_torque['y']):.4f} "
+            f"mid_margin {float(best_torque['mid_margin']):+.5f} "
+            f"n_mid_out {int(best_torque['n_mid_out'])}/{int(best_torque['n_mid'])}. "
+            "The CoM left the stance contact box. "
+            "Lateral has to stay. Slew branch is the stop, at locked y_swap 0.020. "
+            "The tipping y_swap is not the stop bout."
+        )
+        _require_plant("after", "walk_lat")
+        score_stance_slew(0.020)
+        return
+    else:
+        def _roll_peak(row: dict[str, object]) -> float:
+            return max(_peak_abs(row["dsp"], jn) for jn in _WALK_ROLL)
+
+        best = min(rows, key=_roll_peak)
+        print(
+            f"PRED walk_lat no y_swap cleared DSP ankle/hip-roll. "
+            f"Best under-rail candidate y_swap {float(best['y']):.4f} "
+            f"ss_margin {float(best['ss_margin']):+.5f} "
+            f"inside {int(best['inside'])}. "
+            "Slew branch not taken. Lateral cut did not have to stay "
+            "for a torque pass that never arrived. "
+            "Stop stays the stance-freeze Prefer FAIL. "
+            "d_min is not rebuilt. Foot-z was not raised."
+        )
+    _require_plant("after", "walk_lat")
 
 
 def main() -> None:
