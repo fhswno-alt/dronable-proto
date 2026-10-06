@@ -4831,6 +4831,57 @@ def _com_box_slack(session: sw.SteerSession, side: str) -> dict[str, float]:
     }
 
 
+_SOLE_FLAT_LOAD_N = 5.0
+
+
+def _install_sole_flat_stance(session: sw.SteerSession, mode: str = "q") -> None:
+    """Loaded ankle roll stays with the sole. Hip roll keeps the y_swap IK.
+
+    ``q`` sets q_des to the measured angle when floor+rug load is over 5 N,
+    so the kp term is zero and the ankle does not fight the ground.
+    ``zero`` sets that q_des to 0. Level trim is swing-only and is not
+    added on this write. Hip yaw stays the gait IK. Plant kp is not changed.
+    """
+    if mode not in ("q", "zero"):
+        raise SystemExit(f"sole-flat mode {mode} is not q or zero")
+    lipm = session.lipm
+    if lipm is None:
+        raise RuntimeError("gait manager missing")
+    rug = int(session.gid_rug)
+    orig = lipm.write_clipped
+    log: dict[str, dict[str, float]] = {}
+    session._sole_flat_log = log  # type: ignore[attr-defined]
+    session._sole_flat_mode = mode  # type: ignore[attr-defined]
+
+    def write(jn: str, q_des: float) -> None:
+        if jn in ("l_ank_roll", "r_ank_roll"):
+            side = "L" if jn.startswith("l_") else "R"
+            fn = float(_foot_surface(session, side, rug)["fn"])
+            q = float(lipm.q(jn))
+            gait = float(q_des)
+            flat = 0.0
+            if fn > _SOLE_FLAT_LOAD_N:
+                flat = 1.0
+                q_des = q if mode == "q" else 0.0
+            log[jn] = {
+                "gait": gait,
+                "des": float(q_des),
+                "q": q,
+                "fn": fn,
+                "flat": flat,
+            }
+        orig(jn, float(q_des))
+
+    lipm.write_clipped = write  # type: ignore[method-assign]
+    target = "measured q" if mode == "q" else "0 rad"
+    print(
+        f"PRED sole_flat mode {mode}. "
+        f"A foot over {_SOLE_FLAT_LOAD_N:.1f} N sets ankle-roll q_des to {target}. "
+        "Level trim stays off that write. Hip roll keeps the y_swap IK. "
+        "Hip yaw is not added. The loaded ankle is not tipped to make the lateral."
+    )
+
+
 def _note_walk_lateral(
     session: sw.SteerSession,
     walker: object,
@@ -4884,6 +4935,19 @@ def _note_walk_lateral(
     slack_r = _com_box_slack(session, "R")
     fn_l = float(_foot_surface(session, "L", rug_gid)["fn"])
     fn_r = float(_foot_surface(session, "R", rug_gid)["fn"])
+    flat_log = getattr(session, "_sole_flat_log", {}) or {}
+
+    def _flat(jn: str, key: str) -> float:
+        packed = flat_log.get(jn) if isinstance(flat_log, dict) else None
+        if not isinstance(packed, dict) or key not in packed:
+            return float("nan")
+        return float(packed[key])
+
+    def _corner_min(side: str) -> float:
+        rows = _box_corner_table(session, side)
+        if not rows:
+            return float("nan")
+        return float(min(z for _label, z, _off in rows))
     if phase == "L":
         stance = "R"
     elif phase == "R":
@@ -4923,6 +4987,22 @@ def _note_walk_lateral(
         "local_y_r": slack_r["local_y"],
         "center_y_l": slack_l["center_y"],
         "center_y_r": slack_r["center_y"],
+        "y_out": float(walker.y_offset) / 2.0,
+        "flat_mode": str(getattr(session, "_sole_flat_mode", "")),
+        "flat_l": _flat("l_ank_roll", "flat"),
+        "flat_r": _flat("r_ank_roll", "flat"),
+        "flat_des_l": _flat("l_ank_roll", "des"),
+        "flat_des_r": _flat("r_ank_roll", "des"),
+        "flat_q_l": _flat("l_ank_roll", "q"),
+        "flat_q_r": _flat("r_ank_roll", "q"),
+        "flat_gait_l": _flat("l_ank_roll", "gait"),
+        "flat_gait_r": _flat("r_ank_roll", "gait"),
+        "flat_fn_l": _flat("l_ank_roll", "fn"),
+        "flat_fn_r": _flat("r_ank_roll", "fn"),
+        "sole_roll_l": float(_sole_roll(session, "L")[0]),
+        "sole_roll_r": float(_sole_roll(session, "R")[0]),
+        "corner_l": _corner_min("L"),
+        "corner_r": _corner_min("R"),
     })
 
 
@@ -4974,6 +5054,9 @@ def measure_pred_clip(
     y_swap_m: float | None = None,
     lateral_log: bool = False,
     stance_slew: bool = False,
+    sole_flat: bool = False,
+    sole_flat_mode: str = "q",
+    y_out_m: float | None = None,
 ) -> PredScore:
     """12 mm @ 20% with an optional swing-hip predicted-force clip.
 
@@ -5094,6 +5177,20 @@ def measure_pred_clip(
     if lipm is None or lipm.op3 is None:
         raise RuntimeError("gait manager walker missing")
     walker = lipm.op3
+    if y_out_m is not None:
+        walker.y_offset = 2.0 * float(y_out_m)
+        stood = walker.stand_joints()
+        for name, val in stood.items():
+            if "sho" in name:
+                continue
+            lipm.q_stand[name] = float(val)
+            session.q_stand[name] = float(val)
+        session._reset_stand()
+        print(
+            f"PRED init_y {float(y_out_m):.4f} m outward on each foot. "
+            f"y_offset {float(walker.y_offset):.4f} m. "
+            "Foot placement only. The contact mesh is unchanged."
+        )
     end = T_END if t_end is None else float(t_end)
     if segments is None:
         segments = (
@@ -5226,6 +5323,9 @@ def measure_pred_clip(
     lateral_rows: list[dict[str, float | str]] = []
     if steer_out is not None:
         _install_unclamp_log(lipm, ask_log)
+    if sole_flat:
+        # After the ask log, so the logged q_des is the sole-flat command.
+        _install_sole_flat_stance(session, sole_flat_mode)
     try:
         while float(session.data.time) < end - 1e-9:
             driver.publish(session.bus, float(session.data.time))
@@ -10592,7 +10692,17 @@ def _ask_q(item: tuple) -> float:
     return qdes - kp_term / kp
 
 
-def _run_continuous_walk(y_swap_m: float, t_end: float = 6.5) -> dict[str, object]:
+_FLAT_SUF = ("hip_roll", "knee", "ank_roll", "ank_pitch")
+
+
+def _run_continuous_walk(
+    y_swap_m: float,
+    t_end: float = 6.5,
+    *,
+    y_out_m: float | None = None,
+    sole_flat: bool = False,
+    sole_flat_mode: str = "q",
+) -> dict[str, object]:
     """Day-1 straight walk, yaw 0, no stop. Same stack as the stance-freeze bout."""
     held: dict[str, object] = {}
     cap = sw.VX_FWD_CAP
@@ -10622,8 +10732,15 @@ def _run_continuous_walk(y_swap_m: float, t_end: float = 6.5) -> dict[str, objec
         steer_out=held,
         y_swap_m=y_swap_m,
         lateral_log=True,
+        sole_flat=sole_flat,
+        sole_flat_mode=sole_flat_mode,
+        y_out_m=y_out_m,
     )
-    return _walk_lateral_summary(held, y_swap_m)
+    summary = _walk_lateral_summary(held, y_swap_m)
+    summary["y_out"] = 0.005 if y_out_m is None else float(y_out_m)
+    summary["sole_flat"] = int(sole_flat)
+    summary["sole_mode"] = sole_flat_mode if sole_flat else ""
+    return summary
 
 
 def _walk_lateral_summary(held: dict[str, object], y_swap_m: float) -> dict[str, object]:
@@ -10642,6 +10759,8 @@ def _walk_lateral_summary(held: dict[str, object], y_swap_m: float) -> dict[str,
     dsp_late: dict[str, tuple] = {}
     ssp: dict[str, tuple] = {}
     startup: dict[str, tuple] = {}
+    mid_stance: dict[str, tuple] = {}
+    dsp_loaded: dict[str, tuple] = {}
 
     def _keep(bucket: dict[str, tuple], item: tuple) -> None:
         prev = bucket.get(str(item[1]))
@@ -10665,8 +10784,36 @@ def _walk_lateral_summary(held: dict[str, object], y_swap_m: float) -> dict[str,
             _keep(dsp, item)
             if t >= 3.0 - 1e-9:
                 _keep(dsp_late, item)
+            jn_d = str(item[1])
+            if jn_d.endswith("ank_roll") or jn_d.endswith("hip_roll"):
+                side_d = "l" if jn_d.startswith("l_") else "r"
+                if float(row[f"fn_{side_d}"]) > _SOLE_FLAT_LOAD_N:
+                    _keep(dsp_loaded, item)
         elif phase in ("L", "R"):
             _keep(ssp, item)
+            pose = float(row["pose"])
+            if phase == "L":
+                frac = (pose - 0.025) / 0.200
+            else:
+                frac = (pose - 0.275) / 0.200
+            if 0.25 - 1e-9 <= frac <= 0.75 + 1e-9:
+                if phase == "L":
+                    fn_st = float(row["fn_r"])
+                    fn_sw = float(row["fn_l"])
+                    stance_side = "R"
+                else:
+                    fn_st = float(row["fn_l"])
+                    fn_sw = float(row["fn_r"])
+                    stance_side = "L"
+                jn = str(item[1])
+                pref = "l_" if stance_side == "L" else "r_"
+                if (
+                    fn_st > _SOLE_FLAT_LOAD_N
+                    and fn_sw <= _SOLE_FLAT_LOAD_N
+                    and jn.startswith(pref)
+                    and jn[len(pref):] in _FLAT_SUF
+                ):
+                    _keep(mid_stance, item)
 
     def _edge(lo: float, hi: float) -> dict[str, float | str] | None:
         best: dict[str, float | str] | None = None
@@ -10787,6 +10934,34 @@ def _walk_lateral_summary(held: dict[str, object], y_swap_m: float) -> dict[str,
     mid_x, mid_y, mid_margin, n_mid, n_mid_out, worst_mid, _mid_half = _ss_stats(
         True, 0.25, 0.75,
     )
+    corner_z = float("inf")
+    corner_side = ""
+    corner_t = float("nan")
+    center_y_l = float("nan")
+    center_y_r = float("nan")
+    for row in lateral:
+        if not isinstance(row, dict):
+            continue
+        if center_y_l != center_y_l and "center_y_l" in row:
+            center_y_l = float(row["center_y_l"])
+            center_y_r = float(row["center_y_r"])
+        if float(row["t_ask"]) < _WALK_STEADY_S:
+            continue
+        for side, fn_key, z_key in (
+            ("L", "fn_l", "corner_l"),
+            ("R", "fn_r", "corner_r"),
+        ):
+            if z_key not in row:
+                continue
+            if float(row[fn_key]) <= _SOLE_FLAT_LOAD_N:
+                continue
+            z = float(row[z_key])
+            if z < corner_z:
+                corner_z = z
+                corner_side = side
+                corner_t = float(row["t_ask"])
+    if corner_z == float("inf"):
+        corner_z = float("nan")
     return {
         "y": float(y_swap_m),
         "fault": held.get("fault") or "",
@@ -10820,6 +10995,14 @@ def _walk_lateral_summary(held: dict[str, object], y_swap_m: float) -> dict[str,
         "n_mid_out": n_mid_out,
         "worst_mid": worst_mid,
         "inside": int(n_mid > 0 and mid_margin >= -1e-4),
+        "mid_stance": mid_stance,
+        "dsp_loaded": dsp_loaded,
+        "corner_z": corner_z,
+        "corner_side": corner_side,
+        "corner_t": corner_t,
+        "dig_in": int(corner_z == corner_z and corner_z < -0.0005),
+        "center_y_l": center_y_l,
+        "center_y_r": center_y_r,
     }
 
 
@@ -11403,6 +11586,299 @@ def score_walk_lateral() -> None:
             "d_min is not rebuilt. Foot-z was not raised."
         )
     _require_plant("after", "walk_lat")
+
+
+def _flat_names() -> tuple[str, ...]:
+    return tuple(f"{side}_{suf}" for side in ("l", "r") for suf in _FLAT_SUF)
+
+
+def _chain_clear(bucket: object) -> bool:
+    if not isinstance(bucket, dict):
+        return False
+    for jn in _flat_names():
+        item = bucket.get(jn)
+        if item is None or abs(float(item[3])) > KNEE_NM + 1e-9:
+            return False
+    return True
+
+
+def _body_bad(summary: dict[str, object]) -> bool:
+    """A fallen bout. A dug corner stays in the log and blocks a pass."""
+    return bool(str(summary.get("fault") or ""))
+
+
+def _sole_pass(summary: dict[str, object]) -> bool:
+    return (
+        _chain_clear(summary.get("dsp"))
+        and _chain_clear(summary.get("mid_stance"))
+        and int(summary.get("inside") or 0) == 1
+        and int(summary.get("dig_in") or 0) == 0
+        and not _body_bad(summary)
+    )
+
+
+def _ask_brief(bucket: object, jn: str) -> str:
+    if not isinstance(bucket, dict):
+        return f"{jn} none"
+    item = bucket.get(jn)
+    if item is None:
+        return f"{jn} none"
+    return f"{jn} {float(item[3]):+.4f}@{float(item[0]):.3f}"
+
+
+def _print_flat_edge(tag: str, row: object) -> None:
+    if not isinstance(row, dict) or "flat_des_l" not in row:
+        print(f"PRED sole_flat edge {tag} missing")
+        return
+    side = "l" if tag.startswith("L") else "r"
+    print(
+        f"PRED sole_flat edge {tag} t {float(row['t_ask']):.3f} "
+        f"pose {float(row['pose']):.5f} phase {row['phase']} "
+        f"gait_ank {float(row[f'gait_{side}_ank_roll']):+.5f} "
+        f"trim {float(row[f'trim_{side}']):+.5f} "
+        f"flat {float(row[f'flat_{side}']):.0f} "
+        f"des {float(row[f'flat_des_{side}']):+.5f} "
+        f"q {float(row[f'flat_q_{side}']):+.5f} "
+        f"fn_write {float(row[f'flat_fn_{side}']):.2f} "
+        f"fn_l {float(row['fn_l']):.2f} fn_r {float(row['fn_r']):.2f} "
+        f"gait_hip {float(row[f'gait_{side}_hip_roll']):+.5f} "
+        f"sole_roll {float(row[f'sole_roll_{side}']):+.5f} "
+        f"center_y {float(row[f'center_y_{side}']) * 1000.0:+.2f} mm "
+        f"swap_y {float(row['swap_y']):+.5f}"
+    )
+
+
+def _print_sole_row(summary: dict[str, object]) -> None:
+    dsp = summary.get("dsp")
+    mid = summary.get("mid_stance")
+    ssp = summary.get("ssp")
+    print(
+        f"PRED sole_flat row y {float(summary['y']):.4f} "
+        f"y_out {float(summary.get('y_out', float('nan'))):.4f} "
+        f"mode {summary.get('sole_mode') or '-'} "
+        f"dsp_hip {_ask_brief(dsp, 'l_hip_roll')} | {_ask_brief(dsp, 'r_hip_roll')} "
+        f"dsp_ank {_ask_brief(dsp, 'l_ank_roll')} | {_ask_brief(dsp, 'r_ank_roll')} "
+        f"dsp_knee {_ask_brief(dsp, 'l_knee')} | {_ask_brief(dsp, 'r_knee')} "
+        f"dsp_ap {_ask_brief(dsp, 'l_ank_pitch')} | {_ask_brief(dsp, 'r_ank_pitch')} "
+        f"loaded_ank {_ask_brief(summary.get('dsp_loaded'), 'l_ank_roll')} | "
+        f"{_ask_brief(summary.get('dsp_loaded'), 'r_ank_roll')} "
+        f"loaded_hip {_ask_brief(summary.get('dsp_loaded'), 'l_hip_roll')} | "
+        f"{_ask_brief(summary.get('dsp_loaded'), 'r_hip_roll')} "
+        f"mid_hip {_ask_brief(mid, 'l_hip_roll')} | {_ask_brief(mid, 'r_hip_roll')} "
+        f"mid_ank {_ask_brief(mid, 'l_ank_roll')} | {_ask_brief(mid, 'r_ank_roll')} "
+        f"mid_knee {_ask_brief(mid, 'l_knee')} | {_ask_brief(mid, 'r_knee')} "
+        f"mid_ap {_ask_brief(mid, 'l_ank_pitch')} | {_ask_brief(mid, 'r_ank_pitch')} "
+        f"ssp_knee {_ask_brief(ssp, 'r_knee')} | {_ask_brief(ssp, 'l_knee')} "
+        f"mid_margin {float(summary['mid_margin']):+.5f} "
+        f"mid_slack_x {float(summary['mid_slack_x']):+.5f} "
+        f"n_mid {int(summary['n_mid'])} n_mid_out {int(summary['n_mid_out'])} "
+        f"inside {int(summary['inside'])} "
+        f"half_y {float(summary['half_y']):.4f} "
+        f"center_y_l {float(summary.get('center_y_l', float('nan'))) * 1000.0:+.2f} "
+        f"center_y_r {float(summary.get('center_y_r', float('nan'))) * 1000.0:+.2f} "
+        f"corner {summary.get('corner_side') or '-'} "
+        f"z {float(summary.get('corner_z', float('nan'))) * 1000.0:+.3f} mm "
+        f"t {float(summary.get('corner_t', float('nan'))):.3f} "
+        f"dig_in {int(summary.get('dig_in') or 0)} "
+        f"chain {int(_chain_clear(dsp) and _chain_clear(mid))} "
+        f"pass {int(_sole_pass(summary))} "
+        f"fault {summary.get('fault') or 'none'}"
+    )
+
+
+def _print_sole_pareto(rows: list[dict[str, object]]) -> None:
+    print("PRED sole_flat pareto y_swap init_y mode vs CoM margin vs unclamped hip/ankle/knee")
+    for summary in rows:
+        _print_sole_row(summary)
+
+
+def score_sole_flat() -> None:
+    """Sole-flat loaded ankle. Hip roll keeps y_swap. No stop. No plant edit."""
+    print(
+        "PRED sole_flat plan continuous straight walk. No stop. "
+        f"Day-1 vx {sw.VX_FWD_CAP:.3f} m/s. Yaw 0. Period 0.500 s. "
+        "Foot-z 1.170 mm. Less-crouch closed. Trim-lead off. "
+        "Loaded ankle roll (floor+rug over 5 N) does not take the y_swap roll. "
+        "Hip roll keeps that IK. Hip yaw is not added. "
+        "Pass is DSP and mid-SS hip roll, knee, and ankle at or under 2.33 Nm, "
+        "with mid-SS CoM inside the stance contact box (half-width 38 mm). "
+        "The swing-z knee stays parked. Plant, kp, and forcerange stay put."
+    )
+    _require_plant("before", "sole_flat")
+    rows: list[dict[str, object]] = []
+
+    def run(y: float, y_out: float, mode: str, *, detail: bool = False) -> dict[str, object]:
+        summary = _run_continuous_walk(
+            y, y_out_m=y_out, sole_flat=True, sole_flat_mode=mode,
+        )
+        rows.append(summary)
+        if detail:
+            _print_walk_detail(summary)
+            _print_flat_edge("L", summary.get("split_l"))
+            _print_flat_edge("R", summary.get("split_r"))
+        _print_sole_row(summary)
+        return summary
+
+    mode = "q"
+    base = run(0.020, 0.005, mode, detail=True)
+    if _body_bad(base):
+        print(
+            "PRED sole_flat measured-q left the body. "
+            "Trying ankle-roll q_des = 0 on the loaded foot. Trim on that write stays 0."
+        )
+        alt = run(0.020, 0.005, "zero", detail=True)
+        if not _body_bad(alt):
+            mode = "zero"
+            base = alt
+        elif _body_bad(base):
+            _print_sole_pareto(rows)
+            print(
+                "PRED sole_flat Prefer FAIL. "
+                "Both loaded-ankle commands left the body. "
+                "y_swap 0.020 m, init_y 0.005 m. "
+                "No wider contact box. d_min is not rebuilt. "
+                "Foot-z stays 1.170 mm. Less-crouch stayed closed. "
+                "The swing-z knee stayed parked."
+            )
+            _require_plant("after", "sole_flat")
+            return
+    if _sole_pass(base):
+        print(
+            f"PRED sole_flat CLEAR y_swap {float(base['y']):.4f} "
+            f"init_y {float(base['y_out']):.4f} mode {base['sole_mode']}. "
+            "DSP and mid-SS hip roll, knee, and ankle stay at or under 2.33 Nm. "
+            "Mid-SS CoM stays inside the stance box. "
+            "Stop is not this bout. d_min is not rebuilt. "
+            "Foot-z stays 1.170 mm. The swing-z knee stayed parked."
+        )
+        _require_plant("after", "sole_flat")
+        return
+
+    y_out = 0.005
+    widen = (0.008, 0.010, 0.012, 0.015, 0.020, 0.025)
+    if int(base["inside"]) != 1:
+        print(
+            "PRED sole_flat CoM is outside the stance box at y_swap 0.020. "
+            "Widening init_y before cutting y_swap. Placement only."
+        )
+        landed = False
+        for yo in widen:
+            trial = run(0.020, yo, mode)
+            if _sole_pass(trial):
+                print(
+                    f"PRED sole_flat CLEAR y_swap 0.0200 init_y {yo:.4f} mode {mode}. "
+                    "Stop is not this bout. d_min is not rebuilt."
+                )
+                _require_plant("after", "sole_flat")
+                return
+            if int(trial["inside"]) == 1 and not _body_bad(trial):
+                y_out = yo
+                base = trial
+                landed = True
+                break
+        if not landed:
+            print(
+                "PRED sole_flat init_y through 0.025 m still leaves the CoM outside "
+                "at y_swap 0.020. Wider placement is not the CoM lever. "
+                "Cutting y_swap at the kit init_y, then at 0.025 m. "
+                "The loaded ankle stays sole-flat."
+            )
+    cut_outs: list[float] = []
+    if rows:
+        best_margin = max(float(row["mid_margin"]) for row in rows)
+        for row in rows:
+            if abs(float(row["mid_margin"]) - best_margin) <= 1e-9:
+                cut_outs.append(float(row["y_out"]))
+                break
+    if 0.025 not in cut_outs and any(
+        abs(float(row["y"]) - 0.020) < 1e-9 and abs(float(row["y_out"]) - 0.025) < 1e-9
+        for row in rows
+    ):
+        cut_outs.append(0.025)
+    if not cut_outs:
+        cut_outs.append(y_out)
+    for cut_out in cut_outs:
+        anchor = next(
+            (
+                row for row in rows
+                if abs(float(row["y"]) - 0.020) < 1e-9
+                and abs(float(row["y_out"]) - cut_out) < 1e-9
+            ),
+            base,
+        )
+        if _chain_clear(anchor.get("dsp")) and _chain_clear(anchor.get("mid_stance")):
+            continue
+        print(
+            f"PRED sole_flat hip or ankle or knee still over 2.33 Nm "
+            f"at y_swap 0.0200 init_y {cut_out:.4f}. "
+            "Cutting y_swap. The loaded ankle stays sole-flat."
+        )
+        for y in (0.016, 0.014, 0.012, 0.011, 0.008, 0.004, 0.000):
+            trial = run(y, cut_out, mode)
+            if _sole_pass(trial):
+                print(
+                    f"PRED sole_flat CLEAR y_swap {y:.4f} init_y {cut_out:.4f} mode {mode}. "
+                    "Stop is not this bout. d_min is not rebuilt. "
+                    "Foot-z stays 1.170 mm. The swing-z knee stayed parked."
+                )
+                _require_plant("after", "sole_flat")
+                return
+    _print_sole_pareto(rows)
+    best = None
+    for summary in rows:
+        if _body_bad(summary):
+            continue
+        if best is None:
+            best = summary
+            continue
+        # Prefer inside, then the least-out CoM, then a flat sole, then a lower ask.
+        def _rank(row: dict[str, object]) -> tuple:
+            dsp = row.get("dsp")
+            mid = row.get("mid_stance")
+            peak = 0.0
+            for bucket in (dsp, mid):
+                if not isinstance(bucket, dict):
+                    continue
+                for jn in _flat_names():
+                    item = bucket.get(jn)
+                    if item is not None:
+                        peak = max(peak, abs(float(item[3])))
+            return (
+                int(row.get("inside") or 0),
+                float(row["mid_margin"]),
+                -int(row.get("dig_in") or 0),
+                -peak,
+                float(row["y"]),
+                -float(row.get("y_out") or 0.0),
+            )
+        if _rank(summary) > _rank(best):
+            best = summary
+    if best is None:
+        best = rows[-1]
+    dsp = best.get("dsp") if isinstance(best.get("dsp"), dict) else {}
+    mid = best.get("mid_stance") if isinstance(best.get("mid_stance"), dict) else {}
+    print(
+        "PRED sole_flat Prefer FAIL. "
+        f"best y_swap {float(best['y']):.4f} init_y {float(best.get('y_out', float('nan'))):.4f} "
+        f"mode {best.get('sole_mode') or '-'} "
+        f"inside {int(best.get('inside') or 0)} "
+        f"mid_margin {float(best['mid_margin']):+.5f} m "
+        f"n_mid_out {int(best['n_mid_out'])}/{int(best['n_mid'])} "
+        f"dig_in {int(best.get('dig_in') or 0)} "
+        f"corner {best.get('corner_side') or '-'} "
+        f"z {float(best.get('corner_z', float('nan'))) * 1000.0:+.3f} mm "
+        f"dsp {_ask_brief(dsp, 'l_hip_roll')} {_ask_brief(dsp, 'l_ank_roll')} "
+        f"{_ask_brief(dsp, 'l_knee')} "
+        f"mid {_ask_brief(mid, 'l_hip_roll')} {_ask_brief(mid, 'l_ank_roll')} "
+        f"{_ask_brief(mid, 'r_hip_roll')} {_ask_brief(mid, 'r_ank_roll')}. "
+        "No value kept DSP and mid-SS hip roll, knee, and ankle at or under 2.33 Nm "
+        "with the CoM inside the 38 mm stance box. "
+        "The contact box was not widened. "
+        "d_min is not rebuilt. Foot-z stays 1.170 mm. Less-crouch stayed closed. "
+        "The swing-z knee stayed parked. "
+        "Plant md5 stays 207f3d5e9c6a72e16f7aa0c8d224f75e."
+    )
+    _require_plant("after", "sole_flat")
 
 
 def main() -> None:
