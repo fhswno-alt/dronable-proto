@@ -49,6 +49,10 @@ STEP_TILT = math.atan(0.0104 / 0.135)
 EDGE_PITCH = math.atan(0.012 / 0.135)
 # Commanded extra lift at ~20% of swing, sized to the 5 mm scuff gap.
 Z_LIFT_M = 0.034
+# 12 mm rug plus the 2 mm margin used on the arm line.
+RUG_TOP_M = 0.012
+CLEAR_MARGIN_M = 0.002
+CMD_CLEAR_M = RUG_TOP_M + CLEAR_MARGIN_M
 
 
 @dataclass
@@ -173,6 +177,74 @@ def _hook_clear(session: sw.SteerSession) -> None:
     lipm._tick_gait_manager = wrapped  # type: ignore[method-assign]
 
 
+def _install_mid_z(session: sw.SteerSession, extra_m: float) -> None:
+    """Add hip-frame z on the swing foot during the middle 20–80% of SSP.
+
+    Patches the OP3 z sample only. kp, damping, armature, and forcerange
+    stay on the plant file.
+    """
+    lipm = session.lipm
+    if lipm is None or lipm.op3 is None:
+        return
+    walker = lipm.op3
+    orig_r = walker._right_z
+    orig_l = walker._left_z
+
+    def _lift(base: float, t: float, start: float, end: float) -> float:
+        span = end - start
+        if span <= 1e-6 or not (start < t <= end):
+            return base
+        frac = (t - start) / span
+        if 0.20 - 1e-12 <= frac <= 0.80 + 1e-12:
+            return base + extra_m
+        return base
+
+    def right_z(t: float) -> float:
+        return _lift(orig_r(t), t, walker.r_ssp_start, walker.r_ssp_end)
+
+    def left_z(t: float) -> float:
+        return _lift(orig_l(t), t, walker.l_ssp_start, walker.l_ssp_end)
+
+    walker._right_z = right_z  # type: ignore[method-assign]
+    walker._left_z = left_z  # type: ignore[method-assign]
+
+
+def _hook_drop_flat(session: sw.SteerSession, rug_gid: int) -> None:
+    """On a split sole, replace the flat hip+knee offset with the 4.4° tilt.
+
+    The kit ankle is hip+knee ± 0.2618. This copy writes hip+knee ± the
+    step tilt and leaves the ±2.09 ctrlrange clamp in write_clipped.
+    It does not change kp or forcerange.
+    """
+    lipm = session.lipm
+    if lipm is None:
+        return
+    orig = lipm._tick_gait_manager
+
+    def wrapped(walking: bool) -> None:
+        orig(walking)
+        if not walking or session.bus.fault:
+            return
+        for side, gid in (("L", session.gid_lfoot), ("R", session.gid_rfoot)):
+            floor_n = _pair_fn(session.model, session.data, gid, session.gid_floor)
+            rug_n = _pair_fn(session.model, session.data, gid, rug_gid)
+            if floor_n <= 1.0 or rug_n <= 1.0:
+                continue
+            pref = "l_" if side == "L" else "r_"
+            sign = 1.0 if side == "L" else -1.0
+            hip = float(session.data.ctrl[lipm.act_idx[pref + "hip_pitch_pos"]])
+            knee = float(session.data.ctrl[lipm.act_idx[pref + "knee_pos"]])
+            lipm.write_clipped(pref + "ank_pitch", hip + knee + sign * STEP_TILT)
+            DROP_RESIDUAL.append(sign * (
+                float(session.data.ctrl[lipm.act_idx[pref + "ank_pitch_pos"]]) - hip - knee
+            ))
+
+    lipm._tick_gait_manager = wrapped  # type: ignore[method-assign]
+
+
+DROP_RESIDUAL: list[float] = []
+
+
 def _hook_edge(session: sw.SteerSession, rug_gid: int) -> None:
     """Toe-up only on a sole that is already split across floor and rug."""
     lipm = session.lipm
@@ -264,7 +336,36 @@ def _named_force(session: sw.SteerSession, tokens: tuple[str, ...]) -> tuple[flo
     return peak, name, t_peak
 
 
-def run_one(name: str, *, z_m: float | None, edge: bool, mode: str = "") -> dict[str, object]:
+def _cmd_time(walker: object) -> float:
+    import op3_walk
+    t_cmd = float(walker.time) - op3_walk.OP3_CTRL_S
+    if t_cmd < -1e-9:
+        t_cmd += float(walker.period)
+    return t_cmd
+
+
+def _mid_frac(walker: object, side: str, t_cmd: float) -> float | None:
+    if side == "L":
+        start = float(walker.l_ssp_start)
+        end = float(walker.l_ssp_end)
+    else:
+        start = float(walker.r_ssp_start)
+        end = float(walker.r_ssp_end)
+    span = end - start
+    if span <= 1e-6 or not (start < t_cmd <= end):
+        return None
+    return (t_cmd - start) / span
+
+
+def run_one(
+    name: str,
+    *,
+    z_m: float | None,
+    edge: bool,
+    mode: str = "",
+    z_extra: float = 0.0,
+    t_end: float = T_END,
+) -> dict[str, object]:
     cfg = sw.locked_kit_config()
     if z_m is not None:
         cfg = replace(cfg, name=name, gm_z_m=z_m)
@@ -276,12 +377,18 @@ def run_one(name: str, *, z_m: float | None, edge: bool, mode: str = "") -> dict
         _hook_follow(session, rug)
     elif mode == "clear":
         _hook_clear(session)
+    elif mode == "zmid":
+        _install_mid_z(session, z_extra)
+    elif mode == "dropflat":
+        DROP_RESIDUAL.clear()
+        _hook_drop_flat(session, rug)
     elif edge:
         _hook_edge(session, rug)
     driver = sw.ScriptedDriver((
         sw.DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
-        sw.DemoSegment(T_END, "vel", sw.VX_FWD_CAP, 0.0, "forward"),
+        sw.DemoSegment(t_end, "vel", sw.VX_FWD_CAP, 0.0, "forward"),
     ))
+    cmd_leads: list[tuple[float, float]] = []
     rows: list[Tick] = []
     ank_peak = 0.0
     ank_name = ""
@@ -327,12 +434,30 @@ def run_one(name: str, *, z_m: float | None, edge: bool, mode: str = "") -> dict
 
     mj.mj_step = _hook
     try:
-        while float(session.data.time) < T_END - 1e-9:
+        while float(session.data.time) < t_end - 1e-9:
             driver.publish(session.bus, float(session.data.time))
             session.step()
             t = float(session.data.time)
             swing = session.lipm._gm_swing if session.lipm is not None else None
             toe_z = _leading_toe_z(session, swing) if swing in ("L", "R") else None
+            if mode == "zmid" and swing in ("L", "R") and session.lipm is not None and session.lipm.op3 is not None:
+                walker = session.lipm.op3
+                frac = _mid_frac(walker, swing, _cmd_time(walker))
+                if frac is not None and 0.20 - 1e-12 <= frac <= 0.80 + 1e-12 and t < T_BAR:
+                    # ctrl has been slewed. The gait goal was the pre-slew write.
+                    # Re-read the live OP3 pose at the command time and FK that.
+                    saved_t = walker.time
+                    walker.time = _cmd_time(walker)
+                    joints, _info = walker.joints_now()
+                    walker.time = saved_t
+                    if joints is not None:
+                        goal = np.array(session.data.ctrl, dtype=np.float64, copy=True)
+                        for jn, val in joints.items():
+                            act = jn + "_pos"
+                            if act in session.act_idx:
+                                goal[session.act_idx[act]] = val
+                        lead, _low = _fk_leading_toe(session, swing, goal)
+                        cmd_leads.append((t, lead))
             swing_fn = 0.0
             if swing in ("L", "R"):
                 gid = session.gid_lfoot if swing == "L" else session.gid_rfoot
@@ -412,6 +537,14 @@ def run_one(name: str, *, z_m: float | None, edge: bool, mode: str = "") -> dict
         "bars": bars,
         "clear": clear,
         "x": float(session.data.qpos[0]),
+        "z_extra_m": z_extra,
+        "cmd_toe_min_m": min((z for _t, z in cmd_leads), default=float("nan")),
+        "cmd_toe_min_t": min(cmd_leads, key=lambda row: row[1])[0] if cmd_leads else float("nan"),
+        "cmd_n": len(cmd_leads),
+        "cmd_clear": bool(cmd_leads) and min(z for _t, z in cmd_leads) > CMD_CLEAR_M,
+        "drop_n": len(DROP_RESIDUAL) if mode == "dropflat" else 0,
+        "drop_res_min": min(DROP_RESIDUAL) if mode == "dropflat" and DROP_RESIDUAL else float("nan"),
+        "drop_res_max": max(DROP_RESIDUAL) if mode == "dropflat" and DROP_RESIDUAL else float("nan"),
     }
 
 
