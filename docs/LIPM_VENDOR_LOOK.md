@@ -1324,13 +1324,14 @@ step. Settled body vx is −0.031 m/s (ratio 0.98). Half of that clamp,
 
 Knees are reported against 2.33 Nm, the HX-35H budget at about 10.5 V.
 The plant forcerange stays ±2.45. Stop and the 200 ms silence apply the
-stand command through the force limit on that same tick, with the knee
-budget at 2.33 Nm. They do not slew through the walking target.
+stand command through the force limit on that same tick. The knee
+command budget on that hold is 2.28 Nm, so the measured stop peak sits
+0.05 Nm under the bar. They do not slew through the walking target.
 
 | Window | Settled body vx | Knee peak | Other peak |
 | --- | ---: | ---: | ---: |
 | Forward, command +0.150 | +0.150 m/s | right +2.173 Nm | hip roll −2.128 Nm |
-| Stop from that walk | — | both knees +2.330 Nm | ankle pitch +2.401 Nm |
+| Stop from that walk | — | both knees +2.280 Nm | ankle pitch +2.401 Nm |
 
 Nothing crosses 2.33 Nm on a knee. Nothing crosses 2.449 Nm on a leg.
 Swing sole p90 on this forward row is 1.75 / 1.73 cm. min up_z is 0.941
@@ -1409,8 +1410,8 @@ Lead foot is a choice, not a permanent lock. Cold stand→forward stays
 left-first: right-first over the same 30 s is −0.14° / −3.33° / −2.60°
 at 6 / 15 / 30 s, and |Δ30| is larger (2.60° versus 0.50°). First-step
 knees after stand, left-lead L 1.152 / R 1.749 Nm, right-lead L 1.749 /
-R 1.152 Nm. Both are under 2.33 Nm. The later walk still sits on
-2.330 Nm. After a yaw target returns to 0, the next double support
+R 1.152 Nm. Both are under 2.33 Nm. A yawed walk peaks at 2.294 Nm.
+The stop peaks at 2.280 Nm. After a yaw target returns to 0, the next double support
 swings the outside foot: right after +yaw, left after −yaw. Doing
 that by parking the clock on the other double support in one tick
 stepped the joint targets 0.342 rad (both shoulders). A normal
@@ -1443,8 +1444,9 @@ finishes at −148.6°, mean body rate −0.236 rad/s. The right arc is
 7.8° shorter. The right rate is the higher of the two. The gap is the
 1.5 s shorter right hold, not a weak right gain and not an outsole
 peel. After the straight resume the leftover is +1.4° on the left and
-−2.0° on the right. Knees on the walks stay on 2.330 Nm. First-step
-knees stay under 2.33 Nm. Soft-pass is off.
+−2.0° on the right. Forward knees peak at 2.173 Nm. A yawed walk peaks
+at 2.294 Nm. The stop peaks at 2.280 Nm. First-step knees stay under
+2.33 Nm. Soft-pass is off.
 
 Kitchen, #62 group-3 `col_*` boxes, same 8 s right turn, colliders not
 edited. With the hip-roll budget off, the left foot hits
@@ -1454,7 +1456,7 @@ support (tipping margin −0.889, min up_z −0.94). With the budget on,
 the same script still clips that stool leg at 6.82 s and 20.4 N, and
 hip pitch reaches ±2.45 Nm during the clip. It does not tip (min up_z
 0.921). A Day-1 `stop` at 6.80 s, before that contact, finishes with
-0 prop contacts, min up_z 0.934, and knees on 2.330 Nm. The stop hold
+0 prop contacts, min up_z 0.934, and knees at −2.280 Nm. The stop hold
 puts the other leg joints at 2.401 Nm (over 2.33, under ±2.45). A stop
 at 6.2 s is also clear of props and touches `r_hip_pitch` at −2.450 Nm.
 A stop at 6.82 s is the contact. Commanding yaw 0 at 5.0 s or 6.0 s
@@ -1464,4 +1466,34 @@ still hits the stool and tips. Reversing to `vel(+0.150, +0.25)` at
 entrance on this 8 s turn match the empty plant (heading −101.4°, 0
 prop contacts). `col_entrance_sill` is a wall and was not touched.
 Not go-anywhere.
+
+Stop distance. `applied_vx` is 0 and `mode` is stand on the next 8 ms
+tick (`T_bus` = 0.008 s). The body is not stood then. `T_stop` is the
+time from the stop command until the horizontal COM speed stays under
+0.02 m/s for 0.20 s. Sampled on the empty plant after the walk is up,
+for `vel(+0.150, 0)` and `vel(+0.150, ±0.25)`, across one gait period
+of issue times. `T_stop` runs from 0.554 s to 0.830 s. The long one is
+the straight walk stopped at gait clock 0.322 s. COM path length over
+that settle is 3.5–8.3 cm. Net COM displacement is at most 3.3 cm.
+min up_z stays 0.930–0.934. Knee peaks on those stops are 2.280 Nm.
+Hip pitch and ankle pitch on the hold are 2.401 Nm. The stool-timed
+right turn, stop at 6.80 s, settles in 0.570 s and 4.1 cm of COM path.
+The same stop on the #62 kitchen still has 0 prop contacts.
+
+Clear distance, with `v` the commanded 0.150 m/s:
+
+`d_min ≥ v × (T_detect + T_stop)`
+
+`T_stop` = 0.830 s. `v × T_stop` = 0.125 m, which is longer than the
+measured 0.083 m COM path, because the body is already slowing down.
+`T_detect` is the time from the first-visible frame to an RGB-only
+detector firing on `kit_cam`, measured on the detector the kit would
+run. It is left as a parameter. It is not filled in here.
+
+`t_cue` is separate. On #63 the leg/rail band of the stool mesh is
+`visible_enough` at t = 1.90 s, and the whole stool is `visible_enough`
+at t = 1.00 s. That frustum uses sim ground-truth masks the real kit
+will not have. First contact on that replay is t = 6.85 s, so the cue
+is available for 6.85 − 1.90 = 4.95 s before contact. That 4.95 s is
+cue availability, not `T_detect`.
 

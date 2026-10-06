@@ -42,6 +42,11 @@ SAT_FRAC = 0.98
 # HX-35H knee budget at about 10.5 V. The plant forcerange stays ±2.45.
 # A knee past this is a Prefer FAIL. Not a forcerange edit.
 KNEE_SAG_NM = 2.33
+# Stop/silence command budget. The sag bar stays 2.33. Sitting the
+# prediction on that bar measured 2.330 Nm, which is no headroom.
+# 0.05 Nm under the bar is the stop target. Not a forcerange edit.
+KNEE_STOP_HEADROOM_NM = 0.05
+KNEE_STOP_NM = KNEE_SAG_NM - KNEE_STOP_HEADROOM_NM
 # Locked kit row. Body speed is about this many (m/s) per meter of OP3
 # x_amp, measured with the step scaled to the command. The bus forward
 # clamp is KIT_BODY_PER_X * KIT_X_RAIL_M, so full stick is the speed the
@@ -438,10 +443,11 @@ class LipmWalker:
         self.lat *= 0.8
         for jn, val in self.q_stand.items():
             # Stop and silence land here. The 20 ms walk slew is not used:
-            # the caller applies this command on the same tick. Knees stay
-            # inside the sag budget. Other joints stay inside 0.98·τ.
+            # the caller applies this command on the same tick. Knees use
+            # KNEE_STOP_NM so the measured peak stays 0.05 Nm under the
+            # 2.33 bar. Other joints stay inside 0.98·τ.
             if jn.endswith("knee"):
-                self.write_force_limited(jn, val, KNEE_SAG_NM)
+                self.write_force_limited(jn, val, KNEE_STOP_NM)
             else:
                 self.write_force_limited(jn, val)
 

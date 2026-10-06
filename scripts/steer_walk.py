@@ -171,9 +171,12 @@ damping adds to the spring. While applied yaw is away from 0 the
 hip-roll command uses the 2.33 Nm prediction budget. The same window
 then peaks at −2.27 Nm. Straight walking is not on that budget.
 Forcerange stays ±2.45 Nm. A Day-1 stop before the kitchen stool
-contact (6.82 s on the #62 colliders) keeps 0 prop contacts and
-min up_z 0.934. That stop hold still sits near 2.40 Nm on non-knee
-joints. Reversing yaw at 4.0 s also misses the stool and stays under
+contact keeps 0 prop contacts and min up_z 0.934. Stop knees measure
+2.280 Nm. Other stop joints still sit near 2.40 Nm. The bus is stood
+on the next 8 ms tick. The body settle, T_stop, is up to 0.830 s and
+8.3 cm of COM path. Clear distance is v × (T_detect + T_stop) with
+T_detect left open. The #63 t_cue of 1.90 s is first-visible, not
+T_detect. Reversing yaw at 4.0 s also misses the stool and stays under
 2.33 Nm. Yaw 0 does not. Not go-anywhere. Soft-pass is off.
 """
 from __future__ import annotations
@@ -3205,6 +3208,16 @@ def _bus_kit_forward_stop() -> tuple[list[str], list[str]]:
                 failures.append(
                     f"{label} {name} {peak.force_nm:+.3f} Nm crosses {lipm_gait.KNEE_SAG_NM:.2f}"
                 )
+            if (
+                label == "stop"
+                and "knee" in name
+                and abs(peak.force_nm) > lipm_gait.KNEE_STOP_NM + 1e-3
+            ):
+                failures.append(
+                    f"{label} {name} {peak.force_nm:+.3f} Nm has no "
+                    f"{lipm_gait.KNEE_STOP_HEADROOM_NM:.2f} Nm headroom under "
+                    f"{lipm_gait.KNEE_SAG_NM:.2f}"
+                )
             # Stop holds non-knees at 0.98·forcerange (2.401 Nm). The 2.33 bar
             # on hip roll is the walking turn, not that hold.
             if (
@@ -3316,6 +3329,15 @@ def _bus_kit_yaw() -> tuple[list[str], list[str]]:
                 failures.append(f"{name} {joint} {peak.force_nm:+.3f} Nm")
             if "knee" in joint and abs(peak.force_nm) > lipm_gait.KNEE_SAG_NM + 1e-3:
                 failures.append(f"{name} knee {joint} {peak.force_nm:+.3f} Nm")
+            if (
+                "knee" in joint
+                and peak.t_s >= move_s - 1e-9
+                and abs(peak.force_nm) > lipm_gait.KNEE_STOP_NM + 1e-3
+            ):
+                failures.append(
+                    f"{name} stop knee {joint} {peak.force_nm:+.3f} Nm "
+                    f"lacks {lipm_gait.KNEE_STOP_HEADROOM_NM:.2f} Nm headroom"
+                )
         for joint, peak in move_peaks.items():
             if "hip_roll" in joint and abs(peak.force_nm) > lipm_gait.KNEE_SAG_NM + 1e-3:
                 failures.append(f"{name} hip roll {joint} {peak.force_nm:+.3f} Nm")
