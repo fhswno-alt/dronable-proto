@@ -19,8 +19,10 @@ leg and the range reads long.
 If that lowest pixel is the last row of the frame, the contact is cut
 off. The cue is ``bottom_clipped`` / ``too_close`` and ``u`` and ``v``
 are left empty. No pixel is emitted, so the ray cannot report a long
-range. A contact in the bottom band has to be a tall column. A short
-speck there is not a leg. ``too_close`` is that flag only for a clip
+range. A leg column is at least 48 px tall and 8–40 px wide. A
+contact in the bottom band has to be taller still. A short speck, a
+hairline edge, or a wide silhouette is not a leg. ``too_close`` is
+that flag only for a clip
 whose last-row column rays into the foot corridor. A last-row dark blob
 outside the corridor is not a near-floor leg, and the flag is cleared.
 Controls latches Day-1 ``stop`` on the flag that remains. This module
@@ -57,15 +59,17 @@ WOOD_SAT_MAX = 0.75
 LEG_LUM_MAX = 90
 LEG_CHROMA_MAX = 48
 LEG_R_MAX = 100
-LEG_SPAN_MIN = 24
-LEG_CLIP_SPAN_MIN = 40
-# Contact row this low is the near floor. A furniture leg there is a tall
-# column (the kitchen stool is hundreds of pixels). A few dozen pixels is
-# a speck, and ranging it stops short of the real prop.
-NEAR_ROW = 460
-NEAR_SPAN_MIN = 80
-LEG_WIDTH_MIN = 3
-LEG_WIDTH_MAX = 48
+# A real near leg in these rooms is a tall column about 11–33 px wide
+# (coffee leg, stool leg). A 3–7 px column is an edge. A 47 px column
+# is a silhouette. A 30 px run is a speck.
+LEG_SPAN_MIN = 48
+LEG_CLIP_SPAN_MIN = 48
+LEG_WIDTH_MIN = 8
+LEG_WIDTH_MAX = 40
+# Contact row this low is the near floor. The column has to be taller
+# still. The kitchen stool there is hundreds of pixels.
+NEAR_ROW = 440
+NEAR_SPAN_MIN = 120
 COLUMN_GAP = 12
 ROW_JOIN = 56
 CLIP_SPLIT = 8
