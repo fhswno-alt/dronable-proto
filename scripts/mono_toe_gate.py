@@ -35,8 +35,10 @@ The head is not tilted. A −10° walk stays off.
 Day-1 stop for the kitchen walk is ``walk_latch``. It calls
 ``ray_corridor.estimate_hazard`` and stops when ``in_corridor`` and
 ``toe_gap_m <= d_min``. That ``toe_gap_m`` already includes the 20 mm
-pad and the live step offset. No 3–5 cm buffer is added. The older
-row-model stress remains in this file and is not the latch.
+pad and the live step offset. No 3–5 cm buffer is added. ``latch-pad``
+reruns the same walk with a frozen pad of 0.035 m and does not replace
+the 0.020 m latch. The older row-model stress remains in this file
+and is not the latch.
 """
 from __future__ import annotations
 
@@ -707,12 +709,17 @@ def _leg_floor_centers(
     return rows
 
 
-def walk_latch(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
+def walk_latch(
+    t_detect: float,
+    t_end: float = 9.0,
+    hazard_pad_m: float = rc.HAZARD_PAD_M,
+) -> dict[str, object]:
     """Day-1 stop on ray_corridor. No extra buffer. Head tilt stays off.
 
     The pixel is the sim projection of a stool-leg floor point. It is not
-    an RGB finder. ``toe_gap_m`` already includes the 20 mm pad and the
-    live step offset, so this latch does not subtract them again.
+    an RGB finder. ``toe_gap_m`` already includes the pad and the live
+    step offset, so this latch does not subtract them again. The shipped
+    pad is 0.020 m. A stress run may pass another frozen constant.
     """
     if not SCENE.is_file():
         raise SystemExit(f"missing kitchen scene {SCENE}")
@@ -764,12 +771,17 @@ def walk_latch(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
         sw.DemoSegment(t_end, "vel", sw.VX_FWD_CAP, -sw.YAW_RATE_CAP, "turn"),
     ))
     gate = rc.d_min(t_detect)
+    pad = float(hazard_pad_m)
     reach: list[tuple[float, float, float]] = []
     latched: dict[str, rc.DeadReckonState] = {}
     seen_names: set[str] = set()
     issued: float | None = None
     reason = ""
     false_early = ""
+    in_corridor_names: set[str] = set()
+    stop_frame = ""
+    leg0_closest = ""
+    leg0_side_abs = 1e9
     min_foot_leg = 1e9
     head_tilt_peak = 0.0
     try:
@@ -796,6 +808,7 @@ def walk_latch(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
                 yaw_rate = float(session.bus.applied_yaw_rate)
                 seen_names = set()
                 best: tuple[float, str] | None = None
+                frame_bits: list[str] = []
                 for name, point in _leg_floor_centers(model, data):
                     pix = rc.project_point(
                         point,
@@ -817,13 +830,27 @@ def walk_latch(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
                         head_tilt_rad=tilt,
                         yaw_rate=yaw_rate,
                         step_off_m=step_off,
-                        hazard_pad_m=rc.HAZARD_PAD_M,
+                        hazard_pad_m=pad,
                         head_pan_rad=pan,
                     )
                     if est is None:
                         continue
                     seen_names.add(name)
                     gt = float(math.hypot(point[0] - cam[0], point[1] - cam[1]))
+                    short = name.rsplit("_", 1)[-1]
+                    frame_bits.append(
+                        f"{short}:{'in' if est.in_corridor else 'out'} "
+                        f"gap={est.toe_gap_m:.3f} side={est.sideways_m:+.3f}"
+                    )
+                    if est.in_corridor:
+                        in_corridor_names.add(name)
+                    if "leg_0" in name and abs(est.sideways_m) < leg0_side_abs:
+                        leg0_side_abs = abs(est.sideways_m)
+                        leg0_closest = (
+                            f"t={now:.3f} side={est.sideways_m:+.3f} "
+                            f"gap={est.toe_gap_m:.3f} "
+                            f"{'in' if est.in_corridor else 'out'}"
+                        )
                     latched[name] = rc.DeadReckonState(
                         est.forward_m, est.sideways_m, est.in_corridor,
                         body.origin_xy_m, body.forward_xy, now,
@@ -835,7 +862,7 @@ def walk_latch(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
                                 f"in_corridor {name} toe_gap={est.toe_gap_m:.3f} "
                                 f"eye={est.eye_range:.3f} gt_eye={gt:.3f} "
                                 f"side={est.sideways_m:+.3f} step_off={step_off:+.3f} "
-                                f"{step_side} pad={rc.HAZARD_PAD_M:.3f}",
+                                f"{step_side} pad={pad:.3f}",
                             )
                     elif (not est.in_corridor) and est.toe_gap_m <= gate and false_early == "":
                         false_early = (
@@ -846,15 +873,16 @@ def walk_latch(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
                     if name in seen_names or not state.in_corridor:
                         continue
                     gap = rc.dead_reckon_gap(
-                        state, body.origin_xy_m, step_off, rc.HAZARD_PAD_M,
+                        state, body.origin_xy_m, step_off, pad,
                     )
                     if gap <= gate and (best is None or gap < best[0]):
                         best = (
                             gap,
                             f"dead_reckon {name} toe_gap={gap:.3f} "
-                            f"step_off={step_off:+.3f} {step_side} pad={rc.HAZARD_PAD_M:.3f}",
+                            f"step_off={step_off:+.3f} {step_side} pad={pad:.3f}",
                         )
                 if best is not None:
+                    stop_frame = " ".join(frame_bits)
                     session.bus.stop(now)
                     issued = now
                     stop_mark["t"] = now
@@ -894,6 +922,10 @@ def walk_latch(t_detect: float, t_end: float = 9.0) -> dict[str, object]:
         "step_off": _high_water(reach),
         "head_tilt_peak": head_tilt_peak,
         "yaw": math.degrees(session.yaw()),
+        "pad": pad,
+        "in_corridor": sorted(in_corridor_names),
+        "stop_frame": stop_frame,
+        "leg0_closest": leg0_closest,
     }
 
 
@@ -902,14 +934,16 @@ def _print_latch(result: dict[str, object]) -> None:
     assert isinstance(step, tuple)
     print(
         f"plant {result['plant']} mode=latch T_detect={result['t_detect']} "
-        f"d_min={result['d_min']:.4f} buffer=0 pad={rc.HAZARD_PAD_M:.3f} "
+        f"d_min={result['d_min']:.4f} buffer=0 pad={result['pad']:.3f} "
         f"step_off={step[0]:+.3f} {step[1]} t={step[2]:.3f} "
         f"issued={result['issued']} reason={result['reason']} "
         f"false_early={result['false_early'] or 'none'} "
         f"contact={result['contact']} T_stop_run={result['t_stop']} "
         f"min_up_z={result['min_up_z']:.3f} min_foot_leg={result['min_foot_leg']} "
         f"yaw={result['yaw']:+.1f} head_tilt_peak={result['head_tilt_peak']:.4f} "
-        f"stop_worst={result['stop_worst']} stop_over={result['stop_over']}"
+        f"stop_worst={result['stop_worst']} stop_over={result['stop_over']} "
+        f"in_corridor={result['in_corridor']} leg0_closest=[{result['leg0_closest']}] "
+        f"stop_frame=[{result['stop_frame']}]"
     )
 
 
@@ -919,6 +953,14 @@ def main() -> None:
         rc.self_check()
         for t_detect in (0.0, 0.033, 0.100):
             _print_latch(walk_latch(t_detect))
+        return
+    if mode == "latch-pad":
+        # Frozen for this stress only. Not a collider radius and not the
+        # shipped 20 mm stand-in. Does not size the 3–5 cm buffer.
+        pad = 0.035 if len(sys.argv) < 3 else float(sys.argv[2])
+        rc.self_check()
+        for t_detect in (0.0, 0.033, 0.100):
+            _print_latch(walk_latch(t_detect, hazard_pad_m=pad))
         return
     if mode == "stress":
         for t_detect in (0.0, 0.033, 0.100):

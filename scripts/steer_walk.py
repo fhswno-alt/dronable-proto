@@ -194,7 +194,9 @@ not enabled. The Day-1 kitchen stop calls ray_corridor.estimate_hazard
 and stops when the hit is in the foot corridor and toe_gap_m is at or
 under d_min. That gap already includes the 20 mm pad and the step
 offset. No 3–5 cm buffer is added. On this walk the latch is the
-hitting stool leg, not the off-axis one. Not kit-safe. The row source
+hitting stool leg, not the off-axis one. A stress with the pad frozen
+at 0.035 m stops earlier on that same leg and still leaves the
+off-axis leg outside the corridor. Not kit-safe. The row source
 is still a sim projection. Not go-anywhere. Soft-pass is off.
 """
 from __future__ import annotations

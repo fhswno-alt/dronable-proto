@@ -1650,6 +1650,30 @@ without the 20 mm pad is still about 0.145 m, above the 0.1263 m
 floor, so the stop is the pad. That pad is a stand-in, not a measured
 leg. Not kit-safe. The 3–5 cm buffer is not sized from this clear.
 
+A stress froze the pad at 0.035 m for the run. The module constant
+stays 0.020 m. The buffer stays off. The head stays level. The same
+kitchen yaw −0.25 walk still latches `col_chair_stool_b_leg_2`.
+`leg_0` stays outside the corridor. Its closest sideways is −0.243 m
+at `T_detect` = 0, and the pad-inflated edge of that interval is still
+about 0.12 m outside the right corridor edge. `leg_3` is inside the
+corridor on both pads, at a sideways offset near +0.05 m and a
+`toe_gap` near 0.47 m, so it is not the latch. Prop contacts are 0.
+No stop-window leg joint crosses 2.33 Nm. min up_z is 0.934. These
+settles do not raise the 0.842 s `T_stop`.
+
+| `T_detect` | stop | `toe_gap` | eye / true | foot–leg after stop | settle | stop peak |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0 | 5.856 s | 0.126 m | 0.193 / 0.193 m | 0.165 m | 0.642 s | right knee +2.280 Nm |
+| 0.033 s | 5.840 s | 0.130 m | 0.196 / 0.196 m | 0.170 m | 0.610 s | right knee +2.280 Nm |
+| 0.100 s | 5.712 s | 0.141 m | 0.194 / 0.194 m | 0.208 m | 0.804 s | left knee −2.280 Nm |
+
+Against the 20 mm stops (5.904 s, 5.888 s, 5.856 s) the clock moves
+earlier by 0.048 s, 0.048 s, and 0.144 s. At `T_detect` = 0 the eye
+at the stop is 0.193 m against 0.180 m on the 20 mm run. The gap
+without this pad, at that frame, is 0.161 m, still above the 0.1263 m
+floor, so the stop is still the pad. Not kit-safe. The 3–5 cm buffer
+is not sized from this clear.
+
 A −10° `head_tilt` walk is not enabled. On that pose the near edge is
 0.077 m at `cam_z` 0.326 m. #67 checked the wood rule at that session
 tilt: the foot contact boxes project to rows 643–749, below the
