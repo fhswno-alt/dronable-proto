@@ -11965,6 +11965,16 @@ def _install_sagittal_slew(
             stepped = float(air_stepped[jn])
             origin = float(prev.get(jn, stepped))
         held, q_now, omega, capped = _hold_inside(jn, stepped)
+        # The hold zeros position error once joint speed alone is past
+        # 2.33 Nm. A few milliradians the other way puts the signed ask
+        # back on the bar. The stop-command hold is not this path.
+        idx = lipm.act_idx[jn + "_pos"]
+        kp = float(lipm.model.actuator_gainprm[idx, 0])
+        kv = -float(lipm.model.actuator_biasprm[idx, 2])
+        ask = kp * (float(held) - q_now) - kv * omega
+        if abs(ask) > KNEE_NM + 1e-9 and kp > 1e-6:
+            held = q_now + (math.copysign(KNEE_NM, ask) + kv * omega) / kp
+            capped = 1
         prev[jn] = float(held)
         _cap_row(jn, q_now, held, float(target), stepped, origin, capped, omega)
         return float(held)
