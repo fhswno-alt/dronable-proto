@@ -4,27 +4,67 @@
   edit it. Named scene geometry so a later vision step can point at
   "entrance". This is not a navigation map and not a planner input.
   One camera: the plant's kit_cam.
-  The entrance body is a visual doorframe: jambs, lintel, white inner
-  trim, and side walls, plus a floor mat. Visual geometry only.
+  The entrance body is a flat visual frame: a static panel set in
+  trim, a floor mat, and a pair of boots. Visual geometry only.
   No hinge, no joint, no lever, no latch, and no swinging panel.
+  See docs/ROOM_ASSETS.md.
 -->
 <mujoco model="room_entrance">
   <include file="ainex_hiwonder/ainex_controls_m2_145.xml"/>
+  <asset>
+    <texture name="room_floor" type="2d" file="assets/rooms/textures/wood_floor.png"/>
+    <material name="room_floor" texture="room_floor" texrepeat="3 3" specular="0.04"/>
+    <texture name="room_wall" type="2d" file="assets/rooms/textures/beige_wall.png"/>
+    <material name="room_wall" texture="room_wall" texrepeat="2.2 1.3" specular="0.02" emission="0.18"/>
+    <texture name="room_ceiling" type="2d" file="assets/rooms/textures/white_plaster.png"/>
+    <material name="room_ceiling" texture="room_ceiling" texrepeat="2 2" specular="0.02" emission="0.62"/>
+    <texture name="room_panel" type="2d" file="assets/rooms/entrance/panel.png"/>
+    <material name="room_panel" texture="room_panel" specular="0.12"/>
+    <mesh name="room_panel" file="assets/rooms/entrance/panel.obj" scale="0.55 0.55 0.55"/>
+    <texture name="room_trim" type="2d" file="assets/rooms/textures/wood_floor.png"/>
+    <material name="room_trim" texture="room_trim" texrepeat="1 2" specular="0.08"/>
+    <texture name="room_boots" type="2d" file="assets/rooms/entrance/boots.png"/>
+    <material name="room_boots" texture="room_boots" specular="0.25"/>
+    <mesh name="room_boots" file="assets/rooms/entrance/boots.obj"/>
+    <texture name="room_mat" type="2d" file="assets/rooms/textures/hessian_mat.png"/>
+    <material name="room_mat" texture="room_mat" specular="0.02"/>
+    <mesh name="room_mat" file="assets/rooms/entrance/mat.obj" scale="2.05 1.20 1"/>
+    <texture name="room_console" type="2d" file="assets/rooms/entrance/console.png"/>
+    <material name="room_console" texture="room_console" specular="0.14"/>
+    <mesh name="room_console" file="assets/rooms/entrance/console.obj" scale="0.72 0.72 0.72"/>
+  </asset>
   <worldbody>
-    <!-- Frame faces the robot (+X is kit_cam look). Static bodies, no joints. -->
-    <body name="entrance" pos="1.28 0.00 0">
-      <site name="entrance" pos="0 0.46 0.70" size="0.015" group="4" rgba="0.93 0.94 0.95 1"/>
-      <geom name="entrance_jamb_left" type="box" size="0.07 0.09 0.62" pos="0 0.46 0.62" rgba="0.12 0.10 0.09 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
-      <geom name="entrance_jamb_right" type="box" size="0.07 0.09 0.62" pos="0 -0.46 0.62" rgba="0.12 0.10 0.09 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
-      <geom name="entrance_lintel" type="box" size="0.07 0.55 0.07" pos="0 0 1.26" rgba="0.12 0.10 0.09 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
-      <geom name="entrance_trim_left" type="box" size="0.02 0.025 0.58" pos="-0.06 0.36 0.62" rgba="0.93 0.94 0.95 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
-      <geom name="entrance_trim_right" type="box" size="0.02 0.025 0.58" pos="-0.06 -0.36 0.62" rgba="0.93 0.94 0.95 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
-      <geom name="entrance_wall_left" type="box" size="0.06 0.42 0.68" pos="0 0.98 0.68" rgba="0.08 0.36 0.44 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
-      <geom name="entrance_wall_right" type="box" size="0.06 0.42 0.68" pos="0 -0.98 0.68" rgba="0.08 0.36 0.44 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+    <light name="room_key" pos="0.40 -0.1 2.05" dir="0.6 0.02 -1" diffuse="0.82 0.78 0.70"/>
+    <light name="room_fill" pos="0.25 0.35 1.6" dir="0.45 -0.1 -1" diffuse="0.38 0.40 0.44"/>
+    <light name="room_up" pos="1.05 0 1.35" dir="0 0 1" diffuse="0.85 0.82 0.74"/>
+    <light name="room_side_l" pos="1.15 -0.15 1.4" dir="0 1 0.15" diffuse="0.40 0.38 0.34"/>
+    <light name="room_side_r" pos="1.15 0.15 1.4" dir="0 -1 0.15" diffuse="0.40 0.38 0.34"/>
+    <geom name="room_floor" type="plane" pos="0 0 0.006" size="3 3 0.02" material="room_floor" contype="0" conaffinity="0"/>
+    <geom name="room_wall" type="box" pos="2.42 0 1.22" size="0.045 1.82 1.22" material="room_wall" contype="0" conaffinity="0"/>
+    <geom name="room_wall_left" type="box" pos="0.86 1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
+    <geom name="room_wall_right" type="box" pos="0.86 -1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
+    <geom name="room_ceiling" type="box" pos="0.86 0 2.48" size="1.64 1.88 0.04" material="room_ceiling" contype="0" conaffinity="0"/>
+    <!-- Leaf set against the back wall in static trim. Mat at the threshold.
+         Console and boots to image-left. No mechanism. -->
+    <body name="entrance" pos="2.28 0 0">
+      <site name="entrance" pos="0 0 0.95" size="0.015" group="4" rgba="0.55 0.40 0.28 1"/>
+      <geom name="entrance_panel" type="mesh" mesh="room_panel" material="room_panel" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+      <geom name="entrance_jamb_left" type="box" pos="0.08 0.58 0.84" size="0.07 0.045 0.84" material="room_trim" contype="0" conaffinity="0"/>
+      <geom name="entrance_jamb_right" type="box" pos="0.08 -0.58 0.84" size="0.07 0.045 0.84" material="room_trim" contype="0" conaffinity="0"/>
+      <geom name="entrance_lintel" type="box" pos="0.08 0 1.68" size="0.07 0.625 0.05" material="room_trim" contype="0" conaffinity="0"/>
+      <geom name="entrance_sill" type="box" pos="0.08 0 0.04" size="0.07 0.54 0.035" material="room_trim" contype="0" conaffinity="0"/>
     </body>
-    <body name="mat" pos="0.72 0.00 0">
-      <site name="mat" pos="0 0 0.02" size="0.012" group="4" rgba="0.55 0.12 0.78 1"/>
-      <geom name="mat_rug" type="box" size="0.32 0.24 0.01" pos="0 0 0.01" rgba="0.55 0.12 0.78 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+    <body name="mat" pos="1.55 0 0">
+      <site name="mat" pos="0 0 0.02" size="0.012" group="4" rgba="0.55 0.42 0.28 1"/>
+      <geom name="mat_rug" type="mesh" mesh="room_mat" material="room_mat" contype="0" conaffinity="0"/>
+    </body>
+    <body name="shoes" pos="1.22 -0.42 0">
+      <site name="shoes" pos="0 0 0.18" size="0.012" group="4" rgba="0.15 0.28 0.18 1"/>
+      <geom name="shoes_pair" type="mesh" mesh="room_boots" material="room_boots" contype="0" conaffinity="0"/>
+    </body>
+    <body name="console" pos="1.62 1.18 0">
+      <site name="console" pos="0 0 0.5" size="0.012" group="4" rgba="0.45 0.32 0.18 1"/>
+      <geom name="console_top" type="mesh" mesh="room_console" material="room_console" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
     </body>
   </worldbody>
 </mujoco>
