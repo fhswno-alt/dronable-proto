@@ -15769,6 +15769,22 @@ def _print_walk_steady_ank(name: str, held: dict[str, object]) -> None:
     _corner_line("tick", named_t)
     if worst_t != named_t:
         _corner_line("worst", worst_t)
+    named_ask = float(named[3])
+    named_row = by_lat.get(named_t)
+    named_phase = str(named_row["phase"]) if named_row is not None else "?"
+    named_frac = (
+        _swing_frac(named_phase, float(named_row["pose"]))
+        if named_row is not None
+        else float("nan")
+    )
+    named_frac_txt = "dsp" if named_phase == "D" else f"{named_frac:.3f}"
+    print(
+        f"PRED {name} walk_steady_ank tick r_ank_pitch {named_ask:+.4f} "
+        f"t {float(named[0]):.3f} phase {named_phase} frac {named_frac_txt} "
+        f"q {_ask_q(named):+.5f} q_des {float(named[2]):+.5f} "
+        f"kp_term {float(named[8]):+.4f} kv_term {float(named[9]):+.4f} "
+        f"ge_2.33 {int(abs(named_ask) > KNEE_NM + 1e-9)}"
+    )
     ask = float(worst[3])
     over = abs(ask) > KNEE_NM + 1e-9
     row = by_lat.get(worst_t)
