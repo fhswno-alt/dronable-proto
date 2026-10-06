@@ -1823,7 +1823,39 @@ That split does not make a gate. The latch stops on the first `too_close` tick. 
 
 Living right's apron pixel at 4.920 s is 0.064 m from the previous both-feet hit while the body walked 0.079 m. The contact row there is a dark run about 225 px wide that the column group reports as 8–14 px. The floor hit moves with the step. The latch names the nearest prop. Bedroom right's birth pixel, row 352–392 around 8.120–8.168 s, has no prior same-stance point. The nearest nightstand is about 2.06 m and 340 px away. The next period does not repeat the cue. The latch keeps the near world point and the gap falls through `d_min` at 8.736 s, 1.906 m from `col_nightstand_leg_2`. Both of those are finder pixels. A two-period rule would drop them and would drop the coffee stop with them.
 
-The finder is unchanged by this check. The fifteen-bout table above still stands. Buffer and the −10° range gate stay off. Not kit-safe. Not go-anywhere.
+That two-period rule was not shipped. The finder emits a first sighting when that stance has no stored in-corridor point, and it drops a later hit farther than the body has walked since the last sample of that stance, plus 0.08 m. The sample is the third tick of a shift bout. The anchor moves on every sample, including one that accepts nothing, so an early unmatched point does not widen the margin by the whole walk. A rejected hit is not stored. Width and span are unchanged. The latch is unchanged. `HAZARD_PAD_M` stays 0.020.
+
+Prefer FAIL. Twelve of the fifteen bouts meet the bar. Three do not. Bouts that already had no stop were not re-rendered: this rule only removes cues. The seven that stopped on the corridor gate were re-rendered.
+
+| room | approach | stop | latch | contacts | peak |
+| --- | --- | --- | --- | --- | --- |
+| kitchen | straight | none | | 0 | hip roll −2.128 Nm |
+| kitchen | left −0.25 | 5.864 s | `stool_b_leg_2`, 0.014 m | 0; unstopped hits that leg at 6.822 s | +2.280 Nm |
+| kitchen | right +0.25 | none | | 0 | hip roll +2.278 Nm |
+| bathroom | straight | none | | 0, unstopped also 0 | hip roll −2.128 Nm |
+| bathroom | left −0.25 | none | | 0, unstopped also 0 | hip roll −2.271 Nm |
+| bathroom | right +0.25 | none | | 0 | hip roll +2.278 Nm |
+| living | straight | 4.376 s | `coffee_leg_0`, 0.034 m | 0; unstopped hits that leg at 5.368 s | +2.280 Nm |
+| living | left −0.25 | none | | 0, unstopped also 0 | hip roll −2.271 Nm |
+| living | right +0.25 | 4.896 s | `coffee_apron_xn`, 0.100 m, side −0.112 m | 0; unstopped hits `coffee_leg_2` at 8.104 s | +2.280 Nm |
+| bedroom | straight | none | | 0, unstopped also 0 | hip roll −2.128 Nm |
+| bedroom | left −0.25 | 5.624 s `too_close` | none, col 268, span 258, width 12, side +0.048 m | 0, unstopped also 0 | −2.280 Nm |
+| bedroom | right +0.25 | none | | 0, unstopped also 0 | hip roll +2.278 Nm |
+| entrance | straight | none | | rug at 6.892 s, 11.3 N | hip roll −2.128 Nm |
+| entrance | left −0.25 | none | | 0, unstopped also 0 | hip roll −2.271 Nm |
+| entrance | right +0.25 | none | | 0 | hip roll +2.278 Nm |
+
+Kitchen left still stops at 5.864 s on `col_chair_stool_b_leg_2`, saved point 0.014 m, eye 0.181 m against 0.191 m, sideways +0.069 m, 0 contacts, stop peak +2.280 Nm. Living straight still stops at 4.376 s on `col_coffee_leg_0`, saved point 0.034 m, born 4.216 s, eye bias −0.030 m, sideways +0.065 m, 0 contacts, stop peak +2.280 Nm. The coffee birth is a first sighting. The stool repeats inside the margin.
+
+Living left no longer stops. Entrance left at 6.576 s is column 379, span 228, width 40, 0.241 m from the previous same-stance point while the body has walked 0.074 m, so that clip is dropped. A later column 241, span 224, width 10, at 8.336 s is 0.799 m from the only stored point. Measuring the walk from when that point was stored (0.725 m) leaves 0.799 m inside the margin and the latch stops. Measuring it from the last sample drops the clip. The re-scored walk does not stop. Both open walks have no contact. Walk peaks are hip roll −2.271 Nm.
+
+Bedroom right no longer stops. The cue born at 8.136 s, which the latch carried to 8.736 s and 1.906 m from `col_nightstand_leg_2`, is farther than the body has walked since the last sample. The open walk has no contact. Walk peak is hip roll +2.278 Nm.
+
+Living right still stops at 4.896 s on `col_coffee_apron_xn`, saved point 0.100 m, eye 0.189 m against 0.233 m, sideways −0.112 m, born on that tick, 0 finder contacts, stop peak +2.280 Nm. The open walk hits `col_coffee_leg_2` at 8.104 s. The apron point moves about 0.064 m while the body walks about 0.079 m, inside the margin. This rule does not move that wrong-leg stop.
+
+Bedroom left still stops at 5.624 s on an unmatched in-corridor `too_close`, column 268, span 258, width 12, sideways +0.048 m. No prior same-stance point makes it a jump, so the first sighting is emitted. The open walk has no contact. Stop peak is left knee −2.280 Nm.
+
+Entrance straight still hits `col_mat_rug` at 6.892 s, 11.3 N, with no stop. That bout was left alone. Stop peaks that fire are 2.280 Nm. Walks that do not stop stay under 2.33 Nm. Buffer and the −10° range gate stay off. Not kit-safe. Not go-anywhere.
 
 A −10° `head_tilt` walk is not enabled. On that pose the near edge is
 0.077 m at `cam_z` 0.326 m. #67 checked the wood rule at that session
