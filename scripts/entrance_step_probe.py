@@ -177,6 +177,39 @@ def _hook_clear(session: sw.SteerSession) -> None:
     lipm._tick_gait_manager = wrapped  # type: ignore[method-assign]
 
 
+def _install_early_z(session: sw.SteerSession, extra_m: float) -> None:
+    """Add hip-frame z from toe-off through 40% of single support.
+
+    The locked sine is still on the floor at 30%. This copy puts the extra
+    on before the 20% mark so the 20–30% command can clear 0.014 m. It does
+    not change kp, damping, armature, or forcerange.
+    """
+    lipm = session.lipm
+    if lipm is None or lipm.op3 is None:
+        return
+    walker = lipm.op3
+    orig_r = walker._right_z
+    orig_l = walker._left_z
+
+    def _lift(base: float, t: float, start: float, end: float) -> float:
+        span = end - start
+        if span <= 1e-6 or not (start < t <= end):
+            return base
+        frac = (t - start) / span
+        if frac <= 0.40 + 1e-12:
+            return base + extra_m
+        return base
+
+    def right_z(t: float) -> float:
+        return _lift(orig_r(t), t, walker.r_ssp_start, walker.r_ssp_end)
+
+    def left_z(t: float) -> float:
+        return _lift(orig_l(t), t, walker.l_ssp_start, walker.l_ssp_end)
+
+    walker._right_z = right_z  # type: ignore[method-assign]
+    walker._left_z = left_z  # type: ignore[method-assign]
+
+
 def _install_mid_z(session: sw.SteerSession, extra_m: float) -> None:
     """Add hip-frame z on the swing foot during the middle 20–80% of SSP.
 
@@ -379,6 +412,8 @@ def run_one(
         _hook_clear(session)
     elif mode == "zmid":
         _install_mid_z(session, z_extra)
+    elif mode == "zearly":
+        _install_early_z(session, z_extra)
     elif mode == "dropflat":
         DROP_RESIDUAL.clear()
         _hook_drop_flat(session, rug)
@@ -440,10 +475,11 @@ def run_one(
             t = float(session.data.time)
             swing = session.lipm._gm_swing if session.lipm is not None else None
             toe_z = _leading_toe_z(session, swing) if swing in ("L", "R") else None
-            if mode == "zmid" and swing in ("L", "R") and session.lipm is not None and session.lipm.op3 is not None:
+            if mode in ("zmid", "zearly") and swing in ("L", "R") and session.lipm is not None and session.lipm.op3 is not None:
                 walker = session.lipm.op3
                 frac = _mid_frac(walker, swing, _cmd_time(walker))
-                if frac is not None and 0.20 - 1e-12 <= frac <= 0.80 + 1e-12 and t < T_BAR:
+                lo, hi = (0.20, 0.30) if mode == "zearly" else (0.20, 0.80)
+                if frac is not None and lo - 1e-12 <= frac <= hi + 1e-12 and t < T_BAR:
                     # ctrl has been slewed. The gait goal was the pre-slew write.
                     # Re-read the live OP3 pose at the command time and FK that.
                     saved_t = walker.time
@@ -542,6 +578,14 @@ def run_one(
         "cmd_toe_min_t": min(cmd_leads, key=lambda row: row[1])[0] if cmd_leads else float("nan"),
         "cmd_n": len(cmd_leads),
         "cmd_clear": bool(cmd_leads) and min(z for _t, z in cmd_leads) > CMD_CLEAR_M,
+        "cmd_actual_m": next(
+            (row.toe_z for row in rows if cmd_leads and abs(row.t - min(cmd_leads, key=lambda item: item[1])[0]) <= 1e-9 and row.toe_z is not None),
+            float("nan"),
+        ),
+        "cmd_actual_fn": next(
+            (row.swing_fn for row in rows if cmd_leads and abs(row.t - min(cmd_leads, key=lambda item: item[1])[0]) <= 1e-9),
+            float("nan"),
+        ),
         "drop_n": len(DROP_RESIDUAL) if mode == "dropflat" else 0,
         "drop_res_min": min(DROP_RESIDUAL) if mode == "dropflat" and DROP_RESIDUAL else float("nan"),
         "drop_res_max": max(DROP_RESIDUAL) if mode == "dropflat" and DROP_RESIDUAL else float("nan"),
