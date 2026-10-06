@@ -329,6 +329,10 @@ def _install_swing_z_add(session: sw.SteerSession, extra_m: float) -> None:
     orig_l = walker._left_z
     log: dict[tuple[float, str], tuple[float, float]] = {}
     session._z_cmd_log = log
+    print(
+        f"PRED swing_z_add {extra_m * 1000.0:.3f} mm on the swing foot "
+        "during single support. Stance z is unchanged."
+    )
 
     def _wrap(orig, side: str):
         def z_fn(t: float) -> float:
@@ -3238,15 +3242,23 @@ def measure_pred_clip(
                 }
                 z_comp = float("nan")
                 z_add = 0.0
-                if swing in ("L", "R"):
+                if swing in ("L", "R") and session.lipm is not None and session.lipm.op3 is not None:
                     zlog = getattr(session, "_z_cmd_log", {})
-                    rec = None
-                    for back in (0.0, float(session.ctrl_dt), 2.0 * float(session.ctrl_dt)):
-                        rec = zlog.get((round(t - back, 5), swing))
-                        if rec is not None:
-                            break
-                    if rec is not None:
-                        z_comp, z_add = rec
+                    period = float(session.lipm.op3.period)
+                    phase = t % period if period > 1e-9 else t
+                    best_dt = 1e9
+                    for (ts, sd), (z_val, added) in zlog.items():
+                        if sd != swing:
+                            continue
+                        dt = abs(float(ts) - phase)
+                        if period > 1e-9:
+                            dt = min(dt, period - dt)
+                        if dt < best_dt - 1e-9 or (
+                            abs(dt - best_dt) <= 1e-9 and float(added) > z_add
+                        ):
+                            best_dt = dt
+                            z_comp = float(z_val)
+                            z_add = float(added)
                 surface_rows.append({
                     "t": t,
                     "swing": swing if swing in ("L", "R") else None,
@@ -4046,21 +4058,20 @@ def score_pitch20_zlift() -> None:
             f"holds_flat {int(holds)} clear {int(clear)} "
             f"ka_over {row.ka_over_n} ka_checked {row.ka_checked}"
         )
-        if mm > 1e-6:
-            if d_centre == d_centre and d_centre >= 0.7 * mm:
-                split = "cmd"
-            elif d_body == d_body and d_body <= -0.3 * mm and (
-                d_centre != d_centre or d_centre < 0.7 * mm
-            ):
-                split = "crouch"
-            else:
-                split = "sag"
+        shortfall = mm - d_centre
+        crouch = -d_body if d_body == d_body and d_body < 0.0 else 0.0
+        sag = shortfall - crouch
+        if shortfall <= 0.3 * mm:
+            split = "cmd"
+        elif crouch >= sag:
+            split = "crouch"
         else:
-            split = "no_add"
+            split = "sag"
         print(
             f"PRED zlift_split {mm:.3f} mm {split} "
             f"cmd_add {mm:.3f} mm world_centre_delta {d_centre:.3f} mm "
-            f"body_delta {d_body:.3f} mm toe_delta {d_toe:.3f} mm"
+            f"body_delta {d_body:.3f} mm toe_delta {d_toe:.3f} mm "
+            f"shortfall {shortfall:.3f} mm crouch {crouch:.3f} mm sag {sag:.3f} mm"
         )
         if clear:
             cleared.append(row)
