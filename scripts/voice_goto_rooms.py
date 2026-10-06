@@ -14,10 +14,12 @@ inside the ±60–90° band where that fraction is ~0. kit_cam is not moved.
 
 The question is "Is there a {room} through the doorway ahead?" yes or no.
 It is not an open-set room label. Search turns in place at +0.25 rad/s
-with no forward velocity. The first yes ends the search. A yes while the
-asked room is under 1% of the frame is a wrong yes and does not go-to.
-A correct yes publishes vel(+0.056, +0.000) along the current heading
-and arms the #71 latch. A stop on the speckled hall shadow by the
+with no forward velocity. Before each question the turn stops and the
+body settles, then kit_cam is captured. The answer is logged at that
+heading, not at reply time. The first yes ends the search. A yes while
+the asked room is under 1% of the frame is a wrong yes and does not
+go-to. A correct yes publishes vel(+0.056, +0.000) along the capture
+heading and arms the #71 latch. A stop on the speckled hall shadow by the
 kitchen or bathroom doorway, with no prop in the frame, is a false stop
 and is not a #71 pass.
 
@@ -82,6 +84,10 @@ CENSUS_OFFSETS_DEG: tuple[int, ...] = (0, 60, -60, 75, -75, 90, -90)
 SEARCH_YAW = voice.YAW_RAD_S
 SEARCH_SWEEP_RAD = 2.0 * math.pi
 ASK_STEP_RAD = math.radians(20.0)
+# Stop, then this long at yaw 0, before the picture. 0.25 rad/s at the
+# 0.40 rad/s² yaw slew takes 0.625 s to reach 0. 0.70 s covers that.
+# Frozen before the bouts. Not a reach bar.
+SETTLE_S = 0.70
 ROOM_VISIBLE_FRAC = 0.01
 HIP_BAR_NM = 2.33
 DOOR_Z = (0.05, 1.35)
@@ -134,8 +140,11 @@ class ShadowSighting(TypedDict):
 
 class AskJson(TypedDict):
     t: float
+    t_capture: float
     tick: int
     heading_rad: float
+    heading_at_capture: float
+    applied_yaw_at_capture: float
     yaw_from_spawn_rad: float
     doorway_fraction: float
     asked_fraction: float
@@ -301,9 +310,11 @@ def _definition() -> DefinitionJson:
         search=(
             "Spawn yaw is the door-facing yaw plus or minus 90 degrees. "
             "After the stand, vel(0, +0.25) turns in place. No forward "
-            "vel until a correct yes. The question is asked at the spawn "
-            "heading and every 20 degrees of body yaw, through one full "
-            "turn. The turn sign is not taken from the door bearing. "
+            "vel until a correct yes. Every 20 degrees the turn stops "
+            f"(yaw 0) and the body settles for {SETTLE_S:.2f} s. The "
+            "question is asked only then. The logged heading is the "
+            "heading at capture, not the heading when the answer "
+            "returns. The turn sign is not taken from the door bearing. "
             "kit_cam is not moved."
         ),
         hip_bar_nm=HIP_BAR_NM,
@@ -1039,6 +1050,15 @@ def _look(
     seen: set[str],
     prop_ids: dict[int, str],
 ) -> tuple[AskJson, dict[str, float]]:
+    applied = float(session.bus.applied_yaw_rate)
+    target = float(session.bus.target_yaw)
+    if abs(applied) > 1e-6 or abs(target) > 1e-6:
+        raise SystemExit(
+            f"FAIL: question while yaw is commanded applied={applied:+.4f} "
+            f"target={target:+.4f}"
+        )
+    heading_at_capture = _yaw(session.data, session.bid_body)
+    t_capture = float(session.data.time)
     rgb = _render_rgb(renderer, session.data)
     _note_shadow(
         session, model, renderer, cid, jid, pan_id, reach, phase_floor,
@@ -1047,7 +1067,6 @@ def _look(
     seg = _render_seg(renderer, session.data)
     fracs = _room_fractions(model, seg)
     door = _doorway_fraction(model, session.data, opening)
-    heading = _yaw(session.data, session.bid_body)
     if asker is None:
         answer = "not loaded"
         raw = ask_error
@@ -1062,11 +1081,18 @@ def _look(
         confidence = None if conf is None else float(conf)
         sec = asked.get("seconds")
         seconds = None if sec is None else float(sec)
+    if abs(_wrap(_yaw(session.data, session.bid_body) - heading_at_capture)) > 1e-6:
+        raise SystemExit("FAIL: heading moved during the question")
+    if abs(float(session.data.time) - t_capture) > 1e-9:
+        raise SystemExit("FAIL: sim time advanced during the question")
     row = AskJson(
-        t=float(session.data.time),
+        t=t_capture,
+        t_capture=t_capture,
         tick=tick,
-        heading_rad=heading,
-        yaw_from_spawn_rad=_wrap(heading - yaw_spawn),
+        heading_rad=heading_at_capture,
+        heading_at_capture=heading_at_capture,
+        applied_yaw_at_capture=applied,
+        yaw_from_spawn_rad=_wrap(heading_at_capture - yaw_spawn),
         doorway_fraction=door,
         asked_fraction=float(fracs.get(room_name, 0.0)),
         visible_rooms=_visible_rooms(fracs),
@@ -1268,7 +1294,7 @@ def _run_room(
                 return row["answer"]
             first_yes_t = row["t"]
             first_yes_tick = row["tick"]
-            first_yes_heading = row["heading_rad"]
+            first_yes_heading = row["heading_at_capture"]
             if row["asked_fraction"] < ROOM_VISIBLE_FRAC:
                 wrong_yes = True
                 visible = ", ".join(row["visible_rooms"]) or "none"
@@ -1306,19 +1332,13 @@ def _run_room(
             stand_visible = look["visible_rooms"]
             decision = consider(look)
             prev_yaw = yaw_spawn
+            last_capture = yaw_spawn
             next_ask = ASK_STEP_RAD
-            while (
-                decision == "no" or decision == "undecided"
-            ) and float(session.data.time) < TIME_LIMIT_S - 1e-9 and yaw_turned < SEARCH_SWEEP_RAD:
-                now = float(session.data.time)
-                session.bus.vel(0.0, SEARCH_YAW, now)
-                bout.yaw_on = True
-                session.step()
-                ticks += 1
-                heading = _yaw(session.data, session.bid_body)
-                yaw_turned += _wrap(heading - prev_yaw)
-                prev_yaw = heading
+
+            def _search_fault() -> str:
+                nonlocal block, stop, ticks, yaw_turned, prev_yaw
                 if bout.contact != "none":
+                    block = f"prop contact during search {bout.contact}"
                     stop = _Stop(
                         path="contact",
                         reason=bout.contact,
@@ -1328,8 +1348,7 @@ def _run_room(
                         false_stop=False,
                         latch_pass=False,
                     )
-                    block = f"prop contact during search {bout.contact}"
-                    break
+                    return "contact"
                 com_now = np.asarray(
                     session.data.subtree_com[session.bid_body], dtype=np.float64,
                 )
@@ -1347,11 +1366,79 @@ def _run_room(
                         false_stop=False,
                         latch_pass=False,
                     )
+                    return "inside"
+                return ""
+
+            hit_sweep = False
+            while (
+                decision == "no" or decision == "undecided"
+            ) and float(session.data.time) < TIME_LIMIT_S - 1e-9 and not hit_sweep:
+                turned_before = yaw_turned
+                while (
+                    yaw_turned < next_ask
+                    and yaw_turned < SEARCH_SWEEP_RAD
+                    and float(session.data.time) < TIME_LIMIT_S - 1e-9
+                ):
+                    now = float(session.data.time)
+                    session.bus.vel(0.0, SEARCH_YAW, now)
+                    bout.yaw_on = True
+                    session.step()
+                    ticks += 1
+                    heading = _yaw(session.data, session.bid_body)
+                    yaw_turned += _wrap(heading - prev_yaw)
+                    prev_yaw = heading
+                    if _search_fault() != "":
+                        break
+                if stop["path"] != "":
                     break
-                if yaw_turned < next_ask:
-                    continue
-                while yaw_turned >= next_ask:
-                    next_ask += ASK_STEP_RAD
+                if float(session.data.time) >= TIME_LIMIT_S - 1e-9:
+                    block = "no yes before the time limit"
+                    stop = _Stop(
+                        path="time",
+                        reason=block,
+                        hit_xy=None,
+                        on_shadow=False,
+                        prop_in_frame=False,
+                        false_stop=False,
+                        latch_pass=False,
+                    )
+                    break
+                if yaw_turned - turned_before < 1e-3:
+                    break
+                if yaw_turned >= SEARCH_SWEEP_RAD - 1e-6:
+                    hit_sweep = True
+                # Stop the turn, then settle, before the picture. The
+                # question runs only after this, with yaw commanded at 0.
+                settle_end = float(session.data.time) + SETTLE_S
+                while float(session.data.time) < settle_end - 1e-9:
+                    if float(session.data.time) >= TIME_LIMIT_S - 1e-9:
+                        break
+                    now = float(session.data.time)
+                    session.bus.vel(0.0, 0.0, now)
+                    bout.yaw_on = True
+                    session.step()
+                    ticks += 1
+                    heading = _yaw(session.data, session.bid_body)
+                    yaw_turned += _wrap(heading - prev_yaw)
+                    prev_yaw = heading
+                    if _search_fault() != "":
+                        break
+                if stop["path"] != "":
+                    break
+                if float(session.data.time) >= TIME_LIMIT_S - 1e-9:
+                    block = "no yes before the time limit"
+                    stop = _Stop(
+                        path="time",
+                        reason=block,
+                        hit_xy=None,
+                        on_shadow=False,
+                        prop_in_frame=False,
+                        false_stop=False,
+                        latch_pass=False,
+                    )
+                    break
+                if abs(_wrap(_yaw(session.data, session.bid_body) - last_capture)) < 0.5 * ASK_STEP_RAD:
+                    break
                 look, _fracs = _look(
                     session, model, renderer, opening, room_name, question,
                     asker, ask_error, tick=ticks, yaw_spawn=yaw_spawn,
@@ -1359,36 +1446,37 @@ def _run_room(
                     phase_floor=phase_floor, sightings=sightings, seen=seen,
                     prop_ids=prop_ids,
                 )
+                next_ask = yaw_turned + ASK_STEP_RAD
+                last_capture = look["heading_at_capture"]
                 decision = consider(look)
                 if decision in ("wrong", "commit"):
                     break
-            else:
-                if not committed and not wrong_yes and block == "" and bout.contact == "none":
-                    if float(session.data.time) >= TIME_LIMIT_S - 1e-9:
-                        block = "no yes before the time limit"
-                        stop = _Stop(
-                            path="time",
-                            reason=block,
-                            hit_xy=None,
-                            on_shadow=False,
-                            prop_in_frame=False,
-                            false_stop=False,
-                            latch_pass=False,
-                        )
-                    else:
-                        block = (
-                            f"turned {yaw_turned:.3f} rad at yaw {SEARCH_YAW:+.2f} "
-                            "with no yes"
-                        )
-                        stop = _Stop(
-                            path="no_yes",
-                            reason=block,
-                            hit_xy=None,
-                            on_shadow=False,
-                            prop_in_frame=False,
-                            false_stop=False,
-                            latch_pass=False,
-                        )
+            if not committed and not wrong_yes and block == "" and stop["path"] == "":
+                if float(session.data.time) >= TIME_LIMIT_S - 1e-9:
+                    block = "no yes before the time limit"
+                    stop = _Stop(
+                        path="time",
+                        reason=block,
+                        hit_xy=None,
+                        on_shadow=False,
+                        prop_in_frame=False,
+                        false_stop=False,
+                        latch_pass=False,
+                    )
+                else:
+                    block = (
+                        f"turned {yaw_turned:.3f} rad at yaw {SEARCH_YAW:+.2f} "
+                        "with no yes"
+                    )
+                    stop = _Stop(
+                        path="no_yes",
+                        reason=block,
+                        hit_xy=None,
+                        on_shadow=False,
+                        prop_in_frame=False,
+                        false_stop=False,
+                        latch_pass=False,
+                    )
             if wrong_yes:
                 stop = _Stop(
                     path="wrong_yes",
@@ -1652,6 +1740,7 @@ def main() -> int:
             "open_set_prompt_not_used": room_ask.PROMPT,
             "room_visible_frac": ROOM_VISIBLE_FRAC,
             "ask_step_rad": ASK_STEP_RAD,
+            "settle_s": SETTLE_S,
             "search_yaw": SEARCH_YAW,
             "search_sweep_rad": SEARCH_SWEEP_RAD,
             "spawn_offsets_rad": list(SPAWN_OFFSETS_RAD),
