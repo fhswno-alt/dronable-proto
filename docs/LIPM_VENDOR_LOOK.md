@@ -1617,6 +1617,22 @@ against a true gap of 0.197 m, short by 0.015 m. The buffered stops
 happen before that frame. The post-stop clearance above is real, and
 it is not a measured 3 cm of kit margin. Not kit-safe.
 
+The column-aware ray is not in this gate. No AI tip has the full-pixel
+floor estimator yet, so the Day-1 stop is not latched to one, and this
+branch does not start a second ray. Buffer size is not taken from the
+wrong-leg clears above.
+
+The corridor half-widths are the outer edges of `l_foot_contact` and
+`r_foot_contact` at the stand pose, in the body frame. The plant box
+half-width is 0.0380 m and the geom pos is already 0.014 m outboard,
+so the ankle-frame outer face is at ±0.052 m. Posed, the body-frame
+outer edges are **+0.0867 m** and **−0.0867 m**. The inboard edges are
++0.0096 m and −0.0096 m. On `vel(+0.150, ±0.25)` the outside foot's
+outer edge goes **0.021 m** past that stand edge, so that side's
+half-width is 0.108 m. Left and right match. The kitchen command is
+yaw −0.25, so the outside foot is the left foot. These are the widths
+for the latch. They are not a stop.
+
 A −10° `head_tilt` walk is not enabled. On that pose the near edge is
 0.077 m at `cam_z` 0.326 m. #67 checked the wood rule at that session
 tilt: the foot contact boxes project to rows 643–749, below the

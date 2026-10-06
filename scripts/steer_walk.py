@@ -190,8 +190,12 @@ The 0.342 ms RGB compute is not kit T_detect. Those six stops have 0
 prop contacts and a stop peak of −2.280 Nm. They fire on an off-axis
 stool leg whose eye range reads about 0.18 m short, so the clearance
 is not a calibrated toe gap. Not kit-safe. A −10° head-down walk is
-not enabled. The row is a sim projection. Not go-anywhere. Soft-pass
-is off.
+not enabled. The column-aware floor ray is not in this stop. No AI
+tip exports that estimator yet, so this branch does not start one.
+The plant corridor for that latch is the posed outer edge of
+l_foot_contact / r_foot_contact, ±0.0867 m, and 0.021 m further on
+the outside foot at yaw ±0.25. The row is a sim projection.
+Not go-anywhere. Soft-pass is off.
 """
 from __future__ import annotations
 
