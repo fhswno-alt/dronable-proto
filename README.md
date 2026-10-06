@@ -135,6 +135,16 @@ Head-tilt ask-pose during the 0.20 s stop, Prefer FAIL. Joint `head_tilt` has ac
 
 Kitchen, bathroom, and bedroom stay **living** under the raised look. True labels on that trio stay **0/3**. Empty stays **none**. Moondream2 pin `5d6c926f44e26b07957b0dd315bbedcb4c17a5fe` stays the primary. This pose does not separate the rooms, so Controls does not take an ask-pose from this probe. Not go-anywhere. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` unchanged.
 
+On the mesh rooms, the same pin and the same prompt, `scripts/head_down_ask.py` holds the kit stand and moves only `head_tilt` inside the session. The bus is not given a joint key. Straight locked-kit `vel(+0.150, 0)` with `head_tilt` 0 has median pitch **−14.86 deg** and a bottom-center floor edge **0.142 m** from the camera nadir. The same walk at `head_tilt` **−10 deg** is pitch **−24.83 deg**, near edge **0.077 m**. At **−15 deg** the pitch is **−29.79 deg** and the near edge is **0.049 m**. Head torque stays about **0.010 Nm**. Min up_z stays **0.934**. The yaw walk `vel(+0.150, −0.25)` at `head_tilt` 0 is median pitch **−14.78 deg**, near edge **0.143 m**.
+
+| Pose | pitch | near edge | kitchen | bathroom | bedroom | living |
+|------|-------|-----------|---------|----------|---------|--------|
+| Stand, `head_tilt` 0 | −14.99 deg | 0.139 m | kitchen | bathroom | bedroom | living |
+| `head_tilt` −10 deg | −25.00 deg | 0.073 m | kitchen | bathroom | bedroom | living |
+| Restore `head_tilt` +0.25 rad | −0.66 deg | 0.261 m | kitchen | bathroom | bedroom | living |
+
+The four mesh-room words stay on the room name at the walk head, at −10 deg, and after the restore. That is not a go-to. Soft-pass is off. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Stills are in `previews/head_down_ask/`.
+
 Scene and frustum at that same 1.0 s kit stand, Prefer FAIL. Top-of-frame crop was not scored. The size classes were frozen before the pixel counts: missing, out of frustum, occluded, tiny (under **3072** px, 1% of 640×480, or a mask shorter than **36** px), in-frame box, or visible enough (a mesh that clears that bar). The stand is the ask viewpoint. Bus mode stays `stand`. Every room stops at **+0.057 m, +0.000 m**, yaw **+0.01 deg**. `kit_cam` is **(0.146, 0.000, 0.335) m**, pitch **−14.84 deg**, look yaw **+0.01 deg**.
 
 The four furnished stills SmolVLM named correctly are the kit frames in commit `bb94512` (`kitchen`, `bathroom`, `living`, `bedroom`). Those room files are textured meshes, a floor, and walls, including `kitchen_stove`. This branch's room files are colored boxes on the plant checkerboard. There is no stove geom. A shared geom name is not the same shape. The mesh rooms were loaded read-only with this plant's `kit_cam`, so the eye matches. The plant file was not edited.
