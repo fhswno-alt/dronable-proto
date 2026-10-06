@@ -14531,6 +14531,34 @@ def _print_air_ank_land(name: str, held: dict[str, object]) -> None:
             f"fn_l {fn_l:.2f} fn_r {fn_r:.2f} ge_2.33 {int(over)}"
         )
         _corners(f"swing_{jn}", t_key, frac_txt)
+        fn_key = "fn_l" if jn.startswith("l_") else "fn_r"
+        landed_sw: dict[str, float | str] | None = None
+        for lat in lateral:
+            if not isinstance(lat, dict):
+                continue
+            t_lat = float(lat["t_ask"])
+            if t_lat <= float(item[0]) + 1e-9:
+                continue
+            if tipped and t_lat >= fault_t - 1e-9:
+                continue
+            if float(lat[fn_key]) > _SOLE_FLAT_LOAD_N:
+                landed_sw = lat
+                break
+        if landed_sw is None:
+            print(f"PRED {name} swing_ank_load {jn} none")
+            continue
+        t_sw = round(float(landed_sw["t_ask"]), 5)
+        phase_sw = str(landed_sw["phase"])
+        frac_sw = _swing_frac(phase_sw, float(landed_sw["pose"]))
+        frac_sw_txt = "dsp" if phase_sw == "D" else f"{frac_sw:.3f}"
+        print(
+            f"PRED {name} swing_ank_load {jn} "
+            f"t {float(landed_sw['t_ask']):.3f} phase {phase_sw} "
+            f"frac {frac_sw_txt} "
+            f"fn_l {float(landed_sw['fn_l']):.2f} "
+            f"fn_r {float(landed_sw['fn_r']):.2f}"
+        )
+        _corners(f"swing_load_{jn}", t_sw, frac_sw_txt)
 
 
 def score_mid_swing() -> None:
