@@ -4694,7 +4694,7 @@ def _install_inflight_stop(
             f"samples {len(chosen_rows)} "
             f"open_loop {(end - float(t0)) * stretch:.3f} s. "
             "The rise above the end height is scaled so the stretched "
-            "descent midpoint fits before the tip. Knee and ankle pitch "
+            "schedule can finish before the tip. Knee and ankle pitch "
             "slew toward that IK at or under 1.90 rad/s and inside 2.33 Nm. "
             "The clock waits while either command is still more than one "
             "step behind."
