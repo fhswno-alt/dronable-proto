@@ -158,11 +158,23 @@ target returns to 0 the next double support swings the outside foot.
 A one-tick clock park stepped the targets 0.342 rad. The pose now
 chases the live gait over that double support (0.056 s); the largest
 tick is 0.062 rad, the same as the walk's own largest tick. The
-post-left 6 s is +2.1°. The post-right 6 s does not move the clock
-and is −0.5°. The left turn (12.5 s) finishes at +145.0° and the
-right turn (11.0 s) at −136.5°. The right arc is 8.5° shorter because
-the hold is shorter; the right rate is −0.217 rad/s, which is not
+post-left 6 s is +1.4°. The post-right 6 s does not move the clock
+and is −2.0°. The left turn (12.5 s) finishes at +156.4° and the
+right turn (11.0 s) at −148.6°. The right arc is 7.8° shorter because
+the hold is shorter; the right rate is −0.236 rad/s, which is not
 the low one.
+
+Hip roll while yawing used to cross 2.33 Nm on the empty plant
+(l_hip_roll −2.36 Nm at 3.42 s on 1 s stand then 8 s vel(+0.150,
+−0.25)). The stance hip is the left leg during the right swing, and
+damping adds to the spring. While applied yaw is away from 0 the
+hip-roll command uses the 2.33 Nm prediction budget. The same window
+then peaks at −2.27 Nm. Straight walking is not on that budget.
+Forcerange stays ±2.45 Nm. A Day-1 stop before the kitchen stool
+contact (6.82 s on the #62 colliders) keeps 0 prop contacts and
+min up_z 0.934. That stop hold still sits near 2.40 Nm on non-knee
+joints. Reversing yaw at 4.0 s also misses the stool and stays under
+2.33 Nm. Yaw 0 does not. Not go-anywhere. Soft-pass is off.
 """
 from __future__ import annotations
 
@@ -3193,6 +3205,16 @@ def _bus_kit_forward_stop() -> tuple[list[str], list[str]]:
                 failures.append(
                     f"{label} {name} {peak.force_nm:+.3f} Nm crosses {lipm_gait.KNEE_SAG_NM:.2f}"
                 )
+            # Stop holds non-knees at 0.98·forcerange (2.401 Nm). The 2.33 bar
+            # on hip roll is the walking turn, not that hold.
+            if (
+                label == "forward"
+                and "hip_roll" in name
+                and abs(peak.force_nm) > lipm_gait.KNEE_SAG_NM + 1e-3
+            ):
+                failures.append(
+                    f"{label} {name} {peak.force_nm:+.3f} Nm crosses {lipm_gait.KNEE_SAG_NM:.2f}"
+                )
         def _signed(joint: str) -> str:
             peak = bucket.get(joint)
             if peak is None:
@@ -3236,11 +3258,14 @@ def _bus_kit_yaw() -> tuple[list[str], list[str]]:
         move_s = 8.00
         stop_s = 9.00
         peaks: dict[str, _TauPeak] = {}
+        move_peaks: dict[str, _TauPeak] = {}
         real_step = mj.mj_step
 
         def _step(model: mj.MjModel, data: mj.MjData) -> None:
             real_step(model, data)
             _note_leg_peaks(session, peaks)
+            if session.bus.mode == "move":
+                _note_leg_peaks(session, move_peaks)
 
         mj.mj_step = _step
         last_send = -1.0
@@ -3291,9 +3316,17 @@ def _bus_kit_yaw() -> tuple[list[str], list[str]]:
                 failures.append(f"{name} {joint} {peak.force_nm:+.3f} Nm")
             if "knee" in joint and abs(peak.force_nm) > lipm_gait.KNEE_SAG_NM + 1e-3:
                 failures.append(f"{name} knee {joint} {peak.force_nm:+.3f} Nm")
+        for joint, peak in move_peaks.items():
+            if "hip_roll" in joint and abs(peak.force_nm) > lipm_gait.KNEE_SAG_NM + 1e-3:
+                failures.append(f"{name} hip roll {joint} {peak.force_nm:+.3f} Nm")
+        hip_move = max(
+            (abs(p.force_nm) for n, p in move_peaks.items() if "hip_roll" in n),
+            default=0.0,
+        )
         lines.append(
             f"{name} angle {angle_peak:.3f} rad  steady Δyaw {dyaw:+.1f} deg  "
             f"yaw rate {rate:+.3f} rad/s  knee |τ| {knee_peak:.3f}  "
+            f"hip roll |τ| {hip_move:.3f}  "
             f"worst {worst_name} {worst:+.3f} Nm"
         )
         session.assert_plant_unchanged()
@@ -3355,14 +3388,17 @@ def _bus_kit_reverse() -> tuple[list[str], list[str]]:
     ratio = body / -VX_BACK_CAP if VX_BACK_CAP else 0.0
     _expect(abs(ratio - 1.0) < 0.08, f"reverse body/command {ratio:.2f}", failures)
     knee = max((abs(p.force_nm) for n, p in peaks.items() if "knee" in n), default=0.0)
+    hip_roll = max((abs(p.force_nm) for n, p in peaks.items() if "hip_roll" in n), default=0.0)
     if knee > lipm_gait.KNEE_SAG_NM + 1e-3:
         failures.append(f"reverse knee {knee:.3f} Nm")
+    if hip_roll > lipm_gait.KNEE_SAG_NM + 1e-3:
+        failures.append(f"reverse hip roll {hip_roll:.3f} Nm")
     for name, peak in peaks.items():
         if abs(peak.force_nm) > BUS_KIT_RAIL_NM:
             failures.append(f"reverse {name} {peak.force_nm:+.3f} Nm")
     lines.append(
         f"reverse cmd {-VX_BACK_CAP:+.3f} m/s  settled body {body:+.3f} m/s  "
-        f"ratio {ratio:.2f}  knee |τ| {knee:.3f}"
+        f"ratio {ratio:.2f}  knee |τ| {knee:.3f}  hip roll |τ| {hip_roll:.3f}"
     )
     session.assert_plant_unchanged()
     return failures, lines
@@ -3521,7 +3557,7 @@ def bus_kit_check() -> int:
         return 1
     print(
         "[bus-kit] Prefer FAIL bar holds: settled vx matches the clamp, "
-        "yaw step angle is non-zero, knees stay at or under 2.33 Nm"
+        "yaw step angle is non-zero, knees and walking hip roll stay at or under 2.33 Nm"
     )
     return 0
 

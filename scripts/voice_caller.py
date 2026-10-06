@@ -42,10 +42,10 @@ in one tick; after a right turn the heading kick runs about +11° to
 over 30 s and the cold start still swings the left foot first. After
 a turn the straight resume swings the outside foot, and the pose
 chases the live gait over that double support instead of stepping
-0.342 rad in one tick. Post-left 6 s is +2.1°, post-right stays
-−0.5°. The left turn finishes at +145.0° in 12.5 s; the right turn
-finishes at −136.5° in 11.0 s (8.5° shorter because the hold is
-shorter). First right-lead step knees after stand are 1.749 / 1.152 Nm,
+0.342 rad in one tick. Post-left 6 s is +1.4°, post-right stays
+−2.0°. The left turn finishes at +156.4° in 12.5 s; the right turn
+finishes at −148.6° in 11.0 s (7.8° shorter because the hold is
+shorter). Hip roll while yawing stays at or under 2.33 Nm. First right-lead step knees after stand are 1.749 / 1.152 Nm,
 under 2.33. This file still publishes the 0.056 phrases.
 
 Go to the kitchen, the bathroom, anywhere, SLAM, a map, a waypoint, or

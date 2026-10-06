@@ -1360,7 +1360,8 @@ From 4 s to 8 s, `vel(+0.150, +0.25)` yaws at +0.217 rad/s and
 `vel(+0.150, −0.25)` yaws at −0.221 rad/s. The magnitudes differ by
 2.0%. Straight walk over that same span is −0.003 rad/s. Knees sit on
 2.330 Nm. The worst other leg sample is hip pitch at 2.401 Nm.
-`vel(0, +0.25)` yaws at +0.213 rad/s.
+`vel(0, +0.25)` yaws at +0.213 rad/s. Those steady rates are from
+before the hip-roll budget at the end of this note.
 
 Nav-left resume heading (Prefer FAIL). Scenario: 1 s stand, 15 s
 forward, 12.5 s `vel(+0.150, +0.25)`, then 6 s `vel(+0.150, 0)`.
@@ -1416,16 +1417,51 @@ stepped the joint targets 0.342 rad (both shoulders). A normal
 published walk tick is mean 0.023 rad, p95 0.047 rad, max 0.063 rad.
 The pose now chases the live gait over that double support, 0.056 s,
 7 ticks. The largest tick in the chase is 0.062 rad, the same size as
-the walk's own largest tick. The post-left 6 s with that chase is
-+2.1°. The post-right 6 s does not move the clock and is −0.5°.
+the walk's own largest tick.
 
-The commanded turns on those windows are not the same length. Left is
-12.5 s (16→28.5 s) at +0.25 rad/s and finishes at +145.0°, mean body
-rate +0.202 rad/s. Right is 11.0 s (16→27.0 s) at −0.25 rad/s and
-finishes at −136.5°, mean body rate −0.217 rad/s. The right arc is
-8.5° shorter. The right rate is the higher of the two. The gap is the
+Hip roll on a yawed walk crossed the 2.33 Nm bar with the plant cold.
+Empty plant, 1.0 s stand, then 8 s `vel(+0.150, −0.25)`: `l_hip_roll_pos`
+peaked −2.363 Nm at t=3.42 s. Knees were −2.060 and +1.966 Nm.
+`r_hip_roll_pos` was +2.207 Nm at 4.70 s. Gait time 0.37 s is the right
+single support, so the left leg is stance. Joint velocity was still
+positive (ω +0.20 rad/s) while the servo torque was negative, so
+damping added onto the spring. That peak is not an arm swing and not a
+prop. While applied yaw is away from 0, the hip-roll command uses the
+same 2.33 Nm prediction budget as a stop knee. Forcerange stays ±2.45 Nm.
+Straight forward and reverse do not take that budget. After it, the same
+window peaks at −2.271 Nm on the left hip roll (3.92 s) and +2.159 Nm on
+the right. Knees are −2.083 / +2.043 Nm. min up_z is 0.934. Heading at
+9 s is −101.4°. The left-turn mirror peaks at +2.278 Nm on the right hip
+roll. `--bus-kit` steady rates are +0.235 and −0.236 rad/s (mismatch
+0.6%). In-place is +0.220 rad/s. Straight-forward hip roll stays
+−2.128 / +2.122 Nm.
+
+The commanded turns on the nav windows are not the same length. Left is
+12.5 s (16→28.5 s) at +0.25 rad/s and finishes at +156.4°, mean body
+rate +0.218 rad/s. Right is 11.0 s (16→27.0 s) at −0.25 rad/s and
+finishes at −148.6°, mean body rate −0.236 rad/s. The right arc is
+7.8° shorter. The right rate is the higher of the two. The gap is the
 1.5 s shorter right hold, not a weak right gain and not an outsole
-peel. After the straight resume the leftover is +2.1° on the left and
-−0.5° on the right. Knees on the walks stay on 2.330 Nm. First-step
+peel. After the straight resume the leftover is +1.4° on the left and
+−2.0° on the right. Knees on the walks stay on 2.330 Nm. First-step
 knees stay under 2.33 Nm. Soft-pass is off.
+
+Kitchen, #62 group-3 `col_*` boxes, same 8 s right turn, colliders not
+edited. With the hip-roll budget off, the left foot hits
+`col_chair_stool_b_leg_2` at 23.9 N and 6.85 s, the right foot hits
+`col_chair_stool_b_rail_yp` at 41 N and 9.08 s, and the COM leaves
+support (tipping margin −0.889, min up_z −0.94). With the budget on,
+the same script still clips that stool leg at 6.82 s and 20.4 N, and
+hip pitch reaches ±2.45 Nm during the clip. It does not tip (min up_z
+0.921). A Day-1 `stop` at 6.80 s, before that contact, finishes with
+0 prop contacts, min up_z 0.934, and knees on 2.330 Nm. The stop hold
+puts the other leg joints at 2.401 Nm (over 2.33, under ±2.45). A stop
+at 6.2 s is also clear of props and touches `r_hip_pitch` at −2.450 Nm.
+A stop at 6.82 s is the contact. Commanding yaw 0 at 5.0 s or 6.0 s
+still hits the stool and tips. Reversing to `vel(+0.150, +0.25)` at
+4.0 s misses the stool, stays at min up_z 0.934, and stays under
+2.33 Nm. The same reversal at 5.0 s does not. Bath, bed, living, and
+entrance on this 8 s turn match the empty plant (heading −101.4°, 0
+prop contacts). `col_entrance_sill` is a wall and was not touched.
+Not go-anywhere.
 

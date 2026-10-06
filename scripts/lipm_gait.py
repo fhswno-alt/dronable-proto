@@ -7,8 +7,9 @@ and are not swept here. Joint targets go to the existing position servos. The B�
 over HIP_KNEE_MOVE_S (150 ms). The OP3 path plans at 8 ms and approaches
 those three joints over ``gm_move_s`` (kit servo write 20 ms). Neither
 path steps the command faster than the HX slew. Other joints stay
-inside the linear band (|ctrl-q| <= 0.98 * tau / kp). Nothing in
-this file writes the plant:
+inside the linear band (|ctrl-q| <= 0.98 * tau / kp). Kit hip roll
+uses the 2.33 Nm prediction budget while the bus yaw is away from 0.
+Nothing in this file writes the plant:
 no forcerange, kp, damping, or armature edits, and no free-joint wrench.
 The actuator forcerange still clips force.
 
@@ -568,7 +569,16 @@ class LipmWalker:
         for name, val in joints.items():
             # Shoulder targets already include arm_swing_gain. This path
             # writes them. The Bézier `arms` flag does not freeze the kit swing.
-            self.write_clipped(name, val)
+            # Hip roll on a yawed stance step was the joint over the 2.33 Nm
+            # bar (left stance during the right swing, empty plant, −2.36 Nm
+            # at 3.42 s). Damping adds to the spring while the hip is still
+            # rolling the other way. The sag budget is the knee number, and
+            # it applies only while the bus yaw is non-zero so a straight
+            # walk is unchanged. Forcerange stays ±2.45 Nm.
+            if name.endswith("hip_roll") and abs(self.cmd_yaw) > 1e-3:
+                self.write_force_limited(name, val, KNEE_SAG_NM)
+            else:
+                self.write_clipped(name, val)
         if phase in ("L", "R"):
             self.z_bez = abs(info.ep_l[2] - info.ep_r[2])
         else:
