@@ -7880,6 +7880,156 @@ def score_trim_lead() -> None:
     )
 
 
+# Restored constant level trim from the landed A10+025 sign check.
+# Roll pair matched. Pitch stays per foot. The trim lead is not reapplied.
+_RESTORED_ROLL_L = 0.00662
+_RESTORED_ROLL_R = -0.00662
+_RESTORED_PITCH_L = 0.00210
+_RESTORED_PITCH_R = -0.00069
+_LEVEL_FOOTZ_UM = 1170
+
+
+def _print_ank_axes() -> None:
+    """Plant joint axes. Read only. The file is not written."""
+    model = mj.MjModel.from_xml_path(SCENE)
+    for jn in ("l_ank_roll", "r_ank_roll", "l_ank_pitch", "r_ank_pitch"):
+        jid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, jn)
+        if jid < 0:
+            raise SystemExit(f"missing joint {jn}")
+        axis = model.jnt_axis[jid]
+        act = jn + "_pos"
+        idx = mj.mj_name2id(model, mj.mjtObj.mjOBJ_ACTUATOR, act)
+        if idx < 0:
+            raise SystemExit(f"missing actuator {act}")
+        lo = float(model.actuator_ctrlrange[idx, 0])
+        hi = float(model.actuator_ctrlrange[idx, 1])
+        print(
+            f"PRED level_footz axis {jn} "
+            f"{float(axis[0]):+.3f} {float(axis[1]):+.3f} {float(axis[2]):+.3f} "
+            f"ctrlrange {lo:+.3f} {hi:+.3f}"
+        )
+
+
+def _tilt_check_mm(tick: dict[str, object]) -> float:
+    """67.5 mm times |pitch| plus 38 mm times |roll|. A check, not the toe."""
+    return 67.5 * abs(float(tick["pitch"])) + 38.0 * abs(float(tick["roll"]))
+
+
+def score_level_footz() -> None:
+    """Constant level trim plus 1.170 mm foot-z. The trim lead stays off.
+
+    Less-crouch is not opened here. A derivative lead is the next copy only
+    if this one is still short of +2 mm with floor knees and ankles under
+    2.33 Nm.
+    """
+    z_m = _LEVEL_FOOTZ_UM / 1_000_000.0
+    print(
+        "PRED level_footz_plan trim-lead is off. "
+        "Restored constant level trim from the landed sign check: "
+        f"roll L {_RESTORED_ROLL_L:+.5f} R {_RESTORED_ROLL_R:+.5f} "
+        f"pitch L {_RESTORED_PITCH_L:+.5f} R {_RESTORED_PITCH_R:+.5f} rad. "
+        "Cap stays ±0.025 rad. Not a world-level sole. "
+        f"Foot-z command {_LEVEL_FOOTZ_UM / 1000.0:.3f} mm on A10+025. "
+        "Hip pitch lead stays 20 ms. Roll lead stays 0. "
+        "Sag cancel stays off. Period stays 0.500 s. "
+        "MFG check, not a result: toe about +2.15 mm if the sole were level. "
+        "Less-crouch is not this copy."
+    )
+    _require_plant("before", "level_footz")
+    _print_ank_axes()
+    row = _level_trim_copy(
+        _RESTORED_ROLL_L, _RESTORED_ROLL_R,
+        _RESTORED_PITCH_L, _RESTORED_PITCH_R,
+        z_m,
+    )
+    _require_plant("after", "level_footz")
+    if "trimlead" in row.name:
+        raise SystemExit(f"trim lead is still in the name {row.name}")
+    tick = _worst_tick(row)
+    _print_exact_208("step1", tick, row.flat_toe_mm)
+    for side in ("L", "R"):
+        foot = _foot_tick(row, side)
+        if foot is None:
+            print(f"PRED level_footz exact side {side} missed")
+            continue
+        if foot is tick:
+            continue
+        _print_exact_208(f"step1_foot_{side}", foot, float(foot["toe_z"]) * 1000.0)
+    over = _print_floor_chain("step1", row)
+    check = _tilt_check_mm(tick)
+    drop = float(tick["drop_fo_m"]) * 1000.0
+    margin, hundredths = _margin_hundredths(row.flat_toe_mm)
+    print(
+        f"PRED level_footz tilt_check side {tick['side']} "
+        f"67.5*|pitch|+38*|roll| {check:.6f} mm "
+        f"measured_centre_minus_front_outside {drop:.6f} mm "
+        f"sole_roll {float(tick['roll']):+.8f} "
+        f"sole_pitch {float(tick['pitch']):+.8f} "
+        "check_not_toe 1"
+    )
+    print(
+        f"PRED level_footz mfg_check measured_toe_mm {row.flat_toe_mm:.6f} "
+        f"guess_mm 2.15 delta_mm {row.flat_toe_mm - 2.15:+.6f} "
+        "guess_is_not_the_result 1"
+    )
+    print(
+        f"PRED level_footz step1 {row.name} "
+        f"flat_worst {row.flat_toe_mm:+.6f} mm "
+        f"t {row.flat_toe_t:.3f} side {row.flat_toe_side} "
+        f"vs_plus2_mm {margin:.6f} margin_hundredths {hundredths:.2f} "
+        f"flat_hx {row.flat_hx_over or 'under'} "
+        f"ank_hx {row.ank_hx_over or 'under'} "
+        f"floor_over {over or 'under'} "
+        f"z_mm {_LEVEL_FOOTZ_UM / 1000.0:.3f} "
+        f"lead 0 "
+        f"{_geom_bits(tick)}"
+    )
+    if over:
+        print(
+            "PRED level_footz STOP floor knee or ankle over 2.33: "
+            f"{over}. Derivative lead was not run. "
+            "Less-crouch was not opened. "
+            f"flat_worst {row.flat_toe_mm:+.6f} mm "
+            f"t {row.flat_toe_t:.3f} side {row.flat_toe_side} "
+            f"flat_hx {row.flat_hx_over or 'under'} "
+            f"ank_hx {row.ank_hx_over or 'under'}. "
+            "Not kit-safe. Not go-anywhere."
+        )
+        return
+    if _bar_clear(row):
+        print(
+            "PRED level_footz clear "
+            f"{row.name} flat_worst {row.flat_toe_mm:.6f} mm "
+            f"t {row.flat_toe_t:.3f} side {row.flat_toe_side} "
+            f"vs_plus2_mm {margin:.6f} margin_hundredths {hundredths:.2f}. "
+            "Plus 2 mm cleared with knees, ankle pitch, and ankle roll "
+            "at or under 2.33 Nm on floor contact. "
+            "Derivative lead was not run. Less-crouch was not opened. "
+            "Not kit-safe. Not go-anywhere."
+        )
+        return
+    if row.flat_toe_mm >= 2.0:
+        print(
+            "PRED level_footz STOP. The toe is not short of +2 mm, "
+            "and a joint is over 2.33 Nm. That over is not a floor knee "
+            "or ankle. Derivative lead was not run. "
+            "Less-crouch was not opened. "
+            f"flat_worst {row.flat_toe_mm:+.6f} mm "
+            f"flat_hx {row.flat_hx_over or 'under'} "
+            f"ank_hx {row.ank_hx_over or 'under'}. "
+            "Not kit-safe. Not go-anywhere."
+        )
+        return
+    print(
+        "PRED level_footz short_under_2.33 1. "
+        f"flat_worst {row.flat_toe_mm:+.6f} mm "
+        f"vs_plus2_mm {margin:.6f} margin_hundredths {hundredths:.2f} "
+        f"floor_over under. "
+        "Derivative trim lead is next. It was not run in this copy. "
+        "Less-crouch was not opened. Not kit-safe. Not go-anywhere."
+    )
+
+
 def main() -> None:
     print(f"STEP_TILT {STEP_TILT:.6f} rad {math.degrees(STEP_TILT):.2f} deg")
     measure_scuff()
