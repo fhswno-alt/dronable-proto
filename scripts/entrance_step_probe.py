@@ -4808,6 +4808,29 @@ def _install_inflight_stop(
                 state["pose_gait"] = float(walker.time)
                 state["live_z"] = {"L": z_l, "R": z_r}
                 return er, el, float(spr), float(spl), float(ssy)
+        # First landing tick only. x/y and sole roll/pitch/yaw stay on the
+        # last swing pose. z stays live, so this is not a toe-down buy
+        # and the engage penetration is not lifted.
+        if (
+            getattr(session, "_land_freeze", False)
+            and not state["stop"]
+            and not state["pin_chain"]
+        ):
+            snap = state.get("land_snap")
+            if isinstance(snap, tuple) and len(snap) == 5:
+                ser, sel, spr, spl, ssy = snap
+                z_r = float(er[2])
+                z_l = float(el[2])
+                er[:] = ser
+                el[:] = sel
+                er[2] = z_r
+                el[2] = z_l
+                state["last_raw"] = (
+                    er.copy(), el.copy(), float(walker.time), float(lipm.data.time),
+                )
+                state["pose_gait"] = float(walker.time)
+                state["live_z"] = {"L": z_l, "R": z_r}
+                return er, el, float(spr), float(spl), float(ssy)
         state["last_raw"] = (er.copy(), el.copy(), float(walker.time), float(lipm.data.time))
         state["pose_gait"] = float(walker.time)
         state["live_z"] = {"L": float(el[2]), "R": float(er[2])}
@@ -5472,6 +5495,47 @@ def _install_inflight_stop(
         if state.get("entrance_freeze_tick") and t > float(state.get("entrance_t", -1.0)) + 1e-6:
             session._entrance_freeze = False  # type: ignore[attr-defined]
             state["entrance_freeze_tick"] = False
+        if state.get("land_freeze_tick") and t > float(state.get("land_t", -1.0)) + 1e-6:
+            session._land_freeze = False  # type: ignore[attr-defined]
+            state["land_freeze_tick"] = False
+        if (
+            label != "stop"
+            and walking
+            and not state.get("land_seen")
+            and not state["stop"]
+        ):
+            saved_t = float(walker.time)
+            dt = float(ow.OP3_CTRL_S)
+            # The clock has already stepped into the double support after
+            # the first left swing. The pose one tick earlier is that swing.
+            if (
+                float(walker.l_ssp_end) < saved_t <= float(walker.r_ssp_start) + 1e-9
+                and saved_t - dt <= float(walker.l_ssp_end) + 1e-9
+            ):
+                walker.time = saved_t - dt
+                try:
+                    er0, el0, pr0, pl0, sy0 = orig_endpoints()
+                finally:
+                    walker.time = saved_t
+                state["land_snap"] = (
+                    np.array(er0, dtype=np.float64, copy=True),
+                    np.array(el0, dtype=np.float64, copy=True),
+                    float(pr0),
+                    float(pl0),
+                    float(sy0),
+                )
+                session._land_freeze = True  # type: ignore[attr-defined]
+                session._land_armed = True  # type: ignore[attr-defined]
+                state["land_seen"] = True
+                state["land_freeze_tick"] = True
+                state["land_t"] = t
+                print(
+                    "PRED stop_land freeze planar+attitude at the last swing "
+                    f"pose t {t:.3f}. The landing tick holds the live joint. "
+                    "Loaded hip pitch, knee, and ankle pitch on the landing "
+                    "leg then step at the stop-bout stance rate. "
+                    "z stays live. This is not a swing stretch."
+                )
         if label != "stop" and walking and not state.get("entrance_seen"):
             er0, el0, pr0, pl0, sy0 = orig_endpoints()
             state["entrance_snap"] = (
@@ -12165,6 +12229,11 @@ def _install_sagittal_slew(
     entrance_cmd: dict[str, float] = {}
     entrance_at: dict[str, float] = {}
     entrance_done: set[str] = set()
+    land_cmd: dict[str, float] = {}
+    land_at: dict[str, float] = {}
+    land_done: set[str] = set()
+    session._land_freeze = False  # type: ignore[attr-defined]
+    session._land_armed = False  # type: ignore[attr-defined]
 
     def _entrance_live(jn: str) -> bool:
         """Stop-bout engage only. Not the continuous-walk seed.
@@ -12228,6 +12297,57 @@ def _install_sagittal_slew(
             if jn.endswith(("knee", "ank_pitch")):
                 prev[jn] = float(stepped)
         return float(entrance_cmd[jn])
+
+    def _land_live(jn: str) -> bool:
+        """First landing double support. Not a swing stretch.
+
+        The leg that just finished the first swing starts from the live
+        joint. The other leg stays on its slew. The walk ladder is not
+        read. Ankle roll stays on its own freeze.
+        """
+        if not getattr(session, "_sag_stop_installed", False):
+            return False
+        if getattr(session, "_walk_z_stretch", False):
+            return False
+        if getattr(session, "_sag_torque_cap", False):
+            return False
+        if not getattr(session, "_land_armed", False):
+            return False
+        if jn in land_done:
+            return False
+        if not jn.startswith("l_"):
+            return False
+        return jn.endswith(("hip_pitch", "knee", "ank_pitch"))
+
+    def _toward_land(jn: str, target: float) -> float:
+        """One stop-bout stance step from the live joint. No torque hold.
+
+        The landing tick writes the live joint. Later ticks step at the
+        stop-bout stance rate onto the loaded chain. Knee and ankle pitch
+        hand that command to the stance slew.
+        """
+        t_now = float(lipm.data.time)
+        last = land_at.get(jn)
+        if last is None or t_now - last >= ctrl_period - 1e-4:
+            old = land_cmd.get(jn)
+            if old is None:
+                old = float(lipm.q(jn))
+            if getattr(session, "_land_freeze", False):
+                stepped = float(old)
+            else:
+                dq = float(target) - float(old)
+                if dq > cap:
+                    stepped = float(old) + cap
+                elif dq < -cap:
+                    stepped = float(old) - cap
+                else:
+                    stepped = float(target)
+                    land_done.add(jn)
+            land_cmd[jn] = float(stepped)
+            land_at[jn] = t_now
+            if jn.endswith(("knee", "ank_pitch")):
+                prev[jn] = float(stepped)
+        return float(land_cmd[jn])
 
     def _toward_approach(jn: str, target: float) -> float:
         """One approach-z step toward the warped swing knee. No torque hold.
@@ -12339,6 +12459,11 @@ def _install_sagittal_slew(
     last_cmd: dict[str, float] = {}
 
     def write(jn: str, q_des: float) -> None:
+        if _land_live(jn):
+            q_des = _toward_land(jn, float(q_des))
+            last_cmd[jn] = float(q_des)
+            orig(jn, float(q_des))
+            return
         if _entrance_live(jn):
             q_des = _toward_entrance(jn, float(q_des))
             last_cmd[jn] = float(q_des)
@@ -12545,6 +12670,14 @@ def _install_sagittal_slew(
             "The engage tick holds that joint. Planar x/y and sole "
             "roll/pitch/yaw hold the stand pose on that tick. "
             "The walk ladder stays off this bout."
+        )
+        print(
+            "PRED sag_slew stop_land from the live joint at "
+            f"{float(rad_s):.3f} rad/s on the landing leg's hip pitch, "
+            "knee, and ankle pitch. The first landing tick holds that "
+            "joint. Planar x/y and sole roll/pitch/yaw hold the last "
+            "swing pose on that tick. z stays live. The walk ladder "
+            "stays off this bout."
         )
     if "hip_pitch" in suffixes:
         print(
@@ -14159,6 +14292,11 @@ def score_sag_stop() -> None:
         "That tick holds the live joint. Loaded hip pitch, knee, and ankle "
         "pitch then step from there at the stop-bout stance rate. That catch "
         "is not the continuous-walk seed. "
+        "At the first landing double support the last swing foot's planar "
+        "and attitude hold for one tick. That tick holds the live joint. "
+        "The landing leg's hip pitch, knee, and ankle pitch then step from "
+        "there at the stop-bout stance rate. z stays live. That catch is "
+        "not a swing stretch. "
         "Before the stop, the approach swing-z is time-stretched on its own "
         "rate so the airborne knee can track. That delta is off from the "
         "stop command. The leftover swing-z is time-stretched so the knee "
@@ -14549,6 +14687,7 @@ def score_sag_stop() -> None:
     _print_air_ank_land(name, held)
     _print_approach_knee(name, held)
     _print_entrance(name, held)
+    _print_landing(name, held)
     if held.get("fault"):
         fails.append(f"fault {held.get('fault')} t {float(held.get('fault_t', float('nan'))):.3f}")
     if air_zero:
@@ -15195,6 +15334,141 @@ def _print_entrance(name: str, held: dict[str, object]) -> None:
         "Hip pitch, knee, and ankle pitch from the engage tick through "
         "the catch stay at or under 2.33 Nm. "
         "The continuous-walk seed stays off."
+    )
+
+
+def _print_landing(name: str, held: dict[str, object]) -> None:
+    """First landing double support. Load and four corners at that tick.
+
+    The window is the loaded catch after the first left swing. Engage
+    corners stay on this copy. A lift that hides that penetration is a
+    Prefer FAIL of this lever.
+    """
+    asks = held.get("asks")
+    lateral = held.get("lateral")
+    surface = held.get("surface")
+    if not isinstance(asks, list) or not isinstance(lateral, list):
+        print(f"PRED {name} landing missing")
+        return
+    by_lat: dict[float, dict[str, float | str]] = {}
+    for row in lateral:
+        if isinstance(row, dict):
+            by_lat[round(float(row["t_ask"]), 5)] = row
+    by_surf: dict[float, dict[str, object]] = {}
+    if isinstance(surface, list):
+        for row in surface:
+            if isinstance(row, dict):
+                by_surf[round(float(row["t"]), 5)] = row
+
+    def _corner_line(tag: str, t_key: float) -> float:
+        surf = by_surf.get(t_key)
+        lat = by_lat.get(t_key)
+        fn_l = float(lat["fn_l"]) if lat is not None else float("nan")
+        fn_r = float(lat["fn_r"]) if lat is not None else float("nan")
+        print(
+            f"PRED {name} landing_load {tag} t {t_key:.3f} "
+            f"fn_l {fn_l:.2f} fn_r {fn_r:.2f}"
+        )
+        low_mm = float("inf")
+        for side in ("L", "R"):
+            plane = surf.get(side) if isinstance(surf, dict) else None
+            plane_d = plane if isinstance(plane, dict) else None
+            corners = plane_d.get("corners") if isinstance(plane_d, dict) else None
+            if not isinstance(corners, tuple) or not corners:
+                print(f"PRED {name} landing_corners side {side} {tag} missing")
+                low_mm = float("nan")
+                continue
+            parts = " ".join(
+                f"{label} {float(z) * 1000.0:+.3f}" for label, z in corners
+            )
+            low = min(corners, key=lambda packed: float(packed[1]))
+            low_side = float(low[1]) * 1000.0
+            low_mm = min(low_mm, low_side)
+            print(
+                f"PRED {name} landing_corners side {side} {tag} "
+                f"t {t_key:.3f} {parts} "
+                f"low {low[0]} {low_side:+.3f} mm"
+            )
+        return low_mm
+
+    land_row: dict[str, float | str] | None = None
+    for row in lateral:
+        if not isinstance(row, dict):
+            continue
+        t_row = float(row["t_ask"])
+        if t_row < 1.20 - 1e-9 or t_row > 1.30 + 1e-9:
+            continue
+        if str(row["phase"]) != "D":
+            continue
+        if land_row is None or t_row < float(land_row["t_ask"]):
+            land_row = row
+    if land_row is None:
+        print(f"PRED {name} landing_load first missing")
+        return
+    land_t = round(float(land_row["t_ask"]), 5)
+    land_low = _corner_line("first", land_t)
+    engage_key = round(_STOP_ENTRANCE_S, 5)
+    if engage_key not in by_surf:
+        nearest = min(by_surf, key=lambda key: abs(key - _STOP_ENTRANCE_S), default=None)
+        engage_key = float(nearest) if nearest is not None else engage_key
+    engage_low = _corner_line("engage", engage_key)
+    # The accepted engage soles sit about 0.6 to 0.8 mm under the floor.
+    # A higher sole on that tick hid the penetration.
+    hidden = (not math.isfinite(engage_low)) or engage_low > -0.55
+    t1 = land_t + 0.20
+    worst: dict[str, tuple] = {}
+    for item in asks:
+        jn = str(item[1])
+        if not jn.endswith(("hip_pitch", "knee", "ank_pitch")):
+            continue
+        t_item = float(item[0])
+        if t_item < land_t - 1e-9 or t_item > t1 + 1e-9:
+            continue
+        prev = worst.get(jn)
+        if prev is None or abs(float(item[3])) > abs(float(prev[3])):
+            worst[jn] = item
+    overs: list[str] = []
+    if hidden:
+        overs.append(
+            f"engage penetration hidden low {engage_low:+.3f} mm"
+        )
+    if not math.isfinite(land_low):
+        overs.append("landing corners missing")
+    for jn in (
+        "l_hip_pitch", "l_knee", "l_ank_pitch",
+        "r_hip_pitch", "r_knee", "r_ank_pitch",
+    ):
+        item = worst.get(jn)
+        if item is None:
+            print(f"PRED {name} landing {jn} none")
+            overs.append(f"{jn} missing")
+            continue
+        ask = float(item[3])
+        over = abs(ask) > KNEE_NM + 1e-9
+        row = by_lat.get(round(float(item[0]), 5))
+        fn_l = float(row["fn_l"]) if row is not None else float("nan")
+        fn_r = float(row["fn_r"]) if row is not None else float("nan")
+        print(
+            f"PRED {name} landing {jn} {ask:+.4f} "
+            f"t {float(item[0]):.3f} "
+            f"q {_ask_q(item):+.5f} q_des {float(item[2]):+.5f} "
+            f"kp_term {float(item[8]):+.4f} kv_term {float(item[9]):+.4f} "
+            f"fn_l {fn_l:.2f} fn_r {fn_r:.2f} ge_2.33 {int(over)}"
+        )
+        if over:
+            overs.append(f"{jn} {ask:+.4f} t {float(item[0]):.3f}")
+    if overs:
+        print(
+            f"PRED {name} landing Prefer FAIL. "
+            + " | ".join(overs)
+            + ". z stayed live. The walk ladder stays off."
+        )
+        return
+    print(
+        f"PRED {name} landing CLEAR. "
+        "The landing leg's hip pitch, knee, and ankle pitch from the "
+        "first double support through the catch stay at or under 2.33 Nm. "
+        "Engage sole penetration stays on this copy. z stayed live."
     )
 
 
