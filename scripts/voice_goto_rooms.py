@@ -729,12 +729,19 @@ def _range_wall(
     pose, body, yaw, pitch, roll, tilt, pan, step_off, _cam = _pose_bits(
         session, model, cid, jid, pan_id, reach,
     )
+    toes = gate.toe_samples(session, cid)
+    # Distance in front of the foot that is ahead right now. The latch
+    # still subtracts the period high-water inside toe_gap. That margin
+    # is not camera-pitch error.
+    lead_off = 0.0 if not toes else max(float(row.offset_m) for row in toes)
     reading: dict[str, object] = {
         "u": None,
         "v": None,
         "wall": "",
         "toe_gap_m": None,
         "geometric_m": None,
+        "lead_off_m": lead_off,
+        "step_off_m": float(step_off),
         "in_corridor": False,
         "cam_z_m": float(pose.position_m[2]),
         "imu_pitch_rad": float(pitch),
@@ -754,7 +761,7 @@ def _range_wall(
         if estimate is None or not estimate.in_corridor:
             continue
         gap = float(estimate.toe_gap_m)
-        geometric = float(estimate.forward_m) - float(estimate.step_off_m)
+        geometric = float(estimate.forward_m) - lead_off
         held = reading["toe_gap_m"]
         if held is None or gap < float(held):
             reading["u"] = u
@@ -2293,6 +2300,8 @@ def _range_probe() -> dict[str, object]:
             "imu_pitch_rad": float(reading["imu_pitch_rad"]),
             "head_tilt_rad": float(reading["head_tilt_rad"]),
             "cam_pitch_rad": float(reading["cam_pitch_rad"]),
+            "lead_off_m": float(reading["lead_off_m"]),
+            "step_off_m": float(reading["step_off_m"]),
         })
 
     try:
@@ -2388,6 +2397,8 @@ def main() -> int:
             f"cam_z={sample['cam_z_m']:.3f} "
             f"imu_pitch={sample['imu_pitch_rad']:+.4f} "
             f"cam_pitch={sample['cam_pitch_rad']:+.4f} "
+            f"lead={sample['lead_off_m']:+.3f} "
+            f"step={sample['step_off_m']:+.3f} "
             f"wall={sample['true_wall']}",
             flush=True,
         )
