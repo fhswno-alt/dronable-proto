@@ -1544,7 +1544,8 @@ Near the middle of the frame the pitch choice is the error. At
 t = 5.46 s, `col_chair_stool_b_leg_2` is at row 381, column 312,
 ground gap 0.227 m. Live pitch −18.29° estimates 0.229 m. Stand
 pitch −14.84° estimates 0.260 m, 3.3 cm long. `head_tilt` alone
-estimates 0.439 m.
+estimates 0.439 m. Those two pitch comparisons used a frozen 0.335 m
+height. The gate below uses the live camera z.
 
 The floor leaves the frame before an eye-only `d_min`. At about
 −15.6° world pitch the bottom row is an eye range of about 0.14 m.
