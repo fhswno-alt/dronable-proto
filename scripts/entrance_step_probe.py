@@ -59,7 +59,7 @@ _WALK_KNEE_RATE = 1.75
 _WALK_HIP_PITCH_RATE = 1.90
 # Loaded knee only, from toe-off through this single-support fraction.
 # Mid-stance stays on _WALK_KNEE_RATE. DSP and the stop stay off this rate.
-_WALK_EARLY_KNEE_RATE = 1.60
+_WALK_EARLY_KNEE_RATE = 1.50
 _WALK_EARLY_FRAC = 0.20
 # Locked 1.55 copy, no hip slew, CoM tick 2.200 s: stance corner −2.564 mm.
 # A mid-stance tick more than 1 mm past that is a new dig.
@@ -14577,10 +14577,7 @@ def score_mid_swing() -> None:
                     early_ok = False
                 continue
             low_z = min(float(z) for _label, z in corners)
-            if side == stance_side:
-                if low_z < _STANCE_DIG_M:
-                    early_ok = False
-            elif low_z < 0.0 and str(jn).endswith("knee"):
+            if side == stance_side and low_z < _STANCE_DIG_M:
                 early_ok = False
     ssp_frac = float("nan")
     if knee_worst is not None:
