@@ -4069,6 +4069,7 @@ def _install_inflight_stop(
     *,
     next_stride_decay: bool = False,
     stance_slew: bool = False,
+    sag_stop_cap: bool = False,
 ) -> None:
     """Freeze the loaded stance chain. Only the airborne swing-z schedule moves.
 
@@ -4113,6 +4114,9 @@ def _install_inflight_stop(
         "slew_t0": float("nan"),
         "slew_from": {},
         "slew_s": 1.0,
+        "sag_stop_cap": bool(sag_stop_cap),
+        "saw_air": False,
+        "told_hold": False,
     }
     print(
         "PRED inflight_stop schedule "
@@ -4598,12 +4602,23 @@ def _install_inflight_stop(
         del vx, yaw_rate
         t = float(lipm.data.time)
         label = driver.segment(t).label
+        entered_now = False
         if not state["stop"]:
             if label != "stop":
                 orig_tick(float(sw.VX_FWD_CAP), 0.0, walking)
                 _remember_pre(t)
                 return
             state["stop"] = True
+            entered_now = True
+            if state["sag_stop_cap"]:
+                session._sag_torque_cap = True  # type: ignore[attr-defined]
+                print(
+                    "PRED sag_stop_cap on. Stance knee and ankle pitch "
+                    "keep the 1.90 rad/s slew and step toward the stand pose. "
+                    "Each of those commands stays inside "
+                    "|kp*(q_des-q)| + |kv*omega| <= 2.33 Nm. "
+                    "The airborne swing-z knee is not on that slew."
+                )
             pre = state["pre"]
             phase = _gait_phase_name(walker)
             load_l = _sole_load_n(session, "L")
@@ -4621,8 +4636,19 @@ def _install_inflight_stop(
                 swing = "L" if load_l <= load_r else "R"
             else:
                 swing = ""
+            if state["sag_stop_cap"] and swing == "" and phase in ("L", "R"):
+                # Both feet are still over the gate at the start of this
+                # single support. The clock swing has not left. That is
+                # not a settled double support, and x_move stays.
+                swing = phase
             state["swing"] = swing
-            airborne = swing in ("L", "R")
+            foot_up = (
+                (swing == "L" and load_l <= load_n)
+                or (swing == "R" and load_r <= load_n)
+            )
+            if foot_up:
+                state["saw_air"] = True
+            airborne = bool(foot_up)
             if airborne and isinstance(pre, dict):
                 ep = pre["el"] if swing == "L" else pre["er"]
                 state["swing_pin"] = (
@@ -4738,7 +4764,59 @@ def _install_inflight_stop(
         load_r = _sole_load_n(session, "R")
         both = load_l > load_n and load_r > load_n
         swing = str(state["swing"])
-        if both and state["pin_chain"]:
+        if state["sag_stop_cap"] and (load_l <= load_n or load_r <= load_n):
+            state["saw_air"] = True
+        if (
+            state["sag_stop_cap"]
+            and swing in ("L", "R")
+            and not state["pin_swing"]
+            and (
+                (swing == "L" and load_l <= load_n)
+                or (swing == "R" and load_r <= load_n)
+            )
+        ):
+            er_now, el_now, _pel_r, _pel_l, _swap_y = orig_endpoints()
+            ep_now = el_now if swing == "L" else er_now
+            state["swing_pin"] = (
+                float(ep_now[0]), float(ep_now[1]),
+                float(ep_now[3]), float(ep_now[4]), float(ep_now[5]),
+            )
+            state["pin_swing"] = True
+            state["toe_hold"] = _swing_toe(swing, float(walker.time))
+            up = load_l if swing == "L" else load_r
+            print(
+                "PRED sag_stop_cap swing foot unloaded "
+                f"t {t:.3f} swing {swing} load {up:.2f} N. "
+                "x/y/roll/pitch pin at this pose. z still advances. "
+                "x_move is not zeroed."
+            )
+        clock = _gait_phase_name(walker)
+        real_dsp = bool(both and state["pin_chain"])
+        if state["sag_stop_cap"]:
+            # A loaded clock-swing is not double support. The snap also
+            # waits one tick so the stop command itself does not zero x_move.
+            if clock in ("L", "R") and not state["saw_air"]:
+                real_dsp = False
+            if entered_now:
+                real_dsp = False
+            if (
+                both
+                and not real_dsp
+                and not state["saw_air"]
+                and clock in ("L", "R")
+                and not state["told_hold"]
+            ):
+                state["told_hold"] = True
+                print(
+                    "PRED sag_stop_cap both feet loaded in single support "
+                    f"t {t:.3f} clock {clock} gait_t {float(walker.time):.3f} "
+                    f"load L {load_l:.2f} R {load_r:.2f}. "
+                    "This is not a settled double support. "
+                    "x_move stays. The snap waits until a foot has been "
+                    "airborne or the clock is in double support, and not "
+                    "on the stop tick."
+                )
+        if real_dsp:
             raw_now = orig_endpoints()
             live_l = float(raw_now[1][2])
             live_r = float(raw_now[0][2])
@@ -4758,6 +4836,12 @@ def _install_inflight_stop(
             walker.angle_cmd = 0.0
             walker.update_movement()
             state["snapped"] = True
+            if state["sag_stop_cap"]:
+                session._sag_both_stance = True  # type: ignore[attr-defined]
+                print(
+                    "PRED sag_stop_cap both feet loaded. "
+                    "Knee and ankle pitch on both legs use the stance slew."
+                )
             print(
                 "PRED inflight_snap "
                 f"t {t:.3f} gait_t {float(walker.time):.3f} "
@@ -5113,6 +5197,7 @@ def measure_pred_clip(
     y_swap_m: float | None = None,
     lateral_log: bool = False,
     stance_slew: bool = False,
+    sag_stop_cap: bool = False,
     sole_flat: bool = False,
     sole_flat_mode: str = "q",
     y_out_m: float | None = None,
@@ -5304,6 +5389,7 @@ def measure_pred_clip(
             session, driver, inflight_trace, inflight_edge,
             next_stride_decay=next_stride_decay,
             stance_slew=stance_slew,
+            sag_stop_cap=sag_stop_cap,
         )
     rows: list[Tick] = []
     surface_rows: list[dict[str, object]] = []
@@ -5935,6 +6021,7 @@ def measure_pred_clip(
         steer_out["inflight"] = inflight_trace
         steer_out["inflight_edge"] = inflight_edge
         steer_out["lateral"] = lateral_rows
+        steer_out["sag_cap"] = list(getattr(session, "_sag_cap_rows", []))
     return PredScore(
         name=name,
         clip=clip,
@@ -10799,20 +10886,104 @@ def _install_sagittal_slew(
         raise SystemExit(f"sagittal slew joints {joints} are not knee or ank_pitch")
     walker = lipm.op3
     orig = lipm.write_clipped
+    orig_fl = lipm.write_force_limited
     prev: dict[str, float] = {}
     cap = float(rad_s) * float(ow.OP3_CTRL_S)
+    session._sag_cap_rows = []  # type: ignore[attr-defined]
+    step_at: dict[str, float] = {}
+    stepped_cmd: dict[str, float] = {}
+    ctrl_period = float(session.ctrl_dt)
 
     def _stance_prefix(t_cmd: float) -> str:
+        if getattr(session, "_sag_both_stance", False):
+            return "both"
         if float(walker.l_ssp_start) < t_cmd <= float(walker.l_ssp_end):
             return "r_"
         if float(walker.r_ssp_start) < t_cmd <= float(walker.r_ssp_end):
             return "l_"
         return "both"
 
+    def _hold_inside(jn: str, proposed: float) -> tuple[float, float, float, int]:
+        """Pull q_des onto |kp*err| + |kv*omega| <= 2.33. Direction stays put."""
+        q = float(lipm.q(jn))
+        jid = mj.mj_name2id(lipm.model, mj.mjtObj.mjOBJ_JOINT, jn)
+        omega = float(lipm.data.qvel[int(lipm.model.jnt_dofadr[jid])])
+        idx = lipm.act_idx[jn + "_pos"]
+        kp = float(lipm.model.actuator_gainprm[idx, 0])
+        kv = -float(lipm.model.actuator_biasprm[idx, 2])
+        budget = KNEE_NM - abs(kv * omega)
+        capped = 0
+        if budget <= 0.0 or kp < 1e-6:
+            return q, q, omega, 1
+        max_err = budget / kp
+        err = float(proposed) - q
+        held = float(proposed)
+        if abs(err) > max_err:
+            held = q + math.copysign(max_err, err)
+            capped = 1
+        return held, q, omega, capped
+
+    def _cap_row(
+        jn: str,
+        q_now: float,
+        q_des: float,
+        q_stand: float,
+        stepped: float,
+        old: float,
+        capped: int,
+        omega: float,
+    ) -> None:
+        session._sag_cap_rows.append({  # type: ignore[attr-defined]
+            "t": float(lipm.data.time),
+            "jn": jn,
+            "q": q_now,
+            "q_des": float(q_des),
+            "q_stand": q_stand,
+            "stepped": float(stepped),
+            "from": float(old),
+            "capped": capped,
+            "omega": omega,
+        })
+
+    def _toward_stand(jn: str, q_des: float) -> tuple[float, float]:
+        """One slew step per control tick, then the live torque hold.
+
+        Physics substeps reuse that step and re-hold against the live
+        omega. A stand write after a tip otherwise requests q_stand with
+        the cap skipped.
+        """
+        t_now = float(lipm.data.time)
+        q_stand = float(lipm.q_stand.get(jn, float(lipm.q(jn))))
+        last = step_at.get(jn)
+        if last is None or t_now - last >= ctrl_period - 1e-4:
+            old = prev.get(jn)
+            if old is None:
+                old = float(q_des)
+            dq = q_stand - old
+            if dq > cap:
+                stepped = old + cap
+            elif dq < -cap:
+                stepped = old - cap
+            else:
+                stepped = q_stand
+            stepped_cmd[jn] = float(stepped)
+            step_at[jn] = t_now
+            origin = float(old)
+        else:
+            stepped = float(stepped_cmd[jn])
+            origin = float(prev.get(jn, stepped))
+        held, q_now, omega, capped = _hold_inside(jn, stepped)
+        prev[jn] = float(held)
+        _cap_row(jn, q_now, held, q_stand, stepped, origin, capped, omega)
+        return float(held), q_stand
+
     def write(jn: str, q_des: float) -> None:
         if jn.endswith(suffixes):
             stance = _stance_prefix(_cmd_time(walker))
-            if stance == "both" or jn.startswith(stance):
+            limited = stance == "both" or jn.startswith(stance)
+            if limited and getattr(session, "_sag_torque_cap", False):
+                q_des, _q_stand = _toward_stand(jn, float(q_des))
+            elif limited:
                 old = prev.get(jn)
                 if old is not None:
                     dq = float(q_des) - old
@@ -10820,10 +10991,19 @@ def _install_sagittal_slew(
                         q_des = old + cap
                     elif dq < -cap:
                         q_des = old - cap
-            prev[jn] = float(q_des)
+                prev[jn] = float(q_des)
         orig(jn, float(q_des))
 
+    def write_limited(jn: str, q_des: float, limit_nm: float | None = None) -> None:
+        # hold_stand and the stand substep call this, not write_clipped.
+        # After the stop, knee and ankle pitch still take the cap. The
+        # walk leaves the flag off, so this copy is unchanged.
+        if jn.endswith(suffixes) and getattr(session, "_sag_torque_cap", False):
+            q_des, _q_stand = _toward_stand(jn, float(q_des))
+        orig_fl(jn, float(q_des), limit_nm)
+
     lipm.write_clipped = write  # type: ignore[method-assign]
+    lipm.write_force_limited = write_limited  # type: ignore[method-assign]
     names = "+".join(suffixes)
     print(
         f"PRED sag_slew {float(rad_s):.3f} rad/s on stance {names}. "
@@ -12376,6 +12556,389 @@ def score_sagittal() -> None:
         "Plant md5 stays 207f3d5e9c6a72e16f7aa0c8d224f75e."
     )
     _require_plant("after", "sag")
+
+
+def _print_box_pair(name: str, tag: str, row: dict[str, float | str] | None) -> None:
+    """CoM slack in both contact boxes. Outside is logged and is not the torque bar."""
+    if row is None:
+        print(f"PRED {name} com {tag} missing")
+        return
+    def _out(sx: float, sy: float) -> int:
+        return int(min(sx, sy) < -1e-4)
+
+    sx_l = float(row["slack_x_l"])
+    sy_l = float(row["slack_y_l"])
+    sx_r = float(row["slack_x_r"])
+    sy_r = float(row["slack_y_r"])
+    print(
+        f"PRED {name} com {tag} t {float(row['t_ask']):.3f} "
+        f"phase {row['phase']} stance {row['stance']} "
+        f"L slack_x {sx_l * 1000.0:+.2f} slack_y {sy_l * 1000.0:+.2f} mm "
+        f"out {_out(sx_l, sy_l)} "
+        f"R slack_x {sx_r * 1000.0:+.2f} slack_y {sy_r * 1000.0:+.2f} mm "
+        f"out {_out(sx_r, sy_r)} "
+        f"half_y {float(row['half_y_l']) * 1000.0:.2f} mm "
+        f"centre_y L {float(row['center_y_l']) * 1000.0:+.2f} "
+        f"R {float(row['center_y_r']) * 1000.0:+.2f} "
+        f"fn L {float(row['fn_l']):.2f} R {float(row['fn_r']):.2f} "
+        f"corner L {float(row['corner_l']) * 1000.0:+.3f} "
+        f"R {float(row['corner_r']) * 1000.0:+.3f} mm"
+    )
+
+
+def score_sag_stop() -> None:
+    """Soft stop on the sagittal CLEAR locks. Yaw stays 0.
+
+    Pass is every unclamped leg ask from the stop command onward at or
+    under 2.33 Nm, and no leg actuator on the plant rail. Hip roll and
+    the CoM box are logged and are not this pass. The y_swap 0 flat toe
+    is not the earlier y_swap 0.020 clear.
+    """
+    name = "sag_stop"
+    y_swap = 0.0
+    slew = 1.90
+    script, end = _inflight_stop_script()
+    print(
+        f"PRED {name} plan y_swap {y_swap:.3f}. "
+        "Sole-flat stance ankle stays on. "
+        f"Stance knee and ankle pitch stay on the {slew:.2f} rad/s slew "
+        "through the walk and the stop. "
+        "On the stop that slew steps toward the stand pose and stays inside "
+        "the 2.33 Nm part cap. "
+        "The airborne foot keeps swing-z. x_move is not zeroed on the stop tick. "
+        "The first real double support snaps the amplitude to 0. "
+        "Full step. Foot-z 1.170 mm. Less-crouch closed. Trim-lead off. Yaw 0. "
+        "Hip roll and CoM-in-box are logged and are not this pass. "
+        "The y_swap 0 toe is not the y_swap 0.020 clear."
+    )
+    _require_plant("before", name)
+    held: dict[str, object] = {}
+    measure_pred_clip(
+        clip=True,
+        move_s=None,
+        pitch_move_off=True,
+        toe_up_rad=0.025,
+        toe_up_shape="front",
+        toe_full_frac=0.10,
+        hip_lead=True,
+        lead_roll_scale=0.0,
+        lead_pitch_scale=_pitch_lead_scale(20.0),
+        sag_cancel=False,
+        z_profile="phase",
+        ank_trim_l=_RESTORED_ROLL_L,
+        ank_trim_r=_RESTORED_ROLL_R,
+        ank_pitch_trim_l=_RESTORED_PITCH_L,
+        ank_pitch_trim_r=_RESTORED_PITCH_R,
+        z_extra_m=_LEVEL_FOOTZ_UM / 1_000_000.0,
+        t_end=end,
+        segments=script,
+        steer_out=held,
+        inflight_stop=True,
+        next_stride_decay=False,
+        y_swap_m=y_swap,
+        sole_flat=True,
+        sole_flat_mode="q",
+        sag_slew_rad_s=slew,
+        sag_slew_joints=("knee", "ank_pitch"),
+        sag_stop_cap=True,
+        lateral_log=True,
+        surface_tag=True,
+    )
+    _require_plant("after", name)
+    trace = held.get("inflight")
+    asks = held.get("asks")
+    lateral = held.get("lateral")
+    surface = held.get("surface")
+    edge = held.get("inflight_edge")
+    assert isinstance(trace, list) and isinstance(asks, list)
+    assert isinstance(lateral, list) and isinstance(surface, list)
+    assert isinstance(edge, dict)
+    summary = _walk_lateral_summary(held, y_swap)
+    by_t: dict[float, dict[str, float | str]] = {}
+    for row in lateral:
+        if isinstance(row, dict):
+            by_t[round(float(row["t_ask"]), 5)] = row
+    cap_rows = held.get("sag_cap")
+    # The cap log lives on the session. measure_pred_clip keeps it only if
+    # we copied it. Pull it from the steer bag when present.
+    if not isinstance(cap_rows, list):
+        cap_rows = []
+
+    stop_rows = [row for row in trace if isinstance(row, dict) and str(row.get("mode")) != "pre"]
+    if not stop_rows:
+        print(f"PRED {name} Prefer FAIL. no stop tick")
+        _require_plant("after", name)
+        return
+    stop_t = float(stop_rows[0]["t"])
+    stop_move = float(stop_rows[0].get("x_move", float("nan")))
+    print(
+        f"PRED {name} stop_t {stop_t:.3f} end {end:.3f} "
+        f"x_move {stop_move:+.5f} "
+        f"fault {held.get('fault') or 'none'} "
+        f"t {float(held.get('fault_t', float('nan'))):.3f}"
+    )
+    air_zero = abs(stop_move) < 1e-4 and str(stop_rows[0].get("mode")) != "snap"
+    if air_zero:
+        print(f"PRED {name} x_move was zero on the stop tick before the snap")
+
+    leg_suffix = (
+        "hip_yaw", "hip_roll", "hip_pitch", "knee", "ank_pitch", "ank_roll",
+    )
+    roll_suffix = ("hip_roll", "ank_roll")
+
+    def _row_at(t: float) -> dict[str, float | str] | None:
+        exact = by_t.get(round(t, 5))
+        if exact is not None:
+            return exact
+        best: dict[str, float | str] | None = None
+        best_dt = 1e9
+        for row in lateral:
+            if not isinstance(row, dict):
+                continue
+            dt = min(
+                abs(float(row["t_ask"]) - t),
+                abs(float(row["t_post"]) - t),
+            )
+            if dt < best_dt:
+                best_dt = dt
+                best = row
+        if best is not None and best_dt <= 0.02 + 1e-6:
+            return best
+        return None
+
+    def _immediate_pre(jn: str) -> tuple | None:
+        """Last sample of this joint before the stop. Not the walk-wide peak."""
+        best: tuple | None = None
+        for item in asks:
+            if str(item[1]) != jn:
+                continue
+            t_item = float(item[0])
+            if t_item >= stop_t - 1e-9:
+                continue
+            if best is None or t_item > float(best[0]) - 1e-12:
+                best = item
+        return best
+
+    def _print_one(label: str, item: tuple) -> None:
+        t = float(item[0])
+        q = _ask_q(item)
+        ask = float(item[3])
+        print(
+            f"PRED {name} {label} {item[1]} {ask:+.4f} t {t:.3f} "
+            f"q {q:+.5f} q_des {float(item[2]):+.5f} "
+            f"kp_term {float(item[8]):+.4f} kv_term {float(item[9]):+.4f} "
+            f"omega {float(item[10]):+.4f} kp {float(item[11]):.2f} kv {float(item[12]):.4f} "
+            f"phase {item[5]} ge_2.33 {int(abs(ask) > KNEE_NM + 1e-9)}"
+        )
+        _print_box_pair(name, label, _row_at(t))
+
+    def _worst(items: list[tuple], suffixes: tuple[str, ...]) -> dict[str, tuple]:
+        out: dict[str, tuple] = {}
+        for item in items:
+            if not str(item[1]).endswith(suffixes):
+                continue
+            prev = out.get(str(item[1]))
+            if prev is None or abs(float(item[3])) > abs(float(prev[3])):
+                out[str(item[1])] = item
+        return out
+
+    pre_items = [
+        item for item in asks
+        if str(item[1]).endswith(leg_suffix) and _WALK_STEADY_S - 1e-9 <= float(item[0]) < stop_t - 1e-9
+    ]
+    post_items = [
+        item for item in asks
+        if str(item[1]).endswith(leg_suffix) and float(item[0]) + 1e-9 >= stop_t
+    ]
+    print(
+        f"PRED {name} walk_mid_margin {float(summary.get('mid_margin', float('nan'))) * 1000.0:+.2f} mm "
+        f"n_mid_out {summary.get('n_mid_out')}/{summary.get('n_mid')} "
+        "CoM outside is expected at y_swap 0 and is not the torque bar."
+    )
+    for bucket, label in (
+        ("dsp", "dsp"),
+        ("mid_stance", "mid"),
+    ):
+        packed = summary.get(bucket)
+        if not isinstance(packed, dict):
+            continue
+        for suf in roll_suffix:
+            for side in ("l_", "r_"):
+                item = packed.get(side + suf)
+                if isinstance(item, tuple):
+                    _print_one(label, item)
+    pre_worst = _worst(pre_items, leg_suffix)
+    post_worst = _worst(post_items, leg_suffix)
+    peak = None
+    for item in post_worst.values():
+        if peak is None or abs(float(item[3])) > abs(float(peak[3])):
+            peak = item
+    fails: list[str] = []
+    if peak is not None:
+        _print_one("peak", peak)
+        jn = str(peak[1])
+        pre = _immediate_pre(jn)
+        walk_max = pre_worst.get(jn)
+        pre_ask = float(pre[3]) if pre is not None else float("nan")
+        pre_over = pre is not None and abs(pre_ask) > KNEE_NM + 1e-9
+        kind = "pre-stop lag" if pre_over else "stop transition"
+        walk_ask = float(walk_max[3]) if walk_max is not None else float("nan")
+        print(
+            f"PRED {name} peak_kind {kind} {jn} "
+            f"stop {float(peak[3]):+.4f} t {float(peak[0]):.3f} "
+            f"pre {pre_ask:+.4f} "
+            f"pre_t {float(pre[0]) if pre is not None else float('nan'):.3f} "
+            f"walk_max {walk_ask:+.4f} "
+            f"walk_max_t {float(walk_max[0]) if walk_max is not None else float('nan'):.3f} "
+            "walk_max is the parked swing-z when that time is near 2 s. "
+            "The kind uses the tick immediately before the stop."
+        )
+        cap_hit = None
+        for row in cap_rows:
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("jn")) != jn:
+                continue
+            if abs(float(row["t"]) - float(peak[0])) > 1e-6:
+                continue
+            cap_hit = row
+        if isinstance(cap_hit, dict):
+            print(
+                f"PRED {name} slew {jn} t {float(cap_hit['t']):.3f} "
+                f"q {float(cap_hit['q']):+.5f} q_des {float(cap_hit['q_des']):+.5f} "
+                f"q_stand {float(cap_hit['q_stand']):+.5f} "
+                f"from {float(cap_hit['from']):+.5f} "
+                f"stepped {float(cap_hit['stepped']):+.5f} "
+                f"capped {int(cap_hit['capped'])} "
+                f"omega {float(cap_hit['omega']):+.4f}"
+            )
+        else:
+            print(
+                f"PRED {name} slew {jn} t {float(peak[0]):.3f} "
+                "not on the stance knee and ankle-pitch cap. "
+                "Swing-z stays on the gait schedule."
+            )
+    else:
+        fails.append("no stop ask")
+        kind = "stop transition"
+    for jn in sorted(post_worst):
+        item = post_worst[jn]
+        ask = float(item[3])
+        over = abs(ask) > KNEE_NM + 1e-9
+        pre = _immediate_pre(jn)
+        pre_ask = float(pre[3]) if pre is not None else float("nan")
+        pre_over = pre is not None and abs(pre_ask) > KNEE_NM + 1e-9
+        print(
+            f"PRED {name} leg_worst {jn} {ask:+.4f} t {float(item[0]):.3f} "
+            f"q {_ask_q(item):+.5f} q_des {float(item[2]):+.5f} "
+            f"pre {pre_ask:+.4f} "
+            f"pre_t {float(pre[0]) if pre is not None else float('nan'):.3f} "
+            f"pre_over {int(pre_over)} "
+            f"ge_2.33 {int(over)}"
+        )
+        if over:
+            why = "pre-stop lag" if pre_over else "stop transition"
+            fails.append(f"unclamped stop {jn} {ask:+.4f} t {float(item[0]):.3f} {why}")
+    near = None
+    if peak is not None:
+        best_dt = 1e9
+        for row in trace:
+            if not isinstance(row, dict):
+                continue
+            dt = abs(float(row["t"]) - float(peak[0]))
+            if dt < best_dt:
+                best_dt = dt
+                near = row
+    if isinstance(near, dict):
+        print(f"PRED {name} bracket peak")
+        _print_soft_feet(name, near)
+        print(
+            f"PRED {name} freeze {near.get('freeze', '-')} "
+            f"mode {near.get('mode', '-')}"
+        )
+    if edge:
+        print(
+            "PRED sag_stop edge "
+            f"swing {edge.get('swing', '-')} "
+            f"dx {float(edge.get('dx', float('nan'))):+.5f} "
+            f"dknee_des {float(edge.get('ddes', float('nan'))):+.5f} "
+            f"x_move_note pin keeps the walking step until the snap"
+        )
+    toe_mm, toe_t, toe_side, toe_frac = _quiet_flat_toe(held)
+    print(
+        f"PRED {name} flat_toe {toe_mm:+.3f} mm t {toe_t:.3f} "
+        f"side {toe_side or '-'} frac {toe_frac:.3f} "
+        "This toe is the y_swap 0 copy. "
+        "It is not the +2.221 mm clear at y_swap 0.020. "
+        "When lateral returns, the 20-80% flat toe and the parked SSP swing-z knee "
+        "are re-scored. Track 1 is not done."
+    )
+    rail_best: tuple[str, float, float] | None = None
+    for surf in surface:
+        if not isinstance(surf, dict):
+            continue
+        t = float(surf["t"])
+        if t + 1e-9 < stop_t:
+            continue
+        for act in (
+            "l_knee", "r_knee", "l_hip_roll", "r_hip_roll",
+            "l_hip_pitch", "r_hip_pitch", "l_hip_yaw", "r_hip_yaw",
+            "l_ank_pitch", "r_ank_pitch", "l_ank_roll", "r_ank_roll",
+        ):
+            if act not in surf:
+                continue
+            tau = float(surf[act])
+            if rail_best is None or abs(tau) > abs(rail_best[1]):
+                rail_best = (act, tau, t)
+    if rail_best is not None:
+        act, tau, t = rail_best
+        print(
+            f"PRED {name} actuator_peak {act} {tau:+.4f} t {t:.3f} "
+            f"plant_rail {PLANT_NM:.2f} "
+            f"ge_2.45 {int(abs(tau) >= PLANT_NM - 1e-3)} "
+            f"ge_2.33 {int(abs(tau) >= KNEE_NM)}"
+        )
+        if abs(tau) >= PLANT_NM - 1e-3:
+            fails.append(f"actuator {act} {tau:+.4f} t {t:.3f}")
+    if held.get("fault"):
+        fails.append(f"fault {held.get('fault')} t {float(held.get('fault_t', float('nan'))):.3f}")
+    if air_zero:
+        fails.append("x_move zeroed on the stop tick")
+    t_stop = _soft_t_stop(
+        [row for row in trace if isinstance(row, dict)],
+        stop_t,
+    )
+    t_txt = "none" if t_stop is None else f"{t_stop:.3f}"
+    if fails:
+        print(
+            f"PRED {name} Prefer FAIL. "
+            + " | ".join(fails)
+            + f". T_stop {t_txt} s is the body-speed settle and is not a pass. "
+            "d_min is not rebuilt. The old d_min 0.1263 m is not claimed. "
+            "CoM outside the 38 mm box is not this bar and is not kit-safe. "
+            "Yaw stayed 0. Foot-z stayed 1.170 mm. Less-crouch stayed closed. "
+            "Trim lead stayed off. y_swap stayed 0. "
+            "Plant md5 stays 207f3d5e9c6a72e16f7aa0c8d224f75e. "
+            "Not kit-safe. Not go-anywhere."
+        )
+        return
+    d_note = "none" if t_stop is None else f"{0.150 * t_stop:.4f}"
+    print(
+        f"PRED {name} CLEAR. Unclamped stop asks from the stop command onward "
+        "stay at or under 2.33 Nm on every leg joint. "
+        "Leg actuators stay under the +/-2.45 Nm plant rail. "
+        f"T_stop {t_txt} s from the stop command to body speed under "
+        f"{SOFT_STOP_SPEED_EPS:.2f} m/s for {SOFT_STOP_HOLD_S:.2f} s. "
+        f"At T_detect 0 the rebuilt d_min is 0.150 * T_stop = {d_note} m. "
+        "The old d_min 0.1263 m is not this stop. No wall-stop pass is claimed. "
+        "CoM outside the 38 mm box is not this bar and is not kit-safe. "
+        "The y_swap 0 toe is not the y_swap 0.020 clear. Track 1 is not done. "
+        "x_move was not zeroed on the stop tick. "
+        "Yaw stayed 0. Foot-z stayed 1.170 mm. Less-crouch stayed closed. "
+        "Trim lead stayed off. "
+        "Plant md5 stays 207f3d5e9c6a72e16f7aa0c8d224f75e. "
+        "Not kit-safe. Not go-anywhere."
+    )
 
 
 def main() -> None:
