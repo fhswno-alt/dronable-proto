@@ -806,6 +806,7 @@ def measure_phase_cmd() -> None:
 
     lipm._tick_gait_manager = wrapped  # type: ignore[method-assign]
     rows: list[tuple[float, np.ndarray, np.ndarray]] = []
+    stance_roll: list[tuple[float, float, float, float, float, float, float]] = []
     while float(session.data.time) < 3.7 - 1e-9:
         driver.publish(session.bus, float(session.data.time))
         session.step()
@@ -817,6 +818,7 @@ def measure_phase_cmd() -> None:
             stand_pitch = torso_pitch(session.data, session.bid_body)
         if have["ok"] and 3.30 < t < 3.60:
             rows.append((t, goal.copy(), np.array(session.data.qpos[0:7], dtype=np.float64, copy=True)))
+            stance_roll.append(_stance_roll_tick(session, t))
     assert stand_free is not None
     # The published window is the contiguous right swing around 3.384 s.
     hit = [row for row in rows if 3.344 - 1e-3 <= row[0] <= 3.536 + 1e-3]
@@ -852,7 +854,57 @@ def measure_phase_cmd() -> None:
             f"local_z {live['local_z']:.6f} ank_minus_lead {live['ank_z'] - live['lead']:.6f}"
         )
     _print_gap_split(min(samples, key=lambda row: abs(row[0] - 3.384)))
+    _print_stance_roll([row for row in stance_roll if 3.344 - 1e-3 <= row[0] <= 3.536 + 1e-3])
     session.assert_plant_unchanged()
+
+
+def _stance_roll_tick(session: sw.SteerSession, t: float) -> tuple[float, float, float, float, float, float, float]:
+    """Left hip-roll and ankle-roll: q, ctrl, force. Left is the stance leg."""
+    hip_q, hip_c, hip_f = _joint_qcf(session, "l_hip_roll")
+    ank_q, ank_c, ank_f = _joint_qcf(session, "l_ank_roll")
+    return (t, hip_q, hip_c, hip_f, ank_q, ank_c, ank_f)
+
+
+def _joint_qcf(session: sw.SteerSession, name: str) -> tuple[float, float, float]:
+    model = session.model
+    data = session.data
+    jid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, name)
+    q = float(data.qpos[int(model.jnt_qposadr[jid])])
+    idx = session.act_idx[name + "_pos"]
+    return q, float(data.ctrl[idx]), float(data.actuator_force[idx])
+
+
+def _print_stance_roll(rows: list[tuple[float, float, float, float, float, float, float]]) -> None:
+    if not rows:
+        print("STANCE_ROLL empty")
+        return
+    hip_f = max(rows, key=lambda row: abs(row[3]))
+    ank_f = max(rows, key=lambda row: abs(row[6]))
+    hip_err = max(rows, key=lambda row: abs(row[2] - row[1]))
+    ank_err = max(rows, key=lambda row: abs(row[5] - row[4]))
+    at = min(rows, key=lambda row: abs(row[0] - 3.384))
+    print(
+        f"STANCE_ROLL n {len(rows)} t0 {rows[0][0]:.3f} t1 {rows[-1][0]:.3f}"
+    )
+    print(
+        f"STANCE_HIP peak_tau {hip_f[3]:.4f} t {hip_f[0]:.3f} "
+        f"q {hip_f[1]:.4f} ctrl {hip_f[2]:.4f} "
+        f"max_ctrl_minus_q {hip_err[2] - hip_err[1]:.4f} t_err {hip_err[0]:.3f}"
+    )
+    print(
+        f"STANCE_ANK peak_tau {ank_f[6]:.4f} t {ank_f[0]:.3f} "
+        f"q {ank_f[4]:.4f} ctrl {ank_f[5]:.4f} "
+        f"max_ctrl_minus_q {ank_err[5] - ank_err[4]:.4f} t_err {ank_err[0]:.3f}"
+    )
+    print(
+        f"STANCE_AT t {at[0]:.3f} hip_q {at[1]:.4f} hip_ctrl {at[2]:.4f} "
+        f"hip_tau {at[3]:.4f} ank_q {at[4]:.4f} ank_ctrl {at[5]:.4f} ank_tau {at[6]:.4f}"
+    )
+    for row in rows:
+        print(
+            f"STANCE_TICK t {row[0]:.3f} hip_q {row[1]:.4f} hip_ctrl {row[2]:.4f} "
+            f"hip_tau {row[3]:.4f} ank_q {row[4]:.4f} ank_ctrl {row[5]:.4f} ank_tau {row[6]:.4f}"
+        )
 
 
 def _print_gap_split(
@@ -917,11 +969,67 @@ def _print_gap_split(
         f"rot_xyz {rot_parts[0]:.6f} {rot_parts[1]:.6f} {rot_parts[2]:.6f} "
         f"drop_plus_rotation {drop + rot:.6f}"
     )
+    _print_direct_roll(live, nominal, gap, drop, rot_parts)
     print(
         f"GAP_JOINTS max_abs_dq {float(np.max(np.abs(joints))):.3e} "
         f"dq {' '.join(f'{v:.3e}' for v in joints)} "
         f"p_body_delta {' '.join(f'{v:.3e}' for v in p_delta)}"
     )
+
+
+def _print_direct_roll(
+    live: dict[str, float],
+    nominal: dict[str, float],
+    gap: float,
+    drop: float,
+    rot_parts: np.ndarray,
+) -> None:
+    """Roll term from (R_live - R_stand) on the pelvis-to-corner vector.
+
+    The three axis pieces are that one matrix difference. They are not a
+    leftover assigned to roll after the fact.
+    """
+    r_live = np.asarray(live["body_r"], dtype=np.float64)
+    r_stand = np.asarray(nominal["body_r"], dtype=np.float64)
+    point = np.asarray(nominal["p_body"], dtype=np.float64)
+    pitch_term = float(rot_parts[0])
+    roll_term = float(rot_parts[1])
+    up_term = float(rot_parts[2])
+    residual = gap - drop - pitch_term - roll_term
+    droll = _body_roll(live) - _body_roll(nominal)
+    # Scalar roll on the lateral lever, the -7.4 to -8.0 mm estimate.
+    roll_times_y = droll * float(point[1])
+    roll_sin_y = math.sin(droll) * float(point[1])
+    # Roll-only factor of the relative rotation, then the stand pelvis
+    # carries that vector into world z. Yaw and pitch stay at the stand.
+    rel = r_stand.T @ r_live
+    roll_only = _rx(_body_roll_of(rel) - _body_roll_of(np.eye(3)))
+    rolled = r_stand @ roll_only @ point
+    stood = r_stand @ point
+    isolated = float(rolled[2] - stood[2])
+    print(
+        f"ROLL_DIRECT pitch_axis {pitch_term:.6f} roll_axis {roll_term:.6f} "
+        f"up_axis {up_term:.6f}"
+    )
+    print(
+        f"ROLL_MATH droll {droll:.6f} y {point[1]:.6f} "
+        f"droll_times_y {roll_times_y:.6f} sin_droll_times_y {roll_sin_y:.6f} "
+        f"isolated_rx {isolated:.6f}"
+    )
+    print(
+        f"ROLL_RESIDUAL after_drop_pitch_roll {residual:.6f} "
+        f"equals_up_axis {abs(residual - up_term) < 1e-9} "
+        f"sum {drop + pitch_term + roll_term + up_term:.6f} gap {gap:.6f}"
+    )
+
+
+def _rx(angle: float) -> np.ndarray:
+    c, s = math.cos(angle), math.sin(angle)
+    return np.array([[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]], dtype=np.float64)
+
+
+def _body_roll_of(rot: np.ndarray) -> float:
+    return math.atan2(float(rot[2, 1]), float(rot[2, 2]))
 
 
 def _pelvis_corner_offset(row: dict[str, float]) -> dict[str, float]:
