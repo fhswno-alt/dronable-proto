@@ -217,6 +217,69 @@ def _install_bezier_early(session: sw.SteerSession, peak_m: float) -> None:
     walker._left_z = left_z  # type: ignore[method-assign]
 
 
+HIP_KIN: dict[str, float] = {}
+
+
+def _stance_weights(walker: object) -> tuple[float, float]:
+    """Left and right stance weights. Each double support ramps the switch.
+
+    During a swing the stance weight is 1 and the swing weight is 0.
+    Across the double support before the next swing, the outgoing stance
+    fades out and the incoming stance fades in. No one-tick step.
+    """
+    period = float(walker.period)
+    if period <= 1e-9:
+        return 0.0, 0.0
+    t = float(walker.time) % period
+    a1 = float(walker.l_ssp_start)
+    b0 = float(walker.l_ssp_end)
+    b1 = float(walker.r_ssp_start)
+    c0 = float(walker.r_ssp_end)
+    if a1 < t <= b0:
+        return 0.0, 1.0
+    if b0 < t <= b1:
+        span = b1 - b0
+        u = 0.0 if span <= 1e-9 else (t - b0) / span
+        return u, 1.0 - u
+    if b1 < t <= c0:
+        return 1.0, 0.0
+    dsp = (period - c0) + a1
+    elapsed = (t - c0) if t > c0 else (period - c0) + t
+    u = 0.0 if dsp <= 1e-9 else elapsed / dsp
+    return 1.0 - u, u
+
+
+def _hook_hip_ramp(session: sw.SteerSession, gain: float) -> None:
+    """Ramp the measured stance-hip error onto the current stance hip only.
+
+    The swing hip is left on the kinematic target. The bias fades across
+    double support instead of stepping on at the stance switch. The
+    1.29/40 rad term is not added.
+    """
+    lipm = session.lipm
+    if lipm is None or lipm.op3 is None:
+        return
+    orig = lipm._tick_gait_manager
+    walker = lipm.op3
+
+    def wrapped(walking: bool) -> None:
+        orig(walking)
+        HIP_KIN.clear()
+        if not walking or session.bus.fault:
+            return
+        w_l, w_r = _stance_weights(walker)
+        for side, weight, bias in (("l", w_l, HIP_FF_L), ("r", w_r, HIP_FF_R)):
+            name = side + "_hip_roll_pos"
+            idx = lipm.act_idx[name]
+            kin = float(session.data.ctrl[idx])
+            HIP_KIN[side] = kin
+            lo = float(session.model.actuator_ctrlrange[idx, 0])
+            hi = float(session.model.actuator_ctrlrange[idx, 1])
+            session.data.ctrl[idx] = min(hi, max(lo, kin + bias * gain * weight))
+
+    lipm._tick_gait_manager = wrapped  # type: ignore[method-assign]
+
+
 def _hook_hip_ff(session: sw.SteerSession) -> None:
     """Shift the stance hip-roll target by the measured cmd-q error.
 
@@ -467,36 +530,63 @@ def _pelvis_roll(session: sw.SteerSession) -> float:
     return math.atan2(float(rot[2, 1]), float(rot[2, 2]))
 
 
-def _roll_sample(
-    session: sw.SteerSession, t: float, swing: str,
-) -> tuple[float, str, float, float, float, float, float, float, float]:
+def _hip_kin_sample(session: sw.SteerSession, side: str) -> tuple[float, float, float, float]:
+    """Actual q, un-offset kinematic target, applied ctrl, torque."""
+    q, ctrl, tau = _joint_qcf(session, side + "_hip_roll")
+    kin = float(HIP_KIN.get(side, ctrl))
+    return q, kin, ctrl, tau
+
+
+def _roll_sample(session: sw.SteerSession, t: float, swing: str) -> dict[str, float | str]:
     stance = "L" if swing == "R" else "R"
     pref = "l_" if stance == "L" else "r_"
-    hip_q, hip_c, hip_f = _joint_qcf(session, pref + "hip_roll")
-    ank_q, ank_c, ank_f = _joint_qcf(session, pref + "ank_roll")
-    return (t, stance, _pelvis_roll(session), hip_q, hip_c, hip_f, ank_q, ank_c, ank_f)
+    lq, lk, lc, lt = _hip_kin_sample(session, "l")
+    rq, rk, rc, rt = _hip_kin_sample(session, "r")
+    aq, ac, af = _joint_qcf(session, pref + "ank_roll")
+    _, _, lp = _joint_qcf(session, "l_hip_pitch")
+    _, _, rp = _joint_qcf(session, "r_hip_pitch")
+    return {
+        "t": t,
+        "roll": _pelvis_roll(session),
+        "ldq": lq - lk,
+        "rdq": rq - rk,
+        "lt": lt,
+        "rt": rt,
+        "lp": lp,
+        "rp": rp,
+        "at": af,
+        "aerr": abs(ac - aq),
+        "lq": lq,
+        "lk": lk,
+        "rq": rq,
+        "rk": rk,
+        "lc": lc,
+        "rc": rc,
+    }
 
 
-def _roll_note(
-    rows: list[tuple[float, str, float, float, float, float, float, float, float]],
-) -> str:
+def _roll_note(rows: list[dict[str, float | str]]) -> str:
     if not rows:
         return ""
-    window = [row for row in rows if 3.344 - 1e-3 <= row[0] <= 3.536 + 1e-3]
+    window = [row for row in rows if 3.344 - 1e-3 <= float(row["t"]) <= 3.536 + 1e-3]
     use = window or rows
-    hip = max(use, key=lambda row: abs(row[5]))
-    ank = max(use, key=lambda row: abs(row[8]))
-    hip_err = max(use, key=lambda row: abs(row[4] - row[3]))
-    ank_err = max(use, key=lambda row: abs(row[7] - row[6]))
-    at = min(use, key=lambda row: abs(row[0] - 3.384))
-    roll_peak = max(use, key=lambda row: abs(row[2]))
+    at = min(use, key=lambda row: abs(float(row["t"]) - 3.384))
+    roll_peak = max(use, key=lambda row: abs(float(row["roll"])))
+    ldq = max(use, key=lambda row: abs(float(row["ldq"])))
+    rdq = max(use, key=lambda row: abs(float(row["rdq"])))
     return (
-        f"window {use[0][0]:.3f}-{use[-1][0]:.3f} "
-        f"roll_at_3.384 {at[2]:.4f} roll_peak {roll_peak[2]:.4f} t_roll {roll_peak[0]:.3f} "
-        f"hip_tau {hip[5]:.4f} t_hip {hip[0]:.3f} hip_q {hip[3]:.4f} hip_ctrl {hip[4]:.4f} "
-        f"hip_abs_err {abs(hip_err[4] - hip_err[3]):.4f} t_hip_err {hip_err[0]:.3f} "
-        f"ank_tau {ank[8]:.4f} t_ank {ank[0]:.3f} ank_q {ank[6]:.4f} ank_ctrl {ank[7]:.4f} "
-        f"ank_abs_err {abs(ank_err[7] - ank_err[6]):.4f} t_ank_err {ank_err[0]:.3f}"
+        f"window {float(use[0]['t']):.3f}-{float(use[-1]['t']):.3f} "
+        f"roll_at_3.384 {float(at['roll']):.4f} "
+        f"ldq_at_3.384 {float(at['ldq']):.4f} rdq_at_3.384 {float(at['rdq']):.4f} "
+        f"roll_peak {float(roll_peak['roll']):.4f} t_roll {float(roll_peak['t']):.3f} "
+        f"ldq_peak {float(ldq['ldq']):.4f} t_ldq {float(ldq['t']):.3f} "
+        f"rdq_peak {float(rdq['rdq']):.4f} t_rdq {float(rdq['t']):.3f} "
+        f"win_l_hip_roll {float(max(use, key=lambda row: abs(float(row['lt'])))['lt']):.4f} "
+        f"win_r_hip_roll {float(max(use, key=lambda row: abs(float(row['rt'])))['rt']):.4f} "
+        f"win_l_hip_pitch {float(max(use, key=lambda row: abs(float(row['lp'])))['lp']):.4f} "
+        f"win_r_hip_pitch {float(max(use, key=lambda row: abs(float(row['rp'])))['rp']):.4f} "
+        f"win_ank {float(max(use, key=lambda row: abs(float(row['at'])))['at']):.4f} "
+        f"win_ank_abs_err {float(max(use, key=lambda row: float(row['aerr']))['aerr']):.4f}"
     )
 
 
@@ -508,6 +598,7 @@ def run_one(
     mode: str = "",
     z_extra: float = 0.0,
     t_end: float = T_END,
+    gain: float = 1.0,
 ) -> dict[str, object]:
     cfg = sw.locked_kit_config()
     if z_m is not None:
@@ -528,6 +619,13 @@ def run_one(
         _hook_hip_ff(session)
     elif mode == "hipbez":
         _hook_hip_ff(session)
+        _install_bezier_early(session, z_extra)
+    elif mode == "hipramp":
+        _hook_hip_ramp(session, gain)
+    elif mode == "bez":
+        _install_bezier_early(session, z_extra)
+    elif mode == "hiprampbez":
+        _hook_hip_ramp(session, gain)
         _install_bezier_early(session, z_extra)
     elif mode == "dropflat":
         DROP_RESIDUAL.clear()
@@ -564,7 +662,10 @@ def run_one(
     walk_leg = 0.0
     walk_leg_name = ""
     walk_leg_t = 0.0
-    roll_rows: list[tuple[float, str, float, float, float, float, float, float, float]] = []
+    roll_rows: list[dict[str, float | str]] = []
+    hip4 = {name: (0.0, 0.0) for name in (
+        "l_hip_roll_pos", "r_hip_roll_pos", "l_hip_pitch_pos", "r_hip_pitch_pos",
+    )}
 
     def _hook(model: mj.MjModel, data: mj.MjData) -> None:
         nonlocal ank_peak, ank_name, ank_t, walk_peak, walk_name, walk_t
@@ -600,6 +701,13 @@ def run_one(
             walk_knee = kforce
             walk_knee_name = kact
             walk_knee_t = kwhen
+        if not seen_fault:
+            for name in hip4:
+                idx = session.act_idx[name]
+                tau = float(data.actuator_force[idx])
+                prev, _when = hip4[name]
+                if abs(tau) > abs(prev):
+                    hip4[name] = (tau, float(data.time))
 
     mj.mj_step = _hook
     try:
@@ -609,12 +717,12 @@ def run_one(
             t = float(session.data.time)
             swing = session.lipm._gm_swing if session.lipm is not None else None
             toe_z = _leading_toe_z(session, swing) if swing in ("L", "R") else None
-            if mode in ("hipff", "hipbez") and swing in ("L", "R") and t < T_BAR:
+            if mode in ("hipff", "hipbez", "hipramp", "hiprampbez", "bez") and swing in ("L", "R") and t < T_BAR:
                 roll_rows.append(_roll_sample(session, t, swing))
-            if mode in ("zmid", "zearly", "hipbez") and swing in ("L", "R") and session.lipm is not None and session.lipm.op3 is not None:
+            if mode in ("zmid", "zearly", "hipbez", "bez", "hiprampbez") and swing in ("L", "R") and session.lipm is not None and session.lipm.op3 is not None:
                 walker = session.lipm.op3
                 frac = _mid_frac(walker, swing, _cmd_time(walker))
-                lo, hi = (0.20, 0.30) if mode in ("zearly", "hipbez") else (0.20, 0.80)
+                lo, hi = (0.20, 0.30) if mode in ("zearly", "hipbez", "bez", "hiprampbez") else (0.20, 0.80)
                 if frac is not None and lo - 1e-12 <= frac <= hi + 1e-12 and t < T_BAR:
                     # ctrl has been slewed. The gait goal was the pre-slew write.
                     # Re-read the live OP3 pose at the command time and FK that.
@@ -717,6 +825,8 @@ def run_one(
         "legs_under_2_33": bool(abs(walk_leg) < KNEE_NM),
         "hit_plant_rail": bool(abs(leg_peak) >= PLANT_NM - 1e-3),
         "roll_note": _roll_note(roll_rows),
+        "hip4": {name: (tau, when) for name, (tau, when) in hip4.items()},
+        "gain": gain,
         "x": float(session.data.qpos[0]),
         "z_extra_m": z_extra,
         "cmd_toe_min_m": min((z for _t, z in cmd_leads), default=float("nan")),
