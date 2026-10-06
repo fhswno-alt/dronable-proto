@@ -4589,13 +4589,12 @@ def _install_inflight_stop(
                             seed[pref + suf] = float(side_des[suf])
         seed_knee = seed.get(pref + "knee")
         seed_ank = seed.get(pref + "ank_pitch")
-        # The full rise needs ~0.49 s to the descent midpoint. The tip on
-        # this stop is ~0.31 s after the command. Scale the rise above the
-        # end height, largest scale first, until the stretched midpoint
-        # plus the first slew catch-up fits in that window.
-        wall_budget = 0.22
-        fit_budget = 0.27
-        scales = (1.0, 0.85, 0.70, 0.55, 0.40, 0.25)
+        # The full rise needs ~0.49 s to the descent midpoint and longer
+        # to the end. The tip on this stop is ~0.31 s after the command.
+        # Scale the rise above the end height, largest scale first, until
+        # the stretched schedule can finish, plus the first slew catch-up.
+        end_budget = 0.28
+        scales = (1.0, 0.85, 0.70, 0.55, 0.40, 0.25, 0.15, 0.0)
         chosen_rows = rows
         chosen = _schedule_of(rows) if rows else {
             "knee_rate": 0.0,
@@ -4629,10 +4628,9 @@ def _install_inflight_stop(
                     catch = max(catch, abs(float(soft_rows[0][1]) - float(seed_knee)) / 1.90)
                 if seed_ank is not None:
                     catch = max(catch, abs(float(soft_rows[0][2]) - float(seed_ank)) / 1.90)
-                fits = (
-                    float(info["wall"]) <= wall_budget + 1e-9
-                    and catch + float(info["wall"]) <= fit_budget + 1e-9
-                )
+                end_wall = max(0.0, float(end) - float(t0)) * float(info["stretch"])
+                info["end_wall"] = float(end_wall)
+                fits = catch + end_wall <= end_budget + 1e-9
                 if fits:
                     chosen_rows = soft_rows
                     chosen = info
@@ -4674,6 +4672,7 @@ def _install_inflight_stop(
         edge["z_peak_z"] = float(peak_z)
         edge["z_soft"] = float(chosen_soft)
         edge["z_wall"] = float(chosen["wall"])
+        edge["z_end_wall"] = float(chosen.get("end_wall", (float(end) - float(t0)) * stretch))
         edge["z_catch"] = float(chosen_catch)
         edge["z_fit"] = int(fitted)
         session._sag_swing_track = True  # type: ignore[attr-defined]
@@ -4689,7 +4688,9 @@ def _install_inflight_stop(
             f"gait {float(t0):.3f} to {end:.3f} "
             f"z {z0:+.5f} peak {peak_z:+.5f} at {peak_gait:.3f} "
             f"land_gate {land_gait:.3f} end_z {zend:+.5f} "
-            f"wall {float(chosen['wall']):.3f} s catch {chosen_catch:.3f} s "
+            f"wall {float(chosen['wall']):.3f} s "
+            f"end_wall {float(chosen.get('end_wall', 0.0)):.3f} s "
+            f"catch {chosen_catch:.3f} s "
             f"samples {len(chosen_rows)} "
             f"open_loop {(end - float(t0)) * stretch:.3f} s. "
             "The rise above the end height is scaled so the stretched "
@@ -5183,6 +5184,17 @@ def _install_inflight_stop(
                 "x/y/roll/pitch pin at this pose. z still advances. "
                 "x_move is not zeroed."
             )
+        if state["sag_stop_cap"]:
+            edge["z_gait_last"] = float(walker.time)
+            edge["z_waits"] = int(state.get("z_wait_n", 0))
+            edge["load_l_last"] = float(load_l)
+            edge["load_r_last"] = float(load_r)
+            edge["saw_air"] = int(bool(state.get("saw_air")))
+            sw_load = load_l if str(state.get("swing")) == "L" else load_r
+            prev_min = edge.get("swing_load_min")
+            if not isinstance(prev_min, float) or float(sw_load) < float(prev_min):
+                edge["swing_load_min"] = float(sw_load)
+                edge["swing_load_min_t"] = float(t)
         land_gate = state.get("z_land_gait")
         past_land = (
             land_gate is None
@@ -13519,7 +13531,15 @@ def score_sag_stop() -> None:
             f"soft {float(edge.get('z_soft', float('nan'))):.2f} "
             f"fit {int(edge.get('z_fit', 0))} "
             f"wall {float(edge.get('z_wall', float('nan'))):.3f} "
+            f"end_wall {float(edge.get('z_end_wall', float('nan'))):.3f} "
             f"catch {float(edge.get('z_catch', float('nan'))):.3f} "
+            f"gait_last {float(edge.get('z_gait_last', float('nan'))):.3f} "
+            f"waits {int(edge.get('z_waits', 0))} "
+            f"saw_air {int(edge.get('saw_air', 0))} "
+            f"load_last L {float(edge.get('load_l_last', float('nan'))):.2f} "
+            f"R {float(edge.get('load_r_last', float('nan'))):.2f} "
+            f"swing_min {float(edge.get('swing_load_min', float('nan'))):.2f} "
+            f"t {float(edge.get('swing_load_min_t', float('nan'))):.3f} "
             f"peak_rate {float(edge.get('z_peak_rate', float('nan'))):.3f} "
             f"knee_rate {float(edge.get('z_knee_rate', float('nan'))):.3f} "
             f"ank_rate {float(edge.get('z_ank_rate', float('nan'))):.3f} "
