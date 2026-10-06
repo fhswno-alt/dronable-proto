@@ -57,6 +57,10 @@ _WALK_Z_RATE = 1.55
 _WALK_STANCE_RATE = 1.90
 _WALK_KNEE_RATE = 1.75
 _WALK_HIP_PITCH_RATE = 1.90
+# Loaded knee only, from toe-off through this single-support fraction.
+# Mid-stance stays on _WALK_KNEE_RATE. DSP and the stop stay off this rate.
+_WALK_EARLY_KNEE_RATE = 1.60
+_WALK_EARLY_FRAC = 0.20
 # Locked 1.55 copy, no hip slew, CoM tick 2.200 s: stance corner −2.564 mm.
 # A mid-stance tick more than 1 mm past that is a new dig.
 _STANCE_DIG_M = -0.003564
@@ -11666,12 +11670,15 @@ def _install_sagittal_slew(
     cap = float(rad_s) * float(ow.OP3_CTRL_S)
     hip_cap = float(_WALK_HIP_PITCH_RATE) * float(ow.OP3_CTRL_S)
     knee_cap = float(_WALK_KNEE_RATE) * float(ow.OP3_CTRL_S)
+    early_knee_cap = float(_WALK_EARLY_KNEE_RATE) * float(ow.OP3_CTRL_S)
     stance_cap = float(_WALK_STANCE_RATE) * float(ow.OP3_CTRL_S)
     slew_stats: dict[str, float] = {
         "hip_clip": 0.0,
         "hip_max_abs_dq": 0.0,
         "knee_clip": 0.0,
         "knee_max_abs_dq": 0.0,
+        "early_clip": 0.0,
+        "early_max_abs_dq": 0.0,
     }
     session._walk_slew_stats = slew_stats  # type: ignore[attr-defined]
     session._sag_cap_rows = []  # type: ignore[attr-defined]
@@ -11687,6 +11694,29 @@ def _install_sagittal_slew(
         if float(walker.r_ssp_start) < t_cmd <= float(walker.r_ssp_end):
             return "l_"
         return "both"
+
+    def _early_knee(jn: str) -> bool:
+        """True on the loaded knee before the mid-stance window.
+
+        Double support keeps the 1.75 rad/s knee rate. The stop bout
+        never reaches this helper.
+        """
+        if not jn.endswith("knee"):
+            return False
+        t_cmd = _cmd_time(walker)
+        l0 = float(walker.l_ssp_start)
+        l1 = float(walker.l_ssp_end)
+        r0 = float(walker.r_ssp_start)
+        r1 = float(walker.r_ssp_end)
+        if l0 < t_cmd <= l1 and jn.startswith("r_"):
+            span = l1 - l0
+            frac = 0.0 if span <= 1e-9 else (t_cmd - l0) / span
+        elif r0 < t_cmd <= r1 and jn.startswith("l_"):
+            span = r1 - r0
+            frac = 0.0 if span <= 1e-9 else (t_cmd - r0) / span
+        else:
+            return False
+        return frac <= _WALK_EARLY_FRAC + 1e-9
 
     def _hold_inside(jn: str, proposed: float) -> tuple[float, float, float, int]:
         """Pull q_des onto |kp*err| + |kv*omega| <= 2.33. Direction stays put."""
@@ -11948,8 +11978,11 @@ def _install_sagittal_slew(
                     and not getattr(session, "_sag_stop_installed", False)
                     and not getattr(session, "_sag_torque_cap", False)
                 )
+                early_knee = walk_stance and _early_knee(jn)
                 if walk_stance and jn.endswith("hip_pitch"):
                     step = hip_cap
+                elif early_knee:
+                    step = early_knee_cap
                 elif walk_stance and jn.endswith("knee"):
                     step = knee_cap
                 elif walk_stance:
@@ -11963,6 +11996,10 @@ def _install_sagittal_slew(
                         slew_stats["hip_max_abs_dq"] = max(
                             float(slew_stats["hip_max_abs_dq"]), abs(dq)
                         )
+                    elif early_knee:
+                        slew_stats["early_max_abs_dq"] = max(
+                            float(slew_stats["early_max_abs_dq"]), abs(dq)
+                        )
                     elif walk_stance and jn.endswith("knee"):
                         slew_stats["knee_max_abs_dq"] = max(
                             float(slew_stats["knee_max_abs_dq"]), abs(dq)
@@ -11971,12 +12008,16 @@ def _install_sagittal_slew(
                         q_des = float(old) + step
                         if walk_stance and jn.endswith("hip_pitch"):
                             slew_stats["hip_clip"] = float(slew_stats["hip_clip"]) + 1.0
+                        elif early_knee:
+                            slew_stats["early_clip"] = float(slew_stats["early_clip"]) + 1.0
                         elif walk_stance and jn.endswith("knee"):
                             slew_stats["knee_clip"] = float(slew_stats["knee_clip"]) + 1.0
                     elif dq < -step:
                         q_des = float(old) - step
                         if walk_stance and jn.endswith("hip_pitch"):
                             slew_stats["hip_clip"] = float(slew_stats["hip_clip"]) + 1.0
+                        elif early_knee:
+                            slew_stats["early_clip"] = float(slew_stats["early_clip"]) + 1.0
                         elif walk_stance and jn.endswith("knee"):
                             slew_stats["knee_clip"] = float(slew_stats["knee_clip"]) + 1.0
                 prev[jn] = float(q_des)
@@ -12052,7 +12093,9 @@ def _install_sagittal_slew(
             f"PRED sag_slew hip_pitch {_WALK_HIP_PITCH_RATE:.3f} rad/s "
             "on the loaded leg. "
             f"Per tick {hip_cap:.5f} rad. "
-            f"Walk stance knee stays at {_WALK_KNEE_RATE:.3f} rad/s. "
+            f"Walk stance knee stays at {_WALK_KNEE_RATE:.3f} rad/s after frac "
+            f"{_WALK_EARLY_FRAC:.2f}. "
+            f"Through that fraction the loaded knee is {_WALK_EARLY_KNEE_RATE:.3f} rad/s. "
             f"Walk stance ankle pitch stays at {_WALK_STANCE_RATE:.3f} rad/s. "
             "The stop bout does not take hip pitch. "
             "Swing hip pitch stays on the gait command."
@@ -14117,16 +14160,19 @@ def score_mid_swing() -> None:
         f"Day-1 vx {sw.VX_FWD_CAP:.3f} m/s. Yaw 0. Period 0.500 s. "
         "y_swap 0. init_y 0.005 m. Foot-z 1.170 mm. Less-crouch closed. "
         "Trim-lead off. Sole-flat stance ankle stays on. "
-        f"Loaded knee stays on the {_WALK_KNEE_RATE:.2f} rad/s slew. "
+        f"Loaded knee stays on the {_WALK_KNEE_RATE:.2f} rad/s slew after frac "
+        f"{_WALK_EARLY_FRAC:.2f}. "
+        f"Through that fraction the loaded knee is {_WALK_EARLY_KNEE_RATE:.2f} rad/s. "
         f"Loaded ankle pitch stays on the {_WALK_STANCE_RATE:.2f} rad/s slew. "
         f"Loaded hip pitch is on its own {_WALK_HIP_PITCH_RATE:.2f} rad/s slew. "
         "Walk swing-z stays at "
         f"{_WALK_Z_RATE:.2f} rad/s. The stop stretch stays off at "
         "0.25 / 1.060×. "
-        "Pass is mid-stance peaks at or under 2.33 Nm, and the flat toe "
-        "still at or above +2 mm, with four contact-box corners at or "
-        "above 0. CoM slack and the four corners are logged at the "
-        "mid-stance knee and hip-pitch peaks. "
+        "Pass is the loaded early-stance knee at or under 2.33 Nm, "
+        "mid-stance peaks at or under 2.33 Nm, DSP at or under 2.33 Nm, "
+        "and the flat toe still at or above +2 mm, with four contact-box "
+        "corners at or above 0 through 20-80%. Load and four corners are "
+        "logged at the early-stance knee. "
         "The parked SSP swing knee is logged and is not the bar unless "
         "that tick moves into 20-80%. "
         "CoM outside the 38 mm box is logged and is not a torque pass. "
@@ -14175,8 +14221,8 @@ def score_mid_swing() -> None:
     summary["sag_slew"] = _WALK_KNEE_RATE
     summary["hip_slew"] = _WALK_HIP_PITCH_RATE
     summary["slew_joints"] = (
-        f"knee@{_WALK_KNEE_RATE:.2f}+ank@{_WALK_STANCE_RATE:.2f}"
-        f"+hip@{_WALK_HIP_PITCH_RATE:.2f}"
+        f"knee@{_WALK_KNEE_RATE:.2f}+early@{_WALK_EARLY_KNEE_RATE:.2f}"
+        f"+ank@{_WALK_STANCE_RATE:.2f}+hip@{_WALK_HIP_PITCH_RATE:.2f}"
     )
     toe_mm, toe_t, toe_side, toe_frac = _quiet_flat_toe(held)
     summary["flat_toe_mm"] = toe_mm
@@ -14319,6 +14365,7 @@ def score_mid_swing() -> None:
     swing_ssp: dict[str, tuple] = {}
     swing_mid: dict[str, tuple] = {}
     stance_mid: dict[str, tuple] = {}
+    stance_early: dict[str, tuple] = {}
     stance_dsp: dict[str, tuple] = {}
     if isinstance(asks, list):
         for item in asks:
@@ -14345,16 +14392,18 @@ def score_mid_swing() -> None:
                     swing_ssp[jn] = _keep_ask(swing_ssp.get(jn), item)
                 if 0.20 - 1e-12 <= frac <= 0.80 + 1e-12:
                     swing_mid[jn] = _keep_ask(swing_mid.get(jn), item)
-            elif (
-                jn.startswith(stance_pref)
-                and 0.25 - 1e-9 <= frac <= 0.75 + 1e-9
-            ):
+            elif jn.startswith(stance_pref):
                 fn_key = "fn_r" if phase == "L" else "fn_l"
                 sw_key = "fn_l" if phase == "L" else "fn_r"
-                if (
+                loaded = (
                     float(row[fn_key]) > _SOLE_FLAT_LOAD_N
                     and float(row[sw_key]) <= _SOLE_FLAT_LOAD_N
+                )
+                if loaded and frac < 0.25 - 1e-9 and (
+                    jn.endswith("knee") or jn.endswith("hip_pitch")
                 ):
+                    stance_early[jn] = _keep_ask(stance_early.get(jn), item)
+                if loaded and 0.25 - 1e-9 <= frac <= 0.75 + 1e-9:
                     stance_mid[jn] = _keep_ask(stance_mid.get(jn), item)
 
     def _dump(tag: str, bucket: dict[str, tuple]) -> tuple | None:
@@ -14386,6 +14435,7 @@ def score_mid_swing() -> None:
 
     knee_worst = _dump("ssp_swing_knee", swing_ssp)
     mid_j = _dump("swing_20_80", swing_mid)
+    early_w = _dump("early_stance", stance_early)
     mid_ss = _dump("mid_ss", stance_mid)
     dsp_w = _dump("dsp", stance_dsp)
     _print_sag_split("mid_knee", _sag_worst(summary.get("mid_stance"), "knee"), summary)
@@ -14438,6 +14488,9 @@ def score_mid_swing() -> None:
             f"knee {_WALK_KNEE_RATE:.2f} rad/s "
             f"clip {int(float(slew_stats.get('knee_clip', 0.0)))} "
             f"max_cmd {knee_cmd:.3f} rad/s "
+            f"early {_WALK_EARLY_KNEE_RATE:.2f} rad/s "
+            f"frac {_WALK_EARLY_FRAC:.2f} "
+            f"clip {int(float(slew_stats.get('early_clip', 0.0)))} "
             f"ank {_WALK_STANCE_RATE:.2f} rad/s"
         )
     mid_plant_ok = True
@@ -14469,6 +14522,66 @@ def score_mid_swing() -> None:
                     mid_plant_ok = False
             elif low_z < 0.0:
                 mid_plant_ok = False
+    early_ok = True
+    early_air = False
+    early_knees = {
+        str(jn): item
+        for jn, item in stance_early.items()
+        if str(jn).endswith("knee")
+    }
+    if "l_knee" not in early_knees or "r_knee" not in early_knees:
+        early_ok = False
+        print(f"PRED {name} early_stance loaded knee missing")
+    for jn, item in stance_early.items():
+        if not (str(jn).endswith("knee") or str(jn).endswith("hip_pitch")):
+            continue
+        if str(jn).endswith("hip_pitch") and abs(float(item[3])) <= KNEE_NM + 1e-9:
+            continue
+        t_key = round(float(item[0]), 5)
+        row = by_lat.get(t_key)
+        frac_e = float("nan")
+        fn_e = float("nan")
+        fn_sw = float("nan")
+        stance_side = ""
+        if row is not None:
+            phase_e = str(row["phase"])
+            frac_e = _swing_frac(phase_e, float(row["pose"]))
+            stance_side = str(row["stance"])
+            if phase_e == "L":
+                fn_e = float(row["fn_r"])
+                fn_sw = float(row["fn_l"])
+            elif phase_e == "R":
+                fn_e = float(row["fn_l"])
+                fn_sw = float(row["fn_r"])
+        loaded = fn_e > _SOLE_FLAT_LOAD_N and fn_sw <= _SOLE_FLAT_LOAD_N
+        over = abs(float(item[3])) > KNEE_NM + 1e-9
+        print(
+            f"PRED {name} early_load {jn} {float(item[3]):+.4f} "
+            f"t {float(item[0]):.3f} frac {frac_e:.3f} "
+            f"fn {fn_e:.2f} N fn_swing {fn_sw:.2f} N "
+            f"loaded {int(loaded)} ge_2.33 {int(over)}"
+        )
+        if str(jn).endswith("knee") and not loaded:
+            early_ok = False
+            early_air = True
+        if over:
+            early_ok = False
+        surf = by_surf.get(t_key)
+        for side in ("L", "R"):
+            plane = surf.get(side) if isinstance(surf, dict) else None
+            plane_d = plane if isinstance(plane, dict) else None
+            _print_corners(f"early_{jn}", side, t_key, frac_e, plane_d)
+            corners = plane_d.get("corners") if isinstance(plane_d, dict) else None
+            if not isinstance(corners, tuple) or not corners:
+                if str(jn).endswith("knee"):
+                    early_ok = False
+                continue
+            low_z = min(float(z) for _label, z in corners)
+            if side == stance_side:
+                if low_z < _STANCE_DIG_M:
+                    early_ok = False
+            elif low_z < 0.0 and str(jn).endswith("knee"):
+                early_ok = False
     ssp_frac = float("nan")
     if knee_worst is not None:
         ssp_row = by_lat.get(round(float(knee_worst[0]), 5))
@@ -14484,17 +14597,19 @@ def score_mid_swing() -> None:
             f"in_20_80 {int(ssp_in_window)} "
             f"ge_2.33 {int(abs(float(knee_worst[3])) > KNEE_NM + 1e-9)}"
         )
-    if swing_ok and toe_bar and rug_ok and corners_ok and support_ok and mid_plant_ok:
+    if (
+        swing_ok and toe_bar and rug_ok and corners_ok
+        and support_ok and mid_plant_ok and early_ok
+    ):
         print(
-            f"PRED {name} CLEAR. 20-80% knee and ankle pitch stay at or under "
-            "2.33 Nm, and both flat toes stay at or above +2 mm near frac 0.208. "
-            "Swing-foot corners stay at or above 0 through that window and at "
-            "the mid-stance knee and hip-pitch peaks. The loaded sole stays "
-            "in the locked penetration class. "
+            f"PRED {name} CLEAR. The loaded early-stance knee stays at or "
+            "under 2.33 Nm, with load over 5 N. "
+            "20-80% knee and ankle pitch stay at or under 2.33 Nm, and both "
+            "flat toes stay at or above +2 mm near frac 0.208. "
+            "Swing-foot corners stay at or above 0 through that window. "
+            "The loaded sole stays in the locked penetration class. "
             "Mid-SS and DSP stay at or under 2.33 Nm. "
             "The swing-knee peak is inside 20-80% and at or under 2.33 Nm. "
-            "The early stance knee outside that mid window is logged and is "
-            "not this bar. "
             f"CoM mid_margin {float(summary['mid_margin']) * 1000.0:+.2f} mm "
             "is outside the 38 mm box and is not a torque pass. "
             "y_swap stayed 0. Foot-z stayed 1.170 mm. Less-crouch stayed closed. "
@@ -14523,6 +14638,20 @@ def score_mid_swing() -> None:
                 "a mid-stance tick dug the stance sole past the locked "
                 "−2.564 mm class, or put the swing foot under 0"
             )
+        if early_air:
+            why.append(
+                "early-stance knee is airborne, the old swing channel, not a loaded stance knee"
+            )
+        elif not early_ok:
+            overs_e = []
+            for jn, item in early_knees.items():
+                if abs(float(item[3])) > KNEE_NM + 1e-9:
+                    overs_e.append(
+                        f"early {jn} {float(item[3]):+.4f} t {float(item[0]):.3f}"
+                    )
+            why.append(
+                "; ".join(overs_e) if overs_e else "early-stance load or corner failed"
+            )
         if not support_ok:
             overs = []
             for jn, item in stance_mid.items():
@@ -14544,6 +14673,23 @@ def score_mid_swing() -> None:
             next_lever = (
                 "20-80% knee and ankle pitch are inside 2.33 Nm and the flat "
                 "toe stays at or above +2 mm. A contact-box corner is under 0. "
+                "Foot-z, crouch, y_swap, the rail, and the plant stay closed."
+            )
+        elif early_air:
+            next_lever = (
+                "The early tick is not a loaded stance knee. It is the "
+                "airborne swing channel. A stance slew does not clear it. "
+                "Foot-z, crouch, y_swap, the rail, and the plant stay closed."
+            )
+        elif swing_ok and toe_bar and corners_ok and support_ok and mid_plant_ok and not early_ok:
+            next_lever = (
+                "Mid-SS, DSP, the 20-80% asks, and the flat toe still hold. "
+                "The miss is the loaded early-stance knee. "
+                f"That window is at {_WALK_EARLY_KNEE_RATE:.2f} rad/s through frac "
+                f"{_WALK_EARLY_FRAC:.2f}, then the knee returns to "
+                f"{_WALK_KNEE_RATE:.2f} rad/s. "
+                "Mid-stance knee stays at 1.75 rad/s. "
+                "The walk swing stays at 1.55 rad/s. "
                 "Foot-z, crouch, y_swap, the rail, and the plant stay closed."
             )
         elif swing_ok and toe_bar and corners_ok and mid_plant_ok and not support_ok:
