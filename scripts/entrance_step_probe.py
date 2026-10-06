@@ -60,12 +60,11 @@ _STOP_APPROACH_Z_RATE = 1.55
 # loaded transition only. It is not the continuous-walk seed and it does
 # not read the walk ladder.
 _STOP_ENTRANCE_S = 1.0
-# Loaded left ankle on the stop bout. The command may step toward the
-# gait only while it stays within one step of the live joint. Two
-# windows: the early steady tick that is just over 2.33 Nm, and the
-# pre-stop descent at 7.968 s. Not a swing stretch. The walk ladder
-# is not read. Engage and the first landing are before these windows.
-_STOP_STEADY_ANK_LO = (2.26, 2.55)
+# Loaded left ankle on the stop bout, on the pre-stop descent only.
+# The command may step toward the gait only while it stays within one
+# step of the live joint. Not a swing stretch. The walk ladder is not
+# read. Engage, the first landing, and the earlier steady steps stay
+# on their own slews.
 _STOP_STEADY_ANK_HI = (7.84, 8.20)
 # Loaded-leg stance rates on the continuous walk. Ankle pitch stays at
 # the 1.90 rad/s rate that already cleared it. The knee is slower on
@@ -12612,9 +12611,8 @@ def _install_sagittal_slew(
                     and not getattr(session, "_sag_torque_cap", False)
                 ):
                     t_now = float(lipm.data.time)
-                    in_lo = _STOP_STEADY_ANK_LO[0] <= t_now < _STOP_STEADY_ANK_LO[1]
                     in_hi = _STOP_STEADY_ANK_HI[0] <= t_now < _STOP_STEADY_ANK_HI[1]
-                    if in_lo or in_hi:
+                    if in_hi:
                         # Delayed hold against a gait target the loaded
                         # joint is not tracking. Do not step further from
                         # the live joint. A step toward it is one stance
@@ -12743,7 +12741,7 @@ def _install_sagittal_slew(
             "PRED sag_slew stop_steady_ank from the live joint at "
             f"{float(rad_s):.3f} rad/s on the loaded left ankle pitch. "
             "The command does not step further from that joint through "
-            "the early steady descent and the pre-stop descent. "
+            "the pre-stop descent. "
             "Planar x/y and sole attitude stay on the live step. "
             "z stays live. This is not a swing stretch. "
             "The walk ladder stays off this bout."
@@ -14367,9 +14365,9 @@ def score_sag_stop() -> None:
         "the live joint through that double support. Ankle pitch stays "
         "on its slew. Hip pitch then continues on the engage catch from "
         "that command. z stays live. That catch is not a swing stretch. "
-        "On the loaded left ankle, the early steady descent and the "
-        "pre-stop descent do not step the command further from the live "
-        "joint. Planar x/y and sole attitude stay on the live step. "
+        "On the loaded left ankle, the pre-stop descent does not step "
+        "the command further from the live joint. Planar x/y and sole "
+        "attitude stay on the live step. "
         "z stays live. That catch is not a swing stretch. "
         "Before the stop, the approach swing-z is time-stretched on its own "
         "rate so the airborne knee can track. That delta is off from the "
