@@ -1789,6 +1789,32 @@ The 0.020 m pad already counts a floor point as inside the stand corridor until 
 
 No existing leg sits in (0.1067, 0.108] at a forward gap near `d_min`. A leg placed there, so the widened edge is what makes the in/out call, is a room-collider move. The plant file was not edited. That placement is open for MFG/Hardware. The five-room bar is unchanged. Not kit-safe. Not go-anywhere.
 
+The table above is the chain before this finder gate. The early unmatched `too_close` stops were last-row columns outside the foot corridor: bedroom left column 605, living left column 13, living right column 530, bathroom left column 512, entrance left column 519. The finder now clears `too_close` unless that last-row column rays into the corridor. A cue also has to be a column at least 48 px tall and 8–40 px wide. A contact at row 440 or lower has to span at least 120 px. The Day-1 latch is unchanged. `HAZARD_PAD_M` stays 0.020. Soft-pass stays off. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` is unchanged.
+
+A 36 px width cap was measured and not kept. Living left and entrance left flicker to 34–39 px on the next frame, so that cap still stops: living left at 6.600 s and entrance left at 6.592 s. Kitchen left stayed at 5.864 s and living straight stayed at 4.376 s. The published gate is 40 px.
+
+Prefer FAIL. Nine of the fifteen bouts meet the bar (0 contacts, the latch is the prop the unstopped walk hits when there is one, and a walk with no prop contact does not stop). Six do not. Kitchen left still stops at 5.864 s on `col_chair_stool_b_leg_2`, saved point 0.014 m from that leg, eye bias −0.011 m, sideways +0.069 m, 0 contacts, stop peak +2.280 Nm. The unstopped walk hits that leg at 6.822 s. Living straight still stops at 4.376 s on `col_coffee_leg_0`, saved point 0.034 m from that leg, eye bias −0.030 m, sideways +0.065 m, born 4.216 s, 0 contacts, stop peak +2.280 Nm. The unstopped walk hits that leg at 5.368 s. Bathroom straight no longer latches `col_toilet_seat`. Bathroom left, bedroom straight, and the four no-contact walks that already had no stop stay stopped-off. Stop peaks that fire are 2.280 Nm. Walks that do not stop stay under 2.33 Nm (hip roll −2.128 Nm, +2.278 Nm, or bathroom-left −2.271 Nm).
+
+| room | approach | stop | latch | contacts | peak |
+| --- | --- | --- | --- | --- | --- |
+| kitchen | straight | none | | 0 | hip roll −2.128 Nm |
+| kitchen | left −0.25 | 5.864 s | `stool_b_leg_2`, 0.014 m | 0; unstopped hits that leg at 6.822 s | +2.280 Nm |
+| kitchen | right +0.25 | none | | 0 | hip roll +2.278 Nm |
+| bathroom | straight | none | | 0, unstopped also 0 | hip roll −2.128 Nm |
+| bathroom | left −0.25 | none | | 0, unstopped also 0 | hip roll −2.271 Nm |
+| bathroom | right +0.25 | none | | 0 | hip roll +2.278 Nm |
+| living | straight | 4.376 s | `coffee_leg_0`, 0.034 m | 0; unstopped hits that leg at 5.368 s | +2.280 Nm |
+| living | left −0.25 | 6.584 s `too_close` | none, col 378, span 227, width 38, side −0.088 m | 0, unstopped also 0 | −2.280 Nm |
+| living | right +0.25 | 4.896 s | `coffee_apron_xn`, 0.100 m, side −0.112 m | 0; unstopped hits `coffee_leg_2` at 8.104 s | +2.280 Nm |
+| bedroom | straight | none | | 0, unstopped also 0 | hip roll −2.128 Nm |
+| bedroom | left −0.25 | 5.624 s `too_close` | none, col 268, span 258, width 12, side +0.048 m | 0, unstopped also 0 | −2.280 Nm |
+| bedroom | right +0.25 | 8.736 s | `nightstand_leg_2`, 1.906 m, eye bias −1.740 m | 0, unstopped also 0 | −2.280 Nm |
+| entrance | straight | none | | rug at 6.892 s, 11.3 N | hip roll −2.128 Nm |
+| entrance | left −0.25 | 6.576 s `too_close` | none, col 379, span 228, width 40, side −0.088 m | 0, unstopped also 0 | −2.280 Nm |
+| entrance | right +0.25 | none | | 0 | hip roll +2.278 Nm |
+
+The three remaining `too_close` stops are in-corridor clips. Living left at 6.584 s is nearest `col_tv_foot_1` at 1.568 m. Bedroom left at 5.624 s is nearest `col_dresser_case` at 2.708 m, and the column is 12 px wide, the same width band as the coffee leg. Entrance left at 6.576 s is nearest `col_entrance_jamb_right` at 1.755 m. Living right stops on the apron report 0.100 m from the saved point, eye 0.189 m against a true range of 0.233 m, while the unstopped walk hits `col_coffee_leg_2` at 8.104 s. Bedroom right is born at 8.136 s on a column 165 px tall and 11 px wide and stops at 8.736 s with the saved point 1.906 m from `col_nightstand_leg_2` and the eye 1.740 m short. Entrance straight still hits `col_mat_rug` at 6.892 s, 11.3 N, with no stop. Not kit-safe. Not go-anywhere.
+
 A −10° `head_tilt` walk is not enabled. On that pose the near edge is
 0.077 m at `cam_z` 0.326 m. #67 checked the wood rule at that session
 tilt: the foot contact boxes project to rows 643–749, below the
