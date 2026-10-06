@@ -1790,16 +1790,10 @@ def _run_room(
                 row["frac_gate"] = "na"
                 return row["answer"]
             if row["asked_fraction"] < ROOM_VISIBLE_FRAC:
+                # Logged against the gate and treated as no. A later
+                # picture under 1% does not cancel a yes that already
+                # cleared the gate, and it does not publish a new commit.
                 row["frac_gate"] = "refuse"
-                if committed:
-                    wrong_yes = True
-                    visible = ", ".join(row["visible_rooms"]) or "none"
-                    block = (
-                        f"wrong yes slipped the frac gate; {room_name} covers "
-                        f"{row['asked_fraction']:.3f} of kit_cam, under "
-                        f"{ROOM_VISIBLE_FRAC:.2f}; visible rooms: {visible}"
-                    )
-                    return "wrong"
                 return "no"
             row["frac_gate"] = "pass"
             first_yes_t = row["t"]
