@@ -32,6 +32,28 @@ A turn is walk-yaw at the forward cap: `vel(+0.056, ±0.250)`. `vx = 0` with a y
 
 Caps stay `vx` **+0.056 / −0.032** m/s and yaw **±0.25** rad/s. This caller does not raise them. The command is not the realized speed or the heading rate.
 
+## Five-room go-to (Prefer FAIL)
+
+`scripts/voice_goto_rooms.py` says "go to the kitchen", "go to the bathroom", "go to the living room", "go to the bedroom", and "go to the entrance". Each phrase is refused. `CommandBus` receives no `stand`, `stop`, or `vel`. There is no room recogniser on this tip (`scripts/room_ask.py` and `scripts/find_room.py` are absent). Moondream is not loaded. Zero spend. The pose is the documented quiet stand in `scripts/render_kit_cam_room.py` (0.60 s). One `kit_cam` frame goes through the #71 finder (cues, in-corridor `too_close` gate, first-sighting low-chroma confirm). That finder does not choose a heading. No map, no waypoint, and no `find_kitchen` path. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` is unchanged. Soft-pass is off. `step_off` stays 0 because no walk high-water was taken. The kitchen-walk +0.017 m is not applied.
+
+This is not the #71 open-loop yaw matrix. Those bouts are scripted `vel` approaches. They are not a voice go-to.
+
+| Room | Voice parse | Recogniser | Remaining / cue | Stop / contact | Peak |
+| --- | --- | --- | --- | --- | --- |
+| kitchen | refuse (`kitchen`) | absent | no cue | not commanded, 0 prop contacts | +0.362 Nm `l_ank_roll_pos` |
+| bathroom | refuse (`bathroom`) | absent | no cue | not commanded, 0 prop contacts | +0.362 Nm `l_ank_roll_pos` |
+| living | refuse (`living`, `room`) | absent | no cue | not commanded, 0 prop contacts | +0.362 Nm `l_ank_roll_pos` |
+| bedroom | refuse (`bedroom`) | absent | no cue | not commanded, 0 prop contacts | +0.362 Nm `l_ank_roll_pos` |
+| entrance | refuse (no room word; `go to ` prefix) | absent | no cue | not commanded, 0 prop contacts | +0.362 Nm `l_ank_roll_pos` |
+
+The stand peak is the same in every scene because the phrase never walks and the furniture never touches the robot. min up_z is 1.000. The refusal line on every phrase is the room line. Not kit-safe. Not go-anywhere.
+
+```bash
+MUJOCO_GL=osmesa python scripts/voice_goto_rooms.py
+```
+
+Exit status is 1. The summary is `previews/voice_goto_rooms_summary.json`.
+
 ## Clip
 
 `MUJOCO_GL=osmesa python scripts/voice_caller.py --clip` plays the claimed nav-left window as phrases: **stand → walk forward → turn left → walk forward → stop**. Times are 1 s, 15 s, 12.5 s, 6 s, then a 2.5 s stop. The bus commands are `stand`, `vel(+0.056, +0.000)`, `vel(+0.056, +0.250)`, `vel(+0.056, +0.000)`, `stop`. Each frame captions the phrase and that bus command. The view is the third-person camera so the body is visible. `kit_cam` stays at `0.050 0.019 0.007` and is not the demo camera.

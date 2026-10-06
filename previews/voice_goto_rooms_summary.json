@@ -1,0 +1,121 @@
+{
+  "prefer_fail": true,
+  "soft_pass": false,
+  "go_anywhere": false,
+  "kit_safe": false,
+  "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+  "plant_file_changed": false,
+  "recogniser": "absent",
+  "map_waypoints": false,
+  "room_script": false,
+  "vel_published": false,
+  "step_off_m": 0.0,
+  "step_off_note": "0 because no vel was published and the walk high-water was not taken. The kitchen-walk +0.017 m is not applied.",
+  "gap": "Voice refuses a room phrase before CommandBus. This tip has no kit_cam room label (room_ask.py and find_room.py are absent; Moondream is not loaded). The #71 finder can report a hazard cue on the stand frame and does not choose vx or yaw.",
+  "rooms": [
+    {
+      "room": "kitchen",
+      "phrase": "go to the kitchen",
+      "voice_parse": "refuse",
+      "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
+      "matched_room_words": [
+        "kitchen"
+      ],
+      "bus_vel_count": 0,
+      "bus_stand_count": 0,
+      "bus_stop_count": 0,
+      "recogniser_label": "absent",
+      "cue_count": 0,
+      "cue": null,
+      "remaining": "no cue",
+      "stop": "not commanded",
+      "contact": null,
+      "peak_nm": 0.3619768663199655,
+      "peak_actuator": "l_ank_roll_pos",
+      "min_up_z": 0.9999296015830651
+    },
+    {
+      "room": "bathroom",
+      "phrase": "go to the bathroom",
+      "voice_parse": "refuse",
+      "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
+      "matched_room_words": [
+        "bathroom"
+      ],
+      "bus_vel_count": 0,
+      "bus_stand_count": 0,
+      "bus_stop_count": 0,
+      "recogniser_label": "absent",
+      "cue_count": 0,
+      "cue": null,
+      "remaining": "no cue",
+      "stop": "not commanded",
+      "contact": null,
+      "peak_nm": 0.3619768663199655,
+      "peak_actuator": "l_ank_roll_pos",
+      "min_up_z": 0.9999296015830651
+    },
+    {
+      "room": "living",
+      "phrase": "go to the living room",
+      "voice_parse": "refuse",
+      "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
+      "matched_room_words": [
+        "living",
+        "room"
+      ],
+      "bus_vel_count": 0,
+      "bus_stand_count": 0,
+      "bus_stop_count": 0,
+      "recogniser_label": "absent",
+      "cue_count": 0,
+      "cue": null,
+      "remaining": "no cue",
+      "stop": "not commanded",
+      "contact": null,
+      "peak_nm": 0.3619768663199655,
+      "peak_actuator": "l_ank_roll_pos",
+      "min_up_z": 0.9999296015830651
+    },
+    {
+      "room": "bedroom",
+      "phrase": "go to the bedroom",
+      "voice_parse": "refuse",
+      "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
+      "matched_room_words": [
+        "bedroom"
+      ],
+      "bus_vel_count": 0,
+      "bus_stand_count": 0,
+      "bus_stop_count": 0,
+      "recogniser_label": "absent",
+      "cue_count": 0,
+      "cue": null,
+      "remaining": "no cue",
+      "stop": "not commanded",
+      "contact": null,
+      "peak_nm": 0.3619768663199655,
+      "peak_actuator": "l_ank_roll_pos",
+      "min_up_z": 0.9999296015830651
+    },
+    {
+      "room": "entrance",
+      "phrase": "go to the entrance",
+      "voice_parse": "refuse",
+      "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
+      "matched_room_words": [],
+      "bus_vel_count": 0,
+      "bus_stand_count": 0,
+      "bus_stop_count": 0,
+      "recogniser_label": "absent",
+      "cue_count": 0,
+      "cue": null,
+      "remaining": "no cue",
+      "stop": "not commanded",
+      "contact": null,
+      "peak_nm": 0.3619768663199655,
+      "peak_actuator": "l_ank_roll_pos",
+      "min_up_z": 0.9999296015830651
+    }
+  ]
+}
