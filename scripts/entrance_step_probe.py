@@ -1673,13 +1673,14 @@ def _mid_swing_limited(
 
 def _worst_mid_swing(
     rows: list[Tick],
+    t_cut: float | None = None,
 ) -> tuple[float, float, float, str, int, int, int]:
     """Worst 20–80% contact-box toe on the whole bout.
 
     A swing still open at the end keeps the median full-swing length, so
     an early sample is not relabeled into the window.
     """
-    cycles = _swing_cycles(rows, T_END + 1.0)
+    cycles = _swing_cycles(rows, (T_END + 1.0) if t_cut is None else t_cut)
     earlier = [len(cyc) for cyc in cycles[:-1] if len(cyc) >= 2] if len(cycles) >= 2 else []
     if earlier:
         ordered = sorted(earlier)
@@ -1738,6 +1739,7 @@ def _surface_summary(
     hx_rug: dict[str, tuple[float, float]],
     ka_hits: list[str] | None = None,
     ka_checked: int = 0,
+    t_cut: float | None = None,
 ) -> dict[str, object]:
     """Knee at 7.432 s, and flat-floor mid-swing separate from rug mid-swing."""
     knee = min(surface_rows, key=lambda row: abs(float(row["t"]) - KNEE_TICK_S))
@@ -1769,7 +1771,7 @@ def _surface_summary(
     ))
     print(f"PRED {name} rug_at {kt:.3f} either_on_rug {knee_on} {knee_rug}")
     by_t = {round(float(row["t"]), 5): row for row in surface_rows}
-    cycles = _swing_cycles(rows, T_END + 1.0)
+    cycles = _swing_cycles(rows, (T_END + 1.0) if t_cut is None else t_cut)
     med_n, _last_n = _cycle_index(cycles)
     flat_best: tuple[float, float, float, str, float, float, float, float] | None = None
     rug_best: tuple[float, float, float, str, float] | None = None
@@ -3592,6 +3594,42 @@ def _check_ank_roll_kv(session: sw.SteerSession) -> float:
     return seen[0]
 
 
+def _install_unclamp_log(lipm: object, bucket: list[tuple]) -> None:
+    """Record kp*(q_des-q) - kv*omega before the yaw budget or the stop clamp."""
+    orig_fl = lipm.write_force_limited
+    orig_wc = lipm.write_clipped
+
+    def _note(jn: str, q_des: float, kind: str, limit: float | None) -> None:
+        if not (jn.endswith("hip_roll") or jn.endswith("knee")):
+            return
+        act = jn + "_pos"
+        idx = lipm.act_idx.get(act)
+        if idx is None:
+            return
+        q = float(lipm.q(jn))
+        jid = mj.mj_name2id(lipm.model, mj.mjtObj.mjOBJ_JOINT, jn)
+        omega = float(lipm.data.qvel[int(lipm.model.jnt_dofadr[jid])])
+        kp = float(lipm.model.actuator_gainprm[idx, 0])
+        kv = -float(lipm.model.actuator_biasprm[idx, 2])
+        ask = kp * (float(q_des) - q) - kv * omega
+        bucket.append((
+            float(lipm.data.time), jn, float(q_des), float(ask),
+            float(lipm.cmd_yaw), str(lipm.phase), kind,
+            None if limit is None else float(limit),
+        ))
+
+    def wrapped_fl(jn: str, q_des: float, limit_nm: float | None = None) -> None:
+        _note(jn, q_des, "force_limited", limit_nm)
+        orig_fl(jn, q_des, limit_nm)
+
+    def wrapped_wc(jn: str, q_des: float) -> None:
+        _note(jn, q_des, "clipped", None)
+        orig_wc(jn, q_des)
+
+    lipm.write_force_limited = wrapped_fl  # type: ignore[method-assign]
+    lipm.write_clipped = wrapped_wc  # type: ignore[method-assign]
+
+
 def measure_pred_clip(
     *,
     clip: bool,
@@ -3629,6 +3667,9 @@ def measure_pred_clip(
     ank_log: bool = False,
     ank_trim_lead: bool = False,
     ank_trim_on_frac: float = 0.208,
+    t_end: float | None = None,
+    segments: tuple[sw.DemoSegment, ...] | None = None,
+    steer_out: dict[str, object] | None = None,
 ) -> PredScore:
     """12 mm @ 20% with an optional swing-hip predicted-force clip.
 
@@ -3741,10 +3782,13 @@ def measure_pred_clip(
     if lipm is None or lipm.op3 is None:
         raise RuntimeError("gait manager walker missing")
     walker = lipm.op3
-    driver = sw.ScriptedDriver((
-        sw.DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
-        sw.DemoSegment(T_END, "vel", sw.VX_FWD_CAP, 0.0, "forward"),
-    ))
+    end = T_END if t_end is None else float(t_end)
+    if segments is None:
+        segments = (
+            sw.DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+            sw.DemoSegment(end, "vel", sw.VX_FWD_CAP, 0.0, "forward"),
+        )
+    driver = sw.ScriptedDriver(segments)
     rows: list[Tick] = []
     surface_rows: list[dict[str, object]] = []
     hx_chain = (
@@ -3839,8 +3883,11 @@ def measure_pred_clip(
     first_fault = ""
     fault_t = float("nan")
     x_at: dict[str, float] = {}
+    ask_log: list[tuple] = []
+    if steer_out is not None:
+        _install_unclamp_log(lipm, ask_log)
     try:
-        while float(session.data.time) < T_END - 1e-9:
+        while float(session.data.time) < end - 1e-9:
             driver.publish(session.bus, float(session.data.time))
             session.step()
             t = float(session.data.time)
@@ -3936,6 +3983,10 @@ def measure_pred_clip(
                     )
                 if sole_corner_log and swing in ("L", "R"):
                     surf_row["sole_tick"] = _sole_tick_capture(session, swing)
+                if steer_out is not None:
+                    surf_row["seg"] = driver.segment(t).label
+                    surf_row["yaw"] = float(lipm.cmd_yaw)
+                    surf_row["phase"] = str(lipm.phase)
                 if yswap_lead_s > 0.0:
                     stand_l = float(lipm.q_stand.get("l_ank_roll", 0.0))
                     stand_r = float(lipm.q_stand.get("r_ank_roll", 0.0))
@@ -4020,7 +4071,9 @@ def measure_pred_clip(
         mj.mj_step = real_step
     toe_min, toe_t, _p90, _n_mid, _n_cyc, toe_frac, toe_side = _mid_swing(rows)
     if whole_toe:
-        bout_z, bout_t, bout_frac, bout_side, bout_n, med_n, last_n = _worst_mid_swing(rows)
+        bout_z, bout_t, bout_frac, bout_side, bout_n, med_n, last_n = _worst_mid_swing(
+            rows, None if t_end is None else end + 1.0,
+        )
         if bout_t == bout_t and (
             toe_t != toe_t or abs(bout_t - toe_t) > 1e-6 or abs(bout_z - toe_min) > 1e-9
         ):
@@ -4275,6 +4328,7 @@ def measure_pred_clip(
         surf = _surface_summary(
             name, rows, surface_rows, hx_flat, hx_rug,
             ka_hits if ka_log else None, ka_checked,
+            None if t_end is None else end + 1.0,
         )
         if early_log:
             _print_early_flat(name, rows, surface_rows)
@@ -4338,6 +4392,13 @@ def measure_pred_clip(
             "swing knee only. Stance sag cancel is off."
         )
     session.assert_plant_unchanged()
+    if steer_out is not None:
+        steer_out["asks"] = ask_log
+        steer_out["rows"] = rows
+        steer_out["surface"] = surface_rows
+        steer_out["fault"] = first_fault
+        steer_out["fault_t"] = fault_t
+        steer_out["end"] = end
     return PredScore(
         name=name,
         clip=clip,
@@ -8027,6 +8088,331 @@ def score_level_footz() -> None:
         f"floor_over under. "
         "Derivative trim lead is next. It was not run in this copy. "
         "Less-crouch was not opened. Not kit-safe. Not go-anywhere."
+    )
+
+
+def _steer_turn_script() -> tuple[sw.DemoSegment, ...]:
+    """Straight entrance walk, then a stop, then ±0.25 yaw, then stops.
+
+    The straight piece ends at the same 8.2 s as the cleared level-trim bout,
+    so the entrance rug is still in the score. Yaw is the bus cap, 0.25 rad/s.
+    """
+    cap = sw.VX_FWD_CAP
+    yaw = sw.YAW_RATE_CAP
+    return (
+        sw.DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+        sw.DemoSegment(8.2, "vel", cap, 0.0, "forward"),
+        sw.DemoSegment(9.4, "stop", 0.0, 0.0, "stop"),
+        sw.DemoSegment(14.4, "vel", cap, yaw, "yaw_left"),
+        sw.DemoSegment(15.6, "stop", 0.0, 0.0, "stop"),
+        sw.DemoSegment(20.6, "vel", cap, -yaw, "yaw_right"),
+        sw.DemoSegment(21.6, "stop", 0.0, 0.0, "stop"),
+    )
+
+
+def _steer_corners(tag: str, sole: dict[str, object], centre_mm: float) -> None:
+    corners = _corner_map(sole["corners"])
+    for label in _CORNER_ORDER:
+        z, off = corners[label]
+        z_mm = z * 1000.0
+        print(
+            f"PRED steer_turn corner {tag} {label} "
+            f"z_mm {z_mm:.6f} centre_minus_corner_mm {centre_mm - z_mm:.6f} "
+            f"forward_mm {off * 1000.0:.1f}"
+        )
+
+
+def _steer_window(
+    rows: list[Tick],
+    surface: list[dict[str, object]],
+    t_cut: float,
+) -> list[dict[str, object]]:
+    """One record per swing: its 20-80% toe minimum, plus the lift-off tick."""
+    by_t = {round(float(row["t"]), 5): row for row in surface}
+    cycles = _swing_cycles(rows, t_cut)
+    med_n, _last = _cycle_index(cycles)
+    out: list[dict[str, object]] = []
+    for step, cyc in enumerate(cycles):
+        n = len(cyc)
+        if n < 2 or med_n < 2:
+            continue
+        n_full = med_n if step == len(cycles) - 1 and n < med_n - 1 else n
+        mids: list[tuple[float, Tick, dict[str, object]]] = []
+        lift: tuple[float, Tick, dict[str, object]] | None = None
+        for j, row in enumerate(cyc):
+            if row.toe_z is None or row.swing is None:
+                continue
+            frac = j / (n_full - 1)
+            surf = by_t.get(round(row.t, 5))
+            if surf is None:
+                continue
+            plane = surf.get(row.swing)
+            sole = surf.get("sole_tick")
+            if not isinstance(plane, dict) or not isinstance(sole, dict):
+                continue
+            packed = (frac, row, surf)
+            if lift is None:
+                lift = packed
+            if 0.20 - 1e-12 <= frac <= 0.80 + 1e-12:
+                mids.append(packed)
+        if not mids or lift is None:
+            continue
+        on_rug = any(int(item[2][item[1].swing]["on_rug"]) for item in mids)  # type: ignore[index]
+        worst = min(mids, key=lambda item: float(item[1].toe_z or 0.0))
+        out.append({
+            "step": step,
+            "tag": "rug" if on_rug else "flat",
+            "worst": worst,
+            "lift": lift,
+        })
+    return out
+
+
+def _print_steer_tick(tag: str, packed: tuple[float, Tick, dict[str, object]]) -> float:
+    frac, row, surf = packed
+    side = str(row.swing)
+    plane = surf[side]
+    sole = surf["sole_tick"]
+    assert isinstance(plane, dict) and isinstance(sole, dict)
+    toe = float(row.toe_z or 0.0) * 1000.0
+    centre = float(sole["center_z"]) * 1000.0
+    clear = float(plane["clear"]) * 1000.0
+    margin, hundredths = _margin_hundredths(toe)
+    print(
+        f"PRED steer_turn {tag} side {side} t {row.t:.3f} "
+        f"frac {frac:.6f} seg {surf.get('seg', '')} "
+        f"yaw {float(surf.get('yaw', 0.0)):+.5f} phase {surf.get('phase', '')} "
+        f"toe_mm {toe:.6f} clear_mm {clear:.6f} "
+        f"vs_plus2_mm {margin:.6f} margin_hundredths {hundredths:.2f} "
+        f"centre_mm {centre:.6f} scored {sole['scored_label']} lowest {sole['low_label']} "
+        f"contact {plane['contact']} geoms {plane['geoms']} "
+        f"surface {plane['surface']} on_rug {plane['on_rug']}"
+    )
+    _steer_corners(tag, sole, centre)
+    return toe
+
+
+def score_steer_turn() -> None:
+    """Level trim plus foot-z 1.170, with ±0.25 yaw and starts/stops.
+
+    Trim lead stays off. Less-crouch stays closed. The bar fails if a
+    whole-walk 20-80% toe is under +2 mm, a rug clearance is under +2 mm,
+    a floor knee, ankle, or hip roll is over 2.33 Nm, or the unclamped
+    hip-roll or knee ask on a turning step or a later stop is over 2.33 Nm.
+    """
+    script = _steer_turn_script()
+    print(
+        "PRED steer_turn_plan trim-lead is off. Less-crouch is not this copy. "
+        "Stack is the restored constant level trim plus foot-z 1.170 mm on A10+025. "
+        "Hip pitch lead stays 20 ms. Roll lead stays 0. Sag cancel stays off. "
+        "Period stays 0.500 s. "
+        "Script is stand, straight through 8.2 s, stop, "
+        f"yaw_left +{sw.YAW_RATE_CAP:.2f} rad/s, stop, "
+        f"yaw_right -{sw.YAW_RATE_CAP:.2f} rad/s, stop. "
+        "Unclamped ask is kp*(q_des-q)-kv*omega before the yaw budget and the stop clamp."
+    )
+    _require_plant("before", "steer_turn")
+    held: dict[str, object] = {}
+    row = measure_pred_clip(
+        clip=True,
+        move_s=None,
+        pitch_move_off=True,
+        toe_up_rad=0.025,
+        toe_up_shape="front",
+        toe_full_frac=0.10,
+        hip_lead=True,
+        lead_roll_scale=0.0,
+        lead_pitch_scale=_pitch_lead_scale(20.0),
+        whole_toe=True,
+        surface_tag=True,
+        ka_log=True,
+        sag_cancel=False,
+        z_profile="phase",
+        sole_corner_log=True,
+        ank_trim_l=_RESTORED_ROLL_L,
+        ank_trim_r=_RESTORED_ROLL_R,
+        ank_pitch_trim_l=_RESTORED_PITCH_L,
+        ank_pitch_trim_r=_RESTORED_PITCH_R,
+        ank_log=True,
+        roll_log=True,
+        z_extra_m=_LEVEL_FOOTZ_UM / 1_000_000.0,
+        t_end=21.6,
+        segments=script,
+        steer_out=held,
+    )
+    _require_plant("after", "steer_turn")
+    if "trimlead" in row.name:
+        raise SystemExit(f"trim lead is still in the name {row.name}")
+    surface = held["surface"]
+    asks = held["asks"]
+    assert isinstance(surface, list) and isinstance(asks, list)
+    swings = _steer_window(held["rows"], surface, 21.6 + 1.0)  # type: ignore[arg-type]
+    yaw_max = {"yaw_left": 0.0, "yaw_right": 0.0}
+    for surf in surface:
+        seg = str(surf.get("seg", ""))
+        if seg in yaw_max:
+            yaw_max[seg] = max(yaw_max[seg], abs(float(surf.get("yaw", 0.0))))
+    print(
+        f"PRED steer_turn yaw_seen left {yaw_max['yaw_left']:+.5f} "
+        f"right {yaw_max['yaw_right']:+.5f} "
+        f"fault {held['fault'] or 'none'} t {float(held['fault_t']):.3f}"
+    )
+    fails: list[str] = []
+    foot_best: dict[str, dict[str, object]] = {}
+    rug_best: dict[str, object] | None = None
+    for item in swings:
+        worst = item["worst"]
+        assert isinstance(worst, tuple)
+        side = str(worst[1].swing)
+        toe = float(worst[1].toe_z or 0.0)
+        prev = foot_best.get(side)
+        if prev is None or toe < float(prev["toe"]):
+            foot_best[side] = {"toe": toe, "item": item}
+        if item["tag"] == "rug":
+            plane = worst[2][side]
+            clear = float(plane["clear"])
+            if rug_best is None or clear < float(rug_best["clear"]):
+                rug_best = {"clear": clear, "item": item}
+    for side in ("L", "R"):
+        packed = foot_best.get(side)
+        if packed is None:
+            print(f"PRED steer_turn foot {side} missed")
+            fails.append(f"{side} swing missed")
+            continue
+        item = packed["item"]
+        assert isinstance(item, dict)
+        toe = _print_steer_tick(f"worst_{side}", item["worst"])
+        _print_steer_tick(f"liftoff_{side}", item["lift"])
+        margin, hundredths = _margin_hundredths(toe)
+        if toe < 2.0:
+            fails.append(
+                f"{side} toe {toe:.6f} mm t {item['worst'][1].t:.3f} "
+                f"vs_plus2_mm {margin:.6f} margin_hundredths {hundredths:.2f}"
+            )
+    if rug_best is None:
+        print("PRED steer_turn rug missed")
+        fails.append("rug swing missed")
+    else:
+        item = rug_best["item"]
+        assert isinstance(item, dict)
+        _print_steer_tick("rug_worst", item["worst"])
+        _print_steer_tick("rug_liftoff", item["lift"])
+        clear = float(rug_best["clear"]) * 1000.0
+        margin, hundredths = _margin_hundredths(clear)
+        print(
+            f"PRED steer_turn rug_clear_mm {clear:.6f} "
+            f"vs_plus2_mm {margin:.6f} margin_hundredths {hundredths:.2f}"
+        )
+        if clear < 2.0:
+            fails.append(
+                f"rug clear {clear:.6f} mm vs_plus2_mm {margin:.6f} "
+                f"margin_hundredths {hundredths:.2f}"
+            )
+    floor_acts = (
+        "l_knee", "r_knee", "l_ank_pitch", "r_ank_pitch",
+        "l_ank_roll", "r_ank_roll", "l_hip_roll", "r_hip_roll",
+    )
+    floor_peak: dict[str, tuple[float, float, str, str]] = {}
+    for surf in surface:
+        for act in floor_acts:
+            if act not in surf:
+                continue
+            side = "L" if act.startswith("l_") else "R"
+            plane = surf[side]
+            if not isinstance(plane, dict):
+                continue
+            contact = str(plane["contact"])
+            if contact not in ("floor", "floor+rug"):
+                continue
+            tau = float(surf[act])
+            prev = floor_peak.get(act)
+            if prev is None or abs(tau) > abs(prev[0]):
+                floor_peak[act] = (tau, float(surf["t"]), contact, str(surf.get("seg", "")))
+    for act, (tau, when, contact, seg) in floor_peak.items():
+        head = KNEE_NM - abs(tau)
+        head_h = math.floor(head * 100.0 + 1e-9) / 100.0
+        ge = int(abs(tau) >= KNEE_NM)
+        print(
+            f"PRED steer_turn floor {act} {tau:+.4f} t {when:.3f} "
+            f"contact {contact} seg {seg} ge_2.33 {ge} "
+            f"headroom_nm {head:.6f} headroom_hundredths {head_h:.2f}"
+        )
+        if ge:
+            fails.append(f"floor {act} {tau:+.4f} t {when:.3f} contact {contact} seg {seg}")
+    def _ask_peak(turning: bool) -> dict[str, tuple]:
+        best: dict[str, tuple] = {}
+        for item in asks:
+            t, jn, _qdes, ask, yaw, phase, kind, limit = item
+            turn = abs(float(yaw)) > 1e-3 and str(phase) != "stand"
+            if turn != turning:
+                continue
+            if not turning and (str(phase) != "stand" or float(t) < 1.2):
+                continue
+            prev = best.get(str(jn))
+            if prev is None or abs(float(ask)) > abs(float(prev[3])):
+                best[str(jn)] = item
+        return best
+    def _near_surf(when: float) -> dict[str, object] | None:
+        best: dict[str, object] | None = None
+        best_dt = 1e9
+        for surf in surface:
+            dt = abs(float(surf["t"]) - when)
+            if dt < best_dt:
+                best_dt = dt
+                best = surf
+        if best is None or best_dt > 0.012:
+            return None
+        return best
+
+    for label, turning in (("turn", True), ("stop", False)):
+        for jn, item in _ask_peak(turning).items():
+            t, _jn, qdes, ask, yaw, phase, kind, limit = item
+            lim = "none" if limit is None else f"{float(limit):.2f}"
+            ge = int(abs(float(ask)) >= KNEE_NM)
+            head = KNEE_NM - abs(float(ask))
+            head_h = math.floor(head * 100.0 + 1e-9) / 100.0
+            near = _near_surf(float(t))
+            measured = float("nan")
+            contact = "-"
+            if near is not None and jn in near:
+                measured = float(near[jn])
+                side = "L" if str(jn).startswith("l_") else "R"
+                plane = near.get(side)
+                if isinstance(plane, dict):
+                    contact = str(plane.get("contact", "-"))
+            print(
+                f"PRED steer_turn unclamped {label} {jn} {float(ask):+.4f} "
+                f"t {float(t):.3f} q_des {float(qdes):+.5f} "
+                f"yaw {float(yaw):+.5f} phase {phase} kind {kind} limit {lim} "
+                f"measured {measured:+.4f} contact {contact} "
+                f"ge_2.33 {ge} headroom_nm {head:.6f} "
+                f"headroom_hundredths {head_h:.2f}"
+            )
+            if ge:
+                fails.append(
+                    f"unclamped {label} {jn} {float(ask):+.4f} t {float(t):.3f}"
+                )
+    if yaw_max["yaw_left"] < 0.20 or yaw_max["yaw_right"] < 0.20:
+        fails.append(
+            f"yaw short left {yaw_max['yaw_left']:.5f} right {yaw_max['yaw_right']:.5f}"
+        )
+    if held["fault"]:
+        fails.append(f"fault {held['fault']} t {float(held['fault_t']):.3f}")
+    if fails:
+        print(
+            "PRED steer_turn Prefer FAIL. "
+            + " | ".join(fails)
+            + ". Trim lead stayed off. Less-crouch was not opened. "
+            "Not kit-safe. Not go-anywhere."
+        )
+        return
+    print(
+        "PRED steer_turn bar_held. Whole-walk 20-80% toes and the rug clearance "
+        "are at or over +2 mm. Floor knee, ankle, and hip roll stay under 2.33 Nm. "
+        "Unclamped hip-roll and knee asks on turning steps and later stops "
+        "stay under 2.33 Nm. "
+        "Trim lead stayed off. Less-crouch was not opened. "
+        "Not kit-safe. Not go-anywhere."
     )
 
 
