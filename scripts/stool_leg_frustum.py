@@ -25,6 +25,7 @@ import json
 import math
 import os
 import sys
+import time
 from pathlib import Path
 from typing import TypedDict
 
@@ -237,7 +238,7 @@ def _contacts(model: mj.MjModel, data: mj.MjData, ankle_bodies: set[int], prop_n
     return rows
 
 
-def _sample(
+def _sample_timed(
     model: mj.MjModel,
     data: mj.MjData,
     renderer: mj.Renderer,
@@ -246,7 +247,13 @@ def _sample(
     rail_ids: list[int],
     hit_leg_id: int,
     hit_rail_id: int,
-) -> tuple[SampleRow, np.ndarray]:
+) -> tuple[SampleRow, np.ndarray, float]:
+    """Cue sample. The third value is wall seconds after the RGB buffer exists.
+
+    That span is the leg/rail read (segmentation and depth on the visual
+    mesh). It is not a Moondream call, and it is not the lead from the cue
+    to contact. Collision boxes are not the pixel mask.
+    """
     cam_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_CAMERA, "kit_cam")
     cam_pos = np.asarray(data.cam_xpos[cam_id], dtype=np.float64)
     cam_mat = np.asarray(data.cam_xmat[cam_id], dtype=np.float64).reshape(3, 3)
@@ -257,6 +264,9 @@ def _sample(
     renderer.disable_depth_rendering()
     renderer.update_scene(data, camera="kit_cam")
     rgb = np.asarray(renderer.render(), dtype=np.uint8).copy()
+    # Cue is already in this buffer or it is not. The clock below is only
+    # the read that decides visible_enough. The walk clock stays put.
+    t_rgb = time.perf_counter()
     renderer.enable_segmentation_rendering()
     renderer.update_scene(data, camera="kit_cam")
     seg = np.asarray(renderer.render()).copy()
@@ -331,6 +341,22 @@ def _sample(
         "hit_leg_projects": _projects(hit_leg_pts, cam_pos, cam_mat, fovy),
         "hit_rail_projects": _projects(hit_rail_pts, cam_pos, cam_mat, fovy),
     }
+    return row, rgb, time.perf_counter() - t_rgb
+
+
+def _sample(
+    model: mj.MjModel,
+    data: mj.MjData,
+    renderer: mj.Renderer,
+    stool_id: int,
+    leg_ids: list[int],
+    rail_ids: list[int],
+    hit_leg_id: int,
+    hit_rail_id: int,
+) -> tuple[SampleRow, np.ndarray]:
+    row, rgb, _post_rgb_s = _sample_timed(
+        model, data, renderer, stool_id, leg_ids, rail_ids, hit_leg_id, hit_rail_id,
+    )
     return row, rgb
 
 
