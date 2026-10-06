@@ -137,6 +137,10 @@ FRONTIER_SECOND_LEFT_S = 8.0
 FRONTIER_RIGHT_HOLD_S = 34.0
 # False: the 4 s / 8 s / 34 s chain is not a qualified envelope.
 QUALIFIED_FRONTIER_CHAIN = False
+# Stop long enough for the bus to stand, then one question. Not a percept.
+ASK_STOP_S = 0.20
+# Repeat room label: reverse at the Controls back clamp. Not a waypoint.
+BACKTRACK_S = 2.0
 FRONTIER_WALK_S = (
     steer_walk.CLAIMED_APPROACH_S
     + steer_walk.CLAIMED_LEFT_ARC_S
@@ -1323,6 +1327,68 @@ def _pose(session: steer_walk.SteerSession) -> RobotPose:
     )
 
 
+@dataclass(frozen=True)
+class AskRecord:
+    """One stop-look question. The room word is a label, not a goal."""
+
+    t: float
+    room: str | None
+    raw: str
+    confidence: float | None
+    seconds: float
+    decision: str
+
+
+def decide_next(memory: list[AskRecord], upcoming: ExplorePhase, *, just_backtracked: bool) -> ExplorePhase:
+    """Next vel after a stop-look answer.
+
+    none and a hedge keep the scheduled vel. The first time a room word
+    appears, it is only remembered. The same word again is a reverse at
+    the back clamp, then the scheduled vel still follows. No waypoint
+    and no room-specific path.
+    """
+    if just_backtracked or not memory:
+        return upcoming
+    latest = memory[-1].room
+    prior = [item.room for item in memory[:-1]]
+    import room_ask
+
+    if latest in room_ask.ROOMS and latest in prior:
+        return ExplorePhase(
+            "backtrack",
+            BACKTRACK_S,
+            -steer_walk.VX_BACK_CAP,
+            0.0,
+            f"repeat label {latest}; reverse at the back clamp, not a waypoint",
+        )
+    return upcoming
+
+
+def _stop_look_ask(session: steer_walk.SteerSession, cam: KitCam, asker: object, sent: list[SentCommand]) -> tuple[np.ndarray, AskRecord]:
+    """vel window ended. Stop, one kit_cam frame, one question. Sim pauses for the model."""
+    now = float(session.data.time)
+    refusal = session.bus.stop(now)
+    if refusal:
+        raise RuntimeError(refusal)
+    sent.append(SentCommand(now, "stop", 0.0, 0.0))
+    end = now + ASK_STOP_S
+    while float(session.data.time) < end - 1e-9:
+        session.step()
+    frame, _cam_pos, _cam_mat, _fovy = cam.grab(session.model, session.data)
+    answer = asker.ask(frame)
+    room = answer.get("room")
+    confidence = answer.get("confidence")
+    record = AskRecord(
+        t=float(session.data.time),
+        room=room if isinstance(room, str) or room is None else str(room),
+        raw=str(answer.get("raw", "")),
+        confidence=float(confidence) if isinstance(confidence, (int, float)) else None,
+        seconds=float(answer.get("seconds", 0.0)),
+        decision="pending",
+    )
+    return frame, record
+
+
 def _hold_stand(session: steer_walk.SteerSession, seconds: float, sent: list[SentCommand]) -> None:
     now = float(session.data.time)
     refusal = session.bus.stand(now)
@@ -1377,6 +1443,7 @@ class SceneRun:
     near_face_x_m: float | None
     soft_goal_xy: tuple[float, float] | None
     arrival_bars_met: bool
+    asks: list[AskRecord] | None = None
 
     def delta_x(self) -> float:
         return self.end.x - self.start.x
@@ -1396,6 +1463,8 @@ def run_explore(
     walk_s: float,
     *,
     record_frames: bool,
+    ask: bool = False,
+    asker: object | None = None,
 ) -> SceneRun:
     scene_xml = SCENES[scene]
     session = steer_walk.SteerSession(
@@ -1407,6 +1476,13 @@ def run_explore(
     feature_map = ExploreMap.empty()
     sent: list[SentCommand] = []
     frames: list[np.ndarray] = []
+    asks: list[AskRecord] = []
+    own_asker = False
+    if ask and asker is None:
+        import room_ask
+
+        asker = room_ask.RoomAsk()
+        own_asker = True
     try:
         _hold_stand(session, STAND_S, sent)
         start = _pose(session)
@@ -1472,10 +1548,49 @@ def run_explore(
             phase = schedule[phase_i]
             if now >= (phase_t0 + phase.duration_s) - 1e-9:
                 pose_now = _pose(session)
+                closed_name = schedule[phase_i].name
                 _close_phase(pose_now)
                 note_frontier_phase(drive, schedule[phase_i])
                 phase_i += 1
                 phase_min_up = 1.0
+                if ask and asker is not None:
+                    _frame, record = _stop_look_ask(session, cam, asker, sent)
+                    upcoming = schedule[phase_i] if phase_i < len(schedule) else None
+                    if upcoming is None:
+                        record = AskRecord(
+                            t=record.t,
+                            room=record.room,
+                            raw=record.raw,
+                            confidence=record.confidence,
+                            seconds=record.seconds,
+                            decision="stop",
+                        )
+                    else:
+                        chosen = decide_next(
+                            asks + [record],
+                            upcoming,
+                            just_backtracked=closed_name == "backtrack",
+                        )
+                        if chosen.name == "backtrack" and upcoming.name != "backtrack":
+                            schedule.insert(phase_i, chosen)
+                            decision = "backtrack"
+                        else:
+                            decision = "vel"
+                        record = AskRecord(
+                            t=record.t,
+                            room=record.room,
+                            raw=record.raw,
+                            confidence=record.confidence,
+                            seconds=record.seconds,
+                            decision=decision,
+                        )
+                    asks.append(record)
+                    print(
+                        f"[explore] ask t={record.t:.2f} room={record.room!r} "
+                        f"raw={record.raw!r} conf={record.confidence} "
+                        f"s={record.seconds:.2f} next={record.decision}",
+                        flush=True,
+                    )
                 if (
                     QUALIFIED_FRONTIER_CHAIN
                     and phase_i >= len(schedule)
@@ -1501,10 +1616,13 @@ def run_explore(
                             schedule.append(nxt)
                 if phase_i >= len(schedule):
                     break
-                phase_origin = pose_now
-                phase_t0 = now
+                if ask:
+                    walk_end += ASK_STOP_S
+                phase_origin = _pose(session)
+                phase_t0 = float(session.data.time)
                 phase = schedule[phase_i]
                 command = VelocityCommand(phase.vx, phase.yaw_rate, phase.name, None)
+                last_send = -1.0
             if (now - last_send) >= (steer_walk.VEL_RESEND_S - 1e-9):
                 _send_vel(session, command, sent)
                 last_send = now
@@ -1541,6 +1659,26 @@ def run_explore(
         else:
             if phase_i < len(schedule) and stop_reason == "claimed walk-yaw schedule":
                 _close_phase(_pose(session))
+                # The last step can land on the walk budget and the phase end
+                # together. That stop still gets one question. Decision is stop:
+                # the budget is finished, so a repeat label does not add a vel.
+                if ask and asker is not None:
+                    _frame, record = _stop_look_ask(session, cam, asker, sent)
+                    record = AskRecord(
+                        t=record.t,
+                        room=record.room,
+                        raw=record.raw,
+                        confidence=record.confidence,
+                        seconds=record.seconds,
+                        decision="stop",
+                    )
+                    asks.append(record)
+                    print(
+                        f"[explore] ask t={record.t:.2f} room={record.room!r} "
+                        f"raw={record.raw!r} conf={record.confidence} "
+                        f"s={record.seconds:.2f} next={record.decision}",
+                        flush=True,
+                    )
         if stop_reason == "claimed walk-yaw schedule" and scene != "plant":
             stop_reason = "furnished right-first window"
         elif any(phase.name == "frontier-left" for phase in phases) and stop_reason == "claimed walk-yaw schedule":
@@ -1604,9 +1742,12 @@ def run_explore(
             near_face_x_m=near_face,
             soft_goal_xy=feature_map.soft_goal_xy,
             arrival_bars_met=bars,
+            asks=asks,
         )
     finally:
         cam.close()
+        if own_asker and asker is not None:
+            asker.close()
 
 
 def run_soft_goal(hold_s: float, *, record_frames: bool) -> SceneRun:
@@ -1961,6 +2102,7 @@ def _run_payload(run: SceneRun) -> dict[str, object]:
         "trail_points": len(run.trail),
         "commands": _command_stats(run.sent),
         "phases": [asdict(phase) for phase in run.phases],
+        "asks": [asdict(item) for item in (run.asks or [])],
         "yaw_tracked": {
             phase.name: phase.tracked
             for phase in run.phases
@@ -2162,6 +2304,27 @@ def test_stand_scenes() -> list[str]:
     return failures
 
 
+def test_budget_end_asks() -> list[str]:
+    """The walk-budget stop still asks once. No model load."""
+    failures: list[str] = []
+
+    class _FakeAsker:
+        def ask(self, frame: np.ndarray) -> dict[str, object]:
+            return {"room": "none", "confidence": 0.5, "raw": "None", "seconds": 0.0}
+
+        def close(self) -> None:
+            return None
+
+    run = run_explore("plant", 2.0, record_frames=False, ask=True, asker=_FakeAsker())
+    _expect(len(run.asks or []) == 1, f"budget stop asks {run.asks}", failures)
+    assert run.asks is not None
+    _expect(run.asks[0].decision == "stop", f"budget decision {run.asks[0].decision}", failures)
+    _expect(run.asks[0].room == "none", f"budget room {run.asks[0].room}", failures)
+    _expect(run.vx_zero_yaw_sends() == 0, "budget ask sent vx=0 yaw", failures)
+    _expect(not any(phase.name == "backtrack" for phase in run.phases), "budget inserted a vel", failures)
+    return failures
+
+
 def test_short_walk() -> list[str]:
     failures: list[str] = []
     run = run_explore("plant", 2.0, record_frames=False)
@@ -2183,6 +2346,34 @@ def test_short_walk() -> list[str]:
     _expect(len(run.phases) == 1 and run.phases[0].name == "approach", f"short phases {run.phases}", failures)
     _expect(not run.yellow.seen, "short walk saw yellow on the empty plant", failures)
     _expect(run.after.free_cells >= run.before.free_cells, "map lost free cells", failures)
+    return failures
+
+
+def test_stop_look_decision() -> list[str]:
+    """A repeat room word reverses. none and a hedge do not. No waypoint."""
+    failures: list[str] = []
+    upcoming = ExplorePhase("arc-left", 12.5, EXPLORE_VX, steer_walk.YAW_RATE_CAP, "scheduled")
+    none_mem = [AskRecord(1.0, "none", "none", 0.9, 5.0, "pending")]
+    kept = decide_next(none_mem, upcoming, just_backtracked=False)
+    _expect(kept.name == "arc-left" and kept.vx == EXPLORE_VX, f"none changed the vel {kept}", failures)
+    hedge = [AskRecord(1.0, None, "not sure", 0.4, 5.0, "pending")]
+    kept_hedge = decide_next(hedge, upcoming, just_backtracked=False)
+    _expect(kept_hedge.name == upcoming.name, f"hedge changed the vel {kept_hedge}", failures)
+    first = [AskRecord(1.0, "kitchen", "kitchen", 0.8, 5.0, "pending")]
+    named = decide_next(first, upcoming, just_backtracked=False)
+    _expect(named.name == "arc-left", f"first label became a goal {named}", failures)
+    repeat = [
+        AskRecord(1.0, "kitchen", "kitchen", 0.8, 5.0, "vel"),
+        AskRecord(2.0, "kitchen", "kitchen", 0.7, 5.0, "pending"),
+    ]
+    backed = decide_next(repeat, upcoming, just_backtracked=False)
+    _expect(backed.name == "backtrack", f"repeat did not backtrack {backed}", failures)
+    _expect(abs(backed.vx + steer_walk.VX_BACK_CAP) < 1e-9, f"backtrack vx {backed.vx}", failures)
+    _expect(abs(backed.yaw_rate) < 1e-9, "backtrack yaw", failures)
+    _expect(_within_caps(backed.vx, backed.yaw_rate), "backtrack outside caps", failures)
+    after = decide_next(repeat, upcoming, just_backtracked=True)
+    _expect(after.name == "arc-left", f"backtrack looped {after}", failures)
+    _expect(not QUALIFIED_FRONTIER_CHAIN, "frontier chain enabled", failures)
     return failures
 
 
@@ -2388,6 +2579,7 @@ def test_frontier_windows() -> list[str]:
 def self_test() -> int:
     failures: list[str] = []
     failures.extend(test_caps_and_plant())
+    failures.extend(test_stop_look_decision())
     failures.extend(test_classify_colors())
     failures.extend(test_policy_uses_frontiers_not_yellow())
     failures.extend(test_claimed_schedule())
@@ -2396,6 +2588,7 @@ def self_test() -> int:
     failures.extend(test_hole_fill_and_soft_goal())
     failures.extend(test_stand_scenes())
     failures.extend(test_short_walk())
+    failures.extend(test_budget_end_asks())
     if _md5(PLANT_XML) != steer_walk.PLANT_MD5:
         failures.append("plant md5 changed during self-test")
     if failures:
@@ -2435,6 +2628,56 @@ def _save_run(run: SceneRun) -> list[Path]:
     return paths
 
 
+def score_stand_asks(asker: object) -> list[dict[str, object]]:
+    """One question per stand frame. Not a walk and not every percept.
+
+    Empty plant, the four furnished rooms, and the entrance door frame.
+    There is no corridor scene on this branch. The XML name is not the
+    expected answer and is not a waypoint.
+    """
+    rows: list[dict[str, object]] = []
+    scenes: tuple[tuple[str, SceneName], ...] = (
+        ("empty", "plant"),
+        ("door", "entrance"),
+        ("kitchen", "kitchen"),
+        ("bathroom", "bathroom"),
+        ("living", "living"),
+        ("bedroom", "bedroom"),
+    )
+    for label, scene in scenes:
+        session = steer_walk.SteerSession(
+            video=False,
+            scene_xml=SCENES[scene],
+            lipm=steer_walk.locked_kit_config(),
+        )
+        cam = KitCam(session.model)
+        sent: list[SentCommand] = []
+        try:
+            _hold_stand(session, STAND_S, sent)
+            frame, _pos, _mat, _fovy = cam.grab(session.model, session.data)
+            answer = asker.ask(frame)
+            row = {
+                "label": label,
+                "scene": scene,
+                "room": answer.get("room"),
+                "raw": answer.get("raw"),
+                "confidence": answer.get("confidence"),
+                "seconds": answer.get("seconds"),
+                "min_up_z": float(session.min_up_z),
+                "fault": bool(session.bus.fault),
+            }
+            rows.append(row)
+            print(
+                f"[explore] stand-ask {label} room={row['room']!r} "
+                f"raw={row['raw']!r} s={float(row['seconds']):.2f}",
+                flush=True,
+            )
+            session.assert_plant_unchanged()
+        finally:
+            cam.close()
+    return rows
+
+
 def demo(walk_s: float) -> int:
     before = _md5(PLANT_XML)
     if before != steer_walk.PLANT_MD5:
@@ -2443,23 +2686,37 @@ def demo(walk_s: float) -> int:
     payloads: list[dict[str, object]] = []
     saved: list[Path] = []
     problems: list[str] = []
-    for scene in DEMO_SCENES:
-        run = run_explore(scene, walk_s, record_frames=scene == "kitchen")
-        _print_run(run)
-        payloads.append(_run_payload(run))
-        saved.extend(_save_run(run))
-        if run.fault or run.min_up_z < UP_Z_ABORT:
-            problems.append(f"{scene} min_up_z {run.min_up_z:.3f} fault {run.fault_reason}")
-        if run.vx_zero_yaw_sends() != 0:
-            problems.append(f"{scene} sent vx=0 yaw")
-        if run.end_mode != "stand":
-            problems.append(f"{scene} end mode {run.end_mode}")
-        for command in run.sent:
-            if command.name != "vel":
-                continue
-            if abs(command.vx - EXPLORE_VX) > 1e-9:
-                problems.append(f"{scene} explore vel vx {command.vx}")
-                break
+    import room_ask
+
+    asker = room_ask.RoomAsk()
+    stand_rows: list[dict[str, object]] = []
+    try:
+        stand_rows = score_stand_asks(asker)
+        for scene in DEMO_SCENES:
+            run = run_explore(
+                scene,
+                walk_s,
+                record_frames=scene == "kitchen",
+                ask=True,
+                asker=asker,
+            )
+            _print_run(run)
+            payloads.append(_run_payload(run))
+            saved.extend(_save_run(run))
+            if run.fault or run.min_up_z < UP_Z_ABORT:
+                problems.append(f"{scene} min_up_z {run.min_up_z:.3f} fault {run.fault_reason}")
+            if run.vx_zero_yaw_sends() != 0:
+                problems.append(f"{scene} sent vx=0 yaw")
+            if run.end_mode != "stand":
+                problems.append(f"{scene} end mode {run.end_mode}")
+            for command in run.sent:
+                if command.name != "vel":
+                    continue
+                if abs(command.vx - EXPLORE_VX) > 1e-9 and abs(command.vx + steer_walk.VX_BACK_CAP) > 1e-9:
+                    problems.append(f"{scene} explore vel vx {command.vx}")
+                    break
+    finally:
+        asker.close()
     soft = run_soft_goal(SOFT_GOAL_HOLD_S, record_frames=True)
     _print_run(soft)
     payloads.append(_run_payload(soft))
@@ -2506,6 +2763,10 @@ def demo(walk_s: float) -> int:
         "arrival_yellow_frac": ARRIVAL_YELLOW_FRAC,
         "arrival_remaining_m": ARRIVAL_REMAINING_M,
         "arrival_claimed": False,
+        "moondream_rev": room_ask.MODEL_REV,
+        "moondream_license": "apache-2.0",
+        "stand_asks": stand_rows,
+        "qualified_frontier_chain": QUALIFIED_FRONTIER_CHAIN,
         "main_find_kitchen": {
             "remaining_m": MAIN_REMAINING_M,
             "yellow": MAIN_YELLOW,
@@ -2530,6 +2791,9 @@ def demo(walk_s: float) -> int:
                 "0.150 m/s. The 4 s gap, 8 s second left, and 34 s right hold "
                 "stay off. A soft-XY stop inside 0.40 m is not arrival. "
                 "Rooms are separate XML files, not one space. Pose is the sim freejoint. "
+                "At each vel stop the schedule asks Moondream once, remembers the "
+                "word, and either continues or reverses on a repeat label. "
+                "It does not ask every frame. A room word is not a waypoint. "
                 "vel(0, yaw) turns and is not sent. Arrival is still yellow >= 0.50 "
                 "and torso-to-kitchen <= 0.25 m together. Not go-anywhere. Not a human walk."
             ),
