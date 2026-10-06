@@ -42,28 +42,32 @@ Scored spawns are the doorway xy turned **±90°** from the door-facing yaw, sti
 
 While yaw is commanded, both hip yaw joints and both hip roll joints are logged against 2.33 Nm. The bout peak names its joint. A #71 stop on the speckled kitchen or bathroom shadow with no prop in frame is a false stop and is not a #71 pass.
 
-The room question runs only when the doorway opening is in the frame. Search applies yaw +0.25 until then. A correct yes re-points in place, settles, and walks `vel(+0.056, 0)`. Doorway pixel and size are logged. That re-point is not a free turn: in-place yaw that asks a hip roll over 2.33 Nm unclamped fails the bout. The floor-edge latch fires only when the forward ray hits the same wall the row ranged. A prop, or a different wall, is logged and is not added to the latch. `latch_extra` is the median of the 17 same-wall `wall_hall_w_2` errors from the previous tip (0.0301 m to 0.0543 m), which is 0.04087 m. It is not the peak. The settled-stand error on `wall_hall_e_1` is 0.18 mm, so the old 0.0101 m bob pad is not stacked on that median. After the median, a same-wall residual over 1 cm fails the wall stop. Room reach is a separate bar. `d_min` stays 0.1263 m, so the latch distance is 0.1672 m. A wall or prop contact with the latch armed fails the bout.
+The room question runs only when the doorway opening is in the frame. Search applies yaw +0.25 until then. A correct yes re-points in place, settles, and walks `vel(+0.056, 0)`. Doorway pixel and size are logged. That re-point is not a free turn: in-place yaw that asks a hip roll over 2.33 Nm unclamped fails the bout. The floor-edge latch fires only when the forward ray hits the same wall the row ranged. A prop, or a different wall, is logged and is not added to the latch. `latch_extra` 0.04087 m is the median of the 17 close `wall_hall_w_2` errors from the previous tip (0.0301 m to 0.0543 m, sim gap under 0.40 m). It is not the peak, and it is not added on any other wall or on a far look at the same name. The settled-stand error on `wall_hall_e_1` is 0.18 mm, so the old 0.0101 m bob pad is not stacked on that median. A stop commits only in the close class (sim gap under 0.40 m): `wall_hall_w_2` uses the median, any other wall uses `d_min` alone. The residual past that wall's own pad has to be within 1 cm or the wall stop fails. A same name seen from farther than 0.40 m is a class reject and stays out of the latch. Room reach is a separate bar. `d_min` stays 0.1263 m, so the living close latch distance is 0.1672 m and every other close wall latches at 0.1263 m. A wall or prop contact with the latch armed fails the bout.
 
-The typed caller still refuses a room phrase. The scored run is **Prefer FAIL**. `reached_all` is false (0 of 10). `wrong_yes_any` is false. `frac_refuse_count` is 10. `false_stop_any` is false. `latch_contact_any` is false. `wall_range_fail_any` is true. `wall_stop_pass_any` is true. `gait_limit_any` is false. `search_yaw_fail_any` is false. `inplace_hip_fail_any` is true. `go_anywhere` is false. `kit_safe` is false. All 10 bouts started outside the named room box. None finished inside. Min up_z is 0.934. No prop or wall contact. Every bout's search applied yaw peaked at +0.250. Every capture still has `applied_yaw_at_capture` 0, because the picture is taken after the settle. Walk yaw on every committed bout is 0.
+The typed caller still refuses a room phrase. The scored run is **Prefer FAIL**. Reach CLEAR is 0 of 10. Wall-stop CLEAR is 1 of 10. `wrong_yes_any` is false. `frac_refuse_count` is 9. `false_stop_any` is false. `latch_contact_any` is false. `wall_stop_fail_any` is true (kitchen −90°). `gait_limit_any` is false. `search_yaw_fail_any` is false. `inplace_hip_fail_any` is true. `class_reject_count` is 668. `surface_reject_count` is 317. `go_anywhere` is false. `kit_safe` is false. All 10 bouts started outside the named room box. None finished inside. Min up_z is 0.934. No prop or wall contact. Every bout's search applied yaw peaked at +0.250. Every capture still has `applied_yaw_at_capture` 0, because the picture is taken after the settle. Walk yaw on every committed bout is 0. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`.
 
-Ten Moondream yeses had the asked room under 1% of `kit_cam` and were refused: bathroom +90° four, bathroom −90° three, entrance +90° three. Each returned to search and did not commit. Later pictures on those bouts cleared the gate.
+Nine Moondream yeses had the asked room under 1% of `kit_cam` and were refused: bathroom +90° four, bathroom −90° three, entrance +90° two. Each returned to search and did not commit. Later pictures on those bouts cleared the gate. Wrong-yes count stays 0.
 
-Living −90° counted three `tv_stand` rays and logged one (the ranged row was `wall_hall_w_2`, the ray was the stand at 1.358 m error, camera pitch −0.260, `cam_z` 0.332 m, leading toe −0.016 m). That prop was not latched. The bout then stopped on the same wall `wall_hall_w_2`: ranged 0.199 m, ray 0.239 m, error 0.0401 m, residual after the median −0.0008 m, camera pitch −0.267, `cam_z` 0.337 m, leading toe −0.017 m. That wall stop passes the 1 cm residual bar. The body was still outside the living box, so reach fails. Other same-wall samples in that bout have residuals up to 0.242 m, so the bout's wall-range flag stays true. Kitchen −90° also stopped, on `wall_hall_e_1`: ranged 0.199 m, ray 0.414 m, residual 0.174 m. That wall stop fails. Different-wall rays were rejected 330 times and were not soaked into the latch. The largest same-wall residual is 0.790 m (entrance +90°).
+Living −90° stops on `wall_hall_w_2` in the close class. Ranged 0.199 m, ray 0.239 m, error 0.0401 m, residual after the 0.04087 m pad −0.0008 m. Heading +2.672 rad, `cam_z` 0.337 m, camera pitch −0.267, leading toe −0.017 m. That wall stop is CLEAR. The body is still outside the living box, so reach stays open.
 
-In-place yaw asks hip roll unclamped from −4.04 Nm to +4.16 Nm against a clamped write of ±2.33 Nm on every bout. That saturation is a fail. `gait_limit` stays false because yaw was not commanded while walking. Not kit-safe. Not go-anywhere.
+Kitchen −90° stops on `wall_hall_e_1`, close class, pad 0. Ranged 0.152 m, ray 0.355 m, error and residual 0.203 m. Heading −1.089 rad, `cam_z` 0.332 m, camera pitch −0.273, leading toe −0.014 m. Camera height, pitch, and leading toe sit next to the living stop. The wall id is `wall_hall_e_1` and the ray is 0.355 m against a ranged 0.152 m. That is a different wall, so the living median stays off it. The wall stop fails. Reach stays open. At t = 46.06 s, still on `wall_hall_e_1`, the row ranged 0.167 m while the ray was 0.575 m (error 0.408 m), heading −1.091, `cam_z` 0.337 m, pitch −0.267, leading toe −0.017 m. The sim gap is past 0.40 m, so that sample is a class reject and stays out of the latch.
+
+Entrance +90° logs the far look at the living wall name. `wall_hall_w_2` at t = 32.26 s: ranged 3.312 m, ray 3.818 m, error 0.506 m, heading +1.780 rad, `cam_z` 0.335 m, pitch −0.267, leading toe −0.014 m. Class `far_same_name`. The 17-sample median was measured with the ray under 0.40 m, so this metre-scale row is a class reject and stays out of the latch. Entrance −90° at t = 7.00 s hits `wall_outer_n` at 4.177 m (ranged 3.928 m, error 0.248 m, heading +1.619, `cam_z` 0.330 m, pitch −0.253, leading toe −0.010 m). That is `other_wall_far`, also out of the latch. The previous tip's 0.790 m row was this far class (a ~4 m ray on `wall_hall_w_2`), and this gate keeps that class out.
+
+In-place yaw asks hip roll unclamped from about −4.04 Nm to +4.16 Nm against a clamped write of ±2.33 Nm on every bout. That saturation is a fail. `gait_limit` stays false because yaw was not commanded while walking. Not kit-safe. Not go-anywhere.
 
 | Room | Offset | Refused yes | Door u / size | Wall stop | Residual at stop | Reach |
 | --- | --- | --- | --- | --- | --- | --- |
-| kitchen | +90° | 0 | 356 / 0.010 | none, 53 s | — | outside |
-| kitchen | −90° | 0 | 333 / 0.010 | `wall_hall_e_1` | 0.174 m | outside |
-| bathroom | +90° | 4 | 522 / 0.022 | none, 53 s | — | outside |
-| bathroom | −90° | 3 | 479 / 0.016 | none, 53 s | — | outside |
-| living | +90° | 0 | 210 / 0.184 | none, 53 s | — | outside |
-| living | −90° | 0 | 184 / 0.225 | `wall_hall_w_2` | −0.0008 m | outside |
-| bedroom | +90° | 0 | 80 / 0.103 | none, 53 s | — | outside |
-| bedroom | −90° | 0 | 55 / 0.073 | none, 53 s | — | outside |
-| entrance | +90° | 3 | 524 / 0.023 | none, 53 s | — | outside |
-| entrance | −90° | 0 | 484 / 0.015 | none, 53 s | — | outside |
+| kitchen | +90° | 0 | 353 / 0.198 | none, 53 s | — | outside |
+| kitchen | −90° | 0 | 355 / 0.459 | `wall_hall_e_1` fail | 0.203 m | outside |
+| bathroom | +90° | 4 | 602 / 0.033 | none, 53 s | — | outside |
+| bathroom | −90° | 3 | 484 / 0.005 | none, 53 s | — | outside |
+| living | +90° | 0 | 223 / 0.016 | none, 53 s | — | outside |
+| living | −90° | 0 | 157 / 0.028 | `wall_hall_w_2` clear | −0.0008 m | outside |
+| bedroom | +90° | 0 | 320 / 1.000 | none, 53 s | — | outside |
+| bedroom | −90° | 0 | 201 / 0.018 | none, 53 s | — | outside |
+| entrance | +90° | 2 | 322 / 0.026 | none, 53 s | — | outside |
+| entrance | −90° | 0 | 294 / 0.044 | none, 53 s | — | outside |
 
 ```bash
 MUJOCO_GL=osmesa python scripts/voice_goto_rooms.py
