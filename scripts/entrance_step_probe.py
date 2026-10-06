@@ -12736,10 +12736,11 @@ def _install_sagittal_slew(
                     and _stop_knee_local(jn)
                     and _side_loaded(jn)
                 ):
-                    # First fifth of stance, and the double support that
-                    # enters it. The write sits on 2.33 Nm. The slew
-                    # memory stays on the 1.90 path, so the next tick is
-                    # not left a step behind. This is not a freeze.
+                    # First quarter of stance, and the double support that
+                    # enters it. This solves q_des so the signed ask is
+                    # ±2.33 Nm. That is a hard cap. The absolute sum is
+                    # logged and is not this solve. The slew memory stays
+                    # on the 1.90 path.
                     ask_k, q_now_k = _ask_at(jn, float(q_des))
                     if abs(ask_k) > KNEE_NM + 1e-9:
                         jid_k = mj.mj_name2id(lipm.model, mj.mjtObj.mjOBJ_JOINT, jn)
@@ -12812,9 +12813,9 @@ def _install_sagittal_slew(
                         _WALK_ANK_PRE_S - 1e-9 <= t_now < _WALK_STEADY_S - 1e-9
                         and _side_loaded(jn)
                     ):
-                        # Loaded stance ankle before 2 s. The write sits
-                        # on 2.33 Nm. The slew memory stays on the 1.90
-                        # path, so the steady gate is not left behind.
+                        # Loaded stance ankle before 2 s. This solves q_des
+                        # so the signed ask is ±2.33 Nm. That is a hard
+                        # cap. The slew memory stays on the 1.90 path.
                         ask_w, q_now_w = _ask_at(jn, float(q_des))
                         if abs(ask_w) > KNEE_NM + 1e-9:
                             jid_w = mj.mj_name2id(
@@ -14621,9 +14622,10 @@ def score_sag_stop() -> None:
             "On a loaded hip, a step that would put the ask over 2.33 Nm "
             "is not taken. A raw gait jump is cut to one stance step. "
             "An airborne hip is not that hold. "
-            "On a loaded knee, through the stop command, the write is pulled "
-            "toward the live joint in the first quarter of stance and the "
-            "double support that enters it, until the ask sits on 2.33 Nm. "
+            "On a loaded knee, through the stop command, q_des is solved "
+            "so the signed ask sits on ±2.33 Nm in the first quarter of "
+            "stance and the double support that enters it. That solve is "
+            "a hard cap. The absolute sum is logged and is not this pass. "
             "The slew memory stays on the 1.90 rad/s path. The descent after "
             "the stop command stays on that slew. "
         "z stays live. That catch is not a swing stretch. "
@@ -15099,6 +15101,25 @@ def _keep_ask(best: tuple | None, item: tuple) -> tuple:
     return best
 
 
+def _unclamped_nm(item: tuple) -> float:
+    """|kp*(q_des-q)| + |kv*omega| on the command that was written."""
+    return abs(float(item[8])) + abs(float(item[9]))
+
+
+def _solved_onto_bar(item: tuple) -> int:
+    """1 when q_des is the signed-ask solve that lands on ±2.33 Nm."""
+    kp = float(item[11])
+    if kp < 1e-6:
+        return 0
+    ask = float(item[3])
+    if abs(abs(ask) - KNEE_NM) > 1e-4:
+        return 0
+    qdes = float(item[2])
+    q = qdes - float(item[8]) / kp
+    solved = q + (math.copysign(KNEE_NM, ask) + float(item[12]) * float(item[10])) / kp
+    return int(abs(qdes - solved) <= 1e-5)
+
+
 def _print_gait_peaks(name: str, held: dict[str, object], summary: dict[str, object]) -> bool:
     """Max |unclamped ask| on every leg joint before the tip.
 
@@ -15120,6 +15141,7 @@ def _print_gait_peaks(name: str, held: dict[str, object], summary: dict[str, obj
     pre: dict[str, tuple] = {}
     steady: dict[str, tuple] = {}
     post: dict[str, tuple] = {}
+    pre_raw: dict[str, tuple] = {}
     for item in asks:
         jn = str(item[1])
         if jn not in _WALK_LEG:
@@ -15130,6 +15152,9 @@ def _print_gait_peaks(name: str, held: dict[str, object], summary: dict[str, obj
             post[jn] = _keep_ask(post.get(jn), item)
             continue
         pre[jn] = _keep_ask(pre.get(jn), item)
+        prev_raw = pre_raw.get(jn)
+        if prev_raw is None or _unclamped_nm(item) > _unclamped_nm(prev_raw):
+            pre_raw[jn] = item
         if t_item >= _WALK_STEADY_S - 1e-9:
             steady[jn] = _keep_ask(steady.get(jn), item)
 
@@ -15157,14 +15182,23 @@ def _print_gait_peaks(name: str, held: dict[str, object], summary: dict[str, obj
                 continue
             phase, frac, fn_l, fn_r = _phase_frac(item)
             ask = float(item[3])
-            over = abs(ask) > KNEE_NM + 1e-9
+            raw = _unclamped_nm(item)
+            hard = _solved_onto_bar(item)
+            # A write solved onto ±2.33 Nm is a hard cap. The absolute
+            # sum is logged. It is not the bout fail when |kv*ω| alone
+            # is already over 2.33 Nm.
+            signed_over = abs(ask) > KNEE_NM + 1e-9 or bool(hard)
+            over = signed_over if tag != "gait_unclamped" else raw > KNEE_NM + 1e-9
             frac_txt = "dsp" if phase == "D" else f"{frac:.3f}"
             print(
                 f"PRED {name} {tag} {jn} {ask:+.4f} "
                 f"t {float(item[0]):.3f} phase {phase} frac {frac_txt} "
                 f"fn_l {fn_l:.2f} fn_r {fn_r:.2f} "
-                f"ge_2.33 {int(over)}"
+                f"unclamped {raw:.4f} hard_cap {hard} "
+                f"ge_2.33 {int(signed_over)}"
             )
+            if tag == "gait_unclamped":
+                continue
             if over:
                 bit = (
                     f"{jn} {ask:+.4f} t {float(item[0]):.3f} "
@@ -15177,6 +15211,7 @@ def _print_gait_peaks(name: str, held: dict[str, object], summary: dict[str, obj
         return found, worst_bit
 
     overs, worst_over = _emit("gait_pre", pre)
+    _emit("gait_unclamped", pre_raw)
     steady_overs, steady_worst = _emit("gait_steady", steady)
     if not post:
         print(f"PRED {name} gait_post none")
@@ -16085,13 +16120,18 @@ def _print_named_ticks(
         fn_r = float(row["fn_r"]) if row is not None else float("nan")
         loaded_l = fn_l > _SOLE_FLAT_LOAD_N
         loaded_r = fn_r > _SOLE_FLAT_LOAD_N
+        raw = _unclamped_nm(named)
+        hard = _solved_onto_bar(named)
+        over = abs(ask) > KNEE_NM + 1e-9 or bool(hard) or raw > KNEE_NM + 1e-9
         print(
             f"PRED {name} named_tick {jn} {ask:+.4f} t {float(named[0]):.3f} "
             f"phase {phase} frac {frac_txt} "
             f"q {_ask_q(named):+.5f} q_des {float(named[2]):+.5f} "
             f"fn_l {fn_l:.2f} fn_r {fn_r:.2f} "
             f"loaded_l {int(loaded_l)} loaded_r {int(loaded_r)} "
-            f"ge_2.33 {int(abs(ask) > KNEE_NM + 1e-9)}"
+            f"kp_term {float(named[8]):+.4f} kv_term {float(named[9]):+.4f} "
+            f"unclamped {raw:.4f} hard_cap {hard} "
+            f"ge_2.33 {int(over)}"
         )
         surf = by_surf.get(t_key)
         for side in ("L", "R"):
@@ -16128,8 +16168,9 @@ def score_mid_swing() -> None:
         f"{_WALK_EARLY_FRAC:.2f}. "
         f"Through that fraction the loaded knee is {_WALK_EARLY_KNEE_RATE:.2f} rad/s. "
         f"Loaded ankle pitch stays on the {_WALK_STANCE_RATE:.2f} rad/s slew. "
-        "Before 2 s a loaded ankle write sits on 2.33 Nm and the slew "
-        "memory stays on the 1.90 rad/s path. "
+        "Before 2 s a loaded ankle write is solved so the signed ask sits "
+        "on ±2.33 Nm. That solve is a hard cap. The absolute sum is logged "
+        "and is not this pass. The slew memory stays on the 1.90 rad/s path. "
         "From 2 s a stance step that would put that ask over 2.33 Nm is not taken. "
         f"Loaded hip pitch is on its own {_WALK_HIP_PITCH_RATE:.2f} rad/s slew. "
         "Walk swing-z stays at "
