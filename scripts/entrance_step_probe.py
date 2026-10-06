@@ -114,6 +114,7 @@ def _foot_surface(session: sw.SteerSession, side: str, rug_gid: int) -> dict[str
     floor_n = _pair_fn(session.model, session.data, gid, session.gid_floor)
     rug_n = _pair_fn(session.model, session.data, gid, rug_gid) if rug_gid >= 0 else 0.0
     names: list[str] = []
+    dist = float("nan")
     for i in range(session.data.ncon):
         con = session.data.contact[i]
         g1, g2 = int(con.geom1), int(con.geom2)
@@ -123,6 +124,10 @@ def _foot_surface(session: sw.SteerSession, side: str, rug_gid: int) -> dict[str
         nm = mj.mj_id2name(session.model, mj.mjtObj.mjOBJ_GEOM, other) or str(other)
         if nm not in names:
             names.append(nm)
+        # MuJoCo dist is the gap. Negative is penetration.
+        gap = float(con.dist)
+        if dist != dist or gap < dist:
+            dist = gap
     corners = _box_bottom_corners(session.model, session.data, bid, gid)
     fwd = body_forward_xy(session.data, session.bid_body)
     origin = np.asarray(session.data.xpos[session.bid_body, :2], dtype=np.float64)
@@ -141,6 +146,8 @@ def _foot_surface(session: sw.SteerSession, side: str, rug_gid: int) -> dict[str
     return {
         "floor_n": floor_n,
         "rug_n": rug_n,
+        "fn": floor_n + rug_n,
+        "dist": dist,
         "geoms": ",".join(names) if names else "-",
         "corners_in": n_in,
         "lead_in": int(lead_in),
@@ -896,15 +903,17 @@ def _install_swing_sole_target(session: sw.SteerSession, *, world_level: bool) -
     walker.step = step  # type: ignore[method-assign]
 
 
-def _toe_up_ramp(frac: float, shape: str) -> float:
+def _toe_up_ramp(frac: float, shape: str, full_frac: float = 0.15) -> float:
     """Unit toe-up vs single-support fraction. Peak stays the caller's rad."""
     if shape == "sine":
         return math.sin(math.pi * frac)
     if shape != "front":
         raise SystemExit(f"toe-up shape {shape} is not sine or front")
-    # Full by 15% of single support, held through 80%, back to 0 at touchdown.
-    if frac < 0.15:
-        u = frac / 0.15
+    if not 0.0 < full_frac < 0.80:
+        raise SystemExit(f"toe-up full fraction {full_frac} is not inside 0-80%")
+    # Full by full_frac of single support, held through 80%, back to 0 at touchdown.
+    if frac < full_frac:
+        u = frac / full_frac
         return u * u * (3.0 - 2.0 * u)
     if frac <= 0.80:
         return 1.0
@@ -917,21 +926,24 @@ def _install_swing_toe_up(
     session: sw.SteerSession,
     peak: float,
     shape: str = "sine",
+    full_frac: float = 0.15,
 ) -> None:
     """Add a swing ankle toe-up that is zero at toe-off and at touchdown.
 
     The peak is under 0.03 rad. ``sine`` rises from 0 at toe-off.
-    ``front`` is already at that peak by 15% of single support and holds
-    it through 80%. Knee and ankle pitch keep the 20 ms approach. This
-    does not world-level the sole.
+    ``front`` is already at that peak by ``full_frac`` of single support
+    and holds it through 80%. The landed copy is full by 15%. Knee and
+    ankle pitch keep the 20 ms approach. This does not world-level the sole.
     """
     if not 0.0 < peak < 0.03 - 1e-12:
         raise SystemExit(f"toe-up peak {peak} rad is not under 0.03")
     if shape not in ("sine", "front"):
         raise SystemExit(f"toe-up shape {shape} is not sine or front")
+    if shape == "front" and not 0.0 < full_frac < 0.80:
+        raise SystemExit(f"toe-up full fraction {full_frac} is not inside 0-80%")
     signs = {side: _ank_pitch_raises_front(session, side) for side in ("L", "R")}
     label = (
-        "front full by 15% hold through 80%"
+        f"front full by {full_frac * 100:.0f}% hold through 80%"
         if shape == "front"
         else "sine"
     )
@@ -955,7 +967,7 @@ def _install_swing_toe_up(
         frac = _mid_frac(walker, swing, _cmd_time(walker))
         if frac is None or frac <= 0.0 or frac >= 1.0:
             return
-        ramp = _toe_up_ramp(float(frac), shape)
+        ramp = _toe_up_ramp(float(frac), shape, full_frac)
         delta = signs[swing] * peak * ramp
         act = ("l_" if swing == "L" else "r_") + "ank_pitch_pos"
         idx = session.act_idx[act]
@@ -966,6 +978,32 @@ def _install_swing_toe_up(
             cmd["toe_up_frac"] = float(frac)
 
     lipm._tick_gait_manager = wrapped  # type: ignore[method-assign]
+
+
+def _install_yswap_lead(session: sw.SteerSession, lead_s: float) -> None:
+    """Sample the existing lateral shift a few milliseconds earlier.
+
+    Amplitude stays the walker's y_swap command. Both ankle rolls still
+    take the same shift times lat. This does not add a one-sided ankle offset.
+    """
+    if lead_s <= 0.0:
+        raise SystemExit(f"yswap lead {lead_s} s is not positive")
+    lipm = session.lipm
+    if lipm is None or lipm.op3 is None:
+        raise RuntimeError("gait manager walker missing")
+    walker = lipm.op3
+    orig = walker._swap_y_before_swing
+    print(
+        f"PRED yswap_lead {lead_s * 1000:.1f} ms. "
+        f"y_swap amplitude stays {walker.y_swap_cmd:.3f} m. "
+        "The lateral shift is sampled that much earlier. "
+        "Ankle-roll pair stays the same lat on both feet."
+    )
+
+    def led(t: float) -> float:
+        return float(orig(float(t) + float(lead_s)))
+
+    walker._swap_y_before_swing = led  # type: ignore[method-assign]
 
 
 def _capture_sole_tick(session: sw.SteerSession, t: float, side: str) -> dict[str, object]:
@@ -1585,6 +1623,7 @@ def _surface_summary(
     mid_samples: list[tuple[float, str, float, float, float, float, float, str]] = []
     n_flat = 0
     n_rug = 0
+    flat_fracs: list[float] = []
     for step, cyc in enumerate(cycles):
         n = len(cyc)
         if n < 2 or med_n < 2:
@@ -1644,6 +1683,7 @@ def _surface_summary(
             f"floor {float(plane['floor_n']):.1f} rug {float(plane['rug_n']):.1f}"
         )
         if tag == "flat":
+            flat_fracs.append(frac)
             if flat_best is None or toe < flat_best[0]:
                 flat_best = (
                     toe, row.t, frac, row.swing or "",
@@ -1669,6 +1709,12 @@ def _surface_summary(
         f"body_z {flat_body:.3f} mm z_add {flat_z_add:.3f} mm "
         f"rug_worst_clear {rug_clear:.3f} mm t {rug_t:.3f} side {rug_side} "
         f"rug_toe {rug_toe:.3f} mm. Track 1 uses the flat swings only."
+    )
+    n_at = sum(1 for frac in flat_fracs if abs(frac - (5.0 / 24.0)) <= 0.01)
+    shown = " ".join(f"{frac:.3f}" for frac in flat_fracs)
+    print(
+        f"PRED {name} flat_min_frac n {len(flat_fracs)} at_0.208 {n_at}"
+        + (f" fracs {shown}" if shown else "")
     )
     flat_hits: list[str] = []
     for act, packed in hx_flat.items():
@@ -1713,6 +1759,7 @@ def _surface_summary(
         "ka_over_n": 0 if ka_hits is None else len(ka_hits),
         "ka_checked": ka_checked,
         "mid_samples": tuple(mid_samples),
+        "flat_min_fracs": tuple(flat_fracs),
     }
 
 
@@ -1752,15 +1799,28 @@ def _print_early_flat(
         for frac, row, plane in early:
             n_lines += 1
             toe_mm = float(row.toe_z) * 1000.0
+            fn = float(plane.get("fn", float(plane["floor_n"]) + float(plane["rug_n"])))
+            dist = float(plane.get("dist", float("nan")))
+            if dist == dist:
+                dist_txt = f"{dist * 1000.0:.3f} mm"
+                pen_txt = f"{max(0.0, -dist) * 1000.0:.3f} mm"
+            else:
+                dist_txt = "none"
+                pen_txt = "none"
             print(
                 f"PRED {name} early_toe swing {step} side {row.swing} "
                 f"t {row.t:.3f} frac {frac:.3f} toe {toe_mm:.3f} mm "
                 f"vs_plus2 {toe_mm - 2.0:+.3f} mm "
+                f"fn {fn:.3f} N dist {dist_txt} pen {pen_txt} "
                 f"contact {plane.get('contact', '')}"
             )
     print(
         f"PRED {name} early_toe_n {n_lines} "
-        "window 0-30% of flat swings. Scoring window stays 20-80%."
+        "window 0-30% of flat swings. Scoring window stays 20-80%. "
+        "fn is floor plus rug normal on the swing foot. "
+        "MuJoCo dist is the contact gap; negative is penetration. "
+        "fn near 0 with no penetration is unload. "
+        "fn above 0 with negative dist is soft-contact spring-back."
     )
 
 
@@ -1780,6 +1840,8 @@ def _print_chain_bar(name: str, surface_rows: list[dict[str, object]]) -> None:
 
     def _knee(key: str):
         def pick(row: dict[str, object]):
+            if key not in row:
+                return None
             side = "L" if key.startswith("l_") else "R"
             plane = row[side]
             if not isinstance(plane, dict):
@@ -1822,6 +1884,20 @@ def _print_chain_bar(name: str, surface_rows: list[dict[str, object]]) -> None:
         f"ge_2.33 {int(abs(tau) >= KNEE_NM)} "
         f"ge_2.45 {int(abs(tau) >= PLANT_NM - 1e-3)}"
     )
+    for key in ("l_hip_roll", "r_hip_roll"):
+        if not any(key in row for row in surface_rows):
+            continue
+        hit_r = _best(_knee(key))
+        if hit_r is None:
+            print(f"PRED {name} chain_vs_2.33 {key} missed")
+            continue
+        tau, when, contact, act = hit_r
+        print(
+            f"PRED {name} chain_vs_2.33 {act} {tau:+.4f} t {when:.3f} "
+            f"contact {contact or '-'} abs {abs(tau):.4f} "
+            f"ge_2.33 {int(abs(tau) >= KNEE_NM)} "
+            f"ge_2.45 {int(abs(tau) >= PLANT_NM - 1e-3)}"
+        )
 
 
 def _ankle_peak(session: sw.SteerSession) -> tuple[float, str, float]:
@@ -3320,6 +3396,8 @@ class PredScore:
     ka_checked: int = 0
     mid_samples: tuple = ()
     sag_rows: tuple = ()
+    flat_min_fracs: tuple = ()
+    roll_hx_over: str = ""
 
 
 def _check_compiled_kv(session: sw.SteerSession) -> None:
@@ -3384,6 +3462,9 @@ def measure_pred_clip(
     early_peak_m: float = 0.0,
     knee_lead_s: float = 0.0,
     early_log: bool = False,
+    toe_full_frac: float = 0.15,
+    yswap_lead_s: float = 0.0,
+    roll_log: bool = False,
 ) -> PredScore:
     """12 mm @ 20% with an optional swing-hip predicted-force clip.
 
@@ -3405,6 +3486,12 @@ def measure_pred_clip(
         raise SystemExit(f"early rise peak {early_peak_m} m is outside 0–12 mm")
     if sag_cancel and knee_lead_s > 0.0:
         raise SystemExit("swing knee lead is not stacked on stance sag cancel")
+    if toe_up_shape == "front" and not 0.0 < toe_full_frac < 0.80:
+        raise SystemExit(f"toe-up full fraction {toe_full_frac} is not inside 0-80%")
+    if yswap_lead_s < 0.0:
+        raise SystemExit(f"yswap lead {yswap_lead_s} s is negative")
+    if sag_cancel and yswap_lead_s > 0.0:
+        raise SystemExit("yswap lead is not stacked on stance sag cancel")
     cfg = sw.locked_kit_config()
     if move_s is not None:
         cfg = replace(cfg, gm_move_s=float(move_s))
@@ -3439,13 +3526,17 @@ def measure_pred_clip(
         _print_foot_geoms(session)
         _install_swing_sole_target(session, world_level=world_level)
     if toe_up_rad > 0.0:
-        _install_swing_toe_up(session, toe_up_rad, shape=toe_up_shape)
+        _install_swing_toe_up(
+            session, toe_up_rad, shape=toe_up_shape, full_frac=toe_full_frac,
+        )
     if hip_lead:
         _install_swing_hip_lead(
             session,
             roll_scale=lead_roll_scale,
             pitch_scale=lead_pitch_scale,
         )
+    if yswap_lead_s > 0.0:
+        _install_yswap_lead(session, yswap_lead_s)
     if knee_lead_s > 0.0:
         _install_swing_knee_lead(session, knee_lead_s)
     if sag_cancel:
@@ -3467,7 +3558,10 @@ def measure_pred_clip(
     )
     hx_flat = {act: (0.0, 0.0, "") for act in hx_chain}
     hx_rug = {act: (0.0, 0.0, "") for act in hx_chain}
-    ka_names = hx_chain
+    roll_chain = ("l_hip_roll_pos", "r_hip_roll_pos") if roll_log else ()
+    roll_flat = {act: (0.0, 0.0, "") for act in roll_chain}
+    roll_rug = {act: (0.0, 0.0, "") for act in roll_chain}
+    ka_names = hx_chain + roll_chain
     ka_hits: list[str] = []
     ka_checked = 0
     suffixes = ("hip_roll", "hip_pitch", "ank_roll") if ankle_roll else ("hip_roll", "hip_pitch")
@@ -3484,6 +3578,7 @@ def measure_pred_clip(
     last: dict[str, tuple[float, float, float, float]] = {}
     sole_rows: list[tuple[float, str, float, float, float, str]] = []
     clip_n = 0
+    ank_split = 0.0
     real_step = mj.mj_step
     bar = float(bar_before_s) if bar_before_s is not None else None
 
@@ -3602,7 +3697,7 @@ def measure_pred_clip(
                             best_dt = dt
                             z_comp = float(z_val)
                             z_add = float(added)
-                surface_rows.append({
+                surf_row: dict[str, object] = {
                     "t": t,
                     "swing": swing if swing in ("L", "R") else None,
                     "toe_z": toe_z,
@@ -3619,7 +3714,23 @@ def measure_pred_clip(
                     "r_ank_pitch": float(
                         session.data.actuator_force[session.act_idx["r_ank_pitch_pos"]]
                     ),
-                })
+                }
+                if roll_log:
+                    surf_row["l_hip_roll"] = float(
+                        session.data.actuator_force[session.act_idx["l_hip_roll_pos"]]
+                    )
+                    surf_row["r_hip_roll"] = float(
+                        session.data.actuator_force[session.act_idx["r_hip_roll_pos"]]
+                    )
+                if yswap_lead_s > 0.0:
+                    stand_l = float(lipm.q_stand.get("l_ank_roll", 0.0))
+                    stand_r = float(lipm.q_stand.get("r_ank_roll", 0.0))
+                    ctrl_l = float(session.data.ctrl[session.act_idx["l_ank_roll_pos"]])
+                    ctrl_r = float(session.data.ctrl[session.act_idx["r_ank_roll_pos"]])
+                    split = abs((ctrl_l - stand_l) - (ctrl_r - stand_r))
+                    if split > ank_split:
+                        ank_split = split
+                surface_rows.append(surf_row)
                 if ka_log:
                     ka_checked += 1
                     for act in ka_names:
@@ -3639,6 +3750,14 @@ def measure_pred_clip(
                     # Floor contact, and a foot touching nothing, are Track 1.
                     # A rug geom in the contact list is not called floor.
                     bucket = hx_flat if contact in ("floor", "none") else hx_rug
+                    prev, _when, _contact = _hx_parts(bucket[act])
+                    if abs(tau) > abs(prev):
+                        bucket[act] = (tau, t, contact)
+                for act in roll_chain:
+                    tau = float(session.data.actuator_force[session.act_idx[act]])
+                    foot = planes["L" if act.startswith("l_") else "R"]
+                    contact = str(foot["contact"])
+                    bucket = roll_flat if contact in ("floor", "none") else roll_rug
                     prev, _when, _contact = _hx_parts(bucket[act])
                     if abs(tau) > abs(prev):
                         bucket[act] = (tau, t, contact)
@@ -3719,6 +3838,7 @@ def measure_pred_clip(
         pitch_move_off or ankle_roll or period_s is not None
         or world_level or toe_up_rad > 0.0 or hip_lead or sag_cancel
         or z_profile != "phase" or knee_lead_s > 0.0 or toe_up_shape != "sine"
+        or yswap_lead_s > 0.0 or abs(toe_full_frac - 0.15) > 1e-9
     ):
         parts = ["clip" if clip else "base"]
         parts.append("pitchoff" if pitch_move_off else f"move{used_move * 1000:.0f}")
@@ -3727,8 +3847,17 @@ def measure_pred_clip(
         if world_level:
             parts.append("worldlevel")
         if toe_up_rad > 0.0:
-            if toe_up_shape == "front":
+            landed_front = (
+                toe_up_shape == "front"
+                and abs(toe_full_frac - 0.15) <= 1e-9
+                and abs(toe_up_rad - 0.020) <= 1e-9
+            )
+            if landed_front:
                 parts.append("toeupfront")
+            elif toe_up_shape == "front":
+                parts.append(
+                    f"toeup{toe_up_rad * 1000:.0f}by{toe_full_frac * 100:02.0f}"
+                )
             else:
                 parts.append(f"toeup{toe_up_rad * 1000:.0f}mrad")
         if z_profile == "front":
@@ -3751,6 +3880,8 @@ def measure_pred_clip(
             parts.append(f"kneelead{knee_lead_s * 1000.0:.0f}ms")
         if sag_cancel:
             parts.append("sag")
+        if yswap_lead_s > 0.0:
+            parts.append(f"yswap{yswap_lead_s * 1000:.0f}ms")
         name = "_".join(parts)
     else:
         name = f"{'clip' if clip else 'base'}_move{used_move * 1000:.0f}"
@@ -3898,6 +4029,7 @@ def measure_pred_clip(
         "ka_over_n": 0,
         "ka_checked": 0,
         "mid_samples": (),
+        "flat_min_fracs": (),
     }
     if surface_tag and surface_rows:
         surf = _surface_summary(
@@ -3907,6 +4039,33 @@ def measure_pred_clip(
         if early_log:
             _print_early_flat(name, rows, surface_rows)
             _print_chain_bar(name, surface_rows)
+    roll_hits: list[str] = []
+    if roll_log:
+        for act, packed in roll_flat.items():
+            tau, when, contact = _hx_parts(packed)
+            over = abs(tau) >= KNEE_NM
+            if over:
+                roll_hits.append(f"{act} {tau:+.4f} t {when:.3f} contact {contact}")
+            print(
+                f"PRED {name} hx_flat {act} {tau:+.4f} t {when:.3f} "
+                f"contact {contact or '-'} "
+                f"abs {abs(tau):.4f} ge_2.33 {int(over)} "
+                f"ge_2.45 {int(abs(tau) >= PLANT_NM - 1e-3)}"
+            )
+        for act, packed in roll_rug.items():
+            tau, when, contact = _hx_parts(packed)
+            print(
+                f"PRED {name} hx_rug {act} {tau:+.4f} t {when:.3f} "
+                f"contact {contact or '-'} "
+                f"abs {abs(tau):.4f} ge_2.33 {int(abs(tau) >= KNEE_NM)} "
+                f"ge_2.45 {int(abs(tau) >= PLANT_NM - 1e-3)}"
+            )
+    if yswap_lead_s > 0.0:
+        print(
+            f"PRED {name} ank_pair_split {ank_split:.6f} rad "
+            f"matched {int(ank_split <= 1e-4)} "
+            "shift lat is the same on both ankle rolls"
+        )
     klog = getattr(session, "_knee_lead_log", None)
     if klog:
         clamps = sum(int(row[4]) for row in klog)
@@ -3958,6 +4117,8 @@ def measure_pred_clip(
         ka_checked=int(surf["ka_checked"]),
         mid_samples=tuple(surf["mid_samples"]),  # type: ignore[arg-type]
         sag_rows=tuple(getattr(session, "_sag_log", ())),
+        flat_min_fracs=tuple(surf.get("flat_min_fracs", ())),  # type: ignore[arg-type]
+        roll_hx_over=", ".join(roll_hits),
     )
 
 
@@ -5612,6 +5773,180 @@ def score_liftoff() -> None:
         f"copies {bits}. "
         "The 20-80% window was not moved. Sag cancel stayed off. "
         "Pitch lead stays 20 ms. Toe-up peak stays 0.020 rad. Period stays 0.500 s."
+    )
+
+
+def _toe_sooner_copy(
+    peak: float,
+    full_frac: float,
+    yswap_lead_s: float = 0.0,
+) -> PredScore:
+    """20 ms pitch lead, roll lead 0, clip on, sag cancel off, phase lift."""
+    return measure_pred_clip(
+        clip=True,
+        move_s=None,
+        pitch_move_off=True,
+        toe_up_rad=peak,
+        toe_up_shape="front",
+        toe_full_frac=full_frac,
+        yswap_lead_s=yswap_lead_s,
+        hip_lead=True,
+        lead_roll_scale=0.0,
+        lead_pitch_scale=_pitch_lead_scale(20.0),
+        whole_toe=True,
+        surface_tag=True,
+        ka_log=True,
+        early_log=True,
+        roll_log=yswap_lead_s > 0.0,
+        sag_cancel=False,
+        z_profile="phase",
+    )
+
+
+def _mins_at_208(row: PredScore) -> bool:
+    fracs = tuple(row.flat_min_fracs)
+    if not fracs:
+        return False
+    return all(abs(float(frac) - (5.0 / 24.0)) <= 0.01 for frac in fracs)
+
+
+def _toe_chain_clear(row: PredScore) -> bool:
+    return row.flat_hx_over == "" and row.flat_toe_mm >= 2.0
+
+
+def _yswap_clear(row: PredScore) -> bool:
+    return _toe_chain_clear(row) and row.roll_hx_over == ""
+
+
+def _report_toe_sooner(label: str, row: PredScore) -> None:
+    knee_rail = "knee" in row.flat_hx_over
+    print(
+        f"PRED toe_sooner {label} {row.name} "
+        f"flat_worst {row.flat_toe_mm:.3f} mm t {row.flat_toe_t:.3f} "
+        f"side {row.flat_toe_side} vs_plus2 {row.flat_toe_mm - 2.0:+.3f} mm "
+        f"short {2.0 - row.flat_toe_mm:.3f} mm "
+        f"box_centre {row.flat_center_mm:.3f} mm "
+        f"sole_pitch {row.flat_sole_pitch:.5f} rad "
+        f"flat_hx {row.flat_hx_over or 'under'} "
+        f"roll_hx {row.roll_hx_over or 'under'} "
+        f"mins_at_0.208 {int(_mins_at_208(row))} "
+        f"flat_min_n {len(row.flat_min_fracs)} "
+        f"knee_rail {int(knee_rail)} "
+        f"clear {int(_yswap_clear(row) if row.roll_hx_over or 'yswap' in row.name else _toe_chain_clear(row))} "
+        f"ka_over {row.ka_over_n} ka_checked {row.ka_checked}"
+    )
+
+
+def score_toe_sooner() -> None:
+    """Earlier front toe-up, then earlier y_swap if the mins stay at 0.208.
+
+    The 20–80% window is unchanged. Sag cancel stays off. Soft-pass stays off.
+    Contact settings and the 2.33 Nm bar stay put. Plant stays cold.
+    """
+    print(
+        "PRED toe_sooner_plan Sag cancel stays off. "
+        "Base is the 20 ms pitch lead, roll lead 0, period 0.500 s, "
+        "the 12 mm phase lift, and the swing-hip clip. "
+        "A10 is toe-up 0.020 rad full by 10% and held through 80%. "
+        "A05 is the same peak full by 5%. "
+        "A15+025 is 0.025 rad full by 15%. "
+        "A10+025 is 0.025 rad full by 10%. "
+        "Each 0-30% tick of a flat swing logs the swing-foot normal and contact dist. "
+        "Scoring window stays 20-80%. "
+        "If those copies stay short of +2 mm under 2.33 Nm and every flat minimum "
+        "is still fraction 0.208, y_swap is sampled 8 ms and 16 ms earlier "
+        "on the best under-bar shape. Amplitude stays 0.020 m. "
+        "Both ankle rolls keep the same shift lat."
+    )
+    copies = (
+        ("A10", 0.020, 0.10),
+        ("A05", 0.020, 0.05),
+        ("A15+025", 0.025, 0.15),
+        ("A10+025", 0.025, 0.10),
+    )
+    ran: list[tuple[str, float, float, PredScore]] = []
+    cleared: list[tuple[str, PredScore]] = []
+    for label, peak, full in copies:
+        row = _toe_sooner_copy(peak, full)
+        _report_toe_sooner(label, row)
+        ran.append((label, peak, full, row))
+        if _toe_chain_clear(row):
+            cleared.append((label, row))
+    digest = sw._md5(sw.PLANT_XML)
+    print(f"PRED toe_sooner plant_md5 {digest}")
+    if digest != sw.PLANT_MD5:
+        raise SystemExit(f"plant md5 {digest} != {sw.PLANT_MD5}")
+    bits = " ".join(
+        f"{label} {row.flat_toe_mm:+.3f} mm" for label, _peak, _full, row in ran
+    )
+    if cleared:
+        best = max(cleared, key=lambda item: item[1].flat_toe_mm)
+        print(
+            f"PRED toe_sooner clear {best[0]} {best[1].name} "
+            f"flat_worst {best[1].flat_toe_mm:.3f} mm "
+            f"t {best[1].flat_toe_t:.3f} side {best[1].flat_toe_side}. "
+            f"copies {bits}. "
+            "y_swap lead was not run. Pitch lead stays 20 ms. Period stays 0.500 s."
+        )
+        return
+    under = [item for item in ran if item[3].flat_hx_over == ""]
+    if not under:
+        print(
+            "PRED toe_sooner Prefer FAIL. Every earlier toe-up copy puts a "
+            "floor-contact pitch-chain actuator over 2.33 Nm. "
+            f"copies {bits}. "
+            "y_swap lead was not run. The 20-80% window was not moved. "
+            "Pitch lead stays 20 ms. Period stays 0.500 s."
+        )
+        return
+    best_label, best_peak, best_full, best_row = max(under, key=lambda item: item[3].flat_toe_mm)
+    stalled = best_row.flat_toe_mm < 2.0 and all(_mins_at_208(item[3]) for item in under)
+    if not stalled:
+        print(
+            "PRED toe_sooner Prefer FAIL. Earlier toe-up is still short of +2 mm "
+            "under 2.33 Nm, and a flat minimum left fraction 0.208. "
+            f"best {best_label} {best_row.flat_toe_mm:+.3f} mm. copies {bits}. "
+            "y_swap lead is not the next copy. The 20-80% window was not moved. "
+            "Pitch lead stays 20 ms. Period stays 0.500 s."
+        )
+        return
+    print(
+        f"PRED toe_sooner stall mins_at_0.208 1 best {best_label} "
+        f"{best_row.flat_toe_mm:+.3f} mm under 2.33 Nm. "
+        f"Running yswap 8 ms and 16 ms on peak {best_peak:.3f} rad "
+        f"full by {best_full * 100:.0f}%. Amplitude stays 0.020 m."
+    )
+    y_ran: list[tuple[str, PredScore]] = []
+    y_cleared: list[tuple[str, PredScore]] = []
+    for label, lead in ((f"{best_label}+Y8", 0.008), (f"{best_label}+Y16", 0.016)):
+        row = _toe_sooner_copy(best_peak, best_full, yswap_lead_s=lead)
+        _report_toe_sooner(label, row)
+        y_ran.append((label, row))
+        if _yswap_clear(row):
+            y_cleared.append((label, row))
+    digest = sw._md5(sw.PLANT_XML)
+    print(f"PRED toe_sooner plant_md5 {digest}")
+    if digest != sw.PLANT_MD5:
+        raise SystemExit(f"plant md5 {digest} != {sw.PLANT_MD5}")
+    ybits = " ".join(f"{label} {row.flat_toe_mm:+.3f} mm" for label, row in y_ran)
+    if y_cleared:
+        ybest = max(y_cleared, key=lambda item: item[1].flat_toe_mm)
+        print(
+            f"PRED toe_sooner clear {ybest[0]} {ybest[1].name} "
+            f"flat_worst {ybest[1].flat_toe_mm:.3f} mm "
+            f"t {ybest[1].flat_toe_t:.3f} side {ybest[1].flat_toe_side}. "
+            f"toe copies {bits}. yswap {ybits}. "
+            "Hip rolls on floor contact stay at or under 2.33 Nm. "
+            "Ankle-roll shift lat stays matched. Pitch lead stays 20 ms."
+        )
+        return
+    print(
+        "PRED toe_sooner Prefer FAIL. Earlier toe-up and an earlier y_swap "
+        "did not clear a flat mid-swing contact-box toe of +2 mm with the "
+        "pitch chain and both hip rolls at or under 2.33 Nm on floor contact. "
+        f"toe copies {bits}. yswap {ybits}. "
+        "The 20-80% window was not moved. Sag cancel stayed off. "
+        "y_swap amplitude stayed 0.020 m. Pitch lead stays 20 ms. Period stays 0.500 s."
     )
 
 
