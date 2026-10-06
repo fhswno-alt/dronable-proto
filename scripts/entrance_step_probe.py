@@ -5118,6 +5118,7 @@ def measure_pred_clip(
     y_out_m: float | None = None,
     x_scale: float = 1.0,
     sag_slew_rad_s: float | None = None,
+    sag_slew_joints: tuple[str, ...] = ("knee", "ank_pitch"),
     sag_split: bool = False,
 ) -> PredScore:
     """12 mm @ 20% with an optional swing-hip predicted-force clip.
@@ -5407,7 +5408,7 @@ def measure_pred_clip(
         _install_sole_flat_stance(session, sole_flat_mode)
     if sag_slew_rad_s is not None:
         # After the ask log, so the logged q_des is the slowed stance command.
-        _install_sagittal_slew(session, float(sag_slew_rad_s))
+        _install_sagittal_slew(session, float(sag_slew_rad_s), sag_slew_joints)
     try:
         while float(session.data.time) < end - 1e-9:
             driver.publish(session.bus, float(session.data.time))
@@ -10777,18 +10778,25 @@ def _ask_q(item: tuple) -> float:
 _FLAT_SUF = ("hip_roll", "knee", "ank_roll", "ank_pitch")
 
 
-def _install_sagittal_slew(session: sw.SteerSession, rad_s: float) -> None:
-    """Slow the stance knee and the stance ankle pitch. Swing-z knee stays full.
+def _install_sagittal_slew(
+    session: sw.SteerSession,
+    rad_s: float,
+    joints: tuple[str, ...] = ("knee", "ank_pitch"),
+) -> None:
+    """Slow stance q_des. The airborne knee keeps the swing-z schedule.
 
-    The cap is radians per second on q_des. Double support limits both legs.
-    Single support limits the loaded leg only, so the airborne knee keeps
-    the swing-z schedule. The logged ask uses this slowed q_des.
+    The cap is radians per second. Double support limits both legs.
+    Single support limits the loaded leg only. ``joints`` chooses knee,
+    ankle pitch, or both. The logged ask uses this slowed q_des.
     """
     lipm = session.lipm
     if lipm is None or lipm.op3 is None:
         raise RuntimeError("gait manager missing")
     if rad_s < 0.0:
         raise SystemExit(f"sagittal slew {rad_s} is negative")
+    suffixes = tuple(joints)
+    if not suffixes or any(name not in ("knee", "ank_pitch") for name in suffixes):
+        raise SystemExit(f"sagittal slew joints {joints} are not knee or ank_pitch")
     walker = lipm.op3
     orig = lipm.write_clipped
     prev: dict[str, float] = {}
@@ -10802,7 +10810,7 @@ def _install_sagittal_slew(session: sw.SteerSession, rad_s: float) -> None:
         return "both"
 
     def write(jn: str, q_des: float) -> None:
-        if jn.endswith(("knee", "ank_pitch")):
+        if jn.endswith(suffixes):
             stance = _stance_prefix(_cmd_time(walker))
             if stance == "both" or jn.startswith(stance):
                 old = prev.get(jn)
@@ -10816,8 +10824,9 @@ def _install_sagittal_slew(session: sw.SteerSession, rad_s: float) -> None:
         orig(jn, float(q_des))
 
     lipm.write_clipped = write  # type: ignore[method-assign]
+    names = "+".join(suffixes)
     print(
-        f"PRED sag_slew {float(rad_s):.3f} rad/s on stance knee and stance ankle pitch. "
+        f"PRED sag_slew {float(rad_s):.3f} rad/s on stance {names}. "
         f"Per tick {cap:.5f} rad. The swing knee keeps the swing-z schedule. "
         "Foot-z and less-crouch stay put."
     )
@@ -10870,13 +10879,17 @@ def _quiet_flat_toe(held: dict[str, object]) -> tuple[float, float, str, float]:
 
 
 def _steady_x(lateral: list[dict[str, float | str]]) -> float:
+    """Largest step length after 2 s. The first steady tick is still ramping."""
+    best = float("nan")
     for row in lateral:
         if not isinstance(row, dict) or "x_cmd" not in row:
             continue
         if float(row["t_ask"]) < _WALK_STEADY_S:
             continue
-        return float(row["x_cmd"])
-    return float("nan")
+        x_cmd = float(row["x_cmd"])
+        if best != best or abs(x_cmd) > abs(best):
+            best = x_cmd
+    return best
 
 
 def _run_continuous_walk(
@@ -10888,6 +10901,7 @@ def _run_continuous_walk(
     sole_flat_mode: str = "q",
     x_scale: float = 1.0,
     sag_slew_rad_s: float | None = None,
+    sag_slew_joints: tuple[str, ...] = ("knee", "ank_pitch"),
     sag_split: bool = False,
     surface_tag: bool = False,
 ) -> dict[str, object]:
@@ -10925,6 +10939,7 @@ def _run_continuous_walk(
         y_out_m=y_out_m,
         x_scale=x_scale,
         sag_slew_rad_s=sag_slew_rad_s,
+        sag_slew_joints=sag_slew_joints,
         sag_split=sag_split,
         surface_tag=surface_tag,
     )
@@ -10934,6 +10949,7 @@ def _run_continuous_walk(
     summary["sole_mode"] = sole_flat_mode if sole_flat else ""
     summary["x_scale"] = float(x_scale)
     summary["sag_slew"] = float("nan") if sag_slew_rad_s is None else float(sag_slew_rad_s)
+    summary["slew_joints"] = "" if sag_slew_rad_s is None else "+".join(sag_slew_joints)
     toe_mm, toe_t, toe_side, toe_frac = _quiet_flat_toe(held)
     summary["flat_toe_mm"] = toe_mm
     summary["flat_toe_t"] = toe_t
@@ -12186,7 +12202,7 @@ def _print_sag_row(summary: dict[str, object]) -> None:
     print(
         f"PRED sag row x_scale {float(summary.get('x_scale', float('nan'))):.3f} "
         f"x_cmd {float(summary.get('x_cmd', float('nan'))):+.5f} "
-        f"slew {slew_txt} "
+        f"slew {slew_txt} joints {summary.get('slew_joints') or '-'} "
         f"dsp_knee {_ask_brief(dsp, 'l_knee')} | {_ask_brief(dsp, 'r_knee')} "
         f"dsp_ap {_ask_brief(dsp, 'l_ank_pitch')} | {_ask_brief(dsp, 'r_ank_pitch')} "
         f"mid_knee {_ask_brief(mid, 'l_knee')} | {_ask_brief(mid, 'r_knee')} "
@@ -12235,6 +12251,7 @@ def score_sagittal() -> None:
         slew: float | None,
         *,
         detail: bool = False,
+        joints: tuple[str, ...] = ("knee", "ank_pitch"),
     ) -> dict[str, object]:
         summary = _run_continuous_walk(
             0.0,
@@ -12243,6 +12260,7 @@ def score_sagittal() -> None:
             sole_flat_mode="q",
             x_scale=x_scale,
             sag_slew_rad_s=slew,
+            sag_slew_joints=joints,
             sag_split=True,
             surface_tag=True,
         )
@@ -12288,11 +12306,24 @@ def score_sagittal() -> None:
         "Stance knee and stance ankle pitch q_des are rate limited. "
         "The swing knee is not."
     )
-    for rate in (1.50, 1.00, 0.60, 0.30):
+    for rate in (2.50, 2.00, 1.95, 1.90, 1.75, 1.50, 1.00, 0.60):
         trial = run(1.0, rate)
         if _body_bad(trial):
             print(f"PRED sag slew {rate:.2f} rad/s left the body. Stopping the rate cut.")
             break
+    full_step_pass = [
+        row for row in rows
+        if _sag_pass(row) and abs(float(row.get("x_scale") or 0.0) - 1.0) < 1e-9
+        and str(row.get("slew_joints") or "") == "knee+ank_pitch"
+    ]
+    if full_step_pass:
+        mild_rate = max(float(row["sag_slew"]) for row in full_step_pass)
+        print(
+            f"PRED sag fastest combined slew that holds the bar is {mild_rate:.2f} rad/s. "
+            "Trying that cap on the knee alone, then on ankle pitch alone."
+        )
+        run(1.0, mild_rate, joints=("knee",), detail=True)
+        run(1.0, mild_rate, joints=("ank_pitch",), detail=True)
 
     passing = [row for row in rows if _sag_pass(row)]
     if passing:
@@ -12305,6 +12336,11 @@ def score_sagittal() -> None:
                 0.0 if slew_v != slew_v else slew_v,
             )
         best = max(passing, key=_mild)
+        _print_sag_split("mid_knee", _sag_worst(best.get("mid_stance"), "knee"), best)
+        _print_sag_split("mid_ap", _sag_worst(best.get("mid_stance"), "ank_pitch"), best)
+        _print_sag_split("dsp_knee", _sag_worst(best.get("dsp"), "knee"), best)
+        _print_sag_split("dsp_ap", _sag_worst(best.get("dsp"), "ank_pitch"), best)
+        _print_sag_split("ssp_knee", _sag_worst(best.get("ssp"), "knee"), best)
         toe = float(best.get("flat_toe_mm", float("nan")))
         slew = float(best.get("sag_slew", float("nan")))
         slew_txt = "off" if slew != slew else f"{slew:.3f} rad/s"
@@ -12312,7 +12348,7 @@ def score_sagittal() -> None:
             "PRED sag CLEAR. "
             f"y_swap 0. x_scale {float(best.get('x_scale', float('nan'))):.3f} "
             f"x_cmd {float(best.get('x_cmd', float('nan'))):+.5f} m "
-            f"slew {slew_txt}. "
+            f"slew {slew_txt} joints {best.get('slew_joints') or '-'}. "
             "DSP and mid-SS knee and ankle pitch stay at or under 2.33 Nm. "
             f"Flat mid-swing toe {toe:+.3f} mm "
             f"t {float(best.get('flat_toe_t', float('nan'))):.3f} "
