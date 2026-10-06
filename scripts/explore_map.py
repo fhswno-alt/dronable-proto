@@ -137,7 +137,9 @@ FRONTIER_SECOND_LEFT_S = 8.0
 FRONTIER_RIGHT_HOLD_S = 34.0
 # False: the 4 s / 8 s / 34 s chain is not a qualified envelope.
 QUALIFIED_FRONTIER_CHAIN = False
-# Stop long enough for the bus to stand, then one question. Not a percept.
+# 0.20 s is the interrupted ask row. A 1.0 s stand before the ask was
+# measured with ask_hold_s and is not this default. That settle is not
+# the no-ask left/right unload row.
 ASK_STOP_S = 0.20
 # Repeat room label: reverse at the Controls back clamp. Not a waypoint.
 BACKTRACK_S = 2.0
@@ -1364,14 +1366,29 @@ def decide_next(memory: list[AskRecord], upcoming: ExplorePhase, *, just_backtra
     return upcoming
 
 
-def _stop_look_ask(session: steer_walk.SteerSession, cam: KitCam, asker: object, sent: list[SentCommand]) -> tuple[np.ndarray, AskRecord]:
-    """vel window ended. Stop, one kit_cam frame, one question. Sim pauses for the model."""
+def _stop_look_ask(
+    session: steer_walk.SteerSession,
+    cam: KitCam,
+    asker: object,
+    sent: list[SentCommand],
+    hold_s: float,
+) -> tuple[np.ndarray, AskRecord]:
+    """vel window ended. Stop, settle, one kit_cam frame, one question.
+
+    The model call does not advance sim time. hold_s is the settle before
+    the frame. 0.20 s is the interrupted row. A longer hold is a stand.
+    """
     now = float(session.data.time)
     refusal = session.bus.stop(now)
     if refusal:
         raise RuntimeError(refusal)
     sent.append(SentCommand(now, "stop", 0.0, 0.0))
-    end = now + ASK_STOP_S
+    if hold_s > ASK_STOP_S + 1e-9:
+        refusal = session.bus.stand(now)
+        if refusal:
+            raise RuntimeError(refusal)
+        sent.append(SentCommand(now, "stand", 0.0, 0.0))
+    end = now + hold_s
     while float(session.data.time) < end - 1e-9:
         session.step()
     frame, _cam_pos, _cam_mat, _fovy = cam.grab(session.model, session.data)
@@ -1465,6 +1482,7 @@ def run_explore(
     record_frames: bool,
     ask: bool = False,
     asker: object | None = None,
+    ask_hold_s: float = ASK_STOP_S,
 ) -> SceneRun:
     scene_xml = SCENES[scene]
     session = steer_walk.SteerSession(
@@ -1554,7 +1572,7 @@ def run_explore(
                 phase_i += 1
                 phase_min_up = 1.0
                 if ask and asker is not None:
-                    _frame, record = _stop_look_ask(session, cam, asker, sent)
+                    _frame, record = _stop_look_ask(session, cam, asker, sent, ask_hold_s)
                     upcoming = schedule[phase_i] if phase_i < len(schedule) else None
                     if upcoming is None:
                         record = AskRecord(
@@ -1617,7 +1635,7 @@ def run_explore(
                 if phase_i >= len(schedule):
                     break
                 if ask:
-                    walk_end += ASK_STOP_S
+                    walk_end += ask_hold_s
                 phase_origin = _pose(session)
                 phase_t0 = float(session.data.time)
                 phase = schedule[phase_i]
@@ -1663,7 +1681,7 @@ def run_explore(
                 # together. That stop still gets one question. Decision is stop:
                 # the budget is finished, so a repeat label does not add a vel.
                 if ask and asker is not None:
-                    _frame, record = _stop_look_ask(session, cam, asker, sent)
+                    _frame, record = _stop_look_ask(session, cam, asker, sent, ask_hold_s)
                     record = AskRecord(
                         t=record.t,
                         room=record.room,
