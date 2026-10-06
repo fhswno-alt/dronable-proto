@@ -11635,6 +11635,11 @@ def _install_sagittal_slew(
                     elif dq < -cap:
                         q_des = old - cap
                 prev[jn] = float(q_des)
+            elif not getattr(session, "_sag_torque_cap", False):
+                # Walk only. The swing command is not rate limited, and the
+                # next stance step has to start from it. Leaving prev at the
+                # previous stance pose makes the 1.90 slew open a gap.
+                prev[jn] = float(q_des)
             last_cmd[jn] = float(q_des)
         else:
             q_des = _apply_stop_hip(jn, float(q_des))
