@@ -11914,6 +11914,55 @@ def _install_sagittal_slew(
         prev[jn] = float(stepped)
         return float(stepped)
 
+    air_step_at: dict[str, float] = {}
+    air_stepped: dict[str, float] = {}
+
+    def _air_ank(jn: str) -> bool:
+        """Airborne ankle pitch on the stop walk, before the stop command.
+
+        Clock DSP can still show one foot at 0 N. That foot is not the
+        loaded stance slew. Ankle roll and the stop stretch stay out.
+        """
+        if not jn.endswith("ank_pitch") or "ank_pitch" not in suffixes:
+            return False
+        if not getattr(session, "_sag_stop_installed", False):
+            return False
+        if getattr(session, "_sag_torque_cap", False):
+            return False
+        side = "L" if jn.startswith("l_") else "R"
+        return _sole_load_n(session, side) <= _SOLE_FLAT_LOAD_N + 1e-9
+
+    def _toward_air_ank(jn: str, target: float) -> float:
+        """One 1.90 rad/s step toward the gait ankle, then the 2.33 Nm hold.
+
+        The first step may start from a stale stance command. The hold
+        pulls that step back to the live joint so the airborne ask cannot
+        slam. The loaded leg does not use this path.
+        """
+        t_now = float(lipm.data.time)
+        last = air_step_at.get(jn)
+        if last is None or t_now - last >= ctrl_period - 1e-4:
+            old = prev.get(jn)
+            if old is None:
+                old = float(lipm.q(jn))
+            dq = float(target) - float(old)
+            if dq > cap:
+                stepped = float(old) + cap
+            elif dq < -cap:
+                stepped = float(old) - cap
+            else:
+                stepped = float(target)
+            air_stepped[jn] = float(stepped)
+            air_step_at[jn] = t_now
+            origin = float(old)
+        else:
+            stepped = float(air_stepped[jn])
+            origin = float(prev.get(jn, stepped))
+        held, q_now, omega, capped = _hold_inside(jn, stepped)
+        prev[jn] = float(held)
+        _cap_row(jn, q_now, held, float(target), stepped, origin, capped, omega)
+        return float(held)
+
     def _apply_stop_hip(jn: str, q_des: float) -> float:
         """Loaded hips step toward stand. An airborne hip stays on the pin.
 
@@ -11932,6 +11981,11 @@ def _install_sagittal_slew(
     last_cmd: dict[str, float] = {}
 
     def write(jn: str, q_des: float) -> None:
+        if _air_ank(jn):
+            q_des = _toward_air_ank(jn, float(q_des))
+            last_cmd[jn] = float(q_des)
+            orig(jn, float(q_des))
+            return
         if jn.endswith(suffixes):
             stance = _stance_prefix(_cmd_time(walker))
             limited = stance == "both" or jn.startswith(stance)
@@ -12089,6 +12143,14 @@ def _install_sagittal_slew(
             f"Per tick {cap:.5f} rad. The swing knee keeps the swing-z schedule. "
             "Foot-z and less-crouch stay put."
         )
+        if getattr(session, "_sag_stop_installed", False):
+            print(
+                "PRED sag_slew airborne ank_pitch "
+                f"{float(rad_s):.3f} rad/s on the stop walk while that foot "
+                f"is at or under {_SOLE_FLAT_LOAD_N:.1f} N, then inside 2.33 Nm. "
+                "Loaded ankle pitch stays on the stance cap. "
+                "Ankle roll, sole-flat, and the stop stretch stay put."
+            )
     if "hip_pitch" in suffixes:
         print(
             f"PRED sag_slew hip_pitch {_WALK_HIP_PITCH_RATE:.3f} rad/s "
@@ -14082,6 +14144,7 @@ def score_sag_stop() -> None:
             "is at or after the tip and is not the torque bar"
         )
     _print_gait_peaks(name, held, summary)
+    _print_air_ank_land(name, held)
     if held.get("fault"):
         fails.append(f"fault {held.get('fault')} t {float(held.get('fault_t', float('nan'))):.3f}")
     if air_zero:
@@ -14272,6 +14335,125 @@ def _print_gait_peaks(name: str, held: dict[str, object], summary: dict[str, obj
         "d_min is not rebuilt. Not kit-safe."
     )
     return True
+
+
+def _print_air_ank_land(name: str, held: dict[str, object]) -> None:
+    """Load and four corners at the airborne ankle peaks, and at the next load.
+
+    The next load is the first later tick of that foot over 5 N. A front
+    corner under 0 there is a toe-down dig.
+    """
+    asks = held.get("asks")
+    lateral = held.get("lateral")
+    surface = held.get("surface")
+    if not isinstance(asks, list) or not isinstance(lateral, list):
+        print(f"PRED {name} air_ank missing")
+        return
+    by_lat: dict[float, dict[str, float | str]] = {}
+    for row in lateral:
+        if isinstance(row, dict):
+            by_lat[round(float(row["t_ask"]), 5)] = row
+    by_surf: dict[float, dict[str, object]] = {}
+    if isinstance(surface, list):
+        for row in surface:
+            if isinstance(row, dict):
+                by_surf[round(float(row["t"]), 5)] = row
+    fault_t = float(held.get("fault_t", float("nan")))
+    tipped = bool(held.get("fault")) and math.isfinite(fault_t)
+    worst: dict[str, tuple] = {}
+    for item in asks:
+        jn = str(item[1])
+        if jn not in ("l_ank_pitch", "r_ank_pitch"):
+            continue
+        t_item = float(item[0])
+        if tipped and t_item >= fault_t - 1e-9:
+            continue
+        row = by_lat.get(round(t_item, 5))
+        if row is None:
+            continue
+        fn_key = "fn_l" if jn.startswith("l_") else "fn_r"
+        if float(row[fn_key]) > _SOLE_FLAT_LOAD_N + 1e-9:
+            continue
+        prev = worst.get(jn)
+        if prev is None or abs(float(item[3])) > abs(float(prev[3])):
+            worst[jn] = item
+
+    def _corners(tag: str, t_key: float, frac_txt: str) -> None:
+        surf = by_surf.get(t_key)
+        for side in ("L", "R"):
+            plane = surf.get(side) if isinstance(surf, dict) else None
+            plane_d = plane if isinstance(plane, dict) else None
+            corners = plane_d.get("corners") if isinstance(plane_d, dict) else None
+            if not isinstance(corners, tuple) or not corners:
+                print(f"PRED {name} corners side {side} {tag} missing")
+                continue
+            parts = " ".join(
+                f"{label} {float(z) * 1000.0:+.3f}" for label, z in corners
+            )
+            low = min(corners, key=lambda packed: float(packed[1]))
+            front_under = any(
+                ("front" in str(label)) and float(z) < 0.0
+                for label, z in corners
+            )
+            print(
+                f"PRED {name} corners side {side} {tag} "
+                f"t {t_key:.3f} frac {frac_txt} {parts} "
+                f"low {low[0]} {float(low[1]) * 1000.0:+.3f} mm "
+                f"toe_down {int(front_under)}"
+            )
+
+    for jn in ("r_ank_pitch", "l_ank_pitch"):
+        item = worst.get(jn)
+        if item is None:
+            print(f"PRED {name} air_ank {jn} none")
+            continue
+        t_key = round(float(item[0]), 5)
+        row = by_lat.get(t_key)
+        phase = str(row["phase"]) if row is not None else str(item[5])
+        frac = float("nan")
+        fn_l = float("nan")
+        fn_r = float("nan")
+        if row is not None:
+            frac = _swing_frac(phase, float(row["pose"]))
+            fn_l = float(row["fn_l"])
+            fn_r = float(row["fn_r"])
+        frac_txt = "dsp" if phase == "D" else f"{frac:.3f}"
+        ask = float(item[3])
+        over = abs(ask) > KNEE_NM + 1e-9
+        print(
+            f"PRED {name} air_ank {jn} {ask:+.4f} "
+            f"t {float(item[0]):.3f} phase {phase} frac {frac_txt} "
+            f"q {_ask_q(item):+.5f} q_des {float(item[2]):+.5f} "
+            f"kp_term {float(item[8]):+.4f} kv_term {float(item[9]):+.4f} "
+            f"fn_l {fn_l:.2f} fn_r {fn_r:.2f} ge_2.33 {int(over)}"
+        )
+        _corners(f"air_{jn}", t_key, frac_txt)
+        fn_key = "fn_l" if jn.startswith("l_") else "fn_r"
+        landed: dict[str, float | str] | None = None
+        for lat in lateral:
+            if not isinstance(lat, dict):
+                continue
+            t_lat = float(lat["t_ask"])
+            if t_lat <= float(item[0]) + 1e-9:
+                continue
+            if tipped and t_lat >= fault_t - 1e-9:
+                continue
+            if float(lat[fn_key]) > _SOLE_FLAT_LOAD_N:
+                landed = lat
+                break
+        if landed is None:
+            print(f"PRED {name} air_ank_load {jn} none")
+            continue
+        t_land = round(float(landed["t_ask"]), 5)
+        phase_l = str(landed["phase"])
+        frac_l = _swing_frac(phase_l, float(landed["pose"]))
+        frac_l_txt = "dsp" if phase_l == "D" else f"{frac_l:.3f}"
+        print(
+            f"PRED {name} air_ank_load {jn} "
+            f"t {float(landed['t_ask']):.3f} phase {phase_l} frac {frac_l_txt} "
+            f"fn_l {float(landed['fn_l']):.2f} fn_r {float(landed['fn_r']):.2f}"
+        )
+        _corners(f"air_load_{jn}", t_land, frac_l_txt)
 
 
 def score_mid_swing() -> None:
