@@ -44,28 +44,28 @@ While yaw is commanded, both hip yaw joints and both hip roll joints are logged 
 
 The room question runs only when the doorway opening is in the frame. Search applies yaw +0.25 until then. A correct yes re-points in place, settles, and walks `vel(+0.056, 0)`. Doorway pixel and size are logged. That re-point is not a free turn: in-place yaw that asks a hip roll over 2.33 Nm unclamped fails the bout. The floor-edge latch fires only when the forward ray hits the same wall the row ranged. A prop, or a different wall, is logged and is not added to the latch. `latch_extra` 0.04087 m is the median of the 17 close `wall_hall_w_2` errors (sim gap under 0.40 m). It is not the peak, and it is not copied onto any other wall. `wall_hall_e_1` keeps that pooled median, 0.03983 m, from 43 close samples on tip aac2baa. The latch for a known leading toe is the median of that toe on tip a3c05f3, with the committing stop left out: left 0.01426 m (21 samples), right 0.07279 m (9 samples). Contact-box centres sit 14 mm outboard of each ankle-roll axis, so the ray origin flips side with the lead foot. The living 0.04087 m pad is not copied onto either toe. Right toe has fewer than 17 samples, so a right stop cannot CLEAR. A left stop clears only when a held-out hit on the left toe lands within 1 cm of 0.01426 m. The 0.40 m bound is 2.39 times the living latch distance 0.1672 m (`d_min` 0.1263 m plus 0.04087 m), so it is the walk-up in front of the latch. A ray past 0.40 m stays a far reject. `wall_hall_e_0` had five close samples on that tip, under the living set of 17, so its pad stays 0. The settled-stand error on `wall_hall_e_1` is 0.18 mm, so the old 0.0101 m bob pad is not stacked on either median. Room reach is a separate bar. `d_min` stays 0.1263 m. Living close latches at 0.1672 m. East left latches at 0.1406 m. East right latches at 0.1991 m and cannot CLEAR on nine samples. An east sample with no toe side stays on the pooled 0.1661 m. Every other close wall latches at 0.1263 m. A wall or prop contact with the latch armed fails the bout.
 
-The typed caller still refuses a room phrase. The scored run is **Prefer FAIL**. Reach CLEAR is 0 of 10. Wall-stop CLEAR is 1 of 10. `wrong_yes_any` is false. `frac_refuse_count` is 10. `false_stop_any` is false. `latch_contact_any` is false. `wall_stop_fail_any` is true (kitchen −90°, held-out residual 0.069 m). `gait_limit_any` is false. `search_yaw_fail_any` is false. `inplace_hip_fail_any` is true. `class_reject_count` is 717. `surface_reject_count` is 330. `go_anywhere` is false. `kit_safe` is false. All 10 bouts started outside the named room box. None finished inside. Min up_z is 0.934. No prop or wall contact. Every bout's search applied yaw peaked at +0.250. Every capture still has `applied_yaw_at_capture` 0, because the picture is taken after the settle. Walk yaw on every committed bout is 0. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`.
+The typed caller still refuses a room phrase. The scored run is **Prefer FAIL**. Reach CLEAR is 0 of 10. Wall-stop CLEAR is 1 of 10. `wrong_yes_any` is false. `frac_refuse_count` is 10. `false_stop_any` is false. `latch_contact_any` is false. `wall_stop_fail_any` is false. Kitchen −90° never committed a close stop, so there is no same-toe held-out residual to clear. `gait_limit_any` is false. `search_yaw_fail_any` is false. `inplace_hip_fail_any` is true. `class_reject_count` is 637. `surface_reject_count` is 312. `go_anywhere` is false. `kit_safe` is false. All 10 bouts started outside the named room box. None finished inside. Min up_z is 0.934. No prop or wall contact. Every bout's search applied yaw peaked at +0.250. Every capture still has `applied_yaw_at_capture` 0, because the picture is taken after the settle. Walk yaw on every committed bout is 0. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`.
 
 Ten Moondream yeses had the asked room under 1% of `kit_cam` and were refused: bathroom +90° four, bathroom −90° three, entrance +90° three. Each returned to search and did not commit. Later pictures on those bouts cleared the gate. Wrong-yes count stays 0.
 
-Living −90° stops on `wall_hall_w_2` in the close class. Ranged 0.199 m, ray 0.239 m, error 0.0401 m, residual after the 0.04087 m pad −0.0008 m. Heading +2.672 rad, `cam_z` 0.337 m, camera pitch −0.267, leading toe −0.017 m on the right foot. That wall stop is CLEAR. The body is still outside the living box, so reach stays open.
+Living −90° stops on `wall_hall_w_2`. Ranged 0.199 m, ray 0.239 m, error 0.0401 m, residual after the 0.04087 m pad −0.0008 m. Heading +2.672 rad, `cam_z` 0.337 m, camera pitch −0.267, leading toe −0.017 m on the right foot. That wall stop is CLEAR. The body is still outside the living box, so reach stays open.
 
-Kitchen −90° is the held-out hit. It stops on `wall_hall_e_1` with the east median 0.03983 m, which was frozen from tip aac2baa and was not refit on this stop. Ranged 0.181 m, ray 0.289 m, error 0.108 m, residual after that median 0.069 m. Heading −0.779 rad, `cam_z` 0.332 m, camera pitch −0.273, leading toe −0.014 m on the left foot. The east heading puts the left toe ahead. The living stop puts the right toe ahead. The living 0.04087 m pad stays on `wall_hall_w_2`. The residual is past 1 cm, so the kitchen wall stop stays open. Reach stays open.
+Kitchen −90° reaches the time limit with no close `wall_hall_e_1` ray. The nearest same-wall ray is 0.506 m at t = 20.50 s, left toe, ranged 0.475 m, error 0.031 m, heading −0.512 rad, `cam_z` 0.332 m, pitch −0.273, leading toe −0.014 m. That ray is past 0.40 m, so it stays a far reject and the left-toe pad is not applied. There is no held-out left-toe stop within 1 cm, so the kitchen wall stop stays open. Reach stays open.
 
-In-place yaw asks hip roll unclamped from about −4.04 Nm to +4.16 Nm against a clamped write of ±2.33 Nm on every bout. Bedroom +90° left roll is −4.01 Nm. That saturation is a fail. `gait_limit` stays false because yaw was not commanded while walking. Not kit-safe. Not go-anywhere.
+In-place yaw asks hip roll unclamped from about −4.04 Nm to +4.17 Nm against a clamped write of ±2.33 Nm on every bout. Bedroom +90° left roll is −4.01 Nm. That saturation is a fail. `gait_limit` stays false because yaw was not commanded while walking. Not kit-safe. Not go-anywhere.
 
 | Room | Offset | Refused yes | Door u / size | Wall stop | Residual at stop | Leading toe | Reach |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| kitchen | +90° | 0 | 354 / 0.194 | none, 53 s | — | — | outside |
-| kitchen | −90° | 0 | 439 / 0.529 | `wall_hall_e_1` fail | 0.069 m | L | outside |
-| bathroom | +90° | 4 | 394 / 0.024 | none, 53 s | — | — | outside |
-| bathroom | −90° | 3 | 484 / 0.005 | none, 53 s | — | — | outside |
+| kitchen | +90° | 0 | 354 / 0.198 | none, 53 s | — | — | outside |
+| kitchen | −90° | 0 | 377 / 0.126 | none, 53 s | — | — | outside |
+| bathroom | +90° | 4 | 389 / 0.030 | none, 53 s | — | — | outside |
+| bathroom | −90° | 3 | 481 / 0.004 | none, 53 s | — | — | outside |
 | living | +90° | 0 | 223 / 0.016 | none, 53 s | — | — | outside |
-| living | −90° | 0 | 157 / 0.028 | `wall_hall_w_2` clear | −0.0008 m | R | outside |
+| living | −90° | 0 | 158 / 0.030 | `wall_hall_w_2` clear | −0.0008 m | R | outside |
 | bedroom | +90° | 0 | 320 / 1.000 | none, 53 s | — | — | outside |
-| bedroom | −90° | 0 | 68 / 0.047 | none, 53 s | — | — | outside |
+| bedroom | −90° | 0 | 67 / 0.049 | none, 53 s | — | — | outside |
 | entrance | +90° | 3 | 242 / 0.036 | none, 53 s | — | — | outside |
-| entrance | −90° | 0 | 293 / 0.044 | none, 53 s | — | — | outside |
+| entrance | −90° | 0 | 304 / 0.038 | none, 53 s | — | — | outside |
 
 ```bash
 MUJOCO_GL=osmesa python scripts/voice_goto_rooms.py
