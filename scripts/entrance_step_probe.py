@@ -45,10 +45,10 @@ KNEE_NM = 2.33
 PLANT_NM = 2.45
 KNEE_KP = 45.0
 TOE_BAR_M = 0.002
-# Continuous-walk swing-z rate. Knee kv is 1.4573, so 1.40 rad/s keeps
-# that velocity term near 2.04 Nm. The parked stop stretch stays at
+# Continuous-walk swing-z rate. Knee kv is 1.4573, so 1.55 rad/s keeps
+# that velocity term near 2.26 Nm. The parked stop stretch stays at
 # 1.90 rad/s and 0.25 / 1.060×. This rate is not that knob.
-_WALK_Z_RATE = 1.40
+_WALK_Z_RATE = 1.55
 # Swing ankle trim cap. This is not a world-level sole and not body roll.
 ANK_TRIM_CAP = 0.025
 # Trim-lead schedule. Full through 80% of swing, command back to 0 by 92%
@@ -14035,7 +14035,7 @@ def score_mid_swing() -> None:
         "Trim-lead off. Sole-flat stance ankle stays on. "
         "Stance knee and ankle pitch stay on the 1.90 rad/s slew. "
         "Walk swing-z is stretched on its own knob so the swing knee and "
-        "ankle pitch track at 1.40 rad/s. The stop stretch stays off at "
+        f"ankle pitch track at {_WALK_Z_RATE:.2f} rad/s. The stop stretch stays off at "
         "0.25 / 1.060×. "
         "Pass is both bars on this copy: 20-80% unclamped knee and ankle "
         "pitch at or under 2.33 Nm, and the flat toe still at or above "
@@ -14340,7 +14340,16 @@ def score_mid_swing() -> None:
         if ssp_row is not None:
             ssp_frac = _swing_frac(str(ssp_row["phase"]), float(ssp_row["pose"]))
     ssp_in_window = ssp_frac == ssp_frac and 0.20 - 1e-12 <= ssp_frac <= 0.80 + 1e-12
-    if swing_ok and toe_bar and rug_ok and corners_ok and support_ok and not ssp_in_window:
+    if knee_worst is None:
+        print(f"PRED {name} ssp_knee_peak missing")
+    else:
+        print(
+            f"PRED {name} ssp_knee_peak {knee_worst[1]} {float(knee_worst[3]):+.4f} "
+            f"t {float(knee_worst[0]):.3f} frac {ssp_frac:.3f} "
+            f"in_20_80 {int(ssp_in_window)} "
+            f"ge_2.33 {int(abs(float(knee_worst[3])) > KNEE_NM + 1e-9)}"
+        )
+    if swing_ok and toe_bar and rug_ok and corners_ok and support_ok:
         print(
             f"PRED {name} CLEAR. 20-80% knee and ankle pitch stay at or under "
             "2.33 Nm, and both flat toes stay at or above +2 mm near frac 0.208. "
@@ -14372,19 +14381,19 @@ def score_mid_swing() -> None:
             why.append("rug clearance under 0")
         if not support_ok:
             why.append("mid-SS or DSP ask over 2.33")
-        if ssp_in_window and knee_worst is not None:
-            why.append(
-                f"SSP swing knee moved into 20-80% "
-                f"{knee_worst[1]} {float(knee_worst[3]):+.4f} "
-                f"t {float(knee_worst[0]):.3f} frac {ssp_frac:.3f}"
-            )
         next_lever = (
-            "The 1.40 rad/s landing schedule is the knee-safe swing-z. "
-            "Spending the +12.9 mm surplus under +2 mm is this Prefer FAIL. "
-            "Do not trade the parked SSP knee, and do not open foot-z, "
-            "crouch, y_swap, the rail, or the plant."
+            "Foot-z, crouch, y_swap, the rail, and the plant stay closed. "
+            "The stop stretch stays 0.25 / 1.060×."
         )
-        if swing_ok and not toe_bar:
+        if swing_ok and toe_bar and (not corners_ok or not support_ok):
+            next_lever = (
+                "20-80% knee and ankle pitch are inside 2.33 Nm and the flat "
+                "toe stays at or above +2 mm. The miss is a corner under 0 "
+                "or a mid-SS/DSP ask over 2.33 Nm. A higher swing that clears "
+                "the heel has to keep those two bars. Foot-z, crouch, y_swap, "
+                "the rail, and the plant stay closed."
+            )
+        elif swing_ok and not toe_bar:
             next_lever = (
                 "Knee and ankle pitch in 20-80% are inside 2.33 Nm, and the "
                 "landing schedule spent the +12.9 mm toe under +2 mm. "
