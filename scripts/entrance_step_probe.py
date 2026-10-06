@@ -14168,6 +14168,7 @@ def _print_gait_peaks(name: str, held: dict[str, object], summary: dict[str, obj
     fault_t = float(held.get("fault_t", float("nan")))
     tipped = bool(held.get("fault")) and math.isfinite(fault_t)
     pre: dict[str, tuple] = {}
+    steady: dict[str, tuple] = {}
     post: dict[str, tuple] = {}
     for item in asks:
         jn = str(item[1])
@@ -14175,40 +14176,58 @@ def _print_gait_peaks(name: str, held: dict[str, object], summary: dict[str, obj
             continue
         t_item = float(item[0])
         before = (not tipped) or t_item < fault_t - 1e-9
-        bucket = pre if before else post
-        bucket[jn] = _keep_ask(bucket.get(jn), item)
+        if not before:
+            post[jn] = _keep_ask(post.get(jn), item)
+            continue
+        pre[jn] = _keep_ask(pre.get(jn), item)
+        if t_item >= _WALK_STEADY_S - 1e-9:
+            steady[jn] = _keep_ask(steady.get(jn), item)
 
-    def _phase_frac(item: tuple) -> tuple[str, float]:
+    def _phase_frac(item: tuple) -> tuple[str, float, float, float]:
         row = by_lat.get(round(float(item[0]), 5))
         if row is None:
-            return str(item[5]), float("nan")
+            return str(item[5]), float("nan"), float("nan"), float("nan")
         phase = str(row["phase"])
-        return phase, _swing_frac(phase, float(row["pose"]))
-
-    overs: list[str] = []
-    worst_over = ""
-    worst_abs = -1.0
-    for jn in _WALK_LEG:
-        item = pre.get(jn)
-        if item is None:
-            print(f"PRED {name} gait_pre {jn} missing")
-            overs.append(f"{jn} missing")
-            continue
-        phase, frac = _phase_frac(item)
-        ask = float(item[3])
-        over = abs(ask) > KNEE_NM + 1e-9
-        frac_txt = "dsp" if phase == "D" else f"{frac:.3f}"
-        print(
-            f"PRED {name} gait_pre {jn} {ask:+.4f} "
-            f"t {float(item[0]):.3f} phase {phase} frac {frac_txt} "
-            f"ge_2.33 {int(over)}"
+        return (
+            phase,
+            _swing_frac(phase, float(row["pose"])),
+            float(row["fn_l"]),
+            float(row["fn_r"]),
         )
-        if over:
-            bit = f"{jn} {ask:+.4f} t {float(item[0]):.3f} frac {frac_txt}"
-            overs.append(bit)
-            if abs(ask) > worst_abs:
-                worst_abs = abs(ask)
-                worst_over = bit
+
+    def _emit(tag: str, bucket: dict[str, tuple]) -> tuple[list[str], str]:
+        found: list[str] = []
+        worst_bit = ""
+        worst_abs = -1.0
+        for jn in _WALK_LEG:
+            item = bucket.get(jn)
+            if item is None:
+                print(f"PRED {name} {tag} {jn} missing")
+                found.append(f"{jn} missing")
+                continue
+            phase, frac, fn_l, fn_r = _phase_frac(item)
+            ask = float(item[3])
+            over = abs(ask) > KNEE_NM + 1e-9
+            frac_txt = "dsp" if phase == "D" else f"{frac:.3f}"
+            print(
+                f"PRED {name} {tag} {jn} {ask:+.4f} "
+                f"t {float(item[0]):.3f} phase {phase} frac {frac_txt} "
+                f"fn_l {fn_l:.2f} fn_r {fn_r:.2f} "
+                f"ge_2.33 {int(over)}"
+            )
+            if over:
+                bit = (
+                    f"{jn} {ask:+.4f} t {float(item[0]):.3f} "
+                    f"frac {frac_txt} fn_l {fn_l:.2f} fn_r {fn_r:.2f}"
+                )
+                found.append(bit)
+                if abs(ask) > worst_abs:
+                    worst_abs = abs(ask)
+                    worst_bit = bit
+        return found, worst_bit
+
+    overs, worst_over = _emit("gait_pre", pre)
+    steady_overs, steady_worst = _emit("gait_steady", steady)
     if not post:
         print(f"PRED {name} gait_post none")
     else:
@@ -14216,7 +14235,7 @@ def _print_gait_peaks(name: str, held: dict[str, object], summary: dict[str, obj
             item = post.get(jn)
             if item is None:
                 continue
-            phase, frac = _phase_frac(item)
+            phase, frac, _fn_l, _fn_r = _phase_frac(item)
             ask = float(item[3])
             frac_txt = "dsp" if phase == "D" else f"{frac:.3f}"
             print(
@@ -14227,11 +14246,16 @@ def _print_gait_peaks(name: str, held: dict[str, object], summary: dict[str, obj
     margin = float(summary.get("mid_margin", float("nan"))) * 1000.0
     n_out = summary.get("n_mid_out")
     n_mid = summary.get("n_mid")
-    if overs:
+    if overs or steady_overs:
         for bit in overs:
             print(f"PRED {name} gait_over {bit}")
+        steady_txt = (
+            f"Steady from {_WALK_STEADY_S:.1f} s stays at or under 2.33 Nm."
+            if not steady_overs
+            else f"Steady worst {steady_worst}."
+        )
         print(
-            f"PRED {name} gait_peak Prefer FAIL. {worst_over}. "
+            f"PRED {name} gait_peak Prefer FAIL. {worst_over}. {steady_txt} "
             f"CoM mid_margin {margin:+.2f} mm "
             f"n_mid_out {n_out}/{n_mid}. "
             "Post-tip asks are not this bar. "
