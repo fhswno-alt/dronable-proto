@@ -835,11 +835,17 @@ def _capture_sole_tick(session: sw.SteerSession, t: float, side: str) -> dict[st
     cmd = getattr(session, "_sole_cmd", None) or {}
     if cmd.get("side") not in (None, side):
         cmd = {}
+    roll, drop, _half, inside = _sole_roll(session, side)
+    center_z = float(sum(z for _label, z, _off in corners) / len(corners))
     return {
         "t": t,
         "side": side,
         "pitch": _sole_pitch(session, side),
+        "roll": roll,
+        "inside_drop": drop,
+        "inside": inside,
         "corners": corners,
+        "center_z": center_z,
         "scored_label": scored[0],
         "scored_z": scored[1],
         "low_label": lowest[0],
@@ -879,6 +885,7 @@ def _print_sole_diag(
         f"PRED {name} scored_corner {row['scored_label']} "
         f"z {float(row['scored_z']) * 1000:.3f} mm "
         f"lowest_corner {row['low_label']} z {float(row['low_z']) * 1000:.3f} mm "
+        f"box_center {float(row.get('center_z', float('nan'))) * 1000:.3f} mm "
         f"viz_bottom {float(row['viz_z']) * 1000:.3f} mm"
     )
     raw_roll = float(cmd.get("raw_roll", float("nan")))
@@ -1257,6 +1264,54 @@ def _mid_swing(rows: list[Tick]) -> tuple[float, float, float, int, int, float, 
         float(mids[k][2]),
         mids[k][3],
     )
+
+
+def _swing_cycles(rows: list[Tick], t_cut: float) -> list[list[Tick]]:
+    """Contiguous swing ticks with t < t_cut, split when the swing foot changes."""
+    cycles: list[list[Tick]] = []
+    cur: list[Tick] = []
+    for row in rows:
+        if row.t >= t_cut - 1e-9:
+            break
+        if row.swing in ("L", "R"):
+            if cur and cur[-1].swing != row.swing:
+                cycles.append(cur)
+                cur = []
+            cur.append(row)
+        elif cur:
+            cycles.append(cur)
+            cur = []
+    if cur:
+        cycles.append(cur)
+    return cycles
+
+
+def _mid_swing_step_mins(
+    rows: list[Tick], t_cut: float,
+) -> list[tuple[int, str, float, float, float]]:
+    """Per swing, the min contact-box toe inside the 20–80% window before t_cut.
+
+    The fraction is the cycle index i/(n-1), the same index `_mid_swing` uses.
+    Each row is (step, side, t, toe_z, frac).
+    """
+    out: list[tuple[int, str, float, float, float]] = []
+    for step, cyc in enumerate(_swing_cycles(rows, t_cut)):
+        n = len(cyc)
+        if n < 2:
+            continue
+        best: tuple[float, float, float, str] | None = None
+        for i, row in enumerate(cyc):
+            frac = i / (n - 1)
+            if row.toe_z is None or row.swing is None:
+                continue
+            if 0.20 - 1e-12 <= frac <= 0.80 + 1e-12 and (
+                best is None or row.toe_z < best[0]
+            ):
+                best = (row.toe_z, row.t, frac, row.swing)
+        if best is None:
+            continue
+        out.append((step, best[3], best[1], best[0], best[2]))
+    return out
 
 
 def _ankle_peak(session: sw.SteerSession) -> tuple[float, str, float]:
@@ -2539,6 +2594,7 @@ def measure_pred_clip(
     world_level: bool = False,
     toe_up_rad: float = 0.0,
     sole_report: bool = False,
+    geometry_diag: bool = False,
 ) -> PredScore:
     """12 mm @ 20% with an optional swing-hip predicted-force clip.
 
@@ -2816,6 +2872,8 @@ def measure_pred_clip(
         _print_sole_diag(name, sole_log, snaps, 2.872)
         if abs(toe_t - 2.872) > session.ctrl_dt:
             _print_sole_diag(name, sole_log, snaps, toe_t)
+    if geometry_diag:
+        _print_toeup_geometry(name, sole_log, snaps, rows, toe_up_rad, toe_t)
     _print_pred_sample(name, snaps, 2.872)
     if abs(toe_t - 2.872) > session.ctrl_dt:
         _print_pred_sample(name, snaps, toe_t)
@@ -3012,6 +3070,125 @@ def score_pitch_move_off() -> None:
             print(f"PRED period {period:.2f} railed before 7.0 s. Stop.")
             return
     print("PRED period slowdown held 2.33 before 7.0 s and did not clear +2 mm.")
+
+
+def _print_toeup_geometry(
+    name: str,
+    log: list[dict[str, object]],
+    snaps: list[PredSnap],
+    rows: list[Tick],
+    peak: float,
+    toe_t: float,
+) -> None:
+    """Contact-box print for the 0.020 rad toe-up copy. Not a clear attempt."""
+    print(
+        f"PRED {name} geometry_diag peak {peak:.3f} rad. "
+        "Commanded rad is sign * peak * sin(pi * gait_frac), added to the "
+        "ankle-pitch target before the 20 ms approach. Track 1 stays parked."
+    )
+
+    def _row_at(t_want: float) -> dict[str, object] | None:
+        near = [row for row in log if abs(float(row["t"]) - t_want) <= 0.008 * 0.51]
+        return near[0] if near else None
+
+    def _cycle_frac(t_want: float) -> float:
+        for cyc in _swing_cycles(rows, T_BAR):
+            n = len(cyc)
+            if n < 2:
+                continue
+            for i, row in enumerate(cyc):
+                if abs(row.t - t_want) <= 0.008 * 0.51:
+                    return i / (n - 1)
+        return float("nan")
+
+    def _dump(tag: str, t_want: float) -> None:
+        row = _row_at(t_want)
+        if row is None:
+            print(f"PRED {name} {tag} missed {t_want:.3f}")
+            return
+        cmd = row["cmd"] if isinstance(row["cmd"], dict) else {}
+        gait_frac = float(cmd.get("toe_up_frac", float("nan")))
+        commanded = float(cmd.get("toe_up", float("nan")))
+        sine = math.sin(math.pi * gait_frac) if gait_frac == gait_frac else float("nan")
+        print(
+            f"PRED {name} {tag} t {float(row['t']):.3f} side {row['side']} "
+            f"scored {row['scored_label']} {float(row['scored_z']) * 1000:.3f} mm "
+            f"lowest {row['low_label']} {float(row['low_z']) * 1000:.3f} mm "
+            f"box_center {float(row['center_z']) * 1000:.3f} mm "
+            f"sole_pitch_toe_down {float(row['pitch']):.5f} rad "
+            f"sole_roll {float(row['roll']):.5f} rad "
+            f"inside {row['inside']} drop {float(row['inside_drop']) * 1000:.3f} mm "
+            f"cycle_frac {_cycle_frac(float(row['t'])):.3f}"
+        )
+        for label, z, off in row["corners"]:  # type: ignore[misc]
+            mark = ""
+            if label == row["low_label"]:
+                mark += " LOW"
+            if label == row["scored_label"]:
+                mark += " SCORED"
+            print(
+                f"PRED {name} {tag} corner {label} z {float(z) * 1000:.3f} mm "
+                f"fwd {float(off) * 1000:.1f} mm{mark}"
+            )
+        print(
+            f"PRED {name} {tag} commanded_rad {commanded:.5f} "
+            f"gait_frac {gait_frac:.3f} sine {sine:.3f} "
+            f"peak {peak:.3f} of_peak {sine:.3f}"
+        )
+        ank = [
+            s for s in snaps
+            if s.joint.endswith("ank_pitch") and abs(s.t - float(row["t"])) <= 0.008 * 0.51
+        ]
+        for s in ank:
+            print(
+                f"PRED {name} {tag} ank_pitch {s.joint} ik {s.ik:.6f} "
+                f"ctrl {s.ctrl:.6f} q {s.q:.6f} "
+                f"ctrl_minus_ik {s.ctrl - s.ik:.6f} "
+                f"ctrl_minus_ik_minus_commanded {s.ctrl - s.ik - commanded:.6f}"
+            )
+
+    _dump("at_2.872", 2.872)
+    _dump("at_min", toe_t)
+    # Same cycles as _mid_swing (ticks before 7.560 s). A cut at 7.0 s
+    # shortens the last swing and pulls an earlier tick into the window.
+    steps = [
+        item for item in _mid_swing_step_mins(rows, T_BAR)
+        if item[2] < T_TRACK1 - 1e-9
+    ]
+    print(
+        f"PRED {name} step_mins n {len(steps)} "
+        f"cycle_cut {T_BAR:.3f} min_before {T_TRACK1:.1f}"
+    )
+    for step, side, t, z, frac in steps:
+        print(
+            f"PRED {name} step {step} side {side} t {t:.3f} "
+            f"toe {z * 1000:.3f} mm cycle_frac {frac:.3f}"
+        )
+    if steps:
+        worst = min(steps, key=lambda item: item[3])
+        print(
+            f"PRED {name} step_min_before_7s step {worst[0]} side {worst[1]} "
+            f"t {worst[2]:.3f} toe {worst[3] * 1000:.3f} mm "
+            f"cycle_frac {worst[4]:.3f}"
+        )
+    print(
+        f"PRED {name} not_a_clear. Track 1 stays parked. "
+        "Next gate is the kit HX-35H kp/kv bench. "
+        "A 0.030 rad clear was not run."
+    )
+
+
+def score_toeup_diag() -> None:
+    """Print the 0.020 rad toe-up copy. Do not try to clear +2 mm."""
+    measure_pred_clip(
+        clip=True,
+        move_s=None,
+        pitch_move_off=True,
+        bar_before_s=T_TRACK1,
+        toe_up_rad=TOE_UP_PEAK,
+        sole_report=True,
+        geometry_diag=True,
+    )
 
 
 def score_sole_frame() -> None:
