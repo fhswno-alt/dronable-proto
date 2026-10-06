@@ -1,0 +1,98 @@
+{
+  "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+  "scene": "kitchen",
+  "vx": 0.15,
+  "yaw_rate": -0.25,
+  "t_cue": 1.9040000000000015,
+  "T_detect_s": 0.028835650000473834,
+  "t_stop": 1.9040000000000015,
+  "sim_s_cue_to_stop": 0.0,
+  "cue_to_old_contact_s": 4.943999999999998,
+  "nomenclature": {
+    "t_cue": "sim time of the first leg/rail visible_enough sample",
+    "T_detect": "wall-clock seconds from that frame's RGB buffer to CommandBus.stop; not the cue-to-contact lead",
+    "t_stop": "sim time of the Day1 stop write",
+    "T_stop": "not measured here; Controls owns gait stop distance and time"
+  },
+  "cue": {
+    "t": 1.9040000000000015,
+    "up_z": 0.9623678778654601,
+    "xy": [
+      0.08290810015152845,
+      0.005842830069926637
+    ],
+    "yaw_deg": -8.051189215554675,
+    "cam_z": 0.3345124262533243,
+    "pitch_deg": -15.698496721105917,
+    "stool": {
+      "pixels": 9792,
+      "min_side_px": 189,
+      "bbox": [
+        451,
+        120,
+        639,
+        352
+      ],
+      "class_name": "visible_enough",
+      "bearing_deg": -47.24026127705076,
+      "center_z_m": 0.34143707415035696
+    },
+    "legs": {
+      "pixels": 3849,
+      "min_side_px": 141,
+      "bbox": [
+        451,
+        212,
+        639,
+        352
+      ],
+      "class_name": "visible_enough",
+      "bearing_deg": -47.26130435842279,
+      "center_z_m": 0.1281
+    },
+    "seat": {
+      "pixels": 5943,
+      "min_side_px": 105,
+      "bbox": [
+        472,
+        120,
+        639,
+        224
+      ],
+      "class_name": "visible_enough",
+      "bearing_deg": -47.24026127705076,
+      "center_z_m": 0.34143707415035696
+    },
+    "stool_pixel_z_min": 0.006009156704615604,
+    "stool_pixel_z_max": 0.47672446106987465,
+    "legs_pixel_mean_z": 0.10650408589686443,
+    "seat_pixel_mean_z": 0.4318876035511751,
+    "hit_leg_projects": true,
+    "hit_rail_projects": true
+  },
+  "n_prop_contacts": 0,
+  "contact_episodes": [],
+  "min_up_z": 0.93415459431212,
+  "fault": false,
+  "fault_reason": "",
+  "end_xy": [
+    0.08625563004463987,
+    -0.007358098063914337
+  ],
+  "end_yaw_deg": -5.612958057752321,
+  "end_mode": "stand",
+  "knee_peaks": [
+    {
+      "actuator": "l_knee_pos",
+      "peak_nm": 2.0602090006012617,
+      "t": 1.5440000000000011
+    },
+    {
+      "actuator": "r_knee_pos",
+      "peak_nm": 1.9603403996245703,
+      "t": 1.288000000000001
+    }
+  ],
+  "leg_peaks_over_2_33_nm": [],
+  "max_leg_tau_nm": 2.0653488014227634
+}

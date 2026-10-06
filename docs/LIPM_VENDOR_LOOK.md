@@ -1434,3 +1434,5 @@ Scene frustum at that quiet stand, for a stop-pose Prefer FAIL. The ask stand is
 
 Kitchen stool legs are in `kit_cam` before the foot hits. On the locked-kit 8 s `vel(+0.150, −0.25)` the leg band of `chair_stool_b` is `tiny` at the end of the stand (2012 px, short side 96, t = 1.00 s) and `visible_enough` at t = 1.90 s, **4.94 s** before `l_ank_roll_link` meets `col_chair_stool_b_leg_2` at t = 6.85 s. The whole mesh is `visible_enough` from t = 1.00 s (**5.85 s** of lead). Controls owns stop and steer. This probe does not send one, and it does not edit the plant.
 
+The cue is now wired to Day1 `stop` in `scripts/stool_leg_stop.py`. `t_cue` is **1.90 s**. `T_detect` is **28.8 ms** wall-clock from that frame's kit_cam RGB buffer to the `CommandBus.stop` return. No Moondream. The sim clock does not move in that span, so `t_stop` is **1.90 s**. The 4.94 s cue-to-contact lead is not `T_detect`. `T_stop` is not measured here. Held to t = 9.0 s on plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`: 0 prop contacts, min up_z **0.934**, knees **2.060 Nm** and **1.960 Nm**. Not a go-to. Soft-pass is off.
+
