@@ -12245,6 +12245,7 @@ def _install_sagittal_slew(
     entrance_done: set[str] = set()
     hip_hold_cmd: dict[str, float] = {}
     hip_hold_at: dict[str, float] = {}
+    hip_written: dict[str, float] = {}
     land_cmd: dict[str, float] = {}
     land_at: dict[str, float] = {}
     land_done: set[str] = set()
@@ -12291,6 +12292,40 @@ def _install_sagittal_slew(
         if held > q_now:
             return float(held - step)
         return float(held + step)
+
+    def _hold_loaded_hip(jn: str, q_des: float) -> float:
+        """After the engage catch, a loaded hip does not take a raw jump.
+
+        The previous command is the last one written. A step past 2.33 Nm
+        is not taken. An airborne hip stays on the gait command.
+        """
+        if not jn.endswith("hip_pitch"):
+            return float(q_des)
+        if not getattr(session, "_sag_stop_installed", False):
+            return float(q_des)
+        if getattr(session, "_sag_torque_cap", False):
+            return float(q_des)
+        if float(lipm.data.time) + 1e-9 < _STOP_ENTRANCE_S:
+            return float(q_des)
+        if not _side_loaded(jn):
+            return float(q_des)
+        t_now = float(lipm.data.time)
+        held_tick = hip_hold_at.get(jn)
+        if held_tick is not None and t_now - held_tick < ctrl_period - 1e-4:
+            return float(hip_hold_cmd[jn])
+        old_hip = hip_written.get(jn)
+        nearer = _loaded_nearer(
+            jn,
+            float(q_des),
+            None if old_hip is None else float(old_hip),
+            cap,
+        )
+        if abs(nearer - float(q_des)) > 1e-12:
+            hip_hold_cmd[jn] = float(nearer)
+            hip_hold_at[jn] = t_now
+            q_des = float(nearer)
+        hip_written[jn] = float(q_des)
+        return float(q_des)
 
     def _entrance_live(jn: str) -> bool:
         """Stop-bout engage only. Not the continuous-walk seed.
@@ -12358,6 +12393,8 @@ def _install_sagittal_slew(
                     entrance_done.discard(jn)
                 stepped = nearer
             entrance_cmd[jn] = float(stepped)
+            if jn.endswith("hip_pitch"):
+                hip_written[jn] = float(stepped)
             entrance_at[jn] = t_now
             if jn.endswith(("knee", "ank_pitch")):
                 prev[jn] = float(stepped)
@@ -12428,6 +12465,7 @@ def _install_sagittal_slew(
             if jn.endswith("hip_pitch"):
                 entrance_cmd[jn] = float(stepped)
                 entrance_at[jn] = t_now
+                hip_written[jn] = float(stepped)
             else:
                 prev[jn] = float(stepped)
         return float(land_cmd[jn])
@@ -12737,36 +12775,7 @@ def _install_sagittal_slew(
             last_cmd[jn] = float(q_des)
         else:
             q_des = _apply_stop_hip(jn, float(q_des))
-            if (
-                jn.endswith("hip_pitch")
-                and getattr(session, "_sag_stop_installed", False)
-                and not getattr(session, "_sag_torque_cap", False)
-                and float(lipm.data.time) + 1e-9 >= _STOP_ENTRANCE_S
-                and _side_loaded(jn)
-            ):
-                # The engage catch has met the gait. The next loaded
-                # write is the raw gait command. Cut a jump to one
-                # stance step, and do not take a step past 2.33 Nm.
-                # Physics substeps reuse that step.
-                t_now = float(lipm.data.time)
-                held_tick = hip_hold_at.get(jn)
-                if held_tick is not None and t_now - held_tick < ctrl_period - 1e-4:
-                    q_des = float(hip_hold_cmd[jn])
-                else:
-                    old_hip = entrance_cmd.get(jn)
-                    if old_hip is None:
-                        old_hip = last_cmd.get(jn)
-                    nearer = _loaded_nearer(
-                        jn,
-                        float(q_des),
-                        None if old_hip is None else float(old_hip),
-                        cap,
-                    )
-                    if abs(nearer - float(q_des)) > 1e-12:
-                        hip_hold_cmd[jn] = float(nearer)
-                        hip_hold_at[jn] = t_now
-                        entrance_cmd[jn] = float(nearer)
-                        q_des = float(nearer)
+            q_des = _hold_loaded_hip(jn, float(q_des))
         orig(jn, float(q_des))
 
     def write_limited(jn: str, q_des: float, limit_nm: float | None = None) -> None:
@@ -12787,6 +12796,7 @@ def _install_sagittal_slew(
                 q_des = _hold_pin(jn, float(q_des))
         else:
             q_des = _apply_stop_hip(jn, float(q_des))
+            q_des = _hold_loaded_hip(jn, float(q_des))
         orig_fl(jn, float(q_des), limit_nm)
 
     lipm.write_clipped = write  # type: ignore[method-assign]
