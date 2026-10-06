@@ -136,6 +136,7 @@ def _foot_surface(session: sw.SteerSession, side: str, rug_gid: int) -> dict[str
     else:
         surface = "floor"
         clear = float(lead[2])
+    center_z = float(sum(float(corner[2]) for corner in corners) / len(corners))
     return {
         "floor_n": floor_n,
         "rug_n": rug_n,
@@ -143,6 +144,8 @@ def _foot_surface(session: sw.SteerSession, side: str, rug_gid: int) -> dict[str
         "corners_in": n_in,
         "lead_in": int(lead_in),
         "lead_z": float(lead[2]),
+        "center_z": center_z,
+        "sole_pitch": _sole_pitch(session, side),
         "on_rug": int(on_rug),
         "surface": surface,
         "clear": clear,
@@ -310,6 +313,36 @@ def _install_phase_lift(
 
     walker._right_z = right_z  # type: ignore[method-assign]
     walker._left_z = left_z  # type: ignore[method-assign]
+
+
+def _install_swing_z_add(session: sw.SteerSession, extra_m: float) -> None:
+    """Add a constant to the swing-foot z command during that foot's single support.
+
+    The 12 mm phase bump stays underneath. Stance z is unchanged. The log
+    stores the z component and the add at the walker time the IK used.
+    """
+    lipm = session.lipm
+    if lipm is None or lipm.op3 is None:
+        return
+    walker = lipm.op3
+    orig_r = walker._right_z
+    orig_l = walker._left_z
+    log: dict[tuple[float, str], tuple[float, float]] = {}
+    session._z_cmd_log = log
+
+    def _wrap(orig, side: str):
+        def z_fn(t: float) -> float:
+            z = float(orig(t))
+            start = walker.r_ssp_start if side == "R" else walker.l_ssp_start
+            end = walker.r_ssp_end if side == "R" else walker.l_ssp_end
+            added = extra_m if start < t <= end else 0.0
+            z_out = z + added
+            log[(round(float(t), 5), side)] = (z_out, added)
+            return z_out
+        return z_fn
+
+    walker._right_z = _wrap(orig_r, "R")  # type: ignore[method-assign]
+    walker._left_z = _wrap(orig_l, "L")  # type: ignore[method-assign]
 
 
 def _install_slow_rise(
@@ -1456,7 +1489,9 @@ def _surface_summary(
     surface_rows: list[dict[str, object]],
     hx_flat: dict[str, tuple[float, float]],
     hx_rug: dict[str, tuple[float, float]],
-) -> dict[str, float | str]:
+    ka_hits: list[str] | None = None,
+    ka_checked: int = 0,
+) -> dict[str, object]:
     """Knee at 7.432 s, and flat-floor mid-swing separate from rug mid-swing."""
     knee = min(surface_rows, key=lambda row: abs(float(row["t"]) - KNEE_TICK_S))
     kt = float(knee["t"])
@@ -1488,8 +1523,9 @@ def _surface_summary(
     by_t = {round(float(row["t"]), 5): row for row in surface_rows}
     cycles = _swing_cycles(rows, T_END + 1.0)
     med_n, _last_n = _cycle_index(cycles)
-    flat_best: tuple[float, float, float, str] | None = None
+    flat_best: tuple[float, float, float, str, float, float, float, float] | None = None
     rug_best: tuple[float, float, float, str, float] | None = None
+    mid_samples: list[tuple[float, str, float, float, float, float, float, str]] = []
     n_flat = 0
     n_rug = 0
     for step, cyc in enumerate(cycles):
@@ -1520,9 +1556,29 @@ def _surface_summary(
         else:
             n_flat += 1
         worst = min(mids, key=lambda item: float(item[1].toe_z or 0.0))
+        for _frac, row_i, plane_i in mids:
+            surf_i = by_t.get(round(row_i.t, 5), {})
+            body_i = (
+                float(surf_i["body_z"])
+                if isinstance(surf_i, dict) and "body_z" in surf_i else float("nan")
+            )
+            zadd_i = (
+                float(surf_i["z_add"])
+                if isinstance(surf_i, dict) and "z_add" in surf_i else float("nan")
+            )
+            mid_samples.append((
+                row_i.t, row_i.swing or "", float(row_i.toe_z or 0.0) * 1000.0,
+                float(plane_i["center_z"]) * 1000.0, body_i * 1000.0,
+                zadd_i * 1000.0, float(plane_i["sole_pitch"]), tag,
+            ))
         frac, row, plane = worst
         toe = float(row.toe_z or 0.0)
         clear = float(plane["clear"])
+        surf = by_t.get(round(row.t, 5), {})
+        body_z = float(surf["body_z"]) if isinstance(surf, dict) and "body_z" in surf else float("nan")
+        z_add = float(surf["z_add"]) if isinstance(surf, dict) and "z_add" in surf else float("nan")
+        center_z = float(plane["center_z"])
+        sole_pitch = float(plane["sole_pitch"])
         print(
             f"PRED {name} swing {step} side {row.swing} t {row.t:.3f} "
             f"frac {frac:.3f} tag {tag} toe {toe * 1000:.3f} mm "
@@ -1532,7 +1588,10 @@ def _surface_summary(
         )
         if tag == "flat":
             if flat_best is None or toe < flat_best[0]:
-                flat_best = (toe, row.t, frac, row.swing or "")
+                flat_best = (
+                    toe, row.t, frac, row.swing or "",
+                    center_z, sole_pitch, body_z, z_add,
+                )
         elif rug_best is None or clear < rug_best[0]:
             rug_best = (clear, row.t, frac, row.swing or "", toe)
     flat_toe = flat_best[0] * 1000.0 if flat_best else float("nan")
@@ -1542,9 +1601,15 @@ def _surface_summary(
     rug_t = rug_best[1] if rug_best else float("nan")
     rug_side = rug_best[3] if rug_best else ""
     rug_toe = rug_best[4] * 1000.0 if rug_best else float("nan")
+    flat_center = flat_best[4] * 1000.0 if flat_best else float("nan")
+    flat_pitch = flat_best[5] if flat_best else float("nan")
+    flat_body = flat_best[6] * 1000.0 if flat_best else float("nan")
+    flat_z_add = flat_best[7] * 1000.0 if flat_best else float("nan")
     print(
         f"PRED {name} flat_swings {n_flat} rug_swings {n_rug} "
         f"flat_worst {flat_toe:.3f} mm t {flat_t:.3f} side {flat_side} "
+        f"box_centre {flat_center:.3f} mm sole_pitch {flat_pitch:.5f} rad "
+        f"body_z {flat_body:.3f} mm z_add {flat_z_add:.3f} mm "
         f"rug_worst_clear {rug_clear:.3f} mm t {rug_t:.3f} side {rug_side} "
         f"rug_toe {rug_toe:.3f} mm. Track 1 uses the flat swings only."
     )
@@ -1564,10 +1629,18 @@ def _surface_summary(
             f"abs {abs(tau):.4f} ge_2.33 {int(abs(tau) >= KNEE_NM)} "
             f"ge_2.45 {int(abs(tau) >= PLANT_NM - 1e-3)}"
         )
+    if ka_hits is not None:
+        print(f"PRED {name} ka_checked {ka_checked} ka_over_2.33 {len(ka_hits)}")
+        for line in ka_hits:
+            print(f"PRED {name} ka_tick {line}")
     return {
         "flat_toe_mm": flat_toe,
         "flat_toe_t": flat_t,
         "flat_toe_side": flat_side,
+        "flat_center_mm": flat_center,
+        "flat_sole_pitch": flat_pitch,
+        "flat_body_mm": flat_body,
+        "flat_z_add_mm": flat_z_add,
         "rug_clear_mm": rug_clear,
         "rug_clear_t": rug_t,
         "rug_clear_side": rug_side,
@@ -1576,6 +1649,9 @@ def _surface_summary(
         "knee_rug": knee_rug,
         "knee_on_rug": knee_on,
         "flat_hx_over": ", ".join(flat_hits),
+        "ka_over_n": 0 if ka_hits is None else len(ka_hits),
+        "ka_checked": ka_checked,
+        "mid_samples": tuple(mid_samples),
     }
 
 
@@ -2925,6 +3001,13 @@ class PredScore:
     knee_rug: str = ""
     knee_on_rug: int = 0
     flat_hx_over: str = ""
+    flat_center_mm: float = float("nan")
+    flat_sole_pitch: float = float("nan")
+    flat_body_mm: float = float("nan")
+    flat_z_add_mm: float = float("nan")
+    ka_over_n: int = 0
+    ka_checked: int = 0
+    mid_samples: tuple = ()
 
 
 def _check_compiled_kv(session: sw.SteerSession) -> None:
@@ -2981,6 +3064,8 @@ def measure_pred_clip(
     lead_pitch_scale: float = 1.0,
     whole_toe: bool = False,
     surface_tag: bool = False,
+    z_extra_m: float = 0.0,
+    ka_log: bool = False,
 ) -> PredScore:
     """12 mm @ 20% with an optional swing-hip predicted-force clip.
 
@@ -3001,6 +3086,8 @@ def measure_pred_clip(
     _check_compiled_kv(session)
     ank_kv = _check_ank_roll_kv(session) if ankle_roll else 0.0
     _install_phase_lift(session, 0.012, 0.20, 0.0)
+    if ka_log or abs(z_extra_m) > 0.0:
+        _install_swing_z_add(session, z_extra_m)
     if pitch_move_off:
         _install_pitch_move_off(session)
     if clip:
@@ -3033,6 +3120,12 @@ def measure_pred_clip(
     )
     hx_flat = {act: (0.0, 0.0) for act in hx_chain}
     hx_rug = {act: (0.0, 0.0) for act in hx_chain}
+    ka_names = (
+        "l_knee_pos", "r_knee_pos",
+        "l_ank_pitch_pos", "r_ank_pitch_pos",
+    )
+    ka_hits: list[str] = []
+    ka_checked = 0
     suffixes = ("hip_roll", "hip_pitch", "ank_roll") if ankle_roll else ("hip_roll", "hip_pitch")
     record_suffixes = suffixes + (("ank_pitch",) if sole_report or toe_up_rad > 0.0 else ())
     sole_log: list[dict[str, object]] = []
@@ -3143,15 +3236,40 @@ def measure_pred_clip(
                 planes = {
                     side: _foot_surface(session, side, rug_gid) for side in ("L", "R")
                 }
+                z_comp = float("nan")
+                z_add = 0.0
+                if swing in ("L", "R"):
+                    zlog = getattr(session, "_z_cmd_log", {})
+                    rec = None
+                    for back in (0.0, float(session.ctrl_dt), 2.0 * float(session.ctrl_dt)):
+                        rec = zlog.get((round(t - back, 5), swing))
+                        if rec is not None:
+                            break
+                    if rec is not None:
+                        z_comp, z_add = rec
                 surface_rows.append({
                     "t": t,
                     "swing": swing if swing in ("L", "R") else None,
                     "toe_z": toe_z,
+                    "body_z": float(session.data.xpos[session.bid_body][2]),
+                    "z_comp": z_comp,
+                    "z_add": z_add,
                     "L": planes["L"],
                     "R": planes["R"],
                     "l_knee": float(session.data.actuator_force[session.act_idx["l_knee_pos"]]),
                     "r_knee": float(session.data.actuator_force[session.act_idx["r_knee_pos"]]),
                 })
+                if ka_log:
+                    ka_checked += 1
+                    for act in ka_names:
+                        tau = float(session.data.actuator_force[session.act_idx[act]])
+                        foot = planes["L" if act.startswith("l_") else "R"]
+                        if abs(tau) >= KNEE_NM:
+                            tag = "rug" if int(foot["on_rug"]) else "flat"
+                            ka_hits.append(
+                                f"{act} {tau:+.4f} t {t:.3f} {tag} "
+                                f"ge_2.33 1 ge_2.45 {int(abs(tau) >= PLANT_NM - 1e-3)}"
+                            )
                 for act in hx_chain:
                     tau = float(session.data.actuator_force[session.act_idx[act]])
                     foot = planes["L" if act.startswith("l_") else "R"]
@@ -3254,6 +3372,8 @@ def measure_pred_clip(
                 parts.append(f"r{lead_roll_scale:.2f}p{lead_pitch_scale:.2f}")
         if period_s is not None:
             parts.append(f"T{period_s:.2f}")
+        if abs(z_extra_m) > 0.0:
+            parts.append(f"z{z_extra_m * 1000.0:.3f}mm")
         name = "_".join(parts)
     else:
         name = f"{'clip' if clip else 'base'}_move{used_move * 1000:.0f}"
@@ -3394,9 +3514,19 @@ def measure_pred_clip(
         "knee_rug": "",
         "knee_on_rug": 0,
         "flat_hx_over": "",
+        "flat_center_mm": float("nan"),
+        "flat_sole_pitch": float("nan"),
+        "flat_body_mm": float("nan"),
+        "flat_z_add_mm": float("nan"),
+        "ka_over_n": 0,
+        "ka_checked": 0,
+        "mid_samples": (),
     }
     if surface_tag and surface_rows:
-        surf = _surface_summary(name, rows, surface_rows, hx_flat, hx_rug)
+        surf = _surface_summary(
+            name, rows, surface_rows, hx_flat, hx_rug,
+            ka_hits if ka_log else None, ka_checked,
+        )
     session.assert_plant_unchanged()
     return PredScore(
         name=name,
@@ -3433,6 +3563,13 @@ def measure_pred_clip(
         knee_rug=str(surf["knee_rug"]),
         knee_on_rug=int(surf["knee_on_rug"]),
         flat_hx_over=str(surf["flat_hx_over"]),
+        flat_center_mm=float(surf["flat_center_mm"]),
+        flat_sole_pitch=float(surf["flat_sole_pitch"]),
+        flat_body_mm=float(surf["flat_body_mm"]),
+        flat_z_add_mm=float(surf["flat_z_add_mm"]),
+        ka_over_n=int(surf["ka_over_n"]),
+        ka_checked=int(surf["ka_checked"]),
+        mid_samples=tuple(surf["mid_samples"]),  # type: ignore[arg-type]
     )
 
 
@@ -3811,6 +3948,135 @@ def _pitch_lead_scale(ms: float) -> float:
     """Scale of the compiled hip-pitch kv/kp lag that lands on ``ms``."""
     compiled = _COMPILED_KV["hip_pitch"] / 45.0
     return (ms / 1000.0) / compiled
+
+
+def _pitch20_copy(z_extra_m: float) -> PredScore:
+    """Pitch lead 20 ms, toe-up 0.020, optional swing foot-z add. Roll lead 0."""
+    return measure_pred_clip(
+        clip=True,
+        move_s=None,
+        pitch_move_off=True,
+        toe_up_rad=TOE_UP_PEAK,
+        hip_lead=True,
+        lead_roll_scale=0.0,
+        lead_pitch_scale=_pitch_lead_scale(20.0),
+        whole_toe=True,
+        surface_tag=True,
+        z_extra_m=z_extra_m,
+        ka_log=True,
+    )
+
+
+def _mid_at(
+    samples: tuple,
+    t_want: float,
+    side: str,
+) -> tuple | None:
+    near = [
+        row for row in samples
+        if row[1] == side and abs(float(row[0]) - t_want) <= 0.004
+    ]
+    return near[0] if near else None
+
+
+def score_pitch20_zlift() -> None:
+    """20 ms pitch lead. Foot-z sweep starts at +2 mm minus that copy's box centre.
+
+    Toe-up stays 0.020 rad. The 40.23 ms centre is not the source of the
+    minimum. Knee and ankle pitch are checked on every tick.
+    """
+    base = _pitch20_copy(0.0)
+    centre = base.flat_center_mm
+    zmin = 2.0 - centre
+    print(
+        f"PRED zlift_min pitch20 box_centre {centre:.3f} mm "
+        f"t {base.flat_toe_t:.3f} side {base.flat_toe_side} "
+        f"toe {base.flat_toe_mm:.3f} mm "
+        f"sole_pitch {base.flat_sole_pitch:.5f} rad "
+        f"front_below_centre {centre - base.flat_toe_mm:.3f} mm "
+        f"foot_z_min {zmin:.3f} mm"
+    )
+    start = zmin
+    if zmin < 0.0:
+        print(
+            "PRED zlift_min box centre is already at or above +2 mm. "
+            "The sweep starts at 0 mm."
+        )
+        start = 0.0
+    lifts = [start + 0.4 * i for i in range(5)]
+    if abs(lifts[0]) <= 1e-9:
+        lifts = lifts[1:]
+    print(
+        "PRED zlift_plan "
+        + " ".join(f"{mm:.3f}" for mm in lifts)
+        + " mm above the 12 mm phase bump. Spacing 0.4 mm."
+    )
+    cleared: list[PredScore] = []
+    for mm in lifts:
+        row = _pitch20_copy(mm / 1000.0)
+        same = _mid_at(base.mid_samples, row.flat_toe_t, row.flat_toe_side)
+        if same is None:
+            d_toe = float("nan")
+            d_centre = float("nan")
+            d_body = float("nan")
+            base_toe = float("nan")
+            base_centre = float("nan")
+            base_body = float("nan")
+        else:
+            base_toe = float(same[2])
+            base_centre = float(same[3])
+            base_body = float(same[4])
+            d_toe = row.flat_toe_mm - base_toe
+            d_centre = row.flat_center_mm - base_centre
+            d_body = row.flat_body_mm - base_body
+        holds = row.flat_hx_over == ""
+        clear = holds and row.flat_toe_mm >= 2.0
+        print(
+            f"PRED zlift {mm:.3f} mm {row.name} "
+            f"flat_toe {row.flat_toe_mm:.3f} mm t {row.flat_toe_t:.3f} "
+            f"side {row.flat_toe_side} "
+            f"box_centre {row.flat_center_mm:.3f} mm "
+            f"sole_pitch {row.flat_sole_pitch:.5f} rad "
+            f"z_add {row.flat_z_add_mm:.3f} mm "
+            f"d_toe {d_toe:.3f} mm d_centre {d_centre:.3f} mm "
+            f"d_body {d_body:.3f} mm "
+            f"base_toe {base_toe:.3f} base_centre {base_centre:.3f} "
+            f"base_body {base_body:.3f} "
+            f"flat_hx {row.flat_hx_over or 'under'} "
+            f"holds_flat {int(holds)} clear {int(clear)} "
+            f"ka_over {row.ka_over_n} ka_checked {row.ka_checked}"
+        )
+        if mm > 1e-6:
+            if d_centre == d_centre and d_centre >= 0.7 * mm:
+                split = "cmd"
+            elif d_body == d_body and d_body <= -0.3 * mm and (
+                d_centre != d_centre or d_centre < 0.7 * mm
+            ):
+                split = "crouch"
+            else:
+                split = "sag"
+        else:
+            split = "no_add"
+        print(
+            f"PRED zlift_split {mm:.3f} mm {split} "
+            f"cmd_add {mm:.3f} mm world_centre_delta {d_centre:.3f} mm "
+            f"body_delta {d_body:.3f} mm toe_delta {d_toe:.3f} mm"
+        )
+        if clear:
+            cleared.append(row)
+    if not cleared:
+        print(
+            "PRED zlift Prefer FAIL. No foot-z add cleared a flat mid-swing "
+            "contact-box toe of +2 mm with hip pitch, knee, and ankle pitch "
+            "at or under 2.33 Nm on flat samples. Pitch lead stays 20 ms. "
+            "Toe-up stays 0.020 rad. Period stays 0.500 s."
+        )
+        return
+    best = max(cleared, key=lambda row: row.flat_toe_mm)
+    print(
+        f"PRED zlift clear {best.name} flat_toe {best.flat_toe_mm:.3f} mm "
+        f"t {best.flat_toe_t:.3f} side {best.flat_toe_side}"
+    )
 
 
 def _surface_copy(pitch_scale: float | None) -> PredScore:
