@@ -278,6 +278,9 @@ class LipmWalker:
         self.act_idx = act_idx
         self.cfg = cfg
         self.q_stand = dict(q_stand)
+        # Observation only. Unclamped prediction beside the command that
+        # was actually written. Nothing here changes ctrl.
+        self.tau_note: dict[str, tuple[float, float]] = {}
         self.op3: op3_walk.Op3Walker | None = None
         if cfg.schedule == "gait_manager":
             # Cartesian body drop through the OP3 IK. The old +0.34 rad knee
@@ -382,6 +385,26 @@ class LipmWalker:
         jid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, jn)
         return float(self.data.qpos[self.model.jnt_qposadr[jid]])
 
+    def _note_leg_tau(self, jn: str, q_des: float, cmd: float) -> None:
+        """Record kp·(q_des−q)−kv·ω beside the prediction of the written ctrl.
+
+        Knees and hip rolls only. The written command is unchanged.
+        """
+        if "knee" not in jn and "hip_roll" not in jn:
+            return
+        act = f"{jn}_pos"
+        idx = self.act_idx.get(act)
+        if idx is None:
+            return
+        q = self.q(jn)
+        jid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, jn)
+        omega = float(self.data.qvel[int(self.model.jnt_dofadr[jid])])
+        kp = float(self.model.actuator_gainprm[idx, 0])
+        kv = -float(self.model.actuator_biasprm[idx, 2])
+        unclamped = kp * (q_des - q) - kv * omega
+        clamped = kp * (cmd - q) - kv * omega
+        self.tau_note[jn] = (float(unclamped), float(clamped))
+
     def write_clipped(self, jn: str, q_des: float) -> None:
         """Position target. Hip, knee, and ankle pitch keep the gait goal.
 
@@ -405,7 +428,9 @@ class LipmWalker:
             cmd = min(q + band, max(q - band, q_des))
         lo_lim = float(self.model.actuator_ctrlrange[idx, 0])
         hi_lim = float(self.model.actuator_ctrlrange[idx, 1])
-        self.data.ctrl[idx] = min(hi_lim, max(lo_lim, cmd))
+        written = min(hi_lim, max(lo_lim, cmd))
+        self._note_leg_tau(jn, q_des, written)
+        self.data.ctrl[idx] = written
 
     def write_force_limited(self, jn: str, q_des: float, limit_nm: float | None = None) -> None:
         """Stand target whose predicted servo force stays inside the budget.
@@ -439,7 +464,9 @@ class LipmWalker:
             cmd = q + min(e_hi, max(e_lo, e_des))
         lo_lim = float(self.model.actuator_ctrlrange[idx, 0])
         hi_lim = float(self.model.actuator_ctrlrange[idx, 1])
-        self.data.ctrl[idx] = min(hi_lim, max(lo_lim, cmd))
+        written = min(hi_lim, max(lo_lim, cmd))
+        self._note_leg_tau(jn, q_des, written)
+        self.data.ctrl[idx] = written
 
     def hold_stand(self) -> None:
         self.phase = "stand"

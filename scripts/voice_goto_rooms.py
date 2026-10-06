@@ -5,7 +5,7 @@ Reach is fixed below before any room is scored. A bout reaches only when
 the settled stand COM starts outside that room's floor box in
 mujoco/room_apartment.json and finishes inside the same box, upright,
 with zero prop contacts, at or before the time limit, and only after a
-correct per-target yes committed vel(+0.056, 0). The box is the named
+correct per-target yes committed vel(+0.056, yaw from the doorway pixel). The box is the named
 room, not the plant floor from -3 m to +3 m.
 
 Scored spawns are the doorway xy turned ±90° from the door-facing yaw.
@@ -13,15 +13,19 @@ A geometric census logs the kit_cam doorway fraction. ±90° is the offset
 inside the ±60–90° band where that fraction is ~0. kit_cam is not moved.
 
 The question is "Is there a {room} through the doorway ahead?" yes or no.
-It is not an open-set room label. Search turns in place at +0.25 rad/s
-with no forward velocity. Before each question the turn stops and the
-body settles, then kit_cam is captured. The answer is logged at that
-heading, not at reply time. The first yes ends the search. A yes while
-the asked room is under 1% of the frame is a wrong yes and does not
-go-to. A correct yes publishes vel(+0.056, +0.000) along the capture
-heading and arms the #71 latch. A stop on the speckled hall shadow by the
-kitchen or bathroom doorway, with no prop in the frame, is a false stop
-and is not a #71 pass.
+It is not an open-set room label. Before that question, Moondream detects
+a doorway. No doorway means keep searching. Search turns in place at
++0.25 rad/s with no forward velocity. Before each picture the turn stops
+and the body settles, then kit_cam is captured. The answer is logged at
+that heading, not at reply time. A yes while the asked room is under 1%
+of the frame is a wrong yes and does not go-to. A correct yes does not
+lock that heading. The walk republishes vel(+0.056, yaw) with yaw ±0.25
+from the doorway pixel, and each later stop-settle-capture re-points.
+The #71 latch stays armed on that forward motion. A colour-free floor/wall
+row is ranged with the same kit_cam floor ray and stops at d_min. A wall
+or prop contact with the latch armed fails the bout. A stop on the
+speckled hall shadow by the kitchen or bathroom doorway, with no prop in
+the frame, is a false stop and is not a #71 pass.
 
 0.150 is only the d_min bound. The plant file is only hashed.
 """
@@ -90,6 +94,22 @@ ASK_STEP_RAD = math.radians(20.0)
 SETTLE_S = 0.70
 ROOM_VISIBLE_FRAC = 0.01
 HIP_BAR_NM = 2.33
+# After a correct yes, walk this long, then stop, settle, and re-point.
+# Frozen before the bouts. Not a reach bar.
+APPROACH_LOOK_S = 1.0
+# Doorway pixel inside this band of the frame centre commands yaw 0.
+# Outside it, yaw is the full ±0.25 cap toward that pixel.
+DOOR_DEAD_FRAC = 0.05
+# Floor-edge wall range is sampled on this period during the walk.
+# 0.056 m/s moves about 4.5 mm in this window.
+WALL_SAMPLE_S = 0.08
+# About 1 cm. Frozen before the bouts. d_min is 0.1263 m, so a few
+# centimetres is a large slice of the bar. A floor-edge stop whose
+# geometric range (forward minus step-off, before the hazard pad)
+# misses the sim toe gap by more than this is not a wall-stop pass
+# unless that measured error was added to the latch distance before
+# the bouts. Not a clearance buffer on top of a standing-pose table.
+RANGE_ERR_MAX_M = 0.01
 DOOR_Z = (0.05, 1.35)
 RAY_STEP = 8
 ROOM_GEOMS: dict[str, tuple[str, ...]] = {
@@ -153,6 +173,65 @@ class AskJson(TypedDict):
     raw: str
     confidence: float | None
     seconds: float | None
+    door_detected: bool
+    door_u: float | None
+    door_v: float | None
+    door_frac: float | None
+    door_bbox: list[float] | None
+    door_seconds: float | None
+
+
+class ApproachJson(TypedDict):
+    t: float
+    tick: int
+    heading_rad: float
+    commanded_vx: float
+    commanded_yaw: float
+    door_u: float | None
+    ranged_toe_gap_m: float | None
+    true_wall_gap_m: float | None
+    true_wall: str
+    in_corridor: bool
+    cam_z_m: float
+    imu_pitch_rad: float
+    head_tilt_rad: float
+    cam_pitch_rad: float
+
+
+class FinderCueJson(TypedDict):
+    u: float | None
+    v: float | None
+    too_close: bool
+    bottom_clipped: bool
+    span_px: int
+    width_px: int
+    source: str
+    column: int
+
+
+class WallHitJson(TypedDict):
+    t: float
+    contact: str
+    ranged_toe_gap_m: float | None
+    true_wall_gap_m: float | None
+    true_wall: str
+    range_err_m: float | None
+    range_over_1cm: bool
+    cam_z_m: float | None
+    imu_pitch_rad: float | None
+    head_tilt_rad: float | None
+    cam_pitch_rad: float | None
+    latch_path: str
+    finder: list[FinderCueJson]
+
+
+class TorqueJson(TypedDict):
+    joint: str
+    unclamped_nm: float
+    clamped_nm: float
+    measured_nm: float
+    approach_unclamped_nm: float | None
+    approach_clamped_nm: float | None
 
 
 class HipJson(TypedDict):
@@ -203,6 +282,13 @@ class RoomJson(TypedDict):
     asked_fraction: float
     visible_rooms: list[str]
     asks: list[AskJson]
+    approach: list[ApproachJson]
+    wall_contacts: list[WallHitJson]
+    wall_range_fail: bool
+    wall_stop_pass: bool
+    latch_armed_contact: bool
+    gait_limit: bool
+    torque: list[TorqueJson]
     spawn: SpawnJson
     floor_box: FloorBox
     started_outside: bool
@@ -311,11 +397,20 @@ def _definition() -> DefinitionJson:
             "Spawn yaw is the door-facing yaw plus or minus 90 degrees. "
             "After the stand, vel(0, +0.25) turns in place. No forward "
             "vel until a correct yes. Every 20 degrees the turn stops "
-            f"(yaw 0) and the body settles for {SETTLE_S:.2f} s. The "
-            "question is asked only then. The logged heading is the "
-            "heading at capture, not the heading when the answer "
-            "returns. The turn sign is not taken from the door bearing. "
-            "kit_cam is not moved."
+            f"(yaw 0) and the body settles for {SETTLE_S:.2f} s. "
+            "Moondream detects a doorway before the yes/no. No doorway "
+            "keeps the search. The logged heading is the heading at "
+            "capture, not the heading when the answer returns. The "
+            "search turn sign is not taken from the door bearing. A "
+            "correct yes walks at +0.056 m/s and yaw ±0.25 from the "
+            "doorway pixel, and re-points after each "
+            f"{APPROACH_LOOK_S:.2f} s stop-settle-capture. kit_cam is "
+            "not moved. A floor/wall image row is ranged with the "
+            "kit_cam floor ray and stops at d_min. A ranged gap more "
+            f"than {RANGE_ERR_MAX_M:.2f} m off the sim gap is not a "
+            "wall-stop pass unless that error was added to the latch "
+            "before the bouts. The ray uses the live camera height and "
+            "the IMU pitch plus head_tilt, not a standing-pose table."
         ),
         hip_bar_nm=HIP_BAR_NM,
         soft_pass=False,
@@ -493,6 +588,195 @@ def _doorway_fraction(
     if total == 0:
         return 0.0
     return hit / total
+
+
+def _yaw_toward_u(u: float) -> float:
+    """Full ±0.25 toward a doorway pixel. Centre band commands yaw 0.
+
+    A pixel left of centre is +yaw. kit_cam +X is image right, and +yaw
+    is a left turn. The sign is the pixel, not the door bearing.
+    """
+    center = rc.WIDTH / 2.0
+    if abs(u - center) <= DOOR_DEAD_FRAC * rc.WIDTH:
+        return 0.0
+    if u < center:
+        return voice.YAW_RAD_S
+    return -voice.YAW_RAD_S
+
+
+def _door_pixels(objects: list[object]) -> list[dict[str, object]]:
+    """Normalized detect boxes to pixel centre, area fraction, and bbox."""
+    rows: list[dict[str, object]] = []
+    for obj in objects:
+        if not isinstance(obj, dict) or "x_min" not in obj:
+            continue
+        x0 = float(obj["x_min"]) * rc.WIDTH
+        x1 = float(obj["x_max"]) * rc.WIDTH
+        y0 = float(obj["y_min"]) * rc.HEIGHT
+        y1 = float(obj["y_max"]) * rc.HEIGHT
+        if x1 <= 0.0 or x0 >= rc.WIDTH or y1 <= 0.0 or y0 >= rc.HEIGHT:
+            continue
+        width = max(0.0, x1 - x0)
+        height = max(0.0, y1 - y0)
+        if width < 1.0 or height < 1.0:
+            continue
+        rows.append({
+            "u": 0.5 * (x0 + x1),
+            "v": 0.5 * (y0 + y1),
+            "frac": (width / rc.WIDTH) * (height / rc.HEIGHT),
+            "bbox": [x0, y0, x1, y1],
+        })
+    return rows
+
+
+def _wall_ids(model: mj.MjModel) -> dict[int, str]:
+    found: dict[int, str] = {}
+    for geom_id in range(model.ngeom):
+        name = mj.mj_id2name(model, mj.mjtObj.mjOBJ_GEOM, geom_id) or ""
+        if name.startswith("wall_"):
+            found[geom_id] = name
+    return found
+
+
+def _true_wall_gap(
+    model: mj.MjModel,
+    data: mj.MjData,
+    session: sw.SteerSession,
+    cid: int,
+) -> tuple[str, float | None]:
+    """Sim gap from the leading toe to the first wall along body forward."""
+    toes = gate.toe_samples(session, cid)
+    if not toes:
+        return "", None
+    lead = max(toes, key=lambda row: row.offset_m)
+    fwd = gate.body_forward_xy(data, session.bid_body)
+    norm = float(math.hypot(fwd[0], fwd[1]))
+    if norm < 1e-9:
+        return "", None
+    direction = np.array([fwd[0] / norm, fwd[1] / norm, 0.0], dtype=np.float64)
+    origin = np.array([lead.toe_xy[0], lead.toe_xy[1], 0.05], dtype=np.float64)
+    geomid = np.zeros(1, dtype=np.int32)
+    dist = mj.mj_ray(model, data, origin, direction, None, 1, -1, geomid)
+    if dist < 0.0:
+        return "", None
+    name = mj.mj_id2name(model, mj.mjtObj.mjOBJ_GEOM, int(geomid[0])) or ""
+    if not name.startswith("wall_"):
+        return name, float(dist)
+    return name, float(dist)
+
+
+def _floor_wall_boundaries(
+    seg: np.ndarray,
+    floor_id: int,
+    walls: dict[int, str],
+) -> list[tuple[float, float, str]]:
+    """Colour-free floor pixel just under a wall geom, nearest row per column.
+
+    v grows downward. Scanning from the bottom of the frame hits the
+    near wall base first. kit_cam is not moved. The row is ranged later
+    with ray_corridor.estimate_hazard, the same floor ray the #70 mono
+    height uses. This does not arm the refused rug-height gate.
+    """
+    if seg.ndim != 3 or seg.shape[2] < 2:
+        raise RuntimeError(f"segmentation shape {seg.shape}")
+    geom_type = int(mj.mjtObj.mjOBJ_GEOM)
+    ids = seg[:, :, 0]
+    types = seg[:, :, 1]
+    hits: list[tuple[float, float, str]] = []
+    for u in range(0, rc.WIDTH, RAY_STEP):
+        for v in range(rc.HEIGHT - 2, 0, -1):
+            if int(types[v, u]) != geom_type or int(types[v - 1, u]) != geom_type:
+                continue
+            if int(ids[v, u]) != floor_id:
+                continue
+            above = int(ids[v - 1, u])
+            name = walls.get(above, "")
+            if name == "":
+                continue
+            hits.append((float(u) + 0.5, float(v) + 0.5, name))
+            break
+    return hits
+
+
+def _cam_pitch(yaw: float, pitch: float, roll: float, tilt: float, pan: float) -> float:
+    """Pitch of the kit_cam look direction from IMU and head joints.
+
+    Negative is below the horizon. This is not a standing-pose constant
+    and it is not the sim camera matrix.
+    """
+    rot = rc.camera_rotation_from_imu(yaw, pitch, roll, tilt, pan)
+    look = -rot[:, 2]
+    return math.atan2(float(look[2]), float(math.hypot(look[0], look[1])))
+
+
+def _range_wall(
+    session: sw.SteerSession,
+    model: mj.MjModel,
+    renderer: mj.Renderer,
+    cid: int,
+    jid: int,
+    pan_id: int,
+    reach: list[tuple[float, float, float]],
+    floor_id: int,
+    walls: dict[int, str],
+) -> dict[str, object]:
+    """Nearest in-corridor wall base, ranged at this capture's camera.
+
+    Height is the live kit_cam optical centre (body plus the head joints).
+    The ray direction is body IMU pitch and roll plus head_tilt and
+    head_pan. A fixed stand height and stand pitch are not used.
+    """
+    pose, body, yaw, pitch, roll, tilt, pan, step_off, _cam = _pose_bits(
+        session, model, cid, jid, pan_id, reach,
+    )
+    reading: dict[str, object] = {
+        "u": None,
+        "v": None,
+        "wall": "",
+        "toe_gap_m": None,
+        "geometric_m": None,
+        "in_corridor": False,
+        "cam_z_m": float(pose.position_m[2]),
+        "imu_pitch_rad": float(pitch),
+        "head_tilt_rad": float(tilt),
+        "cam_pitch_rad": _cam_pitch(yaw, pitch, roll, tilt, pan),
+    }
+    seg = _render_seg(renderer, session.data)
+    for u, v, name in _floor_wall_boundaries(seg, floor_id, walls):
+        estimate = rc.estimate_hazard(
+            u, v,
+            cam=pose, body=body,
+            imu_roll_rad=roll, imu_pitch_rad=pitch,
+            head_tilt_rad=tilt, yaw_rate=float(session.bus.applied_yaw_rate),
+            step_off_m=step_off, hazard_pad_m=rc.HAZARD_PAD_M,
+            head_pan_rad=pan,
+        )
+        if estimate is None or not estimate.in_corridor:
+            continue
+        gap = float(estimate.toe_gap_m)
+        geometric = float(estimate.forward_m) - float(estimate.step_off_m)
+        held = reading["toe_gap_m"]
+        if held is None or gap < float(held):
+            reading["u"] = u
+            reading["v"] = v
+            reading["wall"] = name
+            reading["toe_gap_m"] = gap
+            reading["geometric_m"] = geometric
+            reading["in_corridor"] = True
+    return reading
+
+
+def _cue_json(cue: hf.HazardCue) -> FinderCueJson:
+    return FinderCueJson(
+        u=None if cue.u is None else float(cue.u),
+        v=None if cue.v is None else float(cue.v),
+        too_close=bool(cue.too_close),
+        bottom_clipped=bool(cue.bottom_clipped),
+        span_px=int(cue.span_px),
+        width_px=int(cue.width_px),
+        source=str(cue.source),
+        column=int(cue.column),
+    )
 
 
 def _nearest_prop(
@@ -801,7 +1085,14 @@ class _Bout:
         self.peak_nm = 0.0
         self.peak_actuator = ""
         self.yaw_on = False
+        self.approach_yaw = False
         self.hip_peak: dict[str, float] = {}
+        self.tau_unclamped: dict[str, float] = {}
+        self.tau_clamped: dict[str, float] = {}
+        self.approach_unclamped: dict[str, float] = {}
+        self.approach_clamped: dict[str, float] = {}
+        self.measured: dict[str, float] = {}
+        self.gait_limit = False
 
 
 def _watch_step(
@@ -821,8 +1112,40 @@ def _watch_step(
         if abs(force) > abs(bout.peak_nm):
             bout.peak_nm = force
             bout.peak_actuator = name
+        joint = _joint_name(name)
+        if "knee" in joint or "hip_roll" in joint:
+            held = bout.measured.get(joint)
+            if held is None or abs(force) >= abs(held):
+                bout.measured[joint] = force
         if bout.yaw_on and name in bout.hip_peak and abs(force) > abs(bout.hip_peak[name]):
             bout.hip_peak[name] = force
+
+
+def _watch_tau(session: sw.SteerSession, bout: _Bout) -> None:
+    """Peak unclamped prediction beside the clamped prediction. No retune."""
+    lipm = session.lipm
+    if lipm is None:
+        return
+    for joint, pair in lipm.tau_note.items():
+        unclamped, clamped = pair
+        prev = bout.tau_unclamped.get(joint)
+        if prev is None or abs(unclamped) >= abs(prev):
+            bout.tau_unclamped[joint] = unclamped
+            bout.tau_clamped[joint] = clamped
+        if not bout.approach_yaw:
+            continue
+        held = bout.approach_unclamped.get(joint)
+        if held is None or abs(unclamped) >= abs(held):
+            bout.approach_unclamped[joint] = unclamped
+            bout.approach_clamped[joint] = clamped
+        # The write budget is 2.28 Nm on a stop and 2.33 Nm on a yawed
+        # hip roll. A larger unclamped prediction sitting on that write
+        # is the clamp, not a measured peak.
+        if (
+            abs(unclamped) > abs(clamped) + 0.02
+            and abs(clamped) >= lipm_gait.LEG_STOP_NM - 0.02
+        ):
+            bout.gait_limit = True
 
 
 def _hip_rows(bout: _Bout) -> list[HipJson]:
@@ -907,7 +1230,7 @@ def _sense(
     sightings: list[ShadowSighting],
     seen: set[str],
     prop_ids: dict[int, str],
-) -> tuple[str, tuple[float, float] | None, np.ndarray]:
+) -> tuple[str, tuple[float, float] | None, np.ndarray, tuple[hf.HazardCue, ...]]:
     pose, body, yaw, pitch, roll, tilt, pan, step_off, cam = _pose_bits(
         session, model, cid, jid, pan_id, reach,
     )
@@ -970,7 +1293,7 @@ def _sense(
         tilt=tilt, yaw_rate=yaw_rate, step_off=step_off, pan=pan,
         now=float(data.time), gate_m=gate_m,
     )
-    return path, hit, rgb
+    return path, hit, rgb, cues
 
 
 def _note_shadow(
@@ -1067,20 +1390,41 @@ def _look(
     seg = _render_seg(renderer, session.data)
     fracs = _room_fractions(model, seg)
     door = _doorway_fraction(model, session.data, opening)
+    door_detected = False
+    door_u: float | None = None
+    door_v: float | None = None
+    door_frac: float | None = None
+    door_bbox: list[float] | None = None
+    door_seconds: float | None = None
     if asker is None:
         answer = "not loaded"
         raw = ask_error
         confidence = None
         seconds = None
     else:
-        asked = asker.ask_yes_no(rgb, question)
-        parsed = asked.get("answer")
-        answer = "undecided" if parsed is None else str(parsed)
-        raw = str(asked.get("raw", ""))
-        conf = asked.get("confidence")
-        confidence = None if conf is None else float(conf)
-        sec = asked.get("seconds")
-        seconds = None if sec is None else float(sec)
+        detected = asker.detect_doorway(rgb)
+        door_seconds = float(detected["seconds"])
+        boxes = _door_pixels(list(detected["objects"]))  # type: ignore[arg-type]
+        if not boxes:
+            answer = "no_door"
+            raw = ""
+            confidence = None
+            seconds = door_seconds
+        else:
+            best = max(boxes, key=lambda item: float(item["frac"]))
+            door_detected = True
+            door_u = float(best["u"])
+            door_v = float(best["v"])
+            door_frac = float(best["frac"])
+            door_bbox = [float(v) for v in best["bbox"]]  # type: ignore[union-attr]
+            asked = asker.ask_yes_no(rgb, question)
+            parsed = asked.get("answer")
+            answer = "undecided" if parsed is None else str(parsed)
+            raw = str(asked.get("raw", ""))
+            conf = asked.get("confidence")
+            confidence = None if conf is None else float(conf)
+            sec = asked.get("seconds")
+            seconds = None if sec is None else float(sec)
     if abs(_wrap(_yaw(session.data, session.bid_body) - heading_at_capture)) > 1e-6:
         raise SystemExit("FAIL: heading moved during the question")
     if abs(float(session.data.time) - t_capture) > 1e-9:
@@ -1100,6 +1444,12 @@ def _look(
         raw=raw,
         confidence=confidence,
         seconds=seconds,
+        door_detected=door_detected,
+        door_u=door_u,
+        door_v=door_v,
+        door_frac=door_frac,
+        door_bbox=door_bbox,
+        door_seconds=door_seconds,
     )
     return row, fracs
 
@@ -1192,6 +1542,7 @@ def _run_room(
     ask_error: str,
     robot_bodies: set[str],
     d_min_m: float,
+    latch_extra_m: float,
 ) -> RoomJson:
     door = spec_room["doorways"][0]
     spawn_xy = door["spawn"]
@@ -1236,6 +1587,7 @@ def _run_room(
     def hook(step_model: mj.MjModel, step_data: mj.MjData) -> None:
         real(step_model, step_data)
         _watch_step(step_model, step_data, bout, robot_bodies, act_idx)
+        _watch_tau(session, bout)
 
     mj.mj_step = hook
     reach: list[tuple[float, float, float]] = []
@@ -1244,7 +1596,16 @@ def _run_room(
     sightings: list[ShadowSighting] = []
     seen: set[str] = set()
     asks: list[AskJson] = []
+    approach: list[ApproachJson] = []
+    wall_contacts: list[WallHitJson] = []
+    wall_range_fail = False
+    wall_stop_pass = False
     gate_m = d_min_m
+    wall_gate_m = d_min_m + latch_extra_m
+    floor_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "floor")
+    walls = _wall_ids(model)
+    if floor_id < 0 or not walls:
+        raise SystemExit("FAIL: floor or wall geoms missing")
     generic = voice.parse_phrase(phrase)
     words = sorted(set(voice.normalize_phrase(phrase).split()) & voice._ROOM_WORDS)
     stop = _empty_stop()
@@ -1369,100 +1730,350 @@ def _run_room(
                     return "inside"
                 return ""
 
-            hit_sweep = False
-            while (
-                decision == "no" or decision == "undecided"
-            ) and float(session.data.time) < TIME_LIMIT_S - 1e-9 and not hit_sweep:
-                turned_before = yaw_turned
-                while (
-                    yaw_turned < next_ask
-                    and yaw_turned < SEARCH_SWEEP_RAD
-                    and float(session.data.time) < TIME_LIMIT_S - 1e-9
-                ):
-                    now = float(session.data.time)
-                    session.bus.vel(0.0, SEARCH_YAW, now)
-                    bout.yaw_on = True
-                    session.step()
-                    ticks += 1
-                    heading = _yaw(session.data, session.bid_body)
-                    yaw_turned += _wrap(heading - prev_yaw)
-                    prev_yaw = heading
-                    if _search_fault() != "":
-                        break
-                if stop["path"] != "":
-                    break
-                if float(session.data.time) >= TIME_LIMIT_S - 1e-9:
-                    block = "no yes before the time limit"
-                    stop = _Stop(
-                        path="time",
-                        reason=block,
-                        hit_xy=None,
-                        on_shadow=False,
-                        prop_in_frame=False,
-                        false_stop=False,
-                        latch_pass=False,
-                    )
-                    break
-                if yaw_turned - turned_before < 1e-3:
-                    break
-                if yaw_turned >= SEARCH_SWEEP_RAD - 1e-6:
-                    hit_sweep = True
-                # Stop the turn, then settle, before the picture. The
-                # question runs only after this, with yaw commanded at 0.
+            sweep_base = yaw_turned
+            approach_yaw = 0.0
+            if decision == "commit" and look["door_u"] is not None:
+                approach_yaw = _yaw_toward_u(float(look["door_u"]))
+            need_search = decision in ("no", "undecided", "no_door")
+
+            def _time_stop(reason: str) -> None:
+                nonlocal block, stop
+                block = reason
+                stop = _Stop(
+                    path="time",
+                    reason=reason,
+                    hit_xy=None,
+                    on_shadow=False,
+                    prop_in_frame=False,
+                    false_stop=False,
+                    latch_pass=False,
+                )
+
+            def _settle_body(during_search: bool) -> bool:
+                nonlocal ticks, yaw_turned, prev_yaw, stop, block
                 settle_end = float(session.data.time) + SETTLE_S
                 while float(session.data.time) < settle_end - 1e-9:
                     if float(session.data.time) >= TIME_LIMIT_S - 1e-9:
-                        break
+                        return False
                     now = float(session.data.time)
                     session.bus.vel(0.0, 0.0, now)
                     bout.yaw_on = True
+                    bout.approach_yaw = False
                     session.step()
                     ticks += 1
                     heading = _yaw(session.data, session.bid_body)
                     yaw_turned += _wrap(heading - prev_yaw)
                     prev_yaw = heading
-                    if _search_fault() != "":
-                        break
-                if stop["path"] != "":
-                    break
-                if float(session.data.time) >= TIME_LIMIT_S - 1e-9:
-                    block = "no yes before the time limit"
-                    stop = _Stop(
-                        path="time",
-                        reason=block,
-                        hit_xy=None,
-                        on_shadow=False,
-                        prop_in_frame=False,
-                        false_stop=False,
-                        latch_pass=False,
+                    if during_search:
+                        if _search_fault() != "":
+                            return False
+                        continue
+                    if bout.contact != "none":
+                        _log_range(bout.contact, "", ())
+                        stop = _Stop(
+                            path="contact",
+                            reason=bout.contact,
+                            hit_xy=None,
+                            on_shadow=False,
+                            prop_in_frame=False,
+                            false_stop=False,
+                            latch_pass=False,
+                        )
+                        return False
+                    com_now = np.asarray(
+                        session.data.subtree_com[session.bid_body], dtype=np.float64,
                     )
-                    break
-                if abs(_wrap(_yaw(session.data, session.bid_body) - last_capture)) < 0.5 * ASK_STEP_RAD:
-                    break
-                look, _fracs = _look(
+                    if _inside(float(com_now[0]), float(com_now[1]), box):
+                        stop = _Stop(
+                            path="inside",
+                            reason="COM finished inside the named room box",
+                            hit_xy=None,
+                            on_shadow=False,
+                            prop_in_frame=False,
+                            false_stop=False,
+                            latch_pass=False,
+                        )
+                        return False
+                return float(session.data.time) < TIME_LIMIT_S - 1e-9
+
+            def _capture() -> AskJson:
+                return _look(
                     session, model, renderer, opening, room_name, question,
                     asker, ask_error, tick=ticks, yaw_spawn=yaw_spawn,
                     cid=cid, jid=jid, pan_id=pan_id, reach=reach,
                     phase_floor=phase_floor, sightings=sightings, seen=seen,
                     prop_ids=prop_ids,
+                )[0]
+
+            def _log_range(kind: str, latch_path: str, cues: tuple[hf.HazardCue, ...]) -> None:
+                nonlocal wall_range_fail, wall_stop_pass
+                reading = _range_wall(
+                    session, model, renderer, cid, jid, pan_id, reach, floor_id, walls,
                 )
-                next_ask = yaw_turned + ASK_STEP_RAD
+                true_name, true_gap = _true_wall_gap(model, session.data, session, cid)
+                ranged = reading["geometric_m"]
+                err = None
+                if ranged is not None and true_gap is not None:
+                    err = abs(float(ranged) - float(true_gap))
+                over = err is None or err > RANGE_ERR_MAX_M
+                covered = (
+                    latch_extra_m > 0.0
+                    and true_gap is not None
+                    and float(true_gap) + 1e-6 >= d_min_m
+                    and err is not None
+                    and err <= latch_extra_m + 1e-6
+                )
+                honest = (err is not None and err <= RANGE_ERR_MAX_M) or covered
+                if kind == "floor_edge" and bout.contact == "none" and honest:
+                    wall_stop_pass = True
+                if not honest:
+                    wall_range_fail = True
+                wall_contacts.append(WallHitJson(
+                    t=float(session.data.time),
+                    contact=kind if kind != "floor_edge" else bout.contact,
+                    ranged_toe_gap_m=None if ranged is None else float(ranged),
+                    true_wall_gap_m=true_gap,
+                    true_wall=true_name,
+                    range_err_m=err,
+                    range_over_1cm=over,
+                    cam_z_m=float(reading["cam_z_m"]),
+                    imu_pitch_rad=float(reading["imu_pitch_rad"]),
+                    head_tilt_rad=float(reading["head_tilt_rad"]),
+                    cam_pitch_rad=float(reading["cam_pitch_rad"]),
+                    latch_path=latch_path,
+                    finder=[_cue_json(cue) for cue in cues],
+                ))
+
+            while (
+                stop["path"] == ""
+                and not wrong_yes
+                and float(session.data.time) < TIME_LIMIT_S - 1e-9
+                and (need_search or committed)
+            ):
+                if need_search:
+                    turned_before = yaw_turned
+                    while (
+                        yaw_turned - sweep_base < next_ask
+                        and yaw_turned - sweep_base < SEARCH_SWEEP_RAD
+                        and float(session.data.time) < TIME_LIMIT_S - 1e-9
+                    ):
+                        now = float(session.data.time)
+                        session.bus.vel(0.0, SEARCH_YAW, now)
+                        bout.yaw_on = True
+                        bout.approach_yaw = False
+                        session.step()
+                        ticks += 1
+                        heading = _yaw(session.data, session.bid_body)
+                        yaw_turned += _wrap(heading - prev_yaw)
+                        prev_yaw = heading
+                        if _search_fault() != "":
+                            break
+                    if stop["path"] != "":
+                        break
+                    if float(session.data.time) >= TIME_LIMIT_S - 1e-9:
+                        _time_stop("no yes before the time limit")
+                        break
+                    if yaw_turned - turned_before < 1e-3:
+                        break
+                    if yaw_turned - sweep_base >= SEARCH_SWEEP_RAD - 1e-6:
+                        need_search = False
+                        if not committed:
+                            block = (
+                                f"turned {yaw_turned - sweep_base:.3f} rad at yaw "
+                                f"{SEARCH_YAW:+.2f} with no yes"
+                            )
+                            stop = _Stop(
+                                path="no_yes",
+                                reason=block,
+                                hit_xy=None,
+                                on_shadow=False,
+                                prop_in_frame=False,
+                                false_stop=False,
+                                latch_pass=False,
+                            )
+                        break
+                    if not _settle_body(True):
+                        if stop["path"] == "" and float(session.data.time) >= TIME_LIMIT_S - 1e-9:
+                            _time_stop("no yes before the time limit")
+                        break
+                    if abs(_wrap(_yaw(session.data, session.bid_body) - last_capture)) < 0.5 * ASK_STEP_RAD:
+                        break
+                    look = _capture()
+                    next_ask = (yaw_turned - sweep_base) + ASK_STEP_RAD
+                    last_capture = look["heading_at_capture"]
+                    decision = consider(look)
+                    if decision == "commit" and look["door_u"] is not None:
+                        approach_yaw = _yaw_toward_u(float(look["door_u"]))
+                        need_search = False
+                    elif decision == "wrong":
+                        break
+                    continue
+
+                commanded_vx = voice.FWD_MPS
+                commanded_yaw = approach_yaw
+                latch_applied = True
+                look_end = float(session.data.time) + APPROACH_LOOK_S
+                last_wall_t = -1.0
+                last_cues: tuple[hf.HazardCue, ...] = ()
+                repoint = True
+                while float(session.data.time) < look_end - 1e-9:
+                    now = float(session.data.time)
+                    if now >= TIME_LIMIT_S - 1e-9:
+                        break
+                    path, hit, _frame, cues = _sense(
+                        session, model, renderer, cid, jid, pan_id, reach, tracks,
+                        phase_floor, gate_m, sightings, seen, prop_ids,
+                    )
+                    last_cues = cues
+                    if now - last_wall_t >= WALL_SAMPLE_S - 1e-9:
+                        last_wall_t = now
+                        reading = _range_wall(
+                            session, model, renderer, cid, jid, pan_id, reach,
+                            floor_id, walls,
+                        )
+                        true_name, true_gap = _true_wall_gap(
+                            model, session.data, session, cid,
+                        )
+                        approach.append(ApproachJson(
+                            t=now,
+                            tick=ticks,
+                            heading_rad=_yaw(session.data, session.bid_body),
+                            commanded_vx=voice.FWD_MPS,
+                            commanded_yaw=approach_yaw,
+                            door_u=None if look["door_u"] is None else float(look["door_u"]),
+                            ranged_toe_gap_m=(
+                                None if reading["toe_gap_m"] is None
+                                else float(reading["toe_gap_m"])
+                            ),
+                            true_wall_gap_m=true_gap,
+                            true_wall=true_name,
+                            in_corridor=bool(reading["in_corridor"]),
+                            cam_z_m=float(reading["cam_z_m"]),
+                            imu_pitch_rad=float(reading["imu_pitch_rad"]),
+                            head_tilt_rad=float(reading["head_tilt_rad"]),
+                            cam_pitch_rad=float(reading["cam_pitch_rad"]),
+                        ))
+                        gap = reading["toe_gap_m"]
+                        if gap is not None and float(gap) <= wall_gate_m:
+                            _log_range("floor_edge", "floor_edge", cues)
+                            session.bus.stop(now)
+                            bout.approach_yaw = False
+                            bout.yaw_on = abs(session.bus.applied_yaw_rate) > 1e-6
+                            session.step()
+                            ticks += 1
+                            stop = _Stop(
+                                path="floor_edge",
+                                reason=(
+                                    f"floor-edge wall {reading['wall']} "
+                                    f"toe_gap={float(gap):.3f} "
+                                    f"latch={wall_gate_m:.3f} "
+                                    f"cam_pitch={float(reading['cam_pitch_rad']):+.4f}"
+                                ),
+                                hit_xy=None,
+                                on_shadow=False,
+                                prop_in_frame=False,
+                                false_stop=False,
+                                latch_pass=False,
+                            )
+                            repoint = False
+                            break
+                    if path != "":
+                        seg = _render_seg(renderer, session.data)
+                        prop = _prop_in_frame(seg, prop_ids)
+                        stop = _score_stop(
+                            path, path, hit,
+                            model=model, data=session.data, prop_ids=prop_ids,
+                            prop_in_frame=prop,
+                        )
+                        session.bus.stop(now)
+                        bout.approach_yaw = False
+                        bout.yaw_on = abs(session.bus.applied_yaw_rate) > 1e-6
+                        session.step()
+                        ticks += 1
+                        repoint = False
+                        break
+                    if bout.contact != "none":
+                        _log_range(bout.contact, "", last_cues)
+                        stop = _Stop(
+                            path="contact",
+                            reason=bout.contact,
+                            hit_xy=None,
+                            on_shadow=False,
+                            prop_in_frame=False,
+                            false_stop=False,
+                            latch_pass=False,
+                        )
+                        repoint = False
+                        break
+                    com_now = np.asarray(
+                        session.data.subtree_com[session.bid_body], dtype=np.float64,
+                    )
+                    if _inside(float(com_now[0]), float(com_now[1]), box):
+                        session.bus.stop(now)
+                        bout.approach_yaw = False
+                        bout.yaw_on = abs(session.bus.applied_yaw_rate) > 1e-6
+                        session.step()
+                        ticks += 1
+                        stop = _Stop(
+                            path="inside",
+                            reason="COM finished inside the named room box",
+                            hit_xy=None,
+                            on_shadow=False,
+                            prop_in_frame=False,
+                            false_stop=False,
+                            latch_pass=False,
+                        )
+                        repoint = False
+                        break
+                    bout.approach_yaw = abs(approach_yaw) > 1e-6
+                    bout.yaw_on = (
+                        bout.approach_yaw
+                        or abs(session.bus.target_yaw) > 1e-6
+                        or abs(session.bus.applied_yaw_rate) > 1e-6
+                    )
+                    session.bus.vel(voice.FWD_MPS, approach_yaw, now)
+                    session.step()
+                    ticks += 1
+                    if bout.contact != "none":
+                        _log_range(bout.contact, "", last_cues)
+                        stop = _Stop(
+                            path="contact",
+                            reason=bout.contact,
+                            hit_xy=None,
+                            on_shadow=False,
+                            prop_in_frame=False,
+                            false_stop=False,
+                            latch_pass=False,
+                        )
+                        repoint = False
+                        break
+                if stop["path"] != "":
+                    break
+                if float(session.data.time) >= TIME_LIMIT_S - 1e-9:
+                    _time_stop(f"time limit {TIME_LIMIT_S:.1f} s")
+                    break
+                if not repoint:
+                    break
+                if not _settle_body(False):
+                    if stop["path"] == "" and float(session.data.time) >= TIME_LIMIT_S - 1e-9:
+                        _time_stop(f"time limit {TIME_LIMIT_S:.1f} s")
+                    break
+                look = _capture()
                 last_capture = look["heading_at_capture"]
                 decision = consider(look)
-                if decision in ("wrong", "commit"):
+                if decision == "commit" and look["door_u"] is not None:
+                    approach_yaw = _yaw_toward_u(float(look["door_u"]))
+                    need_search = False
+                elif decision == "wrong":
                     break
+                else:
+                    need_search = True
+                    sweep_base = yaw_turned
+                    next_ask = ASK_STEP_RAD
+
             if not committed and not wrong_yes and block == "" and stop["path"] == "":
                 if float(session.data.time) >= TIME_LIMIT_S - 1e-9:
-                    block = "no yes before the time limit"
-                    stop = _Stop(
-                        path="time",
-                        reason=block,
-                        hit_xy=None,
-                        on_shadow=False,
-                        prop_in_frame=False,
-                        false_stop=False,
-                        latch_pass=False,
-                    )
+                    _time_stop("no yes before the time limit")
                 else:
                     block = (
                         f"turned {yaw_turned:.3f} rad at yaw {SEARCH_YAW:+.2f} "
@@ -1477,91 +2088,10 @@ def _run_room(
                         false_stop=False,
                         latch_pass=False,
                     )
-            if wrong_yes:
+            if wrong_yes and stop["path"] == "":
                 stop = _Stop(
                     path="wrong_yes",
                     reason=block,
-                    hit_xy=None,
-                    on_shadow=False,
-                    prop_in_frame=False,
-                    false_stop=False,
-                    latch_pass=False,
-                )
-        if committed and stop["path"] == "":
-            commanded_vx = voice.FWD_MPS
-            commanded_yaw = 0.0
-            latch_applied = True
-            session.bus.vel(voice.FWD_MPS, 0.0, float(session.data.time))
-            while float(session.data.time) < TIME_LIMIT_S - 1e-9:
-                now = float(session.data.time)
-                path, hit, _frame = _sense(
-                    session, model, renderer, cid, jid, pan_id, reach, tracks,
-                    phase_floor, gate_m, sightings, seen, prop_ids,
-                )
-                if path != "":
-                    seg = _render_seg(renderer, session.data)
-                    prop = _prop_in_frame(seg, prop_ids)
-                    stop = _score_stop(
-                        path, path, hit,
-                        model=model, data=session.data, prop_ids=prop_ids,
-                        prop_in_frame=prop,
-                    )
-                    session.bus.stop(now)
-                    bout.yaw_on = abs(session.bus.applied_yaw_rate) > 1e-6
-                    session.step()
-                    ticks += 1
-                    break
-                if bout.contact != "none":
-                    stop = _Stop(
-                        path="contact",
-                        reason=bout.contact,
-                        hit_xy=None,
-                        on_shadow=False,
-                        prop_in_frame=False,
-                        false_stop=False,
-                        latch_pass=False,
-                    )
-                    break
-                com_now = np.asarray(
-                    session.data.subtree_com[session.bid_body], dtype=np.float64,
-                )
-                if _inside(float(com_now[0]), float(com_now[1]), box):
-                    session.bus.stop(now)
-                    bout.yaw_on = abs(session.bus.applied_yaw_rate) > 1e-6
-                    session.step()
-                    ticks += 1
-                    stop = _Stop(
-                        path="inside",
-                        reason="COM finished inside the named room box",
-                        hit_xy=None,
-                        on_shadow=False,
-                        prop_in_frame=False,
-                        false_stop=False,
-                        latch_pass=False,
-                    )
-                    break
-                session.bus.vel(voice.FWD_MPS, 0.0, now)
-                bout.yaw_on = (
-                    abs(session.bus.target_yaw) > 1e-6
-                    or abs(session.bus.applied_yaw_rate) > 1e-6
-                )
-                session.step()
-                ticks += 1
-                if bout.contact != "none":
-                    stop = _Stop(
-                        path="contact",
-                        reason=bout.contact,
-                        hit_xy=None,
-                        on_shadow=False,
-                        prop_in_frame=False,
-                        false_stop=False,
-                        latch_pass=False,
-                    )
-                    break
-            else:
-                stop = _Stop(
-                    path="time",
-                    reason=f"time limit {TIME_LIMIT_S:.1f} s",
                     hit_xy=None,
                     on_shadow=False,
                     prop_in_frame=False,
@@ -1657,6 +2187,13 @@ def _run_room(
             asked_fraction=stand_asked,
             visible_rooms=stand_visible,
             asks=asks,
+            approach=approach,
+            wall_contacts=wall_contacts,
+            wall_range_fail=wall_range_fail,
+            wall_stop_pass=wall_stop_pass,
+            latch_armed_contact=bool(latch_applied and bout.contact != "none"),
+            gait_limit=bout.gait_limit,
+            torque=_torque_rows(bout),
             spawn=spawn,
             floor_box=box,
             started_outside=started_outside,
@@ -1682,6 +2219,116 @@ def _run_room(
         renderer.close()
 
 
+def _torque_rows(bout: _Bout) -> list[TorqueJson]:
+    names = sorted(set(bout.tau_unclamped) | set(bout.measured) | set(bout.approach_unclamped))
+    rows: list[TorqueJson] = []
+    for joint in names:
+        if "knee" not in joint and "hip_roll" not in joint:
+            continue
+        approach_u = bout.approach_unclamped.get(joint)
+        approach_c = bout.approach_clamped.get(joint)
+        rows.append(TorqueJson(
+            joint=joint,
+            unclamped_nm=float(bout.tau_unclamped.get(joint, 0.0)),
+            clamped_nm=float(bout.tau_clamped.get(joint, 0.0)),
+            measured_nm=float(bout.measured.get(joint, 0.0)),
+            approach_unclamped_nm=None if approach_u is None else float(approach_u),
+            approach_clamped_nm=None if approach_c is None else float(approach_c),
+        ))
+    return rows
+
+
+def _place_pitched(session: sw.SteerSession, x: float, y: float, yaw: float, pitch: float) -> None:
+    """Root pose at this yaw and IMU pitch. Legs stay at the stand qpos."""
+    _place(session, x, y, yaw)
+    rot = rc.body_rotation(yaw, pitch, 0.0)
+    quat = np.zeros(4, dtype=np.float64)
+    mj.mju_mat2Quat(quat, np.ascontiguousarray(rot.reshape(9)))
+    session.data.qpos[3:7] = quat
+    session.data.qvel[:] = 0.0
+    mj.mj_forward(session.model, session.data)
+
+
+def _range_probe() -> dict[str, object]:
+    """Live-pose wall range before any room score. Not a standing table.
+
+    Samples a settled stand, a short walk, and root pitches of a few
+    milliradians plus 0.02 rad. The worst absolute error above 1 cm
+    is added to the latch distance. A smaller error leaves the latch
+    at d_min.
+    """
+    session = sw.SteerSession(
+        video=False,
+        scene_xml=SCENE_XML,
+        initial_yaw=0.0,
+        lipm=sw.locked_kit_config(),
+    )
+    model = session.model
+    renderer = mj.Renderer(model, height=rc.HEIGHT, width=rc.WIDTH)
+    cid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_CAMERA, "kit_cam")
+    jid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, "head_tilt")
+    pan_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, "head_pan")
+    floor_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "floor")
+    walls = _wall_ids(model)
+    reach: list[tuple[float, float, float]] = []
+    samples: list[dict[str, object]] = []
+
+    def take(tag: str) -> None:
+        reading = _range_wall(
+            session, model, renderer, cid, jid, pan_id, reach, floor_id, walls,
+        )
+        true_name, true_gap = _true_wall_gap(model, session.data, session, cid)
+        ranged = reading["geometric_m"]
+        err = None
+        if ranged is not None and true_gap is not None:
+            err = abs(float(ranged) - float(true_gap))
+        samples.append({
+            "tag": tag,
+            "ranged_m": None if ranged is None else float(ranged),
+            "toe_gap_m": None if reading["toe_gap_m"] is None else float(reading["toe_gap_m"]),
+            "true_wall_gap_m": true_gap,
+            "true_wall": true_name,
+            "range_err_m": err,
+            "cam_z_m": float(reading["cam_z_m"]),
+            "imu_pitch_rad": float(reading["imu_pitch_rad"]),
+            "head_tilt_rad": float(reading["head_tilt_rad"]),
+            "cam_pitch_rad": float(reading["cam_pitch_rad"]),
+        })
+
+    try:
+        _place(session, 0.40, -1.05, 0.0)
+        while float(session.data.time) < STAND_S - 1e-9:
+            session.bus.stand(float(session.data.time))
+            session.step()
+        take("stand")
+        walk_end = float(session.data.time) + 1.2
+        next_take = float(session.data.time)
+        while float(session.data.time) < walk_end - 1e-9:
+            now = float(session.data.time)
+            session.bus.vel(voice.FWD_MPS, 0.0, now)
+            session.step()
+            if now + 1e-9 >= next_take:
+                take("walk")
+                next_take = now + 0.4
+        for pitch in (0.005, -0.005, 0.02, -0.02):
+            _place_pitched(session, 0.40, -1.05, 0.0, pitch)
+            take(f"pitch {pitch:+.3f}")
+    finally:
+        renderer.close()
+    errs = [float(row["range_err_m"]) for row in samples if row["range_err_m"] is not None]
+    worst = None if not errs else max(errs)
+    extra = 0.0 if worst is None or worst <= RANGE_ERR_MAX_M else float(worst)
+    return {
+        "where": "x=0.40 y=-1.05 yaw=0 facing wall_hall_e",
+        "range_err_max_m": RANGE_ERR_MAX_M,
+        "worst_abs_err_m": worst,
+        "latch_extra_m": extra,
+        "uses_live_cam_height_and_imu_pitch": True,
+        "standing_table_not_used": True,
+        "samples": samples,
+    }
+
+
 def _write(payload: dict[str, object]) -> None:
     SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
     SUMMARY_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -1705,6 +2352,12 @@ def main() -> int:
         raise SystemExit(f"FAIL: voice yaw cap moved to {voice.YAW_RAD_S}")
     if abs(SEARCH_YAW - 0.25) > 1e-12:
         raise SystemExit(f"FAIL: search yaw moved to {SEARCH_YAW}")
+    if abs(RANGE_ERR_MAX_M - 0.01) > 1e-12:
+        raise SystemExit(f"FAIL: range error bar moved to {RANGE_ERR_MAX_M}")
+    if _yaw_toward_u(100.0) != voice.YAW_RAD_S or _yaw_toward_u(540.0) != -voice.YAW_RAD_S:
+        raise SystemExit("FAIL: doorway pixel yaw sign moved")
+    if _yaw_toward_u(rc.WIDTH / 2.0) != 0.0:
+        raise SystemExit("FAIL: centred doorway pixel commands yaw")
     if abs(rc.V_MPS - 0.150) > 1e-12:
         raise SystemExit(f"FAIL: d_min speed bound moved to {rc.V_MPS}")
     if not SCENE_XML.is_file():
@@ -1721,7 +2374,28 @@ def main() -> int:
             flush=True,
         )
     definition = _definition()
+    probe = _range_probe()
+    latch_extra = float(probe["latch_extra_m"])
+    print(
+        f"range probe worst={probe['worst_abs_err_m']} "
+        f"latch_extra={latch_extra:.4f} bar={RANGE_ERR_MAX_M:.3f}",
+        flush=True,
+    )
+    for sample in probe["samples"]:  # type: ignore[union-attr]
+        print(
+            f"  {sample['tag']} ranged={sample['ranged_m']} "
+            f"true={sample['true_wall_gap_m']} err={sample['range_err_m']} "
+            f"cam_z={sample['cam_z_m']:.3f} "
+            f"imu_pitch={sample['imu_pitch_rad']:+.4f} "
+            f"cam_pitch={sample['cam_pitch_rad']:+.4f} "
+            f"wall={sample['true_wall']}",
+            flush=True,
+        )
     want = sys.argv[1] if len(sys.argv) > 1 else ""
+    if want == "--wall-range":
+        if _plant_md5() != before:
+            raise SystemExit("FAIL: plant file changed during the range probe")
+        return 0
     header: dict[str, object] = {
         "prefer_fail": True,
         "soft_pass": False,
@@ -1741,12 +2415,17 @@ def main() -> int:
             "room_visible_frac": ROOM_VISIBLE_FRAC,
             "ask_step_rad": ASK_STEP_RAD,
             "settle_s": SETTLE_S,
+            "door_object": room_ask.DOOR_OBJECT,
+            "approach_look_s": APPROACH_LOOK_S,
+            "range_err_max_m": RANGE_ERR_MAX_M,
             "search_yaw": SEARCH_YAW,
             "search_sweep_rad": SEARCH_SWEEP_RAD,
             "spawn_offsets_rad": list(SPAWN_OFFSETS_RAD),
         },
         "doorway_census": census,
         "shadow_patches": list(PATCHES),
+        "range_probe": probe,
+        "latch_extra_m": latch_extra,
         "rooms": [],
     }
     _write(header)
@@ -1765,7 +2444,7 @@ def main() -> int:
             for offset in SPAWN_OFFSETS_RAD:
                 row = _run_room(
                     name, phrase, offset, spec["rooms"][name], asker, ask_error,
-                    robot_bodies, float(definition["d_min_m"]),
+                    robot_bodies, float(definition["d_min_m"]), latch_extra,
                 )
                 rows.append(row)
                 spawn = row["spawn"]
@@ -1785,6 +2464,10 @@ def main() -> int:
                     f"prop_in_frame={row['prop_in_frame_at_stop']}  "
                     f"latch_pass={row['latch_pass']}  "
                     f"reached={row['reached']}  contact={row['contact']}  "
+                    f"wall_fail={row['wall_range_fail']}  "
+                    f"wall_stop_pass={row['wall_stop_pass']}  "
+                    f"latch_contact={row['latch_armed_contact']}  "
+                    f"gait_limit={row['gait_limit']}  "
                     f"peak={row['peak_nm']:+.3f} {row['peak_joint']}  "
                     f"hip_over={hip_over}  "
                     f"shadows={len(row['shadow_first_sightings'])}",
@@ -1802,12 +2485,23 @@ def main() -> int:
     reached_all = len(rows) == expected and all(row["reached"] for row in rows)
     false_any = any(row["false_stop"] for row in rows)
     wrong_any = any(row["wrong_yes"] for row in rows)
+    contact_any = any(row["latch_armed_contact"] for row in rows)
+    range_any = any(row["wall_range_fail"] for row in rows)
+    gait_any = any(row["gait_limit"] for row in rows)
     header["rooms"] = rows
     header["reached_all"] = reached_all
     header["false_stop_any"] = false_any
     header["wrong_yes_any"] = wrong_any
-    header["prefer_fail"] = (not reached_all) or false_any or wrong_any
-    header["go_anywhere"] = reached_all and not false_any and not wrong_any
+    header["latch_contact_any"] = contact_any
+    header["wall_range_fail_any"] = range_any
+    header["gait_limit_any"] = gait_any
+    header["prefer_fail"] = (
+        (not reached_all) or false_any or wrong_any or contact_any or range_any or gait_any
+    )
+    header["go_anywhere"] = (
+        reached_all and not false_any and not wrong_any
+        and not contact_any and not range_any and not gait_any
+    )
     header["kit_safe"] = False
     header["soft_pass"] = False
     _write(header)
@@ -1817,7 +2511,10 @@ def main() -> int:
     print(
         f"Prefer FAIL  soft-pass=off  reached_all={str(reached_all).lower()}  "
         f"false_stop_any={str(false_any).lower()}  "
-        f"wrong_yes_any={str(wrong_any).lower()}",
+        f"wrong_yes_any={str(wrong_any).lower()}  "
+        f"latch_contact_any={str(contact_any).lower()}  "
+        f"wall_range_fail_any={str(range_any).lower()}  "
+        f"gait_limit_any={str(gait_any).lower()}",
         flush=True,
     )
     return 1
