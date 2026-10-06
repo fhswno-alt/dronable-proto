@@ -3650,10 +3650,10 @@ def _movement_boundary(walker: object) -> bool:
     return False
 
 
-def _ramp_goal(label: str) -> tuple[float, float] | None:
+def _ramp_goal(label: str, yaw_cap: float) -> tuple[float, float] | None:
     """Gait (vx, yaw) after a boundary ramp. None keeps the bus command."""
     cap = sw.VX_FWD_CAP
-    yaw = sw.YAW_RATE_CAP
+    yaw = float(yaw_cap)
     if label in ("stand", "forward"):
         return None
     if label in ("stop", "settle"):
@@ -3669,6 +3669,7 @@ def _install_command_ramp(
     lipm: object,
     driver: sw.ScriptedDriver,
     latches: list[tuple],
+    yaw_cap: float,
 ) -> None:
     """Latch vx and yaw at OP3 movement boundaries. Do not write the stand pose.
 
@@ -3701,7 +3702,7 @@ def _install_command_ramp(
     def wrapped(vx: float, yaw_rate: float, walking: bool) -> None:
         t = float(lipm.data.time)
         label = driver.segment(t).label
-        goal = _ramp_goal(label)
+        goal = _ramp_goal(label, yaw_cap)
         if goal is None:
             state["label"] = label
             state["vx"] = float(vx)
@@ -3792,6 +3793,7 @@ def measure_pred_clip(
     segments: tuple[sw.DemoSegment, ...] | None = None,
     steer_out: dict[str, object] | None = None,
     command_ramp: bool = False,
+    yaw_cap: float = sw.YAW_RATE_CAP,
 ) -> PredScore:
     """12 mm @ 20% with an optional swing-hip predicted-force clip.
 
@@ -3915,7 +3917,7 @@ def measure_pred_clip(
     if command_ramp:
         if steer_out is None:
             raise SystemExit("command ramp needs the steer log")
-        _install_command_ramp(lipm, driver, ramp_latches)
+        _install_command_ramp(lipm, driver, ramp_latches, float(yaw_cap))
     rows: list[Tick] = []
     surface_rows: list[dict[str, object]] = []
     hx_chain = (
@@ -8337,7 +8339,7 @@ def _print_steer_tick(
     return toe
 
 
-def _steer_ramp_script() -> tuple[tuple[sw.DemoSegment, ...], float]:
+def _steer_ramp_script(yaw_cap: float = sw.YAW_RATE_CAP) -> tuple[tuple[sw.DemoSegment, ...], float]:
     """Same straight walk, then yaw on and off across two periods.
 
     The bus vel stays non-zero so the walk approach stays on. The gait
@@ -8345,7 +8347,7 @@ def _steer_ramp_script() -> tuple[tuple[sw.DemoSegment, ...], float]:
     publish forward so the bus does not snap to stand.
     """
     cap = sw.VX_FWD_CAP
-    yaw = sw.YAW_RATE_CAP
+    yaw = float(yaw_cap)
     t = 8.2
     segs = [
         sw.DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
@@ -8382,12 +8384,12 @@ def score_steer_turn() -> None:
     _score_steer(ramp=False)
 
 
-def score_steer_ramp() -> None:
+def score_steer_ramp(yaw_cap: float = sw.YAW_RATE_CAP) -> None:
     """Boundary ramp of yaw and step length. The stand pose is not written."""
-    _score_steer(ramp=True)
+    _score_steer(ramp=True, yaw_cap=float(yaw_cap))
 
 
-def _score_steer(*, ramp: bool) -> None:
+def _score_steer(*, ramp: bool, yaw_cap: float = sw.YAW_RATE_CAP) -> None:
     """Level trim plus foot-z 1.170, with ±0.25 yaw and starts/stops.
 
     Trim lead stays off. Less-crouch stays closed. The bar fails if a
@@ -8395,18 +8397,21 @@ def _score_steer(*, ramp: bool) -> None:
     a floor knee, ankle, or hip roll is over 2.33 Nm, or the unclamped
     hip-roll or knee ask on a turning step or a stop is over 2.33 Nm.
     """
-    name = "steer_ramp" if ramp else "steer_turn"
+    name = "steer_turn" if not ramp else f"steer_ramp_{int(round(yaw_cap * 100)):03d}"
     if ramp:
-        script, end = _steer_ramp_script()
+        script, end = _steer_ramp_script(yaw_cap)
         plan = (
-            "PRED steer_ramp_plan trim-lead is off. Less-crouch is not this copy. "
+            f"PRED {name}_plan trim-lead is off. Less-crouch is not this copy. "
             "Stack is the restored constant level trim plus foot-z 1.170 mm on A10+025. "
             "Hip pitch lead stays 20 ms. Roll lead stays 0. Sag cancel stays off. "
             "Period stays 0.500 s. Yaw on and off is latched at OP3 movement "
             "boundaries and spread over 2 periods (1.000 s). "
             "Stop ramps step length and yaw to 0 over those 2 periods, "
             "then settles on the zero step for 1 period. hold_stand is not called. "
-            f"Cruise yaw stays ±{sw.YAW_RATE_CAP:.2f} rad/s. "
+            f"Cruise yaw stays ±{yaw_cap:.2f} rad/s. "
+            "Vendor gait_manager publishes rot 0 on the forward demo and no yaw "
+            "column in the speed table. The phase-boundary latch is the published "
+            "smoothing. No tighter rad/s cap is in that set. "
             "Unclamped ask is kp*(q_des-q)-kv*omega."
         )
     else:
@@ -8452,6 +8457,7 @@ def _score_steer(*, ramp: bool) -> None:
         segments=script,
         steer_out=held,
         command_ramp=ramp,
+        yaw_cap=yaw_cap,
     )
     _require_plant("after", name)
     if "trimlead" in row.name:
@@ -8656,7 +8662,7 @@ def _score_steer(*, ramp: bool) -> None:
                 fails.append(
                     f"unclamped {label} {jn} {ask:+.4f} t {t:.3f}"
                 )
-    if yaw_max["yaw_left"] < 0.20 or yaw_max["yaw_right"] < 0.20:
+    if yaw_max["yaw_left"] < yaw_cap - 0.005 or yaw_max["yaw_right"] < yaw_cap - 0.005:
         fails.append(
             f"yaw short left {yaw_max['yaw_left']:.5f} right {yaw_max['yaw_right']:.5f}"
         )
