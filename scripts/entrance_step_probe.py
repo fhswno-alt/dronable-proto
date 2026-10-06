@@ -4341,6 +4341,13 @@ def _install_inflight_stop(
                 z_pin = state["z_pin"]
                 assert isinstance(z_pin, dict)
                 ep[2] = float(z_pin[side])
+            elif state.get("z_stretch_on") and side == str(state.get("swing", "")):
+                # The live write uses the softened schedule. The catch
+                # check reads the same z, so the clock cannot run a
+                # different descent than the knee is tracking.
+                z_cmd = _soft_z_at(float(walker.time))
+                if z_cmd is not None:
+                    ep[2] = float(z_cmd)
 
         if state["pin_chain"]:
             swing = str(state["swing"])
@@ -4446,7 +4453,24 @@ def _install_inflight_stop(
             "r_knee", "r_ank_pitch", "r_ank_roll",
         )
 
-    def _swing_ik_at(swing: str, gait_t: float) -> tuple[float, float, float] | None:
+    def _soft_z_at(gait_t: float) -> float | None:
+        sched = state.get("z_soft_sched")
+        if not isinstance(sched, list) or not sched:
+            return None
+        if float(gait_t) <= float(sched[0][0]):
+            return float(sched[0][1])
+        if float(gait_t) >= float(sched[-1][0]):
+            return float(sched[-1][1])
+        for a, b in zip(sched, sched[1:]):
+            if float(a[0]) <= float(gait_t) <= float(b[0]):
+                span = float(b[0]) - float(a[0])
+                u = 0.0 if span < 1e-9 else (float(gait_t) - float(a[0])) / span
+                return float(a[1]) + u * (float(b[1]) - float(a[1]))
+        return float(sched[-1][1])
+
+    def _swing_ik_at(
+        swing: str, gait_t: float, z_override: float | None = None,
+    ) -> tuple[float, float, float] | None:
         """Knee, ankle pitch, and endpoint z of the frozen swing pose at ``gait_t``.
 
         Planar x/y and the sole angles stay on the pre-stop pin. z is the
@@ -4469,6 +4493,12 @@ def _install_inflight_stop(
         ep[3] = float(pin[2])
         ep[4] = float(pin[3])
         ep[5] = float(pin[4])
+        if z_override is not None:
+            ep[2] = float(z_override)
+        elif state.get("z_soft_sched") is not None:
+            z_cmd = _soft_z_at(float(gait_t))
+            if z_cmd is not None:
+                ep[2] = float(z_cmd)
         raw = ow.ik_leg(
             walker.lengths,
             float(ep[0]), float(ep[1]), float(ep[2]),
@@ -4504,26 +4534,48 @@ def _install_inflight_stop(
                 break
             t = nxt
             guard += 1
-        knee_rate = 0.0
-        ank_rate = 0.0
-        for a, b in zip(rows, rows[1:]):
-            span = max(float(b[0]) - float(a[0]), 1e-6)
-            knee_rate = max(knee_rate, abs(float(b[1]) - float(a[1])) / span)
-            ank_rate = max(ank_rate, abs(float(b[2]) - float(a[2])) / span)
-        peak = max(knee_rate, ank_rate)
-        stretch = 1.0 if peak <= 1.90 + 1e-9 else peak / 1.90
-        state["z_stretch"] = float(stretch)
-        state["z_stretch_end"] = float(end)
-        state["z_stretch_on"] = True
-        state["z_sched_n"] = len(rows)
+        def _schedule_of(
+            samples: list[tuple[float, float, float, float]],
+        ) -> dict[str, float]:
+            knee_rate = 0.0
+            ank_rate = 0.0
+            for a, b in zip(samples, samples[1:]):
+                span = max(float(b[0]) - float(a[0]), 1e-6)
+                knee_rate = max(knee_rate, abs(float(b[1]) - float(a[1])) / span)
+                ank_rate = max(ank_rate, abs(float(b[2]) - float(a[2])) / span)
+            peak_rate = max(knee_rate, ank_rate)
+            stretch_s = 1.0 if peak_rate <= 1.90 + 1e-9 else peak_rate / 1.90
+            z_start = float(samples[0][3]) if samples else float("nan")
+            z_stop = float(samples[-1][3]) if samples else float("nan")
+            gait_at_peak = float(t0)
+            z_at_peak = z_start
+            for row in samples:
+                if float(row[3]) > z_at_peak:
+                    z_at_peak = float(row[3])
+                    gait_at_peak = float(row[0])
+            rise = z_at_peak - min(z_start, z_stop) if samples else 0.0
+            if rise < 0.002:
+                gait_land = float(t0)
+            else:
+                # Halfway down the leftover descent. A reload before that
+                # is the liftoff brush, not double support.
+                gait_land = gait_at_peak + 0.5 * (float(end) - gait_at_peak)
+            wall_s = max(0.0, gait_land - float(t0)) * stretch_s
+            return {
+                "knee_rate": knee_rate,
+                "ank_rate": ank_rate,
+                "peak": peak_rate,
+                "stretch": stretch_s,
+                "z0": z_start,
+                "zend": z_stop,
+                "peak_gait": gait_at_peak,
+                "peak_z": z_at_peak,
+                "land_gait": gait_land,
+                "wall": wall_s,
+            }
+
         z0 = float(rows[0][3]) if rows else float("nan")
         zend = float(rows[-1][3]) if rows else float("nan")
-        edge["z_stretch"] = float(stretch)
-        edge["z_peak_rate"] = float(peak)
-        edge["z_knee_rate"] = float(knee_rate)
-        edge["z_ank_rate"] = float(ank_rate)
-        edge["z_from"] = float(t0)
-        edge["z_end"] = float(end)
         pref = "l_" if swing == "L" else "r_"
         seed: dict[str, float] = {}
         pre = state.get("pre")
@@ -4535,6 +4587,95 @@ def _install_inflight_stop(
                     for suf in ("knee", "ank_pitch"):
                         if suf in side_des:
                             seed[pref + suf] = float(side_des[suf])
+        seed_knee = seed.get(pref + "knee")
+        seed_ank = seed.get(pref + "ank_pitch")
+        # The full rise needs ~0.49 s to the descent midpoint. The tip on
+        # this stop is ~0.31 s after the command. Scale the rise above the
+        # end height, largest scale first, until the stretched midpoint
+        # plus the first slew catch-up fits in that window.
+        wall_budget = 0.22
+        fit_budget = 0.27
+        scales = (1.0, 0.85, 0.70, 0.55, 0.40, 0.25)
+        chosen_rows = rows
+        chosen = _schedule_of(rows) if rows else {
+            "knee_rate": 0.0,
+            "ank_rate": 0.0,
+            "peak": 0.0,
+            "stretch": 1.0,
+            "z0": z0,
+            "zend": zend,
+            "peak_gait": float(t0),
+            "peak_z": z0,
+            "land_gait": float(t0),
+            "wall": 0.0,
+        }
+        chosen_soft = 1.0
+        chosen_catch = 0.0
+        fitted = False
+        if rows:
+            for soft in scales:
+                soft_rows: list[tuple[float, float, float, float]] = []
+                for sample_t, _knee, _ank, z in rows:
+                    z_s = float(zend) + float(soft) * (float(z) - float(zend))
+                    ik = _swing_ik_at(swing, float(sample_t), z_override=z_s)
+                    if ik is None:
+                        continue
+                    soft_rows.append((float(sample_t), float(ik[0]), float(ik[1]), float(ik[2])))
+                if len(soft_rows) < 2:
+                    continue
+                info = _schedule_of(soft_rows)
+                catch = 0.0
+                if seed_knee is not None:
+                    catch = max(catch, abs(float(soft_rows[0][1]) - float(seed_knee)) / 1.90)
+                if seed_ank is not None:
+                    catch = max(catch, abs(float(soft_rows[0][2]) - float(seed_ank)) / 1.90)
+                fits = (
+                    float(info["wall"]) <= wall_budget + 1e-9
+                    and catch + float(info["wall"]) <= fit_budget + 1e-9
+                )
+                if fits:
+                    chosen_rows = soft_rows
+                    chosen = info
+                    chosen_soft = float(soft)
+                    chosen_catch = float(catch)
+                    fitted = True
+                    break
+                chosen_rows = soft_rows
+                chosen = info
+                chosen_soft = float(soft)
+                chosen_catch = float(catch)
+        knee_rate = float(chosen["knee_rate"])
+        ank_rate = float(chosen["ank_rate"])
+        peak = float(chosen["peak"])
+        stretch = float(chosen["stretch"])
+        peak_gait = float(chosen["peak_gait"])
+        peak_z = float(chosen["peak_z"])
+        land_gait = float(chosen["land_gait"])
+        z0 = float(chosen["z0"])
+        zend = float(chosen["zend"])
+        if chosen_rows:
+            state["z_soft_sched"] = [
+                (float(row[0]), float(row[3])) for row in chosen_rows
+            ]
+        state["z_stretch"] = float(stretch)
+        state["z_stretch_end"] = float(end)
+        state["z_stretch_on"] = True
+        state["z_sched_n"] = len(chosen_rows)
+        state["z_peak_gait"] = float(peak_gait)
+        state["z_land_gait"] = float(land_gait)
+        edge["z_stretch"] = float(stretch)
+        edge["z_peak_rate"] = float(peak)
+        edge["z_knee_rate"] = float(knee_rate)
+        edge["z_ank_rate"] = float(ank_rate)
+        edge["z_from"] = float(t0)
+        edge["z_end"] = float(end)
+        edge["z_peak_gait"] = float(peak_gait)
+        edge["z_land_gait"] = float(land_gait)
+        edge["z_peak_z"] = float(peak_z)
+        edge["z_soft"] = float(chosen_soft)
+        edge["z_wall"] = float(chosen["wall"])
+        edge["z_catch"] = float(chosen_catch)
+        edge["z_fit"] = int(fitted)
         session._sag_swing_track = True  # type: ignore[attr-defined]
         session._sag_swing_joints = (pref + "knee", pref + "ank_pitch")  # type: ignore[attr-defined]
         session._sag_swing_seed = seed  # type: ignore[attr-defined]
@@ -4542,15 +4683,20 @@ def _install_inflight_stop(
         print(
             "PRED sag_stop_cap z stretch "
             f"swing {swing} factor {stretch:.3f} "
+            f"soft {chosen_soft:.2f} fit {int(fitted)} "
             f"peak_rate {peak:.3f} rad/s "
             f"knee {knee_rate:.3f} ank {ank_rate:.3f} "
             f"gait {float(t0):.3f} to {end:.3f} "
-            f"z {z0:+.5f} to {zend:+.5f} "
-            f"samples {len(rows)} "
+            f"z {z0:+.5f} peak {peak_z:+.5f} at {peak_gait:.3f} "
+            f"land_gate {land_gait:.3f} end_z {zend:+.5f} "
+            f"wall {float(chosen['wall']):.3f} s catch {chosen_catch:.3f} s "
+            f"samples {len(chosen_rows)} "
             f"open_loop {(end - float(t0)) * stretch:.3f} s. "
-            "Knee and ankle pitch slew toward that IK at or under 1.90 rad/s "
-            "and inside 2.33 Nm. The clock waits while either command is "
-            "still more than one step behind."
+            "The rise above the end height is scaled so the stretched "
+            "descent midpoint fits before the tip. Knee and ankle pitch "
+            "slew toward that IK at or under 1.90 rad/s and inside 2.33 Nm. "
+            "The clock waits while either command is still more than one "
+            "step behind."
         )
 
     def _swing_cmd(jn: str) -> float | None:
@@ -4598,7 +4744,11 @@ def _install_inflight_stop(
                 walker.time = proposed
             else:
                 state["z_wait_n"] = int(state.get("z_wait_n", 0)) + 1
+            edge["z_waits"] = int(state["z_wait_n"])
+            edge["z_gait_now"] = float(walker.time)
             return
+        edge["z_waits"] = int(state.get("z_wait_n", 0))
+        edge["z_gait_now"] = float(walker.time)
         walker.time = float(walker.time) + float(ow.OP3_CTRL_S)
         if walker.time >= float(walker.period) - 1e-12:
             walker.time = 0.0
@@ -5033,10 +5183,20 @@ def _install_inflight_stop(
                 "x/y/roll/pitch pin at this pose. z still advances. "
                 "x_move is not zeroed."
             )
+        land_gate = state.get("z_land_gait")
+        past_land = (
+            land_gate is None
+            or float(walker.time) + 1e-9 >= float(land_gate)
+        )
+        schedule_done = (
+            bool(state.get("z_stretch_on"))
+            and float(walker.time) + 1e-9 >= float(state.get("z_stretch_end", 1e9))
+        )
         if (
             state["sag_stop_cap"]
             and swing in ("L", "R")
-            and state["saw_air"]
+            and past_land
+            and (state["saw_air"] or schedule_done)
             and not state.get("touch_logged")
         ):
             load_sw = load_l if swing == "L" else load_r
@@ -5085,6 +5245,12 @@ def _install_inflight_stop(
                 real_dsp = False
             if entered_now:
                 real_dsp = False
+            # The liftoff brush reloads both feet before the descent.
+            # That is not the landing.
+            if state.get("z_stretch_on") and not past_land:
+                real_dsp = False
+            if schedule_done and both and past_land and not entered_now:
+                real_dsp = True
             if (
                 both
                 and not real_dsp
@@ -13055,8 +13221,10 @@ def score_sag_stop() -> None:
         "From the stop command the swing hip roll, hip yaw, hip pitch, and "
         "ankle roll hold the pre-stop q_des. Planar x/y and sole roll/pitch hold. "
         "The leftover swing-z is time-stretched so the knee and ankle-pitch "
-        "IK move at or under 1.90 rad/s. Those two joints slew toward that "
-        "IK inside the 2.33 Nm part cap. The clock waits while either "
+        "IK move at or under 1.90 rad/s. The rise above the end height is "
+        "scaled down when the full schedule cannot reach the descent "
+        "midpoint before the tip. Those two joints slew toward that IK "
+        "inside the 2.33 Nm part cap. The clock waits while either "
         "command is more than one step behind, so z does not run ahead. "
         "Ankle roll stays on the pin until that foot loads, then sole-flat. "
         "Stand hips start only after both feet are over 5 N, and only on "
@@ -13348,6 +13516,10 @@ def score_sag_stop() -> None:
             f"dx {float(edge.get('dx', float('nan'))):+.5f} "
             f"dknee_des {float(edge.get('ddes', float('nan'))):+.5f} "
             f"z_stretch {float(edge.get('z_stretch', float('nan'))):.3f} "
+            f"soft {float(edge.get('z_soft', float('nan'))):.2f} "
+            f"fit {int(edge.get('z_fit', 0))} "
+            f"wall {float(edge.get('z_wall', float('nan'))):.3f} "
+            f"catch {float(edge.get('z_catch', float('nan'))):.3f} "
             f"peak_rate {float(edge.get('z_peak_rate', float('nan'))):.3f} "
             f"knee_rate {float(edge.get('z_knee_rate', float('nan'))):.3f} "
             f"ank_rate {float(edge.get('z_ank_rate', float('nan'))):.3f} "
