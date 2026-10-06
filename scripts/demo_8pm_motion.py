@@ -29,6 +29,8 @@ applied_yaw and the step angle already 0, so they cancel. Straight
 vel(+0.150, 0) already curves +4.2° over 27–33 s and +3.5° over
 28.5–34.5 s. Stop snaps yaw to 0 in one tick; after a right turn the
 heading kick runs about +11° to −10° across 0.37 s of step phase.
+Five cold straight walks net +0.50° over 30 s and always swing the
+left foot first. The +4° slices are that rock, not a steady left bias.
 
 A second clip is a short reverse (stand → vel(-vx_back, 0) for 5.5 s →
 stop). It is not chained onto the turn. If that snippet tips, the JSON

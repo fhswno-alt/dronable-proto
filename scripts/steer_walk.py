@@ -142,6 +142,16 @@ vel(+0.150, 0) already curves +4.2° over 27–33 s and +3.5° over
 follows the yaw sign and the shift stays +|a|. Steady rates are +0.217
 and −0.233 rad/s. Stop snaps yaw to 0 in one tick; after a right turn
 the heading kick runs about +11° to −10° across 0.37 s of step phase.
+
+Five cold starts of 1 s stand then 30 s vel(+0.150, 0) match (std 0).
+Every one starts in double support at gait time 0 and the first swing
+foot is the left foot: stand resets the step clock, and the cycle
+swings left first. Δyaw is −1.46° at 6 s, +1.39° at 15 s, +0.50° at
+30 s. Mean body yaw rate is +0.0003 rad/s. Two-second slices rock
+about −2.9° to +1.9°. The +3° to +4° windows are that rock, not a
+steady left bias. An extra 0.25 s of stand does not change the lead
+foot. Starting the clock half a period later (probe only) swings the
+right foot first and the 30 s net is −2.55°.
 """
 from __future__ import annotations
 

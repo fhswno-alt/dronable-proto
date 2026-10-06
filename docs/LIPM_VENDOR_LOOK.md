@@ -1390,3 +1390,17 @@ probe still reads +11.3° versus −0.4°. Stop snaps yaw to 0 in one
 tick, and the heading kick follows the step phase: after a right turn
 it runs about +11° to −10° across 0.37 s of phase.
 
+Straight walk, five cold starts, same plant. Each trial is 1 s stand,
+then `vel(+0.150, 0)` for 30 s, then stop. The five trajectories match
+(std 0). Every one starts in double support at gait time 0, both feet
+loaded (7.1 N / 7.1 N), and the first swing foot is the left foot.
+Stand resets the step clock, and this cycle swings left first. From
+the first move tick, Δyaw is −1.46° at 6 s (0/5 left), +1.39° at 15 s
+(5/5), and +0.50° at 30 s (5/5). Mean body yaw rate is +0.0003 rad/s.
+Two-second slices rock from about −2.9° to +1.9°. The +3° to +4°
+straight windows above are that rock, not a steady left bias. An extra
+0.25 s of stand leaves the lead foot on the left and Δyaw at 30 s
++0.51°. Starting the clock half a period later, probe only, swings the
+right foot first and the 30 s net is −2.55°. A pelvis-0 probe still
+nets +0.22° at 30 s with the left foot leading. Soft-pass is off.
+
