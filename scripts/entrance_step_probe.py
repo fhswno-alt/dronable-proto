@@ -45,11 +45,14 @@ KNEE_NM = 2.33
 PLANT_NM = 2.45
 KNEE_KP = 45.0
 TOE_BAR_M = 0.002
-# Swing ankle-roll trim cap. This is not a world-level sole and not body roll.
+# Swing ankle trim cap. This is not a world-level sole and not body roll.
 ANK_TRIM_CAP = 0.025
 # "About 0.6 mm" for the centre minus front-outside drop. Outside this, no trim.
 SOLE_FO_LO_MM = 0.50
 SOLE_FO_HI_MM = 0.70
+# Hardware: pitch axis ~11 mm behind the box centre, roll axis ~14 mm inboard.
+PITCH_AXIS_MM = 11.0
+ROLL_AXIS_MM = 14.0
 # Track 1 torques are the flat-floor window. The rug-window knee at
 # 7.232 s is Track 2 and does not fail this bar.
 T_TRACK1 = 7.0
@@ -1016,27 +1019,44 @@ def _install_swing_ank_roll_trim(
     session: sw.SteerSession,
     add_l: float,
     add_r: float,
+    pitch_l: float = 0.0,
+    pitch_r: float = 0.0,
 ) -> None:
-    """Add a constant to the swing ankle-roll ctrl. Stance is not rewritten.
+    """Add a constant to the swing ankle ctrl. Stance is not rewritten.
 
-    The add is the leftover sole roll at the first scored tick, in joint
-    radians, capped at ±0.025. It is not a world-level sole and it does
-    not cancel body roll. Left and right are whatever the sign check passed.
+    Roll and pitch adds are the leftover sole at the first scored tick,
+    in joint radians, each capped at ±0.025. Pitch stays 0 on a roll-only
+    copy. This is not a world-level sole and it does not cancel body roll.
     """
     if abs(add_l) > ANK_TRIM_CAP + 1e-12 or abs(add_r) > ANK_TRIM_CAP + 1e-12:
         raise SystemExit(
             f"ankle-roll trim L {add_l} R {add_r} exceeds ±{ANK_TRIM_CAP:.3f}"
         )
-    print(
-        f"PRED ank_roll_trim L {add_l:+.5f} rad R {add_r:+.5f} rad "
-        f"cap ±{ANK_TRIM_CAP:.3f} rad. Swing ankle roll only. "
-        "Not a world-level sole. Stance ankle roll is not rewritten. "
-        "Body roll is not cancelled by this add."
-    )
+    if abs(pitch_l) > ANK_TRIM_CAP + 1e-12 or abs(pitch_r) > ANK_TRIM_CAP + 1e-12:
+        raise SystemExit(
+            f"ankle-pitch trim L {pitch_l} R {pitch_r} exceeds ±{ANK_TRIM_CAP:.3f}"
+        )
+    pitch_on = abs(pitch_l) > 1e-12 or abs(pitch_r) > 1e-12
+    if pitch_on:
+        print(
+            f"PRED level_trim roll L {add_l:+.5f} R {add_r:+.5f} "
+            f"pitch L {pitch_l:+.5f} R {pitch_r:+.5f} rad "
+            f"cap ±{ANK_TRIM_CAP:.3f} rad each. Swing ankle only. "
+            "Leftover sole, not body roll. Not a world-level sole. "
+            "Stance ankles are not rewritten."
+        )
+    else:
+        print(
+            f"PRED ank_roll_trim L {add_l:+.5f} rad R {add_r:+.5f} rad "
+            f"cap ±{ANK_TRIM_CAP:.3f} rad. Swing ankle roll only. "
+            "Not a world-level sole. Stance ankle roll is not rewritten. "
+            "Body roll is not cancelled by this add."
+        )
     lipm = session.lipm
     if lipm is None or lipm.op3 is None:
         raise RuntimeError("gait manager walker missing")
-    adds = {"L": float(add_l), "R": float(add_r)}
+    roll_adds = {"L": float(add_l), "R": float(add_r)}
+    pitch_adds = {"L": float(pitch_l), "R": float(pitch_r)}
     orig = lipm._tick_gait_manager
 
     def wrapped(walking: bool) -> None:
@@ -1046,12 +1066,16 @@ def _install_swing_ank_roll_trim(
         swing = lipm._gm_swing
         if swing not in ("L", "R"):
             return
-        delta = adds[swing]
-        if abs(delta) <= 1e-12:
-            return
-        act = ("l_" if swing == "L" else "r_") + "ank_roll_pos"
-        idx = session.act_idx[act]
-        session.data.ctrl[idx] = float(session.data.ctrl[idx]) + delta
+        delta = roll_adds[swing]
+        if abs(delta) > 1e-12:
+            act = ("l_" if swing == "L" else "r_") + "ank_roll_pos"
+            idx = session.act_idx[act]
+            session.data.ctrl[idx] = float(session.data.ctrl[idx]) + delta
+        pdelta = pitch_adds[swing]
+        if abs(pdelta) > 1e-12:
+            act = ("l_" if swing == "L" else "r_") + "ank_pitch_pos"
+            idx = session.act_idx[act]
+            session.data.ctrl[idx] = float(session.data.ctrl[idx]) + pdelta
 
     lipm._tick_gait_manager = wrapped  # type: ignore[method-assign]
 
@@ -3520,6 +3544,8 @@ def measure_pred_clip(
     sole_corner_log: bool = False,
     ank_trim_l: float = 0.0,
     ank_trim_r: float = 0.0,
+    ank_pitch_trim_l: float = 0.0,
+    ank_pitch_trim_r: float = 0.0,
     ank_log: bool = False,
 ) -> PredScore:
     """12 mm @ 20% with an optional swing-hip predicted-force clip.
@@ -3552,8 +3578,20 @@ def measure_pred_clip(
         raise SystemExit(
             f"ankle-roll trim L {ank_trim_l} R {ank_trim_r} exceeds ±{ANK_TRIM_CAP:.3f}"
         )
-    if world_level and (abs(ank_trim_l) > 1e-12 or abs(ank_trim_r) > 1e-12):
-        raise SystemExit("ankle-roll trim is not a world-level sole")
+    if (
+        abs(ank_pitch_trim_l) > ANK_TRIM_CAP + 1e-12
+        or abs(ank_pitch_trim_r) > ANK_TRIM_CAP + 1e-12
+    ):
+        raise SystemExit(
+            f"ankle-pitch trim L {ank_pitch_trim_l} R {ank_pitch_trim_r} "
+            f"exceeds ±{ANK_TRIM_CAP:.3f}"
+        )
+    trim_on = (
+        abs(ank_trim_l) > 1e-12 or abs(ank_trim_r) > 1e-12
+        or abs(ank_pitch_trim_l) > 1e-12 or abs(ank_pitch_trim_r) > 1e-12
+    )
+    if world_level and trim_on:
+        raise SystemExit("ankle trim is not a world-level sole")
     cfg = sw.locked_kit_config()
     if move_s is not None:
         cfg = replace(cfg, gm_move_s=float(move_s))
@@ -3603,8 +3641,13 @@ def measure_pred_clip(
         _install_swing_knee_lead(session, knee_lead_s)
     if sag_cancel:
         _install_stance_knee_sag(session)
-    if abs(ank_trim_l) > 1e-12 or abs(ank_trim_r) > 1e-12:
-        _install_swing_ank_roll_trim(session, ank_trim_l, ank_trim_r)
+    if (
+        abs(ank_trim_l) > 1e-12 or abs(ank_trim_r) > 1e-12
+        or abs(ank_pitch_trim_l) > 1e-12 or abs(ank_pitch_trim_r) > 1e-12
+    ):
+        _install_swing_ank_roll_trim(
+            session, ank_trim_l, ank_trim_r, ank_pitch_trim_l, ank_pitch_trim_r,
+        )
     lipm = session.lipm
     if lipm is None or lipm.op3 is None:
         raise RuntimeError("gait manager walker missing")
@@ -3924,6 +3967,7 @@ def measure_pred_clip(
         or z_profile != "phase" or knee_lead_s > 0.0 or toe_up_shape != "sine"
         or yswap_lead_s > 0.0 or abs(toe_full_frac - 0.15) > 1e-9
         or abs(ank_trim_l) > 1e-12 or abs(ank_trim_r) > 1e-12
+        or abs(ank_pitch_trim_l) > 1e-12 or abs(ank_pitch_trim_r) > 1e-12
     ):
         parts = ["clip" if clip else "base"]
         parts.append("pitchoff" if pitch_move_off else f"move{used_move * 1000:.0f}")
@@ -3967,7 +4011,9 @@ def measure_pred_clip(
             parts.append("sag")
         if yswap_lead_s > 0.0:
             parts.append(f"yswap{yswap_lead_s * 1000:.0f}ms")
-        if abs(ank_trim_l) > 1e-12 or abs(ank_trim_r) > 1e-12:
+        if abs(ank_pitch_trim_l) > 1e-12 or abs(ank_pitch_trim_r) > 1e-12:
+            parts.append("leveltrim")
+        elif abs(ank_trim_l) > 1e-12 or abs(ank_trim_r) > 1e-12:
             parts.append("anktrim")
         name = "_".join(parts)
     else:
@@ -6067,7 +6113,7 @@ _CORNER_ORDER = ("front-outside", "front-inside", "heel-outside", "heel-inside")
 
 
 def _sole_tick_capture(session: sw.SteerSession, side: str) -> dict[str, object]:
-    """Corners, sole roll, ankle-roll ctrl, and the pose at this swing tick."""
+    """Corners, sole roll and pitch, ankle ctrl, and the pose at this swing tick."""
     corners = _box_corner_table(session, side)
     roll, drop, half, inside = _sole_roll(session, side)
     center_z = float(sum(z for _label, z, _off in corners) / len(corners))
@@ -6076,9 +6122,10 @@ def _sole_tick_capture(session: sw.SteerSession, side: str) -> dict[str, object]
     fo = next((float(z) for label, z, _off in corners if label == "front-outside"), None)
     if fo is None:
         raise SystemExit("front-outside corner missing")
-    act = ("l_" if side == "L" else "r_") + "ank_roll_pos"
+    pref = "l_" if side == "L" else "r_"
     return {
         "roll": float(roll),
+        "pitch": float(_sole_pitch(session, side)),
         "inside_drop": float(drop),
         "inside": inside,
         "half": float(half),
@@ -6090,7 +6137,8 @@ def _sole_tick_capture(session: sw.SteerSession, side: str) -> dict[str, object]
         "low_z": float(lowest[1]),
         "front_outside_z": float(fo),
         "drop_fo_m": center_z - float(fo),
-        "ank_ctrl": float(session.data.ctrl[session.act_idx[act]]),
+        "ank_ctrl": float(session.data.ctrl[session.act_idx[pref + "ank_roll_pos"]]),
+        "ank_pitch_ctrl": float(session.data.ctrl[session.act_idx[pref + "ank_pitch_pos"]]),
         "qpos": np.array(session.data.qpos, dtype=np.float64, copy=True),
     }
 
@@ -6102,13 +6150,15 @@ def _emit_sole_208(name: str, tag: str, pack: dict[str, object]) -> None:
         f"PRED {name} {tag} side {pack['side']} t {float(pack['t']):.3f} "
         f"frac {float(pack['frac']):.3f} "
         f"sole_roll {float(pack['roll']):+.5f} rad "
+        f"sole_pitch {float(pack['pitch']):+.5f} rad "
         f"inside {pack['inside']} "
         f"inside_drop {float(pack['inside_drop']) * 1000:+.3f} mm "
         f"centre {centre * 1000:+.3f} mm "
         f"tick_toe {float(pack['toe_z']) * 1000:+.3f} mm "
         f"swing_min_toe {float(pack['swing_min_toe']) * 1000:+.3f} mm "
         f"swing_min_frac {float(pack['swing_min_frac']):.3f} "
-        f"ank_ctrl {float(pack['ank_ctrl']):+.5f} rad"
+        f"ank_ctrl {float(pack['ank_ctrl']):+.5f} rad "
+        f"ank_pitch_ctrl {float(pack['ank_pitch_ctrl']):+.5f} rad"
     )
     for label in _CORNER_ORDER:
         z, off = corners[label]
@@ -6200,6 +6250,7 @@ def _print_sole_208(
             "swing_min_toe": float(worst[1].toe_z or 0.0),
             "swing_min_frac": float(worst[0]),
             "roll": float(sole["roll"]),
+            "pitch": float(sole["pitch"]),
             "inside_drop": float(sole["inside_drop"]),
             "inside": str(sole["inside"]),
             "center_z": float(sole["center_z"]),
@@ -6209,6 +6260,7 @@ def _print_sole_208(
             "front_outside_z": float(sole["front_outside_z"]),
             "drop_fo_m": float(sole["drop_fo_m"]),
             "ank_ctrl": float(sole["ank_ctrl"]),
+            "ank_pitch_ctrl": float(sole["ank_pitch_ctrl"]),
             "qpos": sole["qpos"],
             "is_worst": 0,
         }
@@ -6456,9 +6508,9 @@ def _match_mirror(
     return out
 
 
-def _require_plant(tag: str) -> None:
+def _require_plant(tag: str, label: str = "sole_level") -> None:
     digest = sw._md5(sw.PLANT_XML)
-    print(f"PRED sole_level plant_md5 {digest} {tag}")
+    print(f"PRED {label} plant_md5 {digest} {tag}")
     if digest != sw.PLANT_MD5:
         raise SystemExit(f"plant md5 {digest} != {sw.PLANT_MD5}")
 
@@ -6668,6 +6720,603 @@ def score_sole_level() -> None:
         f"measure_feet {_roll_bits(measured)}. "
         f"trim_feet {_roll_bits(trimmed)}. "
         "Less-crouch was not run. A10+030 was not run. y_swap was not re-run. "
+        "Pitch lead stays 20 ms. Period stays 0.500 s. "
+        "Not kit-safe. Not go-anywhere."
+    )
+
+
+def _ank_pitch_adr(model: mj.MjModel, side: str) -> int:
+    jn = ("l_" if side == "L" else "r_") + "ank_pitch"
+    jid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, jn)
+    if jid < 0:
+        raise SystemExit(f"missing joint {jn}")
+    return int(model.jnt_qposadr[jid])
+
+
+def _expect_rise_mm(pitch: float, roll: float) -> float:
+    """11 mm times toe-down pitch plus 14 mm times |roll|. An expectation."""
+    return PITCH_AXIS_MM * max(float(pitch), 0.0) + ROLL_AXIS_MM * abs(float(roll))
+
+
+def _pose_level(
+    model: mj.MjModel,
+    data: mj.MjData,
+    view: SimpleNamespace,
+    qpos: np.ndarray,
+    roll_adr: int,
+    pitch_adr: int,
+    side: str,
+    roll_add: float,
+    pitch_add: float,
+) -> dict[str, object]:
+    data.qpos[:] = qpos
+    data.qvel[:] = 0.0
+    data.qpos[roll_adr] = float(qpos[roll_adr]) + float(roll_add)
+    data.qpos[pitch_adr] = float(qpos[pitch_adr]) + float(pitch_add)
+    mj.mj_forward(model, data)
+    roll, inside_drop, _half, inside = _sole_roll(view, side)
+    corners = tuple(
+        (str(label), float(z), float(off))
+        for label, z, off in _box_corner_table(view, side)
+    )
+    centre = float(sum(z for _label, z, _off in corners) / len(corners))
+    fo = next(z for label, z, _off in corners if label == "front-outside")
+    front = [z for label, z, _off in corners if str(label).startswith("front")]
+    scored = max(corners, key=lambda row: row[2])
+    return {
+        "roll": float(roll),
+        "pitch": float(_sole_pitch(view, side)),
+        "inside_drop": float(inside_drop),
+        "inside": inside,
+        "center_z": centre,
+        "front_z": float(sum(front) / len(front)),
+        "front_outside_z": float(fo),
+        "drop_fo_m": centre - float(fo),
+        "corners": corners,
+        "scored_label": str(scored[0]),
+    }
+
+
+def _level_ok(base: dict[str, object], after: dict[str, object]) -> bool:
+    """Leftover sole only. A sign error that doubles the drop does not pass.
+
+    |roll| and |pitch| must not rise. A high inside edge must not go higher.
+    Toe-down pitch must not lower the front. A low front-outside corner
+    must not drop further.
+    """
+    if abs(float(after["roll"])) > abs(float(base["roll"])) + 2e-4:
+        return False
+    if abs(float(after["pitch"])) > abs(float(base["pitch"])) + 2e-4:
+        return False
+    if (
+        float(base["inside_drop"]) < 0.0
+        and float(after["inside_drop"]) < float(base["inside_drop"]) - 5e-5
+    ):
+        return False
+    if (
+        float(base["pitch"]) > 1e-4
+        and float(after["front_z"]) < float(base["front_z"]) - 5e-5
+    ):
+        return False
+    if (
+        float(base["drop_fo_m"]) > 0.0
+        and float(after["drop_fo_m"]) > float(base["drop_fo_m"]) + 5e-5
+    ):
+        return False
+    return True
+
+
+def _print_level_corners(tag: str, side: str, phase: str, pack: dict[str, object]) -> None:
+    corners = _corner_map(pack["corners"])
+    centre = float(pack["center_z"])
+    for label in _CORNER_ORDER:
+        z, off = corners[label]
+        print(
+            f"PRED level_sign {tag} corner {side} {phase} {label} "
+            f"z {z * 1000:+.3f} mm "
+            f"centre_minus_corner {(centre - z) * 1000:+.3f} mm "
+            f"forward {off * 1000:.1f} mm "
+            f"scored {int(label == pack.get('scored_label', ''))}"
+        )
+
+
+def _print_level_sign(
+    tag: str,
+    side: str,
+    t: float,
+    bout_roll: float,
+    bout_pitch: float,
+    base: dict[str, object],
+    after: dict[str, object],
+    droll: float,
+    dpitch: float,
+    raw_roll: float,
+    raw_pitch: float,
+    add_roll: float,
+    add_pitch: float,
+    flip_roll: int,
+    flip_pitch: int,
+    ank_roll: float,
+    ank_pitch: float,
+) -> None:
+    expect = _expect_rise_mm(bout_pitch, bout_roll)
+    rise = (float(after["center_z"]) - float(base["center_z"])) * 1000.0
+    print(
+        f"PRED level_sign {tag} side {side} t {t:.3f} "
+        f"bout_roll {bout_roll:+.5f} replay_roll {float(base['roll']):+.5f} "
+        f"bout_pitch {bout_pitch:+.5f} replay_pitch {float(base['pitch']):+.5f} rad "
+        f"roll_mismatch {abs(float(base['roll']) - bout_roll):.5f} "
+        f"pitch_mismatch {abs(float(base['pitch']) - bout_pitch):.5f} rad "
+        f"droll {droll:+.5f} dpitch {dpitch:+.5f} "
+        f"raw_roll {raw_roll:+.5f} raw_pitch {raw_pitch:+.5f} "
+        f"add_roll {add_roll:+.5f} add_pitch {add_pitch:+.5f} rad "
+        f"flip_roll {flip_roll} flip_pitch {flip_pitch} cap {ANK_TRIM_CAP:.3f} "
+        f"roll_after {float(after['roll']):+.5f} pitch_after {float(after['pitch']):+.5f} rad "
+        f"inside {base['inside']} "
+        f"inside_drop {float(base['inside_drop']) * 1000:+.3f} "
+        f"to {float(after['inside_drop']) * 1000:+.3f} mm "
+        f"inside_lowered {int(float(after['inside_drop']) > float(base['inside_drop']) + 1e-6)} "
+        f"centre {float(base['center_z']) * 1000:+.3f} "
+        f"to {float(after['center_z']) * 1000:+.3f} mm "
+        f"centre_rise {rise:+.3f} mm expect_centre_rise {expect:+.3f} mm "
+        f"lever_mm {PITCH_AXIS_MM:.0f} {ROLL_AXIS_MM:.0f} "
+        f"front {float(base['front_z']) * 1000:+.3f} "
+        f"to {float(after['front_z']) * 1000:+.3f} mm "
+        f"centre_minus_front_outside {float(base['drop_fo_m']) * 1000:+.3f} "
+        f"to {float(after['drop_fo_m']) * 1000:+.3f} mm "
+        f"ank_roll_ctrl {ank_roll:+.5f} target {ank_roll + add_roll:+.5f} "
+        f"ank_pitch_ctrl {ank_pitch:+.5f} target {ank_pitch + add_pitch:+.5f} "
+        "not_world_level 1 leftover_sole 1"
+    )
+    _print_level_corners(tag, side, "before", base)
+    _print_level_corners(tag, side, "after", after)
+
+
+def _choose_level_add(
+    model: mj.MjModel,
+    data: mj.MjData,
+    view: SimpleNamespace,
+    tick: dict[str, object],
+) -> dict[str, object] | None:
+    """Joint adds that cancel leftover sole roll and sole pitch together."""
+    side = str(tick["side"])
+    qpos = np.asarray(tick["qpos"], dtype=np.float64)
+    roll_adr = _ank_roll_adr(model, side)
+    pitch_adr = _ank_pitch_adr(model, side)
+    base = _pose_level(model, data, view, qpos, roll_adr, pitch_adr, side, 0.0, 0.0)
+    nudged_r = _pose_level(model, data, view, qpos, roll_adr, pitch_adr, side, 0.01, 0.0)
+    nudged_p = _pose_level(model, data, view, qpos, roll_adr, pitch_adr, side, 0.0, 0.01)
+    droll = (float(nudged_r["roll"]) - float(base["roll"])) / 0.01
+    dpitch = (float(nudged_p["pitch"]) - float(base["pitch"])) / 0.01
+    bout_roll = float(tick["roll"])
+    bout_pitch = float(tick["pitch"])
+    ank_roll = float(tick["ank_ctrl"])
+    ank_pitch = float(tick["ank_pitch_ctrl"])
+    roll_mis = abs(float(base["roll"]) - bout_roll)
+    pitch_mis = abs(float(base["pitch"]) - bout_pitch)
+    if roll_mis > 5e-3 or pitch_mis > 5e-3:
+        print(
+            f"PRED level_sign side {side} replay_mismatch "
+            f"roll {roll_mis:.5f} pitch {pitch_mis:.5f} rad exceeds 0.005. "
+            "Trim copy was not run."
+        )
+        return None
+    if abs(droll) < 1e-4 or abs(dpitch) < 1e-4:
+        print(
+            f"PRED level_sign side {side} droll {droll:+.5f} dpitch {dpitch:+.5f} "
+            "does not move the sole. Trim copy was not run."
+        )
+        return None
+    raw_roll = -float(base["roll"]) / droll
+    raw_pitch = -float(base["pitch"]) / dpitch
+    add_roll = _clip_trim(raw_roll)
+    add_pitch = _clip_trim(raw_pitch)
+    trials = (
+        (0, 0, add_roll, add_pitch),
+        (1, 0, _clip_trim(-add_roll), add_pitch),
+        (0, 1, add_roll, _clip_trim(-add_pitch)),
+        (1, 1, _clip_trim(-add_roll), _clip_trim(-add_pitch)),
+    )
+    seen: set[tuple[float, float]] = set()
+    last: tuple[int, int, float, float, dict[str, object]] | None = None
+    for flip_roll, flip_pitch, trial_roll, trial_pitch in trials:
+        key = (round(trial_roll, 8), round(trial_pitch, 8))
+        if key in seen:
+            continue
+        seen.add(key)
+        after = _pose_level(
+            model, data, view, qpos, roll_adr, pitch_adr, side, trial_roll, trial_pitch,
+        )
+        last = (flip_roll, flip_pitch, trial_roll, trial_pitch, after)
+        if not _level_ok(base, after):
+            continue
+        _print_level_sign(
+            "tick", side, float(tick["t"]), bout_roll, bout_pitch, base, after,
+            droll, dpitch, raw_roll, raw_pitch, trial_roll, trial_pitch,
+            flip_roll, flip_pitch, ank_roll, ank_pitch,
+        )
+        return {
+            "side": side,
+            "t": float(tick["t"]),
+            "bout_roll": bout_roll,
+            "bout_pitch": bout_pitch,
+            "ank_ctrl": ank_roll,
+            "ank_pitch_ctrl": ank_pitch,
+            "qpos": qpos,
+            "roll_adr": roll_adr,
+            "pitch_adr": pitch_adr,
+            "base": base,
+            "after": after,
+            "droll": droll,
+            "dpitch": dpitch,
+            "raw_roll": raw_roll,
+            "raw_pitch": raw_pitch,
+            "add_roll": trial_roll,
+            "add_pitch": trial_pitch,
+            "flip_roll": flip_roll,
+            "flip_pitch": flip_pitch,
+        }
+    print(
+        f"PRED level_sign side {side} no sign lowers the inside edge "
+        "and raises a toe-down front without growing |sole roll| or |sole pitch|. "
+        "Trim copy was not run."
+    )
+    if last is not None:
+        flip_roll, flip_pitch, trial_roll, trial_pitch, after = last
+        _print_level_sign(
+            "reject", side, float(tick["t"]), bout_roll, bout_pitch, base, after,
+            droll, dpitch, raw_roll, raw_pitch, trial_roll, trial_pitch,
+            flip_roll, flip_pitch, ank_roll, ank_pitch,
+        )
+    return None
+
+
+def _match_level_mirror(
+    model: mj.MjModel,
+    data: mj.MjData,
+    view: SimpleNamespace,
+    chosen: dict[str, dict[str, object]],
+    worst_side: str,
+) -> dict[str, dict[str, float]]:
+    """Match ankle-roll magnitudes. Pitch adds stay per foot."""
+    left = float(chosen["L"]["add_roll"])
+    right = float(chosen["R"]["add_roll"])
+    pitches = {side: float(chosen[side]["add_pitch"]) for side in ("L", "R")}
+    if left * right >= 0.0:
+        print(
+            f"PRED level_sign pair_mirror 0 L {left:+.5f} R {right:+.5f}. "
+            "A mirrored roll sign raises |sole roll| on one foot. "
+            "Roll adds stay the probed signs. Pitch adds stay per foot."
+        )
+        return {
+            side: {"roll": float(chosen[side]["add_roll"]), "pitch": pitches[side]}
+            for side in ("L", "R")
+        }
+    mag = abs(float(chosen[worst_side]["add_roll"]))
+    out_roll: dict[str, float] = {}
+    for side in ("L", "R"):
+        own = float(chosen[side]["add_roll"])
+        trial = _clip_trim(math.copysign(mag, own))
+        if abs(trial - own) <= 1e-9:
+            out_roll[side] = own
+            continue
+        qpos = np.asarray(chosen[side]["qpos"], dtype=np.float64)
+        after = _pose_level(
+            model, data, view, qpos,
+            int(chosen[side]["roll_adr"]), int(chosen[side]["pitch_adr"]),
+            side, trial, pitches[side],
+        )
+        base = chosen[side]["base"]
+        if not isinstance(base, dict) or not _level_ok(base, after):
+            out_roll[side] = own
+            print(
+                f"PRED level_sign pair_mag_keep side {side} "
+                f"trial {trial:+.5f} own {own:+.5f}. "
+                "Matching the worst-foot roll magnitude raises |sole roll| "
+                "or the front-outside drop. Pitch add stays on this foot."
+            )
+            continue
+        out_roll[side] = trial
+        _print_level_sign(
+            "mirror", side, float(chosen[side]["t"]),
+            float(chosen[side]["bout_roll"]), float(chosen[side]["bout_pitch"]),
+            base, after, float(chosen[side]["droll"]), float(chosen[side]["dpitch"]),
+            float(chosen[side]["raw_roll"]), float(chosen[side]["raw_pitch"]),
+            trial, pitches[side], int(chosen[side]["flip_roll"]),
+            int(chosen[side]["flip_pitch"]), float(chosen[side]["ank_ctrl"]),
+            float(chosen[side]["ank_pitch_ctrl"]),
+        )
+    matched = int(abs(abs(out_roll["L"]) - abs(out_roll["R"])) <= 1e-9)
+    print(
+        f"PRED level_sign pair_mirror 1 mag {mag:.5f} "
+        f"L {out_roll['L']:+.5f} R {out_roll['R']:+.5f} "
+        f"magnitudes_matched {matched} worst_side {worst_side} "
+        f"pitch L {pitches['L']:+.5f} R {pitches['R']:+.5f}"
+    )
+    return {
+        side: {"roll": out_roll[side], "pitch": pitches[side]}
+        for side in ("L", "R")
+    }
+
+
+def _level_trim_copy(
+    ank_trim_l: float = 0.0,
+    ank_trim_r: float = 0.0,
+    ank_pitch_trim_l: float = 0.0,
+    ank_pitch_trim_r: float = 0.0,
+    z_extra_m: float = 0.0,
+) -> PredScore:
+    """A10+025 plus an optional leftover-sole trim and an optional foot-z."""
+    return measure_pred_clip(
+        clip=True,
+        move_s=None,
+        pitch_move_off=True,
+        toe_up_rad=0.025,
+        toe_up_shape="front",
+        toe_full_frac=0.10,
+        hip_lead=True,
+        lead_roll_scale=0.0,
+        lead_pitch_scale=_pitch_lead_scale(20.0),
+        whole_toe=True,
+        surface_tag=True,
+        ka_log=True,
+        sag_cancel=False,
+        z_profile="phase",
+        sole_corner_log=True,
+        ank_trim_l=ank_trim_l,
+        ank_trim_r=ank_trim_r,
+        ank_pitch_trim_l=ank_pitch_trim_l,
+        ank_pitch_trim_r=ank_pitch_trim_r,
+        ank_log=True,
+        z_extra_m=z_extra_m,
+    )
+
+
+def _knee_over(row: PredScore) -> str:
+    hits = [
+        part.strip()
+        for part in row.flat_hx_over.split(",")
+        if "knee" in part
+    ]
+    return ", ".join(hits)
+
+
+def _bar_clear(row: PredScore) -> bool:
+    return row.flat_toe_mm >= 2.0 and row.flat_hx_over == "" and row.ank_hx_over == ""
+
+
+def _geom_bits(tick: dict[str, object]) -> str:
+    return (
+        f"sole_roll {float(tick['roll']):+.5f} rad "
+        f"sole_pitch {float(tick['pitch']):+.5f} rad "
+        f"centre {float(tick['center_z']) * 1000:+.3f} mm "
+        f"scored {tick['scored_label']} lowest {tick['low_label']} "
+        f"centre_minus_front_outside {float(tick['drop_fo_m']) * 1000:+.3f} mm "
+        f"t {float(tick['t']):.3f}"
+    )
+
+
+def score_level_trim() -> None:
+    """Swing-only leftover sole roll and pitch on A10+025, then sized foot-z.
+
+    The 0.6 mm roll-only gate is not this copy. Foot-z is the trim bout's
+    shortfall to +2 mm. A floor knee over 2.33 stops the batch. Less-crouch
+    is named and not implemented.
+    """
+    print(
+        "PRED level_trim_plan A10+030 was not run. A05+025 was not run. "
+        "A00+025 was not run. y_swap was not re-run. "
+        "The roll-only 0.6 mm trim was not re-run and its gate was not loosened. "
+        "Sag cancel stays off. Less-crouch is not this copy. "
+        "Base is A10+025: toe-up 0.025 rad full by 10%, held through 80%, "
+        "20 ms pitch lead, roll lead 0, period 0.500 s, swing-hip clip, "
+        "hip pitch off the 20 ms approach. "
+        "Step 1 adds leftover sole roll and leftover sole pitch on the swing "
+        f"ankle, each capped at ±{ANK_TRIM_CAP:.3f} rad. Not a world-level sole. "
+        "Body roll is not the ankle target. "
+        f"Pitch axis {PITCH_AXIS_MM:.0f} mm behind the box centre. "
+        f"Roll axis {ROLL_AXIS_MM:.0f} mm inboard of the box. "
+        "The centre-rise expectation is those levers times the trimmed angles. "
+        "The measured centre rise is the result. "
+        "One kinematic tick per foot is printed before the trim sweep. "
+        "Step 2 sizes foot-z from the trim bout's shortfall to +2 mm. "
+        "The old +0.4 mm add is not carried in."
+    )
+    _require_plant("before", "level_trim")
+    measured = _level_trim_copy()
+    _require_plant("after_measure", "level_trim")
+    tick = _worst_tick(measured)
+    print(
+        f"PRED level_trim measure {measured.name} "
+        f"flat_worst {measured.flat_toe_mm:+.3f} mm "
+        f"t {measured.flat_toe_t:.3f} side {measured.flat_toe_side} "
+        f"flat_hx {measured.flat_hx_over or 'under'} "
+        f"ank_hx {measured.ank_hx_over or 'under'} "
+        f"{_geom_bits(tick)}"
+    )
+    model = mj.MjModel.from_xml_path(SCENE)
+    data = mj.MjData(model)
+    view = _sole_view(model, data)
+    print("PRED level_trim sign_ticks_before_trim 1")
+    chosen: dict[str, dict[str, object]] = {}
+    for side in ("L", "R"):
+        foot = _foot_tick(measured, side)
+        if foot is None:
+            print(
+                f"PRED level_trim STOP side {side} sole_208_foot missed. "
+                "Trim copy was not run. Foot-z was not run. "
+                "Less-crouch was not run. Not kit-safe. Not go-anywhere."
+            )
+            return
+        picked = _choose_level_add(model, data, view, foot)
+        if picked is None:
+            print(
+                "PRED level_trim Prefer FAIL. "
+                "The sign check refused the level trim before the sweep. "
+                f"measure flat_worst {measured.flat_toe_mm:+.3f} mm "
+                f"{_geom_bits(tick)}. "
+                "Foot-z was not run. Less-crouch was not run. "
+                "Not kit-safe. Not go-anywhere."
+            )
+            return
+        chosen[side] = picked
+    adds = _match_level_mirror(model, data, view, chosen, str(tick["side"]))
+    for side in ("L", "R"):
+        row = chosen[side]
+        qpos = np.asarray(row["qpos"], dtype=np.float64)
+        after = _pose_level(
+            model, data, view, qpos,
+            int(row["roll_adr"]), int(row["pitch_adr"]),
+            side, adds[side]["roll"], adds[side]["pitch"],
+        )
+        base = row["base"]
+        if not isinstance(base, dict):
+            raise SystemExit(f"level trim base pose missing for {side}")
+        _print_level_sign(
+            "apply", side, float(row["t"]),
+            float(row["bout_roll"]), float(row["bout_pitch"]),
+            base, after, float(row["droll"]), float(row["dpitch"]),
+            float(row["raw_roll"]), float(row["raw_pitch"]),
+            adds[side]["roll"], adds[side]["pitch"],
+            int(row["flip_roll"]), int(row["flip_pitch"]),
+            float(row["ank_ctrl"]), float(row["ank_pitch_ctrl"]),
+        )
+    trimmed = _level_trim_copy(
+        adds["L"]["roll"], adds["R"]["roll"],
+        adds["L"]["pitch"], adds["R"]["pitch"],
+    )
+    _require_plant("after_trim", "level_trim")
+    tick_b = _worst_tick(trimmed)
+    knee = _knee_over(trimmed)
+    print(
+        f"PRED level_trim step1 {trimmed.name} "
+        f"flat_worst {trimmed.flat_toe_mm:+.3f} mm "
+        f"t {trimmed.flat_toe_t:.3f} side {trimmed.flat_toe_side} "
+        f"vs_plus2 {trimmed.flat_toe_mm - 2.0:+.3f} mm "
+        f"flat_hx {trimmed.flat_hx_over or 'under'} "
+        f"ank_hx {trimmed.ank_hx_over or 'under'} "
+        f"adds_roll L {adds['L']['roll']:+.5f} R {adds['R']['roll']:+.5f} "
+        f"adds_pitch L {adds['L']['pitch']:+.5f} R {adds['R']['pitch']:+.5f} "
+        f"{_geom_bits(tick_b)}"
+    )
+    for side in ("L", "R"):
+        before = _foot_tick(measured, side)
+        after = _foot_tick(trimmed, side)
+        if before is None or after is None:
+            print(f"PRED level_trim centre_rise side {side} missed")
+            continue
+        dyn = (float(after["center_z"]) - float(before["center_z"])) * 1000.0
+        expect = _expect_rise_mm(float(before["pitch"]), float(before["roll"]))
+        print(
+            f"PRED level_trim centre_rise side {side} "
+            f"dynamic {dyn:+.3f} mm expect {expect:+.3f} mm "
+            f"before {_geom_bits(before)} "
+            f"after {_geom_bits(after)}"
+        )
+    if knee:
+        print(
+            "PRED level_trim STOP floor knee over 2.33 on the level trim: "
+            f"{knee}. Foot-z copy was not run. "
+            "Less-crouch is next. init_z_offset was not invented. "
+            f"step1 flat_worst {trimmed.flat_toe_mm:+.3f} mm "
+            f"t {trimmed.flat_toe_t:.3f} side {trimmed.flat_toe_side} "
+            f"flat_hx {trimmed.flat_hx_over or 'under'} "
+            f"ank_hx {trimmed.ank_hx_over or 'under'}. "
+            "Not kit-safe. Not go-anywhere."
+        )
+        return
+    if _bar_clear(trimmed):
+        print(
+            "PRED level_trim clear "
+            f"{trimmed.name} flat_worst {trimmed.flat_toe_mm:.3f} mm "
+            f"t {trimmed.flat_toe_t:.3f} side {trimmed.flat_toe_side}. "
+            "Plus 2 mm cleared with knees, ankle pitch, and ankle roll "
+            "at or under 2.33 Nm on floor contact. Foot-z was not added. "
+            "Not kit-safe. Not go-anywhere."
+        )
+        return
+    short_mm = 2.0 - trimmed.flat_toe_mm
+    if short_mm <= 1e-9:
+        print(
+            "PRED level_trim Prefer FAIL. "
+            "The level trim is not short of +2 mm, and a floor joint is over 2.33 Nm. "
+            "The over is not a floor knee, so less-crouch was not started. "
+            "Foot-z was not added. No further copy was invented. "
+            f"step1 flat_worst {trimmed.flat_toe_mm:+.3f} mm "
+            f"flat_hx {trimmed.flat_hx_over or 'under'} "
+            f"ank_hx {trimmed.ank_hx_over or 'under'}. "
+            "Not kit-safe. Not go-anywhere."
+        )
+        return
+    z_extra = short_mm / 1000.0
+    print(
+        f"PRED level_trim z_size shortfall {short_mm:.3f} mm "
+        f"command {short_mm:.3f} mm. "
+        "Sized from the trim bout toe to +2 mm. "
+        "The old +0.4 mm add was not carried in. "
+        "Not +2 mm minus the box centre."
+    )
+    lifted = _level_trim_copy(
+        adds["L"]["roll"], adds["R"]["roll"],
+        adds["L"]["pitch"], adds["R"]["pitch"],
+        z_extra,
+    )
+    _require_plant("after_z", "level_trim")
+    tick_z = _worst_tick(lifted)
+    knee_z = _knee_over(lifted)
+    cleared = _bar_clear(lifted)
+    print(
+        f"PRED level_trim step2 {lifted.name} "
+        f"flat_worst {lifted.flat_toe_mm:+.3f} mm "
+        f"t {lifted.flat_toe_t:.3f} side {lifted.flat_toe_side} "
+        f"vs_plus2 {lifted.flat_toe_mm - 2.0:+.3f} mm "
+        f"z_command {short_mm:.3f} mm "
+        f"plus2_under_2.33 {int(cleared)} "
+        f"flat_hx {lifted.flat_hx_over or 'under'} "
+        f"ank_hx {lifted.ank_hx_over or 'under'} "
+        f"{_geom_bits(tick_z)}"
+    )
+    if knee_z:
+        print(
+            "PRED level_trim STOP floor knee over 2.33 on the sized foot-z: "
+            f"{knee_z}. Less-crouch is next. init_z_offset was not invented. "
+            "No third copy. "
+            f"step1 flat_worst {trimmed.flat_toe_mm:+.3f} mm "
+            f"step2 flat_worst {lifted.flat_toe_mm:+.3f} mm "
+            f"t {lifted.flat_toe_t:.3f} side {lifted.flat_toe_side} "
+            f"flat_hx {lifted.flat_hx_over or 'under'} "
+            f"ank_hx {lifted.ank_hx_over or 'under'}. "
+            "Not kit-safe. Not go-anywhere."
+        )
+        return
+    if cleared:
+        print(
+            "PRED level_trim clear "
+            f"{lifted.name} flat_worst {lifted.flat_toe_mm:.3f} mm "
+            f"t {lifted.flat_toe_t:.3f} side {lifted.flat_toe_side}. "
+            f"Foot-z command {short_mm:.3f} mm on the level trim. "
+            "Plus 2 mm cleared with knees, ankle pitch, and ankle roll "
+            "at or under 2.33 Nm on floor contact. "
+            "Not kit-safe. Not go-anywhere."
+        )
+        return
+    print(
+        "PRED level_trim Prefer FAIL. "
+        "The sized foot-z on the level trim did not clear +2 mm "
+        "with knees, ankle pitch, and ankle roll at or under 2.33 Nm "
+        "on floor contact. The floor knee stayed at or under 2.33 Nm, "
+        "so less-crouch was not started. No third copy. "
+        f"step1 flat_worst {trimmed.flat_toe_mm:+.3f} mm "
+        f"t {trimmed.flat_toe_t:.3f} side {trimmed.flat_toe_side} "
+        f"{_geom_bits(tick_b)} "
+        f"flat_hx {trimmed.flat_hx_over or 'under'} "
+        f"ank_hx {trimmed.ank_hx_over or 'under'}. "
+        f"step2 flat_worst {lifted.flat_toe_mm:+.3f} mm "
+        f"t {lifted.flat_toe_t:.3f} side {lifted.flat_toe_side} "
+        f"z_command {short_mm:.3f} mm "
+        f"{_geom_bits(tick_z)} "
+        f"flat_hx {lifted.flat_hx_over or 'under'} "
+        f"ank_hx {lifted.ank_hx_over or 'under'}. "
         "Pitch lead stays 20 ms. Period stays 0.500 s. "
         "Not kit-safe. Not go-anywhere."
     )
