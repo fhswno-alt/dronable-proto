@@ -3,31 +3,81 @@
   Vision room for kit_cam. Includes the frozen walk plant and does not
   edit it. Furniture is named scene geometry so a later vision step can
   point at "bathroom". This is not a navigation map, not a planner input,
-  and not a door. One camera: the plant's kit_cam.
-  Cyan tile, white porcelain, a violet faucet, and a magenta seat are
-  the cues. They are not the kitchen's yellow backsplash.
+  and not a mechanism. One camera: the plant's kit_cam.
+  Vanity and mirror are CC0 Poly Haven meshes. The sink and toilet are
+  CC0 loafbrr meshes. The bathtub is a CC0 stylized tub (Tiny Treats).
+  Static bodies. See docs/ROOM_ASSETS.md.
 -->
 <mujoco model="room_bathroom">
   <include file="ainex_hiwonder/ainex_controls_m2_145.xml"/>
+  <asset>
+    <texture name="room_floor" type="2d" file="assets/rooms/textures/marble.png"/>
+    <material name="room_floor" texture="room_floor" texrepeat="3 3" specular="0.12"/>
+    <texture name="room_wall" type="2d" file="assets/rooms/textures/interior_tiles.png"/>
+    <material name="room_wall" texture="room_wall" texrepeat="2 1.2" specular="0.06" emission="0.16"/>
+    <texture name="room_tile" type="2d" file="assets/rooms/textures/interior_tiles.png"/>
+    <material name="room_tile" texture="room_tile" texrepeat="3 2" specular="0.08"/>
+    <texture name="room_ceiling" type="2d" file="assets/rooms/textures/white_plaster.png"/>
+    <material name="room_ceiling" texture="room_ceiling" texrepeat="2 2" specular="0.02" emission="0.62"/>
+    <texture name="room_vanity" type="2d" file="assets/rooms/bathroom/vanity.png"/>
+    <material name="room_vanity" texture="room_vanity" specular="0.16"/>
+    <mesh name="room_vanity" file="assets/rooms/bathroom/vanity.obj" scale="0.66 0.66 0.66"/>
+    <texture name="room_mirror" type="2d" file="assets/rooms/bathroom/mirror.png"/>
+    <material name="room_mirror" texture="room_mirror" specular="0.45"/>
+    <mesh name="room_mirror" file="assets/rooms/bathroom/mirror.obj"/>
+    <texture name="room_sink" type="2d" file="assets/rooms/bathroom/sink.png"/>
+    <material name="room_sink" texture="room_sink" specular="0.2"/>
+    <mesh name="room_sink" file="assets/rooms/bathroom/sink.obj" scale="1.15 1.15 1.15"/>
+    <texture name="room_bowl" type="2d" file="assets/rooms/bathroom/toilet_bowl.png"/>
+    <material name="room_bowl" texture="room_bowl" specular="0.4"/>
+    <mesh name="room_bowl" file="assets/rooms/bathroom/toilet_bowl.obj"/>
+    <texture name="room_tank" type="2d" file="assets/rooms/bathroom/toilet_tank.png"/>
+    <material name="room_tank" texture="room_tank" specular="0.25"/>
+    <mesh name="room_tank" file="assets/rooms/bathroom/toilet_tank.obj"/>
+    <texture name="room_seat" type="2d" file="assets/rooms/bathroom/toilet_seat.png"/>
+    <material name="room_seat" texture="room_seat" specular="0.3"/>
+    <mesh name="room_seat" file="assets/rooms/bathroom/toilet_seat.obj"/>
+    <texture name="room_handle" type="2d" file="assets/rooms/bathroom/toilet_handle.png"/>
+    <material name="room_handle" texture="room_handle" specular="0.5"/>
+    <mesh name="room_handle" file="assets/rooms/bathroom/toilet_handle.obj"/>
+    <texture name="room_tub" type="2d" file="assets/rooms/bathroom/bathtub.png"/>
+    <material name="room_tub" texture="room_tub" specular="0.2"/>
+    <mesh name="room_tub" file="assets/rooms/bathroom/bathtub.obj"/>
+    <mesh name="room_tub_water" file="assets/rooms/bathroom/bathtub_water.obj"/>
+  </asset>
   <worldbody>
-    <!-- Wall and vanity face the robot (+X is kit_cam look). Static bodies, no joints. -->
-    <body name="bathroom" pos="1.62 0.05 0">
-      <site name="bathroom" pos="0.22 0 1.10" size="0.015" group="4" rgba="0.05 0.78 0.82 1"/>
-      <geom name="bathroom_tile" type="box" size="0.025 0.95 0.58" pos="0.22 0 1.08" rgba="0.05 0.78 0.82 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
-      <geom name="bathroom_vanity" type="box" size="0.24 0.40 0.38" pos="-0.04 0.12 0.38" rgba="0.94 0.95 0.97 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
-      <geom name="bathroom_towel" type="box" size="0.015 0.10 0.16" pos="-0.08 0.50 0.62" rgba="0.72 0.08 0.48 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+    <light name="room_key" pos="0.40 -0.1 2.05" dir="0.65 0.02 -1" diffuse="0.88 0.88 0.86"/>
+    <light name="room_fill" pos="0.25 0.35 1.6" dir="0.5 -0.1 -1" diffuse="0.40 0.42 0.46"/>
+    <light name="room_up" pos="1.05 0 1.35" dir="0 0 1" diffuse="0.80 0.80 0.78"/>
+    <light name="room_side_l" pos="1.15 -0.15 1.4" dir="0 1 0.15" diffuse="0.36 0.36 0.34"/>
+    <light name="room_side_r" pos="1.15 0.15 1.4" dir="0 -1 0.15" diffuse="0.36 0.36 0.34"/>
+    <geom name="room_floor" type="plane" pos="0 0 0.006" size="3 3 0.02" material="room_floor" contype="0" conaffinity="0"/>
+    <geom name="room_wall" type="box" pos="2.42 0 1.22" size="0.045 1.82 1.22" material="room_wall" contype="0" conaffinity="0"/>
+    <geom name="room_wall_left" type="box" pos="0.86 1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
+    <geom name="room_wall_right" type="box" pos="0.86 -1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
+    <geom name="room_ceiling" type="box" pos="0.86 0 2.48" size="1.64 1.88 0.04" material="room_ceiling" contype="0" conaffinity="0"/>
+    <!-- Back-wall row: vanity left, toilet beside it, tub in the right corner. -->
+    <body name="bathroom" pos="2.05 0.88 0">
+      <site name="bathroom" pos="0.0 0 1.05" size="0.015" group="4" rgba="0.75 0.78 0.80 1"/>
+      <geom name="bathroom_tile" type="box" pos="0.28 0 1.05" size="0.02 0.48 0.75" material="room_tile" contype="0" conaffinity="0"/>
+      <geom name="bathroom_vanity" type="mesh" mesh="room_vanity" material="room_vanity" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+      <geom name="bathroom_mirror" type="mesh" mesh="room_mirror" material="room_mirror" pos="0.22 0 1.28" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
     </body>
-    <body name="sink" pos="1.08 0.20 0">
-      <site name="sink" pos="0 0 0.84" size="0.012" group="4" rgba="0.52 0.16 0.86 1"/>
-      <geom name="sink_pedestal" type="box" size="0.12 0.14 0.36" pos="0 0 0.36" rgba="0.93 0.94 0.96 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
-      <geom name="sink_basin" type="box" size="0.16 0.20 0.045" pos="0.02 0 0.76" rgba="0.97 0.98 0.99 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
-      <geom name="sink_faucet" type="box" size="0.03 0.03 0.09" pos="-0.06 0 0.88" rgba="0.52 0.16 0.86 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+    <body name="sink" pos="1.89 0.88 0.76">
+      <site name="sink" pos="0 0 0.2" size="0.012" group="4" rgba="0.70 0.72 0.74 1"/>
+      <geom name="sink_basin" type="mesh" mesh="room_sink" material="room_sink" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
     </body>
-    <body name="toilet" pos="0.98 -0.78 0">
-      <site name="toilet" pos="0 0 0.42" size="0.012" group="4" rgba="0.84 0.08 0.42 1"/>
-      <geom name="toilet_bowl" type="box" size="0.18 0.16 0.18" pos="0.02 0 0.22" rgba="0.95 0.96 0.97 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
-      <geom name="toilet_tank" type="box" size="0.07 0.15 0.18" pos="-0.16 0 0.50" rgba="0.90 0.92 0.94 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
-      <geom name="toilet_seat" type="box" size="0.16 0.14 0.02" pos="0.04 0 0.42" rgba="0.84 0.08 0.42 1" friction="1.0 0.1 0.01" contype="1" conaffinity="1" condim="3"/>
+    <body name="toilet" pos="1.78 0.05 0">
+      <site name="toilet" pos="0 0 0.40" size="0.012" group="4" rgba="0.85 0.86 0.88 1"/>
+      <geom name="toilet_bowl" type="mesh" mesh="room_bowl" material="room_bowl" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+      <geom name="toilet_tank" type="mesh" mesh="room_tank" material="room_tank" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+      <geom name="toilet_seat" type="mesh" mesh="room_seat" material="room_seat" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+      <geom name="toilet_handle" type="mesh" mesh="room_handle" material="room_handle" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+    </body>
+    <body name="bathtub" pos="1.92 -1.20 0">
+      <site name="bathtub" pos="0 0 0.32" size="0.012" group="4" rgba="0.75 0.82 0.88 1"/>
+      <geom name="bathtub_shell" type="mesh" mesh="room_tub" material="room_tub" contype="0" conaffinity="0"/>
+      <geom name="bathtub_water" type="mesh" mesh="room_tub_water" material="room_tub" contype="0" conaffinity="0"/>
     </body>
   </worldbody>
 </mujoco>

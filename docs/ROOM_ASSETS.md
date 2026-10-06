@@ -1,0 +1,143 @@
+# Room assets
+
+The five `kit_cam` rooms use open meshes and albedo textures under `mujoco/assets/rooms/`. They replace the flat colored boxes. The walk plant `mujoco/ainex_hiwonder/ainex_controls_m2_145.xml` is not edited. Room XML only includes it and adds static bodies. Furniture has no joints.
+
+This branch vendors the meshes and textures the five room XML files reference. Unplaced models and `room_hallway_front.xml` from commit `bb94512` are not in this tree. The license notes below still cover the files that are here.
+
+Poly Haven models and textures in this file are **CC0 1.0**. The bedroom bed, nightstand, and dresser are **CC BY 4.0** furniture meshes from Amazon Berkeley Objects. No paid asset. Poly Haven asks for credit when the API is used to fetch files; the assets themselves need no permission. Pages: [polyhaven.com/license](https://polyhaven.com/license).
+
+## What is in the repo
+
+Poly Haven models were downloaded as glTF 2k, rotated from Y-up to Z-up (`x' = x`, `y' = -z`, `z' = y`), and written as one OBJ per unique albedo with the origin on the floor. MuJoCo 3.14's classic renderer loads PNG and rejects JPEG, and it uses the `<texture type="2d">` albedo on the material. Normal, roughness, and metallic maps are not in the repo. Albedo maps are 1024 px PNG. Unique furniture materials use the baked UVs (`texrepeat` left at 1 1). Floor and wall planes tile.
+
+The entrance panel file is named `panel.obj` so the loaded MuJoCo name does not contain `door`. The source model is a castle door mesh used as a static visual frame: no hinge, no lever, no latch.
+
+`entrance/mat.obj` is a generated thin box (0.62 × 0.40 × 0.012 m) with its own UVs. The weave is the Poly Haven hessian texture, not a second furniture mesh.
+
+## Models (Poly Haven, CC0)
+
+| Repo file | Poly Haven asset | Author | Page |
+|-----------|------------------|--------|------|
+| `kitchen/upper.obj` | Modern Wooden Cabinet (not placed) | Patrik Pangerl | https://polyhaven.com/a/modern_wooden_cabinet |
+| `kitchen/cabinet.obj` | Drawer Cabinet (not placed) | Ulan Cabanilla | https://polyhaven.com/a/drawer_cabinet |
+| `kitchen/stove.obj` | Electric Stove (cooktop and oven) | Kuutti Siitonen | https://polyhaven.com/a/electric_stove |
+| `kitchen/kettle.obj` | Vintage Electric Kettle (not placed) | SV Garip | https://polyhaven.com/a/vintage_electric_kettle |
+| `kitchen/microwave.obj` | Vintage Microwave (not placed) | Adam Nekola | https://polyhaven.com/a/vintage_microwave |
+| `kitchen/pot.obj` | Pot Enamel 01 (not placed) | Kuutti Siitonen | https://polyhaven.com/a/pot_enamel_01 |
+| `kitchen/basin.obj` | loafbrr Sink_A basin and faucets | loafbrr | see below |
+| `kitchen/stool.obj` | Metal Stool 02 (island seating, two copies) | Ulan Cabanilla | https://polyhaven.com/a/metal_stool_02 |
+| `kitchen/pendant.obj` | Modern Ceiling Lamp 01 (two copies) | James Ray Cock | https://polyhaven.com/a/modern_ceiling_lamp_01 |
+| `kitchen/table.obj` | Dining Table (not placed) | Aron Łyczek | https://polyhaven.com/a/dining_table |
+| `kitchen/chair.obj` | Dining Chair 02 (not placed) | James Ray Cock | https://polyhaven.com/a/dining_chair_02 |
+| `living/sofa.obj` | Sofa 03 | Fran Calvente | https://polyhaven.com/a/sofa_03 |
+| `living/coffee.obj` | Gothic Coffee Table | Ulan Cabanilla | https://polyhaven.com/a/gothic_coffee_table |
+| `living/tv.obj` | Television 01 | Gabriel Radić | https://polyhaven.com/a/Television_01 |
+| `bedroom/bed.obj` | Gothic Bed 01 (not placed) | Kirill Sannikov | https://polyhaven.com/a/GothicBed_01 |
+| `bedroom/nightstand.obj` | Classic Nightstand 01 (not placed) | Kirill Sannikov | https://polyhaven.com/a/ClassicNightstand_01 |
+| `bedroom/lamp.obj` | Desk Lamp Arm 01 | Kuutti Siitonen (model and texture), Yann Kervran (rigging) | https://polyhaven.com/a/desk_lamp_arm_01 |
+| `bathroom/vanity.obj` | Painted Wooden Cabinet | Kirill Sannikov | https://polyhaven.com/a/painted_wooden_cabinet |
+| `bathroom/mirror.obj` | Ornate Mirror 01 | James Ray Cock | https://polyhaven.com/a/ornate_mirror_01 |
+| `entrance/panel.obj` | Large Castle Door (static frame only) | Tina | https://polyhaven.com/a/large_castle_door |
+| `entrance/console.obj` | Classic Console 01 | Kirill Sannikov | https://polyhaven.com/a/ClassicConsole_01 |
+
+Each OBJ has a matching PNG albedo next to it.
+
+## Textures (Poly Haven, CC0)
+
+| Repo file | Poly Haven asset | Author | Page |
+|-----------|------------------|--------|------|
+| `textures/wood_floor.png` | Wood Floor | Dimitrios Savva | https://polyhaven.com/a/wood_floor |
+| `textures/beige_wall.png` | Beige Wall 001 | Dimitrios Savva (photography), Rico Cilliers (processing) | https://polyhaven.com/a/beige_wall_001 |
+| `textures/interior_tiles.png` | Interior Tiles | Charlotte Baglioni | https://polyhaven.com/a/interior_tiles |
+| `textures/white_plaster.png` | White Plaster 02 | Rob Tuytel | https://polyhaven.com/a/white_plaster_02 |
+| `textures/hessian_mat.png` | Hessian 380 | colormass (photography), Rico Cilliers (processing) | https://polyhaven.com/a/hessian_380 |
+| `textures/marble.png` | Marble 01 | Rob Tuytel | https://polyhaven.com/a/marble_01 |
+| `textures/oak_veneer.png` | Oak Veneer 01 | Jenelle van Heerden | https://polyhaven.com/a/oak_veneer_01 |
+| `textures/rough_linen.png` | Rough Linen | colormass (photography), Rico Cilliers (processing) | https://polyhaven.com/a/rough_linen |
+| `textures/wool_boucle.png` | Wool Boucle | colormass (photography), Rico Cilliers (processing) | https://polyhaven.com/a/wool_boucle |
+
+## Bathroom fixtures (loafbrr, CC0)
+
+Poly Haven has no toilet or sink mesh. The sanitary pieces are from loafbrr's **Toilets** pack, licensed **CC0**:
+
+- https://opengameart.org/content/toilets
+- https://loafbrr.itch.io/
+
+Attribution is not required. The pack README asks for credit anyway: loafbrr.
+
+| Repo file | Pack mesh | Notes |
+|-----------|-----------|--------|
+| `bathroom/toilet_bowl.obj` | Toilet_Round_A | Shared frame with the other toilet parts. Assembled height about 0.74 m |
+| `bathroom/toilet_tank.obj` | Toilet_Round_A flush box | Same frame as the bowl, so the cistern sits behind the bowl |
+| `bathroom/toilet_seat.obj` | seat and cover | Same frame. Lies on the bowl |
+| `bathroom/toilet_handle.obj` | flusher | Same frame, flush-box albedo. The pack has no separate flusher atlas |
+| `bathroom/sink.obj` | Sink_A plus both faucets | Pedestal basin on the vanity. Replaces the earlier Sink_C trough, which read as a wooden block from `kit_cam` |
+| `bathroom/bathtub.obj` | bath | Stylized tub, about 1.08 × 0.72 × 0.58 m. See below |
+| `bathroom/bathtub_water.obj` | bath_water | Water surface in the same frame as the shell |
+| `entrance/boots.obj` | Rubber Boots | Pair of wellies beside the mat. Poly Haven, not the bathroom pack |
+
+The four toilet files are one round toilet split by material. They were re-exported from the pack glTF in a shared Z-up frame (Y-up to Z-up, then one floor-center for the whole fixture). An earlier export centered each part on its own, so the tank lay flat and the seat stood on edge. The sink file is Sink_A from the same CC0 pack, not a new download and not a paid model.
+
+The glTF did not embed images. UVs were kept and the pack's diffuse PNGs were assigned. These are textured game meshes, not photogrammetry. They are still shaped fixtures, not flat rgba boxes.
+
+Poly Haven has no kitchen sink. `kitchen/basin.obj` is the same CC0 Sink_A mesh, with the pedestal faces removed so the bowl and faucets sit on the counter. It is a bathroom basin, not a slim undermount. That style gap is a Prefer FAIL for a photoreal kitchen sink. The faucet is what makes the counter read as a sink from `kit_cam`.
+
+Poly Haven also has no flat-panel kitchen cabinet, no kitchen island, no flush induction hob, and no stacked double oven. The kit_cam run is authored boxes, not a scanned cabinet: white plaster for the slab fronts, the counter, the backsplash, and the island; oak veneer for the upper panels. There are no handles. The counters are plaster, not veined stone (`marble_01` is beige). Those are Prefer FAIL gaps against a photoreal modern kitchen. The freestanding electric stove is the appliance column. It is a white coil-top range with one oven, not a black built-in double oven and not a flush cooktop. Island seating is Metal Stool 02 (round wood seat, metal pedestal), not an upholstered bar stool. The pendants are Modern Ceiling Lamp 01, a disc shade, not a glass globe.
+
+The ribbed wooden cabinet, the drawer cabinet, the dining table, the dining chair, the vintage microwave, the kettle, and the enamel pot stay in the repo and are not placed. From `kit_cam` those reads were gothic props or a wire rack, not the flat white run.
+
+`kit_cam` stands at about 0.38 m and looks level along +X. That pose is frozen. Countertops at 0.90 m stay above the lens, so the still cannot match a standing-eye photo of the cooktop. The island and stools sit image-right of the lens axis so the cabinet fronts, sink, and stove are in frame. That low-camera gap is a Prefer FAIL. Moving `kit_cam` would be required to see the counter surface the way the reference photo does.
+
+## Bedroom furniture (Amazon Berkeley Objects, CC BY 4.0)
+
+The placed bedroom bed, nightstand, and dresser are product meshes from [Amazon Berkeley Objects](https://amazon-berkeley-objects.s3.amazonaws.com/index.html). The dataset README licenses the collection under **Creative Commons Attribution 4.0** (`LICENSE-CC-BY-4.0.txt` on that bucket). Commercial use is allowed with attribution. Credit the data to Amazon.com, and credit the dataset to Matthieu Guillaumin, Thomas Dideriksen, Kenan Deng, and Himanshu Arora (Amazon.com) and Jasmine Collins and Jitendra Malik (UC Berkeley).
+
+glTF files were taken from `3dmodels/original/` on the official bucket, rotated from Y-up to Z-up (`x' = x`, `y' = -z`, `z' = y`), floor-centered, and written as one OBJ plus a 1024 px PNG of the base-color texture. The bed, nightstand, and dresser stay at product scale. The bedroom inner floor is 4.40 m deep by 5.40 m wide (about 23.8 m²). The previous shell was 4.00 m by 4.80 m. The queen sits on the long back wall, about 0.12 m off that wall and about 1.5 m clear of each side corner. About 1.48 m of floor stays in front of the bed. The Stark nightstand is 0.18 m off the head and 0.88 m from the left wall. The Jonathan dresser is on the right wall, 0.10 m off that wall, with 0.92 m of clear floor in front of the drawers.
+
+| Repo file | Product | Source id | Page |
+|-----------|---------|-----------|------|
+| `bedroom/platform_bed.obj` | Rivet York Modern Extended Platform Queen Bed, grey | `B075QFCHM9` | https://amazon-berkeley-objects.s3.amazonaws.com/3dmodels/original/9/B075QFCHM9.glb |
+| `bedroom/stark_nightstand.obj` | Rivet Mid-Century Stark 2-Drawer Nightstand, walnut | `B075YZ16V4` | https://amazon-berkeley-objects.s3.amazonaws.com/3dmodels/original/4/B075YZ16V4.glb |
+| `bedroom/dresser.obj` | Rivet Jonathan Mid-Century Modern Wood Bedroom Dresser, walnut | `B07B4SBZDV` | https://amazon-berkeley-objects.s3.amazonaws.com/3dmodels/original/V/B07B4SBZDV.glb |
+
+Poly Haven still has no contemporary bed. Its bed meshes are Gothic Bed 01 (kept, not placed), a rusty hospital frame, and a carved daybed. Sketchfab has CC-BY modern beds (ArchVibe 3D “Modern bed”, dbasfi92 “Double Bed - Modern contemporary”, renviros “Modern Bed”) but the download button requires a login. Those files were not taken. Quaternius, Kenney, and KayKit publish CC0 beds that read as low-poly blocks, so they are not placed. The York mesh is the bed in frame: grey upholstered platform, mattress, pillows, and a low headboard, long side toward +X. `kit_cam` stays near 0.38 m and looks level, so the still shows the near side of the mattress more than the top of the duvet. That low-camera gap is a Prefer FAIL. The lamp is still Desk Lamp Arm 01. Classic Nightstand 01 is not placed.
+
+Poly Haven has no bathtub. The tub is from Isa Lousberg's **Tiny Treats — Bubbly Bathroom** set, licensed **CC0**:
+
+- https://opengameart.org/content/tiny-treats-bubbly-bathroom-set
+
+Only the bath shell and the water surface are in the repo, with the set's gradient atlas. It is stylized low-poly game art, not a scan. That style gap against the Poly Haven vanity is still a Prefer FAIL for photoreal kit_cam, and it is the CC0 mesh that reads as a tub.
+
+## Entrance boots (Poly Haven, CC0)
+
+| Repo file | Poly Haven asset | Author | Page |
+|-----------|------------------|--------|------|
+| `entrance/boots.obj` | Rubber Boots | L | https://polyhaven.com/a/rubber_boots |
+
+There is no CC0 coat in this set. The shoes cue is the boots, and the hall table is Classic Console 01. Poly Haven has no flat interior door; the leaf is still the castle-door mesh, scaled down and set in static wood trim. Still no hinge, no lever, and no latch.
+
+## Scene names
+
+Body and site names stay `kitchen`, `table`, `chair`, `bathroom`, `sink`, `toilet`, `living`, `tv`, `bedroom`, `nightstand`, `entrance`, `mat`. Later passes add `bathtub`, `shoes`, `coffee`, `console`, and `dresser`. Each room adds a floor texture, side walls, a back wall, and a ceiling as extra worldbody geoms, using the CC0 textures above. The plant's checker plane is still in the included file. Furniture stays static. The entrance panel is still a visual frame: no hinge, no lever, no latch.
+
+## Hallway front test scene
+
+`mujoco/room_hallway_front.xml` is not one of the five rooms. Assets for it live under `mujoco/assets/rooms/hallway/`. Same CC0 rules. The walk plant is included and not edited. The leaf and the casing are static. There is no hinge, no lever, no latch, and no knob torque. MuJoCo body and geom names omit the word door, same as `entrance/panel.obj`, so the loaded names stay free of that token.
+
+Poly Haven has no flat painted entry-door mesh. The leaf is a generated slab, 0.90 m wide, 2.03 m tall, and 0.04 m thick. Its front face uses the Rough Pine Door albedo, U cropped to 0.275–0.725 so the plank width stays near the 2 m scan. That is a rough pine plank leaf, not a flush painted front door, and not the castle-door mesh in `room_entrance`. The casing and the baseboards are the existing oak veneer on boxes.
+
+The picture frames are scaled 1.55 in the scene XML. At the scan size the near frame was 31 px wide from the frozen camera, under the 36 px bar. The larger scale is so the low camera can read the picture. That is a Prefer FAIL against product scale.
+
+The plant stays at scan size, about 1.35 m tall. Leaf cards use a black-background cutout made from the diffuse JPG. The original mask map is not in the repo. Edges can fringe. The glass primitive on the picture frame was not exported.
+
+The ceiling lamp reuses `kitchen/pendant.obj` (Modern Ceiling Lamp 01). It is not a new download.
+
+| Repo file | Source | Author | Page |
+|-----------|--------|--------|------|
+| `hallway/leaf.png` | Rough Pine Door (albedo on a generated slab) | Dimitrios Savva | https://polyhaven.com/a/rough_pine_door |
+| `hallway/runner.png` | Poly Wool Herringbone, tiled on a 2.20 × 0.70 m runner | colormass (photography), Rico Cilliers (processing) | https://polyhaven.com/a/poly_wool_herringbone |
+| `hallway/frame.obj`, `hallway/artwork.obj` | Hanging Picture Frame 03 (glass omitted) | James Ray Cock | https://polyhaven.com/a/hanging_picture_frame_03 |
+| `hallway/plant_pot.obj`, `hallway/plant_leaves.obj` | Potted Plant 01 | Rico Cilliers | https://polyhaven.com/a/potted_plant_01 |
+| `hallway/sconce.obj`, `hallway/sconce_bulb.obj` | Industrial Wall Sconce | Ulan Cabanilla | https://polyhaven.com/a/industrial_wall_sconce |
+
+Floor, wall, plaster, and oak files are the textures already listed above.
