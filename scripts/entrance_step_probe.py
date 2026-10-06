@@ -12632,6 +12632,30 @@ def _install_sagittal_slew(
                                 q_des = held_cmd - step
                             else:
                                 q_des = held_cmd + step
+                if walk_stance and jn.endswith("ank_pitch"):
+                    t_now = float(lipm.data.time)
+                    if t_now >= _WALK_STEADY_S - 1e-9:
+                        # Same loaded pattern as the stop-bout left ankle.
+                        # The gait step is already rate-limited. If that
+                        # step would put the loaded ask over 2.33 Nm,
+                        # keep the nearer command. One stance cap toward
+                        # the joint when the previous command is farther.
+                        # No torque hold, and z is not rewritten.
+                        q_now = float(lipm.q(jn))
+                        jid = mj.mj_name2id(lipm.model, mj.mjtObj.mjOBJ_JOINT, jn)
+                        omega = float(lipm.data.qvel[int(lipm.model.jnt_dofadr[jid])])
+                        idx = lipm.act_idx[jn + "_pos"]
+                        kp = float(lipm.model.actuator_gainprm[idx, 0])
+                        kv = -float(lipm.model.actuator_biasprm[idx, 2])
+                        ask = kp * (float(q_des) - q_now) - kv * omega
+                        if abs(ask) > KNEE_NM + 1e-9:
+                            held_cmd = float(old) if old is not None else q_now
+                            if abs(held_cmd - q_now) + 1e-9 < abs(float(q_des) - q_now):
+                                q_des = held_cmd
+                            elif held_cmd > q_now:
+                                q_des = held_cmd - step
+                            else:
+                                q_des = held_cmd + step
                 prev[jn] = float(q_des)
             elif (
                 getattr(session, "_walk_z_stretch", False)
@@ -12750,6 +12774,18 @@ def _install_sagittal_slew(
             "Planar x/y and sole attitude stay on the live step. "
             "z stays live. This is not a swing stretch. "
             "The walk ladder stays off this bout."
+        )
+    if (
+        getattr(session, "_walk_z_stretch", False)
+        and not getattr(session, "_sag_stop_installed", False)
+    ):
+        print(
+            "PRED sag_slew walk_steady_ank from the live joint at "
+            f"{_WALK_STANCE_RATE:.3f} rad/s on the loaded ankle pitch. "
+            "A step that would put that ask over 2.33 Nm is not taken. "
+            "The command stays nearer the live joint. "
+            "z stays live. This is not a swing stretch. "
+            "The stop bout does not take this seed."
         )
     if "hip_pitch" in suffixes:
         print(
@@ -15666,6 +15702,102 @@ def _print_steady_ank(name: str, held: dict[str, object]) -> None:
     )
 
 
+def _print_walk_steady_ank(name: str, held: dict[str, object]) -> None:
+    """Loaded right ankle after 2 s on the continuous walk.
+
+    The named tick is 2.224 s. Load and four corners at that peak.
+    """
+    asks = held.get("asks")
+    lateral = held.get("lateral")
+    surface = held.get("surface")
+    if not isinstance(asks, list) or not isinstance(lateral, list):
+        print(f"PRED {name} walk_steady_ank missing")
+        return
+    by_lat: dict[float, dict[str, float | str]] = {}
+    for row in lateral:
+        if isinstance(row, dict):
+            by_lat[round(float(row["t_ask"]), 5)] = row
+    by_surf: dict[float, dict[str, object]] = {}
+    if isinstance(surface, list):
+        for row in surface:
+            if isinstance(row, dict):
+                by_surf[round(float(row["t"]), 5)] = row
+
+    def _corner_line(tag: str, t_key: float) -> None:
+        surf = by_surf.get(t_key)
+        lat = by_lat.get(t_key)
+        fn_l = float(lat["fn_l"]) if lat is not None else float("nan")
+        fn_r = float(lat["fn_r"]) if lat is not None else float("nan")
+        print(
+            f"PRED {name} walk_steady_ank_load {tag} t {t_key:.3f} "
+            f"fn_l {fn_l:.2f} fn_r {fn_r:.2f}"
+        )
+        for side in ("L", "R"):
+            plane = surf.get(side) if isinstance(surf, dict) else None
+            plane_d = plane if isinstance(plane, dict) else None
+            corners = plane_d.get("corners") if isinstance(plane_d, dict) else None
+            if not isinstance(corners, tuple) or not corners:
+                print(f"PRED {name} walk_steady_ank_corners side {side} {tag} missing")
+                continue
+            parts = " ".join(
+                f"{label} {float(z) * 1000.0:+.3f}" for label, z in corners
+            )
+            low = min(corners, key=lambda packed: float(packed[1]))
+            print(
+                f"PRED {name} walk_steady_ank_corners side {side} {tag} "
+                f"t {t_key:.3f} {parts} "
+                f"low {low[0]} {float(low[1]) * 1000.0:+.3f} mm"
+            )
+
+    worst: tuple | None = None
+    named: tuple | None = None
+    for item in asks:
+        if str(item[1]) != "r_ank_pitch":
+            continue
+        t_item = float(item[0])
+        if t_item < _WALK_STEADY_S - 1e-9:
+            continue
+        if worst is None or abs(float(item[3])) > abs(float(worst[3])):
+            worst = item
+        if named is None or abs(t_item - 2.224) < abs(float(named[0]) - 2.224):
+            named = item
+    if worst is None or named is None:
+        print(f"PRED {name} walk_steady_ank missing")
+        return
+    named_t = round(float(named[0]), 5)
+    worst_t = round(float(worst[0]), 5)
+    _corner_line("tick", named_t)
+    if worst_t != named_t:
+        _corner_line("worst", worst_t)
+    ask = float(worst[3])
+    over = abs(ask) > KNEE_NM + 1e-9
+    row = by_lat.get(worst_t)
+    phase = str(row["phase"]) if row is not None else "?"
+    frac = _swing_frac(phase, float(row["pose"])) if row is not None else float("nan")
+    frac_txt = "dsp" if phase == "D" else f"{frac:.3f}"
+    fn_l = float(row["fn_l"]) if row is not None else float("nan")
+    fn_r = float(row["fn_r"]) if row is not None else float("nan")
+    print(
+        f"PRED {name} walk_steady_ank r_ank_pitch {ask:+.4f} "
+        f"t {float(worst[0]):.3f} phase {phase} frac {frac_txt} "
+        f"q {_ask_q(worst):+.5f} q_des {float(worst[2]):+.5f} "
+        f"kp_term {float(worst[8]):+.4f} kv_term {float(worst[9]):+.4f} "
+        f"fn_l {fn_l:.2f} fn_r {fn_r:.2f} ge_2.33 {int(over)}"
+    )
+    if over:
+        print(
+            f"PRED {name} walk_steady_ank Prefer FAIL. "
+            f"r_ank_pitch {ask:+.4f} t {float(worst[0]):.3f}. "
+            "z stayed live. This is not a swing stretch."
+        )
+    else:
+        print(
+            f"PRED {name} walk_steady_ank CLEAR. "
+            f"r_ank_pitch {ask:+.4f} t {float(worst[0]):.3f} "
+            "stays at or under 2.33 Nm. z stayed live."
+        )
+
+
 def score_mid_swing() -> None:
     """Continuous straight walk on the locked sagittal copy. No stop.
 
@@ -15683,6 +15815,7 @@ def score_mid_swing() -> None:
         f"{_WALK_EARLY_FRAC:.2f}. "
         f"Through that fraction the loaded knee is {_WALK_EARLY_KNEE_RATE:.2f} rad/s. "
         f"Loaded ankle pitch stays on the {_WALK_STANCE_RATE:.2f} rad/s slew. "
+        "A stance step that would put that ask over 2.33 Nm is not taken. "
         f"Loaded hip pitch is on its own {_WALK_HIP_PITCH_RATE:.2f} rad/s slew. "
         "Walk swing-z stays at "
         f"{_WALK_Z_RATE:.2f} rad/s. The stop stretch stays off at "
@@ -16163,6 +16296,7 @@ def score_mid_swing() -> None:
             f"ge_2.33 {int(abs(float(knee_worst[3])) > KNEE_NM + 1e-9)}"
         )
     _print_gait_peaks(name, held, summary)
+    _print_walk_steady_ank(name, held)
     if (
         swing_ok and toe_bar and rug_ok and corners_ok
         and support_ok and mid_plant_ok and early_ok
