@@ -518,6 +518,71 @@ def measure_scuff() -> None:
     session.assert_plant_unchanged()
 
 
+def _fk_leading_toe(session: sw.SteerSession, side: str, ctrl: np.ndarray) -> tuple[float, float]:
+    """World z of the leading bottom corner, and the lowest corner, at ``ctrl``."""
+    data = session.data
+    model = session.model
+    saved = np.array(data.qpos, dtype=np.float64, copy=True)
+    pref = "r_" if side == "R" else "l_"
+    for jn in ("hip_yaw", "hip_roll", "hip_pitch", "knee", "ank_pitch", "ank_roll"):
+        name = pref + jn
+        jid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, name)
+        adr = int(model.jnt_qposadr[jid])
+        data.qpos[adr] = float(ctrl[session.act_idx[name + "_pos"]])
+    mj.mj_forward(model, data)
+    lead = _leading_toe_z(session, side)
+    bid = session.bid_rf if side == "R" else session.bid_lf
+    gid = session.gid_rfoot if side == "R" else session.gid_lfoot
+    lows = [float(c[2]) for c in _box_bottom_corners(model, data, bid, gid)]
+    data.qpos[:] = saved
+    mj.mj_forward(model, data)
+    return lead, min(lows)
+
+
+def measure_cmd_toe() -> None:
+    """Commanded right-swing toe height at the 3.384 s scuff, from the gait target."""
+    session = sw.SteerSession(
+        video=False, scene_xml=Path(SCENE), lipm=sw.locked_kit_config(),
+    )
+    lipm = session.lipm
+    assert lipm is not None and lipm.op3 is not None
+    driver = sw.ScriptedDriver((
+        sw.DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+        sw.DemoSegment(3.6, "vel", sw.VX_FWD_CAP, 0.0, "forward"),
+    ))
+    goal = np.zeros(session.model.nu, dtype=np.float64)
+    have = {"ok": False}
+    orig = lipm._tick_gait_manager
+
+    def wrapped(walking: bool) -> None:
+        orig(walking)
+        goal[:] = np.array(session.data.ctrl, dtype=np.float64, copy=True)
+        have["ok"] = lipm._gm_swing == "R"
+
+    lipm._tick_gait_manager = wrapped  # type: ignore[method-assign]
+    while float(session.data.time) < 3.6 - 1e-9:
+        driver.publish(session.bus, float(session.data.time))
+        session.step()
+        t = float(session.data.time)
+        if abs(t - 3.384) > session.ctrl_dt * 0.51 or not have["ok"]:
+            continue
+        actual = _leading_toe_z(session, "R")
+        cmd_lead, cmd_min = _fk_leading_toe(session, "R", goal)
+        applied = np.array(session.data.ctrl, dtype=np.float64, copy=True)
+        app_lead, app_min = _fk_leading_toe(session, "R", applied)
+        er, el, _, _, _ = lipm.op3.endpoints()
+        print(f"CMD_TOE t {t:.3f}")
+        print(f"CMD_TOE actual {actual:.6f}")
+        print(f"CMD_TOE goal_lead {cmd_lead:.6f} goal_min {cmd_min:.6f}")
+        print(f"CMD_TOE applied_lead {app_lead:.6f} applied_min {app_min:.6f}")
+        print(f"CMD_TOE ep_r {er[2]:.6f} ep_l {el[2]:.6f} gap {er[2] - el[2]:.6f}")
+        print(f"CMD_TOE actual_minus_goal {actual - cmd_lead:.6f}")
+        break
+    else:
+        print("CMD_TOE missed 3.384")
+    session.assert_plant_unchanged()
+
+
 def main() -> None:
     print(f"STEP_TILT {STEP_TILT:.6f} rad {math.degrees(STEP_TILT):.2f} deg")
     measure_scuff()
