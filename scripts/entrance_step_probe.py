@@ -5498,6 +5498,14 @@ def _install_inflight_stop(
         if state.get("land_freeze_tick") and t > float(state.get("land_t", -1.0)) + 1e-6:
             session._land_freeze = False  # type: ignore[attr-defined]
             state["land_freeze_tick"] = False
+        # The catch is the first landing double support only. The next
+        # swing stays on the approach slew.
+        if (
+            state.get("land_seen")
+            and getattr(session, "_land_armed", False)
+            and float(walker.time) > float(walker.r_ssp_start) + 1e-9
+        ):
+            session._land_armed = False  # type: ignore[attr-defined]
         if (
             label != "stop"
             and walking
@@ -12342,6 +12350,16 @@ def _install_sagittal_slew(
                     stepped = float(old) - cap
                 else:
                     stepped = float(target)
+                # The landing IK can sit well away from the joint. Keep
+                # the command inside one step of the live joint so the
+                # position term cannot slam. Reaching the IK is not a
+                # done mark while that clamp is active.
+                q_now = float(lipm.q(jn))
+                if stepped - q_now > cap:
+                    stepped = q_now + cap
+                elif q_now - stepped > cap:
+                    stepped = q_now - cap
+                elif abs(float(target) - float(stepped)) <= 1e-9:
                     land_done.add(jn)
             land_cmd[jn] = float(stepped)
             land_at[jn] = t_now
