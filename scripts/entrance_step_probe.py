@@ -4117,6 +4117,12 @@ def _install_inflight_stop(
         "sag_stop_cap": bool(sag_stop_cap),
         "saw_air": False,
         "told_hold": False,
+        "z_stretch_on": False,
+        "z_stretch": 1.0,
+        "z_stretch_end": 0.0,
+        "z_stretch_hold": False,
+        "z_wait_n": 0,
+        "touch_logged": False,
     }
     print(
         "PRED inflight_stop schedule "
@@ -4429,7 +4435,170 @@ def _install_inflight_stop(
             sides.append("R")
         session._sag_stand_sides = tuple(sides)  # type: ignore[attr-defined]
 
+    def _swing_leg_names(swing: str) -> tuple[str, ...]:
+        if swing == "L":
+            return (
+                "l_hip_yaw", "l_hip_roll", "l_hip_pitch",
+                "l_knee", "l_ank_pitch", "l_ank_roll",
+            )
+        return (
+            "r_hip_yaw", "r_hip_roll", "r_hip_pitch",
+            "r_knee", "r_ank_pitch", "r_ank_roll",
+        )
+
+    def _swing_ik_at(swing: str, gait_t: float) -> tuple[float, float, float] | None:
+        """Knee, ankle pitch, and endpoint z of the frozen swing pose at ``gait_t``.
+
+        Planar x/y and the sole angles stay on the pre-stop pin. z is the
+        live schedule at that gait time, including the phase bump.
+        """
+        if swing not in ("L", "R"):
+            return None
+        pin = state.get("swing_pin")
+        if not isinstance(pin, tuple) or len(pin) < 5:
+            return None
+        saved = float(walker.time)
+        try:
+            walker.time = float(gait_t)
+            er, el, _pel_r, _pel_l, _swap_y = orig_endpoints()
+        finally:
+            walker.time = saved
+        ep = np.array(el if swing == "L" else er, dtype=np.float64, copy=True)
+        ep[0] = float(pin[0])
+        ep[1] = float(pin[1])
+        ep[3] = float(pin[2])
+        ep[4] = float(pin[3])
+        ep[5] = float(pin[4])
+        raw = ow.ik_leg(
+            walker.lengths,
+            float(ep[0]), float(ep[1]), float(ep[2]),
+            float(ep[3]), float(ep[4]), float(ep[5]),
+        )
+        if raw is None:
+            return None
+        signed = walker._apply_direction(raw, _swing_leg_names(swing))
+        return float(signed[3]), float(signed[4]), float(ep[2])
+
+    def _arm_z_stretch(swing: str, t0: float) -> None:
+        """Stretch the leftover swing-z so knee and ankle pitch can follow at 1.90 rad/s.
+
+        The clock then advances only while those two commands are already
+        within one step of the IK at the current time. z does not run ahead
+        of the slew.
+        """
+        if swing not in ("L", "R"):
+            return
+        end = float(walker.l_ssp_end if swing == "L" else walker.r_ssp_end)
+        dt = float(ow.OP3_CTRL_S)
+        rows: list[tuple[float, float, float, float]] = []
+        t = float(t0)
+        guard = 0
+        while t <= end + 1e-9 and guard < 500:
+            sample = _swing_ik_at(swing, t)
+            if sample is not None:
+                rows.append((t, sample[0], sample[1], sample[2]))
+            if t >= end - 1e-9:
+                break
+            nxt = min(end, t + dt)
+            if nxt <= t + 1e-12:
+                break
+            t = nxt
+            guard += 1
+        knee_rate = 0.0
+        ank_rate = 0.0
+        for a, b in zip(rows, rows[1:]):
+            span = max(float(b[0]) - float(a[0]), 1e-6)
+            knee_rate = max(knee_rate, abs(float(b[1]) - float(a[1])) / span)
+            ank_rate = max(ank_rate, abs(float(b[2]) - float(a[2])) / span)
+        peak = max(knee_rate, ank_rate)
+        stretch = 1.0 if peak <= 1.90 + 1e-9 else peak / 1.90
+        state["z_stretch"] = float(stretch)
+        state["z_stretch_end"] = float(end)
+        state["z_stretch_on"] = True
+        state["z_sched_n"] = len(rows)
+        z0 = float(rows[0][3]) if rows else float("nan")
+        zend = float(rows[-1][3]) if rows else float("nan")
+        edge["z_stretch"] = float(stretch)
+        edge["z_peak_rate"] = float(peak)
+        edge["z_knee_rate"] = float(knee_rate)
+        edge["z_ank_rate"] = float(ank_rate)
+        edge["z_from"] = float(t0)
+        edge["z_end"] = float(end)
+        pref = "l_" if swing == "L" else "r_"
+        seed: dict[str, float] = {}
+        pre = state.get("pre")
+        if isinstance(pre, dict):
+            des = pre.get("des")
+            if isinstance(des, dict):
+                side_des = des.get(swing)
+                if isinstance(side_des, dict):
+                    for suf in ("knee", "ank_pitch"):
+                        if suf in side_des:
+                            seed[pref + suf] = float(side_des[suf])
+        session._sag_swing_track = True  # type: ignore[attr-defined]
+        session._sag_swing_joints = (pref + "knee", pref + "ank_pitch")  # type: ignore[attr-defined]
+        session._sag_swing_seed = seed  # type: ignore[attr-defined]
+        session._sag_swing_cmd = dict(seed)  # type: ignore[attr-defined]
+        print(
+            "PRED sag_stop_cap z stretch "
+            f"swing {swing} factor {stretch:.3f} "
+            f"peak_rate {peak:.3f} rad/s "
+            f"knee {knee_rate:.3f} ank {ank_rate:.3f} "
+            f"gait {float(t0):.3f} to {end:.3f} "
+            f"z {z0:+.5f} to {zend:+.5f} "
+            f"samples {len(rows)} "
+            f"open_loop {(end - float(t0)) * stretch:.3f} s. "
+            "Knee and ankle pitch slew toward that IK at or under 1.90 rad/s "
+            "and inside 2.33 Nm. The clock waits while either command is "
+            "still more than one step behind."
+        )
+
+    def _swing_cmd(jn: str) -> float | None:
+        cmd = getattr(session, "_sag_swing_cmd", None)
+        if isinstance(cmd, dict) and jn in cmd:
+            return float(cmd[jn])
+        seed = getattr(session, "_sag_swing_seed", None)
+        if isinstance(seed, dict) and jn in seed:
+            return float(seed[jn])
+        return None
+
     def _advance_z_clock() -> None:
+        if state.get("z_stretch_on"):
+            if state.get("z_stretch_hold"):
+                return
+            stretch = max(float(state.get("z_stretch", 1.0)), 1.0)
+            end = float(state.get("z_stretch_end", float(walker.period)))
+            now = float(walker.time)
+            if now >= end - 1e-9:
+                walker.time = end
+                return
+            step = float(ow.OP3_CTRL_S) / stretch
+            proposed = min(end, now + step)
+            swing = str(state.get("swing", ""))
+            pref = "l_" if swing == "L" else "r_"
+            cur = _swing_ik_at(swing, now)
+            nxt = _swing_ik_at(swing, proposed)
+            cap = 1.90 * float(ow.OP3_CTRL_S)
+            caught = False
+            if cur is not None and nxt is not None:
+                knee_cmd = _swing_cmd(pref + "knee")
+                ank_cmd = _swing_cmd(pref + "ank_pitch")
+                step_ok = (
+                    abs(float(nxt[0]) - float(cur[0])) <= cap + 1e-6
+                    and abs(float(nxt[1]) - float(cur[1])) <= cap + 1e-6
+                )
+                caught = (
+                    step_ok
+                    and knee_cmd is not None
+                    and ank_cmd is not None
+                    and abs(knee_cmd - float(cur[0])) <= cap + 1e-6
+                    and abs(ank_cmd - float(cur[1])) <= cap + 1e-6
+                )
+            if caught:
+                walker.time = proposed
+            else:
+                state["z_wait_n"] = int(state.get("z_wait_n", 0)) + 1
+            return
         walker.time = float(walker.time) + float(ow.OP3_CTRL_S)
         if walker.time >= float(walker.period) - 1e-12:
             walker.time = 0.0
@@ -4644,7 +4813,8 @@ def _install_inflight_stop(
                     "|kp*(q_des-q)| + |kv*omega| <= 2.33 Nm. "
                     "Swing hip roll, hip yaw, hip pitch, and ankle roll hold "
                     "the pre-stop q_des until that foot is over 5 N. "
-                    "Swing knee and ankle pitch are the swing-z IK, not a frozen q_des. "
+                    "Swing knee and ankle pitch track the time-stretched swing-z IK, "
+                    "not a frozen q_des. "
                     "Planar x/y and sole roll/pitch hold. z is not pinned. "
                     "Loaded hips slew toward stand only after both feet are "
                     "over 5 N, inside the same 2.33 Nm part cap. "
@@ -4714,9 +4884,11 @@ def _install_inflight_stop(
                     f"t {t:.3f} swing {swing} "
                     + " ".join(bits)
                     + f" x {float(ep[0]):+.5f} y {float(ep[1]):+.5f}. "
-                    "Sole roll and pitch hold. z advances. "
-                    "Knee and ankle pitch are that swing-z IK, not a frozen q_des."
+                    "Sole roll and pitch hold. z advances on the stretched clock. "
+                    "Knee and ankle pitch track that IK. Ankle roll stays on the pin "
+                    "until the foot is loaded, then sole-flat."
                 )
+                _arm_z_stretch(swing, float(walker.time))
             if airborne and isinstance(pre, dict) and not state["pin_swing"]:
                 ep = pre["el"] if swing == "L" else pre["er"]
                 state["swing_pin"] = (
@@ -4861,6 +5033,49 @@ def _install_inflight_stop(
                 "x/y/roll/pitch pin at this pose. z still advances. "
                 "x_move is not zeroed."
             )
+        if (
+            state["sag_stop_cap"]
+            and swing in ("L", "R")
+            and state["saw_air"]
+            and not state.get("touch_logged")
+        ):
+            load_sw = load_l if swing == "L" else load_r
+            if load_sw > load_n:
+                state["touch_logged"] = True
+                state["z_stretch_hold"] = True
+                session._sag_swing_track = False  # type: ignore[attr-defined]
+                pref = "l_" if swing == "L" else "r_"
+                corners = _box_corner_table(session, swing)
+                low = min(corners, key=lambda row: float(row[1]))
+                bits = " ".join(
+                    f"{label} {float(z) * 1000.0:+.3f}" for label, z, _off in corners
+                )
+                hold = state.get("swing_hold")
+                roll_pin = float("nan")
+                if isinstance(hold, dict) and (pref + "ank_roll") in hold:
+                    roll_pin = float(hold[pref + "ank_roll"])
+                edge["touchdown"] = {
+                    "t": float(t),
+                    "swing": swing,
+                    "load": float(load_sw),
+                    "lowest": str(low[0]),
+                    "lowest_mm": float(low[1]) * 1000.0,
+                    "waits": int(state.get("z_wait_n", 0)),
+                    "gait": float(walker.time),
+                }
+                print(
+                    "PRED sag_stop_cap touchdown "
+                    f"t {t:.3f} swing {swing} load {load_sw:.2f} N "
+                    f"gait {float(walker.time):.3f} "
+                    f"waits {int(state.get('z_wait_n', 0))} "
+                    f"lowest {low[0]} {float(low[1]) * 1000.0:+.3f} mm "
+                    + bits
+                    + f" ank_roll q {float(lipm.q(pref + 'ank_roll')):+.5f} "
+                    f"pin {roll_pin:+.5f} "
+                    f"ank_pitch q {float(lipm.q(pref + 'ank_pitch')):+.5f}. "
+                    "Ankle roll sole-flat applies on this write. "
+                    "The four corners are the contact box at the first load over 5 N."
+                )
         clock = _gait_phase_name(walker)
         real_dsp = bool(both and state["pin_chain"])
         if state["sag_stop_cap"]:
@@ -11099,6 +11314,50 @@ def _install_sagittal_slew(
         _cap_row(jn, q_now, held, q_stand, stepped, origin, capped, omega)
         return float(held), q_stand
 
+    def _toward_target(jn: str, target: float) -> float:
+        """One 1.90 rad/s step toward the stretched swing-z IK, then the 2.33 Nm hold.
+
+        The first step starts at the pre-stop command. This is not the stance
+        slew and it does not aim at the stand pose.
+        """
+        t_now = float(lipm.data.time)
+        last = step_at.get(jn)
+        if last is None or t_now - last >= ctrl_period - 1e-4:
+            old = prev.get(jn)
+            started = getattr(session, "_sag_swing_started", None)
+            if not isinstance(started, set):
+                started = set()
+                session._sag_swing_started = started  # type: ignore[attr-defined]
+            if jn not in started:
+                # Walk DSP may have left a stale prev. The stop starts at
+                # the pre-stop command, then steps toward the stretched IK.
+                started.add(jn)
+                seed = getattr(session, "_sag_swing_seed", None)
+                if isinstance(seed, dict) and jn in seed:
+                    old = float(seed[jn])
+            if old is None:
+                old = float(target)
+            dq = float(target) - float(old)
+            if dq > cap:
+                stepped = float(old) + cap
+            elif dq < -cap:
+                stepped = float(old) - cap
+            else:
+                stepped = float(target)
+            stepped_cmd[jn] = float(stepped)
+            step_at[jn] = t_now
+            origin = float(old)
+        else:
+            stepped = float(stepped_cmd[jn])
+            origin = float(prev.get(jn, stepped))
+        held, q_now, omega, capped = _hold_inside(jn, stepped)
+        prev[jn] = float(held)
+        cmd = getattr(session, "_sag_swing_cmd", None)
+        if isinstance(cmd, dict):
+            cmd[jn] = float(held)
+        _cap_row(jn, q_now, held, float(target), stepped, origin, capped, omega)
+        return float(held)
+
     def _apply_stop_hip(jn: str, q_des: float) -> float:
         """Loaded hips step toward stand. An airborne hip stays on the pin.
 
@@ -11123,6 +11382,17 @@ def _install_sagittal_slew(
             # After real double support, an airborne leg is not stance.
             if getattr(session, "_sag_stand_armed", False) and not _stand_side(jn):
                 limited = False
+            swing_joints = getattr(session, "_sag_swing_joints", ())
+            tracking = (
+                getattr(session, "_sag_swing_track", False)
+                and isinstance(swing_joints, tuple)
+                and jn in swing_joints
+                and not _stand_side(jn)
+            )
+            if tracking:
+                # The stretched swing-z IK owns these two joints until the
+                # foot loads. The stance 1.90 path stays on the loaded leg.
+                limited = False
             if limited and getattr(session, "_sag_torque_cap", False):
                 q_des, _q_stand = _toward_stand(jn, float(q_des))
             elif (
@@ -11133,6 +11403,17 @@ def _install_sagittal_slew(
             ):
                 # Foot left the loaded set. Hold the last capped command.
                 # The pre-stop pin is not written again.
+                q_des = float(prev[jn])
+            elif tracking:
+                q_des = _toward_target(jn, float(q_des))
+            elif (
+                getattr(session, "_sag_torque_cap", False)
+                and isinstance(swing_joints, tuple)
+                and jn in swing_joints
+                and not _stand_side(jn)
+                and jn in prev
+            ):
+                # Foot has landed and stand is not armed on this leg yet.
                 q_des = float(prev[jn])
             elif limited:
                 old = prev.get(jn)
@@ -12773,8 +13054,11 @@ def score_sag_stop() -> None:
         "the 2.33 Nm part cap. "
         "From the stop command the swing hip roll, hip yaw, hip pitch, and "
         "ankle roll hold the pre-stop q_des. Planar x/y and sole roll/pitch hold. "
-        "Swing knee and ankle pitch are the swing-z IK until that "
-        "foot is over 5 N. "
+        "The leftover swing-z is time-stretched so the knee and ankle-pitch "
+        "IK move at or under 1.90 rad/s. Those two joints slew toward that "
+        "IK inside the 2.33 Nm part cap. The clock waits while either "
+        "command is more than one step behind, so z does not run ahead. "
+        "Ankle roll stays on the pin until that foot loads, then sole-flat. "
         "Stand hips start only after both feet are over 5 N, and only on "
         "a loaded leg, inside the same part cap. "
         "x_move is not zeroed on the stop tick. "
@@ -13063,8 +13347,29 @@ def score_sag_stop() -> None:
             f"swing {edge.get('swing', '-')} "
             f"dx {float(edge.get('dx', float('nan'))):+.5f} "
             f"dknee_des {float(edge.get('ddes', float('nan'))):+.5f} "
+            f"z_stretch {float(edge.get('z_stretch', float('nan'))):.3f} "
+            f"peak_rate {float(edge.get('z_peak_rate', float('nan'))):.3f} "
+            f"knee_rate {float(edge.get('z_knee_rate', float('nan'))):.3f} "
+            f"ank_rate {float(edge.get('z_ank_rate', float('nan'))):.3f} "
             f"x_move_note pin keeps the walking step until the snap"
         )
+        touch = edge.get("touchdown")
+        if isinstance(touch, dict):
+            print(
+                "PRED sag_stop touchdown "
+                f"t {float(touch.get('t', float('nan'))):.3f} "
+                f"swing {touch.get('swing', '-')} "
+                f"load {float(touch.get('load', float('nan'))):.2f} N "
+                f"gait {float(touch.get('gait', float('nan'))):.3f} "
+                f"waits {int(touch.get('waits', 0))} "
+                f"lowest {touch.get('lowest', '-')} "
+                f"{float(touch.get('lowest_mm', float('nan'))):+.3f} mm"
+            )
+        else:
+            print(
+                "PRED sag_stop touchdown none. "
+                "The swing foot did not reload over 5 N."
+            )
     toe_mm, toe_t, toe_side, toe_frac = _quiet_flat_toe(held)
     print(
         f"PRED {name} flat_toe {toe_mm:+.3f} mm t {toe_t:.3f} "
