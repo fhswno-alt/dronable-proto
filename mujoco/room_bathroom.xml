@@ -56,16 +56,29 @@
     <geom name="room_wall_left" type="box" pos="0.86 1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_wall_right" type="box" pos="0.86 -1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_ceiling" type="box" pos="0.86 0 2.48" size="1.64 1.88 0.04" material="room_ceiling" contype="0" conaffinity="0"/>
+    <!-- Hidden group-3 proxies. Visual geoms stay contype 0. Floor and ceiling stay non-colliding. Tub water is inside the shell and has no proxy. -->
+    <geom name="col_room_wall" type="box" pos="2.42 0 1.22" size="0.045 1.82 1.22" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+    <geom name="col_room_wall_left" type="box" pos="0.86 1.82 1.22" size="1.60 0.045 1.22" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+    <geom name="col_room_wall_right" type="box" pos="0.86 -1.82 1.22" size="1.60 0.045 1.22" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
     <!-- Back-wall row: vanity left, toilet beside it, tub in the right corner. -->
     <body name="bathroom" pos="2.05 0.88 0">
       <site name="bathroom" pos="0.0 0 1.05" size="0.015" group="4" rgba="0.75 0.78 0.80 1"/>
       <geom name="bathroom_tile" type="box" pos="0.28 0 1.05" size="0.02 0.48 0.75" material="room_tile" contype="0" conaffinity="0"/>
       <geom name="bathroom_vanity" type="mesh" mesh="room_vanity" material="room_vanity" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
       <geom name="bathroom_mirror" type="mesh" mesh="room_mirror" material="room_mirror" pos="0.22 0 1.28" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+      <geom name="col_bathroom_tile" type="box" pos="0.28 0 1.05" size="0.02 0.48 0.75" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_bathroom_vanity" type="box" pos="-0.0000 -0.0000 0.7029" size="0.2035 0.3942 0.0771" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_bathroom_vanity_leg_0" type="box" pos="0.1401 -0.3550 0.3100" size="0.0225 0.0252 0.3100" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_bathroom_vanity_leg_1" type="box" pos="0.1570 0.0011 0.3339" size="0.0389 0.0466 0.2862" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_bathroom_vanity_leg_2" type="box" pos="0.1314 0.3497 0.3100" size="0.0139 0.0268 0.3100" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_bathroom_vanity_leg_3" type="box" pos="-0.1356 -0.3655 0.3100" size="0.0402 0.0113 0.3100" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_bathroom_vanity_leg_4" type="box" pos="-0.1715 -0.0028 0.3100" size="0.0265 0.0109 0.3100" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_bathroom_mirror" type="box" pos="0.2200 -0.0000 1.6521" size="0.0130 0.2432 0.3721" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
     </body>
     <body name="sink" pos="1.89 0.88 0.76">
       <site name="sink" pos="0 0 0.2" size="0.012" group="4" rgba="0.70 0.72 0.74 1"/>
       <geom name="sink_basin" type="mesh" mesh="room_sink" material="room_sink" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+      <geom name="col_sink_basin" type="box" pos="0.0000 -0.0000 0.1955" size="0.1507 0.2427 0.1955" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
     </body>
     <body name="toilet" pos="1.78 0.05 0">
       <site name="toilet" pos="0 0 0.40" size="0.012" group="4" rgba="0.85 0.86 0.88 1"/>
@@ -73,11 +86,16 @@
       <geom name="toilet_tank" type="mesh" mesh="room_tank" material="room_tank" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
       <geom name="toilet_seat" type="mesh" mesh="room_seat" material="room_seat" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
       <geom name="toilet_handle" type="mesh" mesh="room_handle" material="room_handle" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+      <geom name="col_toilet_bowl" type="box" pos="-0.0158 -0.0000 0.2120" size="0.2985 0.2338 0.2120" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_toilet_tank" type="box" pos="0.2351 0.0000 0.3700" size="0.0791 0.1679 0.3700" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_toilet_seat" type="box" pos="-0.0865 0.0000 0.4383" size="0.2251 0.2357 0.0143" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_toilet_handle" type="box" pos="0.1602 0.1331 0.6808" size="0.0071 0.0299 0.0105" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
     </body>
     <body name="bathtub" pos="1.92 -1.20 0">
       <site name="bathtub" pos="0 0 0.32" size="0.012" group="4" rgba="0.75 0.82 0.88 1"/>
       <geom name="bathtub_shell" type="mesh" mesh="room_tub" material="room_tub" contype="0" conaffinity="0"/>
       <geom name="bathtub_water" type="mesh" mesh="room_tub_water" material="room_tub" contype="0" conaffinity="0"/>
+      <geom name="col_bathtub_shell" type="box" pos="0.0000 0.0000 0.2900" size="0.3607 0.5411 0.2900" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
     </body>
   </worldbody>
 </mujoco>

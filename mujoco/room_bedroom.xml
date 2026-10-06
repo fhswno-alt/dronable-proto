@@ -43,19 +43,32 @@
     <geom name="room_wall_left" type="box" pos="1.35 2.745 1.22" size="2.25 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_wall_right" type="box" pos="1.35 -2.745 1.22" size="2.25 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_ceiling" type="box" pos="1.35 0 2.48" size="2.35 2.85 0.04" material="room_ceiling" contype="0" conaffinity="0"/>
+    <!-- Hidden group-3 proxies. Visual geoms stay contype 0. Floor and ceiling stay non-colliding. Bed bottom is clamped to z=0. -->
+    <geom name="col_room_wall" type="box" pos="3.545 0 1.22" size="0.045 2.79 1.22" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+    <geom name="col_room_wall_left" type="box" pos="1.35 2.745 1.22" size="2.25 0.045 1.22" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+    <geom name="col_room_wall_right" type="box" pos="1.35 -2.745 1.22" size="2.25 0.045 1.22" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
     <!-- York bed at product scale, long side toward +X, head at +Y, clear of both corners. -->
     <body name="bedroom" pos="2.464 0.193 0">
       <site name="bedroom" pos="0 0.40 0.50" size="0.015" group="4" rgba="0.75 0.72 0.66 1"/>
       <geom name="bedroom_headboard" type="mesh" mesh="room_bed" material="room_bed" contype="0" conaffinity="0"/>
+      <geom name="col_bedroom_headboard" type="box" pos="-0.0036 -0.1923 0.5335" size="0.9200 1.1838 0.5335" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
     </body>
     <body name="nightstand" pos="2.55 1.592 0">
       <site name="nightstand" pos="0 0 0.45" size="0.012" group="4" rgba="0.40 0.26 0.14 1"/>
       <geom name="nightstand_top" type="mesh" mesh="room_night" material="room_night" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
       <geom name="nightstand_lamp" type="mesh" mesh="room_lamp" material="room_lamp" pos="0 0.02 0.62" quat="0 0 0 1" contype="0" conaffinity="0"/>
+      <!-- Four corner posts and the top. The space between the posts stays open. -->
+      <geom name="col_nightstand_top" type="box" pos="-0.0206 0.0027 0.5896" size="0.2027 0.2302 0.0285" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_nightstand_leg_0" type="box" pos="0.1631 0.1963 0.3091" size="0.0250 0.0329 0.3091" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_nightstand_leg_1" type="box" pos="0.1631 -0.1950 0.3091" size="0.0250 0.0325 0.3091" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_nightstand_leg_2" type="box" pos="-0.1755 -0.1898 0.3091" size="0.0324 0.0273 0.3091" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_nightstand_leg_3" type="box" pos="-0.1755 0.1905 0.3091" size="0.0324 0.0271 0.3091" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_nightstand_lamp" type="box" pos="0.0000 0.0200 0.8074" size="0.0424 0.1289 0.1874" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
     </body>
     <body name="dresser" pos="2.435 -2.271 0">
       <site name="dresser" pos="0 0.20 0.45" size="0.012" group="4" rgba="0.45 0.32 0.22 1"/>
       <geom name="dresser_case" type="mesh" mesh="room_dresser" material="room_dresser" quat="0 0 0 1" contype="0" conaffinity="0"/>
+      <geom name="col_dresser_case" type="box" pos="0.0010 -0.0794 0.4445" size="0.7362 0.2498 0.4445" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
     </body>
   </worldbody>
 </mujoco>

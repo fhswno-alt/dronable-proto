@@ -37,19 +37,42 @@
     <geom name="room_wall_left" type="box" pos="0.86 1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_wall_right" type="box" pos="0.86 -1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_ceiling" type="box" pos="0.86 0 2.48" size="1.64 1.88 0.04" material="room_ceiling" contype="0" conaffinity="0"/>
+    <!-- Hidden group-3 proxies. Visual geoms stay contype 0. Floor and ceiling stay non-colliding. -->
+    <geom name="col_room_wall" type="box" pos="2.42 0 1.22" size="0.045 1.82 1.22" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+    <geom name="col_room_wall_left" type="box" pos="0.86 1.82 1.22" size="1.60 0.045 1.22" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+    <geom name="col_room_wall_right" type="box" pos="0.86 -1.82 1.22" size="1.60 0.045 1.22" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
     <!-- Sofa against the back wall, cushions toward +X. Coffee table in front.
          TV screen (yaw 270) faces +X at image-right. Static bodies. -->
     <body name="living" pos="1.92 0.42 0">
       <site name="living" pos="-0.2 0 0.48" size="0.015" group="4" rgba="0.55 0.32 0.18 1"/>
       <geom name="living_sofa_back" type="mesh" mesh="room_sofa" material="room_sofa" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+      <!-- Two base rails and the cushion mass. The gap between the rails stays open. -->
+      <geom name="col_living_sofa_rail_a" type="box" pos="-0.3656 0.0000 0.1000" size="0.0692 1.0825 0.1000" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_living_sofa_rail_b" type="box" pos="0.3626 -0.0000 0.1000" size="0.0661 1.0875 0.1000" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_living_sofa_back" type="box" pos="-0.0021 -0.0000 0.6257" size="0.4307 1.2837 0.4255" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
     </body>
     <body name="coffee" pos="1.08 0.42 0">
       <site name="coffee" pos="0 0 0.22" size="0.012" group="4" rgba="0.35 0.24 0.14 1"/>
       <geom name="coffee_top" type="mesh" mesh="room_coffee" material="room_coffee" contype="0" conaffinity="0"/>
+      <!-- Four legs, a perimeter apron, and the top. The space under the top stays open. -->
+      <geom name="col_coffee_top" type="box" pos="0.0000 0.0000 0.2471" size="0.4185 0.4185 0.0770" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_coffee_leg_0" type="box" pos="-0.3711 -0.3740 0.0850" size="0.0299 0.0298 0.0850" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_coffee_leg_1" type="box" pos="0.3711 -0.3740 0.0850" size="0.0299 0.0298 0.0850" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_coffee_leg_2" type="box" pos="-0.3711 0.3740 0.0850" size="0.0299 0.0298 0.0850" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_coffee_leg_3" type="box" pos="0.3711 0.3740 0.0850" size="0.0299 0.0298 0.0850" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_coffee_apron_xn" type="box" pos="-0.3828 -0.0000 0.1364" size="0.0250 0.4106 0.0334" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_coffee_apron_xp" type="box" pos="0.3828 -0.0000 0.1356" size="0.0250 0.4106 0.0343" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_coffee_apron_yn" type="box" pos="-0.0000 -0.3859 0.1369" size="0.4078 0.0248 0.0330" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_coffee_apron_yp" type="box" pos="0.0000 0.3863 0.1356" size="0.4078 0.0243 0.0343" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
     </body>
     <body name="tv" pos="1.88 -1.38 0">
       <site name="tv" pos="0 0 0.28" size="0.012" group="4" rgba="0.25 0.35 0.45 1"/>
       <geom name="tv_screen" type="mesh" mesh="room_tv" material="room_tv" quat="-0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
+      <geom name="col_tv_screen" type="box" pos="-0.0000 0.0000 0.3111" size="0.2354 0.3000 0.1457" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_tv_foot_0" type="box" pos="-0.1436 0.2073 0.0893" size="0.0704 0.0927 0.0893" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_tv_foot_1" type="box" pos="-0.1430 -0.2543 0.0827" size="0.0697 0.0457 0.0827" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_tv_foot_2" type="box" pos="0.1650 0.2146 0.0827" size="0.0668 0.0854 0.0827" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_tv_foot_3" type="box" pos="0.1533 -0.2543 0.0827" size="0.0551 0.0457 0.0827" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
     </body>
   </worldbody>
 </mujoco>
