@@ -48,7 +48,10 @@ point only when the two floor positions are within 0.035 m after
 that move. The radius is a constant frozen before the run. Sim leg
 names are not an input; a name is attached only when the stop is
 reported. ``stop`` is sent when the shortest remaining gap is at or
-under ``d_min``, or when a cue sets ``too_close``. The pad stays
+under ``d_min``, or when a cue sets ``too_close``. The finder
+clears ``too_close`` when the last-row column rays outside the foot
+corridor, so a side blob is not a free stop. A short speck in the
+bottom band is not emitted as a leg. The pad stays
 0.020. No 3–5 cm buffer is added. ``finder-long`` is a stress on
 that latch: the frame after the gap first falls to ``d_min + 0.05``
 adds 0.10 m to that floor point's toe gap, then the finder is
@@ -1046,7 +1049,8 @@ def walk_finder(
     A world floor point is kept per hit. A new frame can only move that
     point closer. Each tick re-reads it with body x, y, and yaw, and
     drops it when it leaves the corridor. A new cue joins a saved point
-    only inside TRACK_JOIN_M. ``too_close`` still stops. A stool-leg
+    only inside TRACK_JOIN_M. ``too_close`` still stops, after the finder
+    clears that flag on a last-row blob outside the foot corridor. A stool-leg
     name is written into the report after the stop, from the saved
     floor point, and is not used to keep or clear a track.
 
@@ -1189,7 +1193,13 @@ def walk_finder(
                 renderer.disable_depth_rendering()
                 renderer.update_scene(data, camera="kit_cam")
                 rgb = np.asarray(renderer.render(), dtype=np.uint8).copy()
-                cues = hf.find_hazard_cues(rgb)
+                cues = hf.corridor_gate_cues(
+                    hf.find_hazard_cues(rgb),
+                    cam=pose, body=body,
+                    imu_roll_rad=roll, imu_pitch_rad=pitch,
+                    head_tilt_rad=tilt, yaw_rate=yaw_rate,
+                    step_off_m=step_off, head_pan_rad=pan,
+                )
                 primary = cues[0] if cues else None
 
                 def nearest(
