@@ -1861,6 +1861,30 @@ The living-right apron and the bedroom-left clip were measured and not shipped. 
 
 Bedroom left at 5.624 s is a first-sighting `too_close`, column 268, span 258, width 12, contact run 9, RGB (84, 62, 42). Clearing a first-sighting clip does not clear the bout. At 5.632 s a pixel cue, column 353, row 469, span 245, width 10, run 4, sideways −0.056 m, stops the walk at 5.648 s. The saved point is 1.956 m from `col_bedroom_headboard`, the eye is 0.176 m against a true range of 1.931 m, and the open walk has no contact. A width cap of 12 px on a first sighting was not shipped: the coffee cue the latch carries is 11 px wide, and its pixel is the same brown, luminance about 64. A taller minimum span would cut the coffee column too (span 254 against the clip's 258). The fifteen-bout table above still stands.
 
+The contact pixel does not separate that clip from the coffee leg. Both are brown, about (84, 62, 42) and (90, 65, 45). The column above the contact does. A first sighting is emitted only when the contiguous leg column goes low-chroma within 64 px of the contact: chroma under 16 and luminance under 40. The bedroom-left clip has no such pixel in its near column. The pixel cue at 5.632 s, column 353, is first dark 234 px up, so it is dropped too. The coffee birth at 4.216 s is dark by 14 px (width 11, kept). The stool fire is gray at the contact (kept). The apron rail is dark by 39 px (kept). Width and span are unchanged. The latch is unchanged. The floor name is still the nearest `col_*` on the z=0 plane. `HAZARD_PAD_M` stays 0.020.
+
+Prefer FAIL. Thirteen of the fifteen bouts meet the bar. The apron stop is kept, and the entrance rug is untouched. Bouts that already had no stop were not re-rendered: this rule only removes cues. Kitchen left, living straight, living right, and bedroom left were re-rendered.
+
+| room | approach | stop | latch | contacts | peak |
+| --- | --- | --- | --- | --- | --- |
+| kitchen | straight | none | | 0 | hip roll −2.128 Nm |
+| kitchen | left −0.25 | 5.864 s | `stool_b_leg_2`, 0.014 m | 0; unstopped hits that leg at 6.822 s | +2.280 Nm |
+| kitchen | right +0.25 | none | | 0 | hip roll +2.278 Nm |
+| bathroom | straight | none | | 0, unstopped also 0 | hip roll −2.128 Nm |
+| bathroom | left −0.25 | none | | 0, unstopped also 0 | hip roll −2.271 Nm |
+| bathroom | right +0.25 | none | | 0 | hip roll +2.278 Nm |
+| living | straight | 4.376 s | `coffee_leg_0`, 0.034 m | 0; unstopped hits that leg at 5.368 s | +2.280 Nm |
+| living | left −0.25 | none | | 0, unstopped also 0 | hip roll −2.271 Nm |
+| living | right +0.25 | 4.896 s | `coffee_apron_xn`, 0.100 m, side −0.112 m | 0; unstopped hits `coffee_leg_2` at 8.104 s | +2.280 Nm |
+| bedroom | straight | none | | 0, unstopped also 0 | hip roll −2.128 Nm |
+| bedroom | left −0.25 | none | | 0, unstopped also 0 | hip roll −2.271 Nm |
+| bedroom | right +0.25 | none | | 0, unstopped also 0 | hip roll +2.278 Nm |
+| entrance | straight | none | | rug at 6.892 s, 11.3 N | hip roll −2.128 Nm |
+| entrance | left −0.25 | none | | 0, unstopped also 0 | hip roll −2.271 Nm |
+| entrance | right +0.25 | none | | 0 | hip roll +2.278 Nm |
+
+Kitchen left still stops at 5.864 s on `col_chair_stool_b_leg_2`, saved point 0.014 m, eye 0.181 m against 0.191 m, sideways +0.069 m, 0 contacts, stop peak +2.280 Nm. Living straight still stops at 4.376 s on `col_coffee_leg_0`, saved point 0.034 m, born 4.216 s, eye 0.178 m against 0.208 m, sideways +0.065 m, 0 contacts, stop peak +2.280 Nm. Living right still stops at 4.896 s on `col_coffee_apron_xn`, saved point 0.100 m, eye 0.189 m against 0.233 m, sideways −0.112 m, 0 finder contacts, stop peak +2.280 Nm. The apron bottom is 0.103 m and the legs would hit it, so that stop stays. Bedroom left no longer stops. The open walk has no contact. Walk peak is hip roll −2.271 Nm. Entrance straight still hits `col_mat_rug` at 6.892 s, 11.3 N, with no stop. Not kit-safe. Not go-anywhere.
+
 A −10° `head_tilt` walk is not enabled. On that pose the near edge is
 0.077 m at `cam_z` 0.326 m. #67 checked the wood rule at that session
 tilt: the foot contact boxes project to rows 643–749, below the
