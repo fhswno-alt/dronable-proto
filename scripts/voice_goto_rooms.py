@@ -5,7 +5,7 @@ Reach is fixed below before any room is scored. A bout reaches only when
 the settled stand COM starts outside that room's floor box in
 mujoco/room_apartment.json and finishes inside the same box, upright,
 with zero prop contacts, at or before the time limit, and only after a
-correct per-target yes committed vel(+0.056, yaw from the doorway pixel). The box is the named
+correct per-target yes committed vel(+0.056, 0) after an in-place re-point. The box is the named
 room, not the plant floor from -3 m to +3 m.
 
 Scored spawns are the doorway xy turned ±90° from the door-facing yaw.
@@ -19,11 +19,14 @@ a doorway. No doorway means keep searching. Search turns in place at
 and the body settles, then kit_cam is captured. The answer is logged at
 that heading, not at reply time. A yes while the asked room is under 1%
 of the frame is a wrong yes and does not go-to. A correct yes does not
-lock that heading. The walk republishes vel(+0.056, yaw) with yaw ±0.25
-from the doorway pixel, and each later stop-settle-capture re-points.
-The #71 latch stays armed on that forward motion. A colour-free floor/wall
-row is ranged with the same kit_cam floor ray and stops at d_min. A wall
-or prop contact with the latch armed fails the bout. A stop on the
+lock that heading. A doorway that is not actually in the frame does
+not get a room question: the body turns in place at yaw +0.25. A correct
+yes re-points in place toward the doorway pixel, settles until that yaw
+is back at 0, then walks vel(+0.056, 0). Yaw is not applied while
+walking. The #71 latch stays armed on that forward motion. A colour-free
+floor/wall row is ranged with the live camera, and the stop latches only
+when the forward ray hits a wall. A wall or prop contact with the latch
+armed fails the bout. A stop on the
 speckled hall shadow by the kitchen or bathroom doorway, with no prop in
 the frame, is a false stop and is not a #71 pass.
 
@@ -179,6 +182,7 @@ class AskJson(TypedDict):
     door_frac: float | None
     door_bbox: list[float] | None
     door_seconds: float | None
+    search_applied_yaw: float
 
 
 class ApproachJson(TypedDict):
@@ -286,6 +290,9 @@ class RoomJson(TypedDict):
     wall_contacts: list[WallHitJson]
     wall_range_fail: bool
     wall_stop_pass: bool
+    ray_reject_count: int
+    search_applied_yaw_peak: float
+    search_yaw_fail: bool
     latch_armed_contact: bool
     gait_limit: bool
     torque: list[TorqueJson]
@@ -398,19 +405,27 @@ def _definition() -> DefinitionJson:
             "After the stand, vel(0, +0.25) turns in place. No forward "
             "vel until a correct yes. Every 20 degrees the turn stops "
             f"(yaw 0) and the body settles for {SETTLE_S:.2f} s. "
-            "Moondream detects a doorway before the yes/no. No doorway "
-            "keeps the search. The logged heading is the heading at "
-            "capture, not the heading when the answer returns. The "
-            "search turn sign is not taken from the door bearing. A "
-            "correct yes walks at +0.056 m/s and yaw ±0.25 from the "
-            "doorway pixel, and re-points after each "
-            f"{APPROACH_LOOK_S:.2f} s stop-settle-capture. kit_cam is "
-            "not moved. A floor/wall image row is ranged with the "
-            "kit_cam floor ray and stops at d_min. A ranged gap more "
-            f"than {RANGE_ERR_MAX_M:.2f} m off the sim gap is not a "
-            "wall-stop pass unless that error was added to the latch "
-            "before the bouts. The ray uses the live camera height and "
-            "the IMU pitch plus head_tilt, not a standing-pose table."
+            "The room question is asked only when the doorway opening "
+            "is actually in kit_cam. Otherwise the body turns in place "
+            "at yaw +0.25, and that applied yaw is logged on the search. "
+            "The picture is still taken after yaw has settled to 0. "
+            "Moondream detects a doorway pixel only on that gated frame. "
+            "The logged heading is the heading at capture, not the "
+            "heading when the answer returns. The search turn sign is "
+            "not taken from the door bearing. A correct yes yaws in "
+            "place toward the doorway pixel, settles until applied yaw "
+            "is 0, then walks at +0.056 m/s with yaw 0. Yaw is not "
+            "commanded while walking. It re-points the same way after "
+            f"each {APPROACH_LOOK_S:.2f} s stop-settle-capture. kit_cam "
+            "is not moved. A floor/wall image row is ranged with the "
+            "live camera. The floor-edge latch fires only when the "
+            "forward ray hits a wall. A prop hit is logged and is not "
+            "added to the latch. A wall range more than "
+            f"{RANGE_ERR_MAX_M:.2f} m off the sim gap is not a "
+            "wall-stop pass unless that wall error was added to the "
+            "latch before the bouts. The ray uses the live camera "
+            "height and the IMU pitch plus head_tilt, not a "
+            "standing-pose table."
         ),
         hip_bar_nm=HIP_BAR_NM,
         soft_pass=False,
@@ -1403,7 +1418,14 @@ def _look(
     door_frac: float | None = None
     door_bbox: list[float] | None = None
     door_seconds: float | None = None
-    if asker is None:
+    if asker is not None and door <= 0.0:
+        # The opening is not in the frame. A detect box here is not a
+        # doorway, and the room question is not asked.
+        answer = "no_door"
+        raw = ""
+        confidence = None
+        seconds = None
+    elif asker is None:
         answer = "not loaded"
         raw = ask_error
         confidence = None
@@ -1457,6 +1479,7 @@ def _look(
         door_frac=door_frac,
         door_bbox=door_bbox,
         door_seconds=door_seconds,
+        search_applied_yaw=0.0,
     )
     return row, fracs
 
@@ -1620,6 +1643,8 @@ def _run_room(
     commanded_yaw: float | None = None
     latch_applied = False
     committed = False
+    search_applied_peak = 0.0
+    ray_reject_count = 0
     wrong_yes = False
     block = ""
     ticks = 0
@@ -1739,9 +1764,16 @@ def _run_room(
 
             sweep_base = yaw_turned
             approach_yaw = 0.0
-            if decision == "commit" and look["door_u"] is not None:
-                approach_yaw = _yaw_toward_u(float(look["door_u"]))
-            need_search = decision in ("no", "undecided", "no_door")
+            search_applied_peak = 0.0
+            ray_reject_count = 0
+            last_reject_t = -1.0
+            last_reject_name = ""
+            if decision == "commit":
+                if look["door_u"] is not None:
+                    approach_yaw = _yaw_toward_u(float(look["door_u"]))
+                need_search = False
+            else:
+                need_search = decision in ("no", "undecided", "no_door")
 
             def _time_stop(reason: str) -> None:
                 nonlocal block, stop
@@ -1812,6 +1844,40 @@ def _run_room(
                     prop_ids=prop_ids,
                 )[0]
 
+            def _turn_toward(rate: float) -> bool:
+                """In-place yaw toward the doorway, then settle. The walk stays at yaw 0."""
+                nonlocal ticks, yaw_turned, prev_yaw, stop, block
+                start = yaw_turned
+                while (
+                    abs(yaw_turned - start) < ASK_STEP_RAD
+                    and float(session.data.time) < TIME_LIMIT_S - 1e-9
+                ):
+                    now = float(session.data.time)
+                    session.bus.vel(0.0, rate, now)
+                    bout.yaw_on = True
+                    bout.approach_yaw = False
+                    session.step()
+                    ticks += 1
+                    heading = _yaw(session.data, session.bid_body)
+                    yaw_turned += _wrap(heading - prev_yaw)
+                    prev_yaw = heading
+                    if bout.contact != "none":
+                        _log_range(bout.contact, "", ())
+                        stop = _Stop(
+                            path="contact",
+                            reason=bout.contact,
+                            hit_xy=None,
+                            on_shadow=False,
+                            prop_in_frame=False,
+                            false_stop=False,
+                            latch_pass=False,
+                        )
+                        return False
+                if float(session.data.time) >= TIME_LIMIT_S - 1e-9:
+                    _time_stop(f"time limit {TIME_LIMIT_S:.1f} s")
+                    return False
+                return _settle_body(False)
+
             def _log_range(kind: str, latch_path: str, cues: tuple[hf.HazardCue, ...]) -> None:
                 nonlocal wall_range_fail, wall_stop_pass
                 reading = _range_wall(
@@ -1819,21 +1885,27 @@ def _run_room(
                 )
                 true_name, true_gap = _true_wall_gap(model, session.data, session, cid)
                 ranged = reading["geometric_m"]
+                is_wall = str(true_name).startswith("wall_")
                 err = None
-                if ranged is not None and true_gap is not None:
+                if is_wall and ranged is not None and true_gap is not None:
                     err = abs(float(ranged) - float(true_gap))
-                over = err is None or err > RANGE_ERR_MAX_M
+                over = is_wall and (err is None or err > RANGE_ERR_MAX_M)
+                # The bob pad is a wall-ray error measured before the bouts.
+                # A prop miss does not widen it.
                 covered = (
-                    latch_extra_m > 0.0
+                    is_wall
+                    and latch_extra_m > 0.0
                     and true_gap is not None
                     and float(true_gap) + 1e-6 >= d_min_m
                     and err is not None
                     and err <= latch_extra_m + 1e-6
                 )
-                honest = (err is not None and err <= RANGE_ERR_MAX_M) or covered
+                honest = is_wall and (
+                    (err is not None and err <= RANGE_ERR_MAX_M) or covered
+                )
                 if kind == "floor_edge" and bout.contact == "none" and honest:
                     wall_stop_pass = True
-                if not honest:
+                if is_wall and kind == "floor_edge" and not honest:
                     wall_range_fail = True
                 wall_contacts.append(WallHitJson(
                     t=float(session.data.time),
@@ -1859,6 +1931,7 @@ def _run_room(
             ):
                 if need_search:
                     turned_before = yaw_turned
+                    segment_peak = 0.0
                     while (
                         yaw_turned - sweep_base < next_ask
                         and yaw_turned - sweep_base < SEARCH_SWEEP_RAD
@@ -1870,6 +1943,11 @@ def _run_room(
                         bout.approach_yaw = False
                         session.step()
                         ticks += 1
+                        applied_now = float(session.bus.applied_yaw_rate)
+                        if abs(applied_now) >= abs(segment_peak):
+                            segment_peak = applied_now
+                        if abs(applied_now) >= abs(search_applied_peak):
+                            search_applied_peak = applied_now
                         heading = _yaw(session.data, session.bid_body)
                         yaw_turned += _wrap(heading - prev_yaw)
                         prev_yaw = heading
@@ -1906,18 +1984,26 @@ def _run_room(
                     if abs(_wrap(_yaw(session.data, session.bid_body) - last_capture)) < 0.5 * ASK_STEP_RAD:
                         break
                     look = _capture()
+                    look["search_applied_yaw"] = segment_peak
                     next_ask = (yaw_turned - sweep_base) + ASK_STEP_RAD
                     last_capture = look["heading_at_capture"]
                     decision = consider(look)
-                    if decision == "commit" and look["door_u"] is not None:
-                        approach_yaw = _yaw_toward_u(float(look["door_u"]))
+                    if decision == "commit":
+                        if look["door_u"] is not None:
+                            approach_yaw = _yaw_toward_u(float(look["door_u"]))
+                        else:
+                            approach_yaw = 0.0
                         need_search = False
                     elif decision == "wrong":
                         break
                     continue
 
+                if abs(approach_yaw) > 1e-6 and not _turn_toward(approach_yaw):
+                    break
+                if stop["path"] != "":
+                    break
                 commanded_vx = voice.FWD_MPS
-                commanded_yaw = approach_yaw
+                commanded_yaw = 0.0
                 latch_applied = True
                 look_end = float(session.data.time) + APPROACH_LOOK_S
                 last_wall_t = -1.0
@@ -1946,7 +2032,7 @@ def _run_room(
                             tick=ticks,
                             heading_rad=_yaw(session.data, session.bid_body),
                             commanded_vx=voice.FWD_MPS,
-                            commanded_yaw=approach_yaw,
+                            commanded_yaw=0.0,
                             door_u=None if look["door_u"] is None else float(look["door_u"]),
                             ranged_toe_gap_m=(
                                 None if reading["toe_gap_m"] is None
@@ -1962,28 +2048,62 @@ def _run_room(
                         ))
                         gap = reading["toe_gap_m"]
                         if gap is not None and float(gap) <= wall_gate_m:
-                            _log_range("floor_edge", "floor_edge", cues)
-                            session.bus.stop(now)
-                            bout.approach_yaw = False
-                            bout.yaw_on = abs(session.bus.applied_yaw_rate) > 1e-6
-                            session.step()
-                            ticks += 1
-                            stop = _Stop(
-                                path="floor_edge",
-                                reason=(
-                                    f"floor-edge wall {reading['wall']} "
-                                    f"toe_gap={float(gap):.3f} "
-                                    f"latch={wall_gate_m:.3f} "
-                                    f"cam_pitch={float(reading['cam_pitch_rad']):+.4f}"
-                                ),
-                                hit_xy=None,
-                                on_shadow=False,
-                                prop_in_frame=False,
-                                false_stop=False,
-                                latch_pass=False,
-                            )
-                            repoint = False
-                            break
+                            if not str(true_name).startswith("wall_"):
+                                ray_reject_count += 1
+                                if (
+                                    true_name != last_reject_name
+                                    or now - last_reject_t >= 0.5
+                                ):
+                                    last_reject_name = true_name
+                                    last_reject_t = now
+                                    wall_contacts.append(WallHitJson(
+                                        t=now,
+                                        contact="none",
+                                        ranged_toe_gap_m=(
+                                            None if reading["geometric_m"] is None
+                                            else float(reading["geometric_m"])
+                                        ),
+                                        true_wall_gap_m=true_gap,
+                                        true_wall=true_name,
+                                        range_err_m=(
+                                            None if reading["geometric_m"] is None
+                                            or true_gap is None
+                                            else abs(
+                                                float(reading["geometric_m"]) - float(true_gap)
+                                            )
+                                        ),
+                                        range_over_1cm=False,
+                                        cam_z_m=float(reading["cam_z_m"]),
+                                        imu_pitch_rad=float(reading["imu_pitch_rad"]),
+                                        head_tilt_rad=float(reading["head_tilt_rad"]),
+                                        cam_pitch_rad=float(reading["cam_pitch_rad"]),
+                                        latch_path="ray_reject",
+                                        finder=[_cue_json(cue) for cue in cues],
+                                    ))
+                            else:
+                                _log_range("floor_edge", "floor_edge", cues)
+                                session.bus.stop(now)
+                                bout.approach_yaw = False
+                                bout.yaw_on = abs(session.bus.applied_yaw_rate) > 1e-6
+                                session.step()
+                                ticks += 1
+                                stop = _Stop(
+                                    path="floor_edge",
+                                    reason=(
+                                        f"floor-edge wall {true_name} "
+                                        f"toe_gap={float(gap):.3f} "
+                                        f"ray={true_gap} "
+                                        f"latch={wall_gate_m:.3f} "
+                                        f"cam_pitch={float(reading['cam_pitch_rad']):+.4f}"
+                                    ),
+                                    hit_xy=None,
+                                    on_shadow=False,
+                                    prop_in_frame=False,
+                                    false_stop=False,
+                                    latch_pass=False,
+                                )
+                                repoint = False
+                                break
                     if path != "":
                         seg = _render_seg(renderer, session.data)
                         prop = _prop_in_frame(seg, prop_ids)
@@ -2032,13 +2152,12 @@ def _run_room(
                         )
                         repoint = False
                         break
-                    bout.approach_yaw = abs(approach_yaw) > 1e-6
+                    bout.approach_yaw = False
                     bout.yaw_on = (
-                        bout.approach_yaw
-                        or abs(session.bus.target_yaw) > 1e-6
+                        abs(session.bus.target_yaw) > 1e-6
                         or abs(session.bus.applied_yaw_rate) > 1e-6
                     )
-                    session.bus.vel(voice.FWD_MPS, approach_yaw, now)
+                    session.bus.vel(voice.FWD_MPS, 0.0, now)
                     session.step()
                     ticks += 1
                     if bout.contact != "none":
@@ -2068,13 +2187,17 @@ def _run_room(
                 look = _capture()
                 last_capture = look["heading_at_capture"]
                 decision = consider(look)
-                if decision == "commit" and look["door_u"] is not None:
-                    approach_yaw = _yaw_toward_u(float(look["door_u"]))
+                if decision == "commit":
+                    if look["door_u"] is not None:
+                        approach_yaw = _yaw_toward_u(float(look["door_u"]))
+                    else:
+                        approach_yaw = 0.0
                     need_search = False
                 elif decision == "wrong":
                     break
                 else:
                     need_search = True
+                    approach_yaw = 0.0
                     sweep_base = yaw_turned
                     next_ask = ASK_STEP_RAD
 
@@ -2198,6 +2321,12 @@ def _run_room(
             wall_contacts=wall_contacts,
             wall_range_fail=wall_range_fail,
             wall_stop_pass=wall_stop_pass,
+            ray_reject_count=ray_reject_count,
+            search_applied_yaw_peak=search_applied_peak,
+            search_yaw_fail=(
+                any(row["answer"] == "no_door" for row in asks)
+                and abs(search_applied_peak) < 0.24
+            ),
             latch_armed_contact=bool(latch_applied and bout.contact != "none"),
             gait_limit=bout.gait_limit,
             torque=_torque_rows(bout),
@@ -2324,7 +2453,11 @@ def _range_probe() -> dict[str, object]:
             take(f"pitch {pitch:+.3f}")
     finally:
         renderer.close()
-    errs = [float(row["range_err_m"]) for row in samples if row["range_err_m"] is not None]
+    errs = [
+        float(row["range_err_m"])
+        for row in samples
+        if row["range_err_m"] is not None and str(row["true_wall"]).startswith("wall_")
+    ]
     worst = None if not errs else max(errs)
     extra = 0.0 if worst is None or worst <= RANGE_ERR_MAX_M else float(worst)
     return {
@@ -2470,6 +2603,9 @@ def main() -> int:
                     f"yaw_turned={row['yaw_turned_rad']:+.3f}  "
                     f"spawn_com={spawn['com_xyz'][0]:+.3f},{spawn['com_xyz'][1]:+.3f}  "
                     f"vx={row['commanded_vx']} yaw={row['commanded_yaw']}  "
+                    f"search_yaw={row['search_applied_yaw_peak']:+.3f}  "
+                    f"search_fail={row['search_yaw_fail']}  "
+                    f"ray_reject={row['ray_reject_count']}  "
                     f"d_min={row['d_min_m']:.4f}  stop={row['stop_path']}  "
                     f"false_stop={row['false_stop']}  "
                     f"prop_in_frame={row['prop_in_frame_at_stop']}  "
@@ -2499,6 +2635,7 @@ def main() -> int:
     contact_any = any(row["latch_armed_contact"] for row in rows)
     range_any = any(row["wall_range_fail"] for row in rows)
     gait_any = any(row["gait_limit"] for row in rows)
+    search_any = any(row["search_yaw_fail"] for row in rows)
     header["rooms"] = rows
     header["reached_all"] = reached_all
     header["false_stop_any"] = false_any
@@ -2506,12 +2643,15 @@ def main() -> int:
     header["latch_contact_any"] = contact_any
     header["wall_range_fail_any"] = range_any
     header["gait_limit_any"] = gait_any
+    header["search_yaw_fail_any"] = search_any
+    header["ray_reject_count"] = sum(int(row["ray_reject_count"]) for row in rows)
     header["prefer_fail"] = (
-        (not reached_all) or false_any or wrong_any or contact_any or range_any or gait_any
+        (not reached_all) or false_any or wrong_any or contact_any
+        or range_any or gait_any or search_any
     )
     header["go_anywhere"] = (
         reached_all and not false_any and not wrong_any
-        and not contact_any and not range_any and not gait_any
+        and not contact_any and not range_any and not gait_any and not search_any
     )
     header["kit_safe"] = False
     header["soft_pass"] = False
@@ -2525,7 +2665,9 @@ def main() -> int:
         f"wrong_yes_any={str(wrong_any).lower()}  "
         f"latch_contact_any={str(contact_any).lower()}  "
         f"wall_range_fail_any={str(range_any).lower()}  "
-        f"gait_limit_any={str(gait_any).lower()}",
+        f"gait_limit_any={str(gait_any).lower()}  "
+        f"search_yaw_fail_any={str(search_any).lower()}  "
+        f"ray_reject={header['ray_reject_count']}",
         flush=True,
     )
     return 1
