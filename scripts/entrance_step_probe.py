@@ -130,6 +130,7 @@ def _foot_surface(session: sw.SteerSession, side: str, rug_gid: int) -> dict[str
     n_in = sum(1 for corner in corners if _xy_in_rug(session, rug_gid, corner))
     lead_in = _xy_in_rug(session, rug_gid, lead)
     on_rug = n_in > 0 or rug_n > 0.5
+    contact = _contact_kind(names)
     if lead_in:
         surface = "rug"
         clear = float(lead[2]) - RUG_TOP_M
@@ -147,9 +148,23 @@ def _foot_surface(session: sw.SteerSession, side: str, rug_gid: int) -> dict[str
         "center_z": center_z,
         "sole_pitch": _sole_pitch(session, side),
         "on_rug": int(on_rug),
+        "contact": contact,
         "surface": surface,
         "clear": clear,
     }
+
+
+def _contact_kind(names: list[str]) -> str:
+    """Geom the foot is touching. Plan position over the rug is not contact."""
+    floor = any(nm == "floor" for nm in names)
+    rug = any("rug" in nm for nm in names)
+    if floor and rug:
+        return "floor+rug"
+    if floor:
+        return "floor"
+    if rug:
+        return "rug"
+    return "none"
 
 
 def _leading_toe_z(session: sw.SteerSession, side: str) -> float:
@@ -1487,6 +1502,13 @@ def _cycle_index(cycles: list[list[Tick]]) -> tuple[int, int]:
     return med_n, (len(cycles[-1]) if cycles else 0)
 
 
+def _hx_parts(packed: tuple) -> tuple[float, float, str]:
+    tau = float(packed[0])
+    when = float(packed[1])
+    contact = str(packed[2]) if len(packed) > 2 else ""
+    return tau, when, contact
+
+
 def _surface_summary(
     name: str,
     rows: list[Tick],
@@ -1517,6 +1539,7 @@ def _surface_summary(
             f"rug {float(plane['rug_n']):.2f} N corners_in {plane['corners_in']} "
             f"lead_in {plane['lead_in']} lead_z {float(plane['lead_z']) * 1000:.3f} mm "
             f"rug_top {RUG_TOP_M * 1000:.1f} mm on_rug {plane['on_rug']} "
+            f"contact {plane.get('contact', '')} "
             f"surface {plane['surface']}"
         )
     knee_rug = " ".join(rug_bits)
@@ -1618,18 +1641,22 @@ def _surface_summary(
         f"rug_toe {rug_toe:.3f} mm. Track 1 uses the flat swings only."
     )
     flat_hits: list[str] = []
-    for act, (tau, when) in hx_flat.items():
+    for act, packed in hx_flat.items():
+        tau, when, contact = _hx_parts(packed)
         over = abs(tau) >= KNEE_NM
         if over:
-            flat_hits.append(f"{act} {tau:+.4f} t {when:.3f}")
+            flat_hits.append(f"{act} {tau:+.4f} t {when:.3f} contact {contact}")
         print(
             f"PRED {name} hx_flat {act} {tau:+.4f} t {when:.3f} "
+            f"contact {contact or '-'} "
             f"abs {abs(tau):.4f} ge_2.33 {int(over)} "
             f"ge_2.45 {int(abs(tau) >= PLANT_NM - 1e-3)}"
         )
-    for act, (tau, when) in hx_rug.items():
+    for act, packed in hx_rug.items():
+        tau, when, contact = _hx_parts(packed)
         print(
             f"PRED {name} hx_rug {act} {tau:+.4f} t {when:.3f} "
+            f"contact {contact or '-'} "
             f"abs {abs(tau):.4f} ge_2.33 {int(abs(tau) >= KNEE_NM)} "
             f"ge_2.45 {int(abs(tau) >= PLANT_NM - 1e-3)}"
         )
@@ -2957,6 +2984,94 @@ def _install_swing_hip_lead(
     return applied["hip_roll"], applied["hip_pitch"]
 
 
+def _stance_knees(lipm: object) -> tuple[str, ...]:
+    """Knees carrying the body this tick. Double support writes both."""
+    swing = getattr(lipm, "_gm_swing", None)
+    if swing == "L":
+        return ("r_knee",)
+    if swing == "R":
+        return ("l_knee",)
+    return ("l_knee", "r_knee")
+
+
+def _knee_load(session: sw.SteerSession, jn: str) -> tuple[float, float, float, float, float]:
+    """Previous-tick hold offset, compiled kp, bias, constraint, and foot dz.
+
+    ``(qfrc_bias - qfrc_constraint) / kp`` is the position offset that
+    holds this pose. It is not the measured actuator force. ``dz`` is
+    the pelvis-fixed vertical jacobian of the foot contact geom, metres
+    per radian.
+    """
+    model = session.model
+    data = session.data
+    jid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, jn)
+    dof = int(model.jnt_dofadr[jid])
+    _q, _qd, idx = _joint_q_qd(session, jn)
+    kp = float(model.actuator_gainprm[idx, 0])
+    if abs(kp - KNEE_KP) > 1e-3:
+        raise SystemExit(f"compiled kp for {jn} is {kp:.4f}, expected {KNEE_KP:.1f}")
+    bias = float(data.qfrc_bias[dof])
+    con = float(data.qfrc_constraint[dof])
+    offset = 0.0 if kp < 1e-6 else (bias - con) / kp
+    gid = session.gid_lfoot if jn.startswith("l_") else session.gid_rfoot
+    jacp = np.zeros((3, model.nv), dtype=np.float64)
+    jacr = np.zeros((3, model.nv), dtype=np.float64)
+    mj.mj_jacGeom(model, data, jacp, jacr, gid)
+    dz = float(jacp[2, dof])
+    return offset, kp, bias, con, dz
+
+
+def _install_stance_knee_sag(session: sw.SteerSession) -> None:
+    """Add the previous tick's stance-knee load offset, then clamp.
+
+    Offset is ``(qfrc_bias - qfrc_constraint) / compiled kp`` from the
+    physics step that already finished. Predicted force
+    ``kp·(ctrl−q) − kv·q̇`` is then clamped to ±2.33 Nm. Measured
+    actuator_force is not an input. The plant file is not edited.
+    """
+    lipm = session.lipm
+    if lipm is None:
+        raise RuntimeError("gait manager missing")
+    session._sag_cancel = True
+    session._sag_log = []
+    for jn in ("l_knee", "r_knee"):
+        _offset, kp, _bias, _con, _dz = _knee_load(session, jn)
+        _q, _qd, idx = _joint_q_qd(session, jn)
+        kv = -float(session.model.actuator_biasprm[idx, 2])
+        print(f"PRED sag_cancel {jn} kp {kp:.4f} kv {kv:.4f}")
+    print(
+        "PRED sag_cancel stance knee offset is "
+        "(qfrc_bias - qfrc_constraint) / compiled kp from the previous tick. "
+        "Predicted force is clamped to ±2.33 Nm. "
+        "Measured actuator_force is not the offset."
+    )
+    orig = lipm._tick_gait_manager
+
+    def wrapped(walking: bool) -> None:
+        loads = {
+            jn: _knee_load(session, jn) for jn in ("l_knee", "r_knee")
+        }
+        orig(walking)
+        if not walking or session.bus.fault:
+            return
+        t_mark = float(session.data.time) + float(session.ctrl_dt)
+        for jn in _stance_knees(lipm):
+            raw, kp, bias, con, dz = loads[jn]
+            _q, _qd, idx = _joint_q_qd(session, jn)
+            before = float(session.data.ctrl[idx])
+            session.data.ctrl[idx] = before + raw
+            pred = _clamp_ctrl_predicted(session, jn, KNEE_NM)
+            applied = float(session.data.ctrl[idx]) - before
+            session._sag_log.append((
+                t_mark, jn, raw, applied, dz,
+                applied * dz * 1000.0, raw * dz * 1000.0,
+                float(pred), bias, con, kp,
+                int(abs(applied - raw) > 1e-6),
+            ))
+
+    lipm._tick_gait_manager = wrapped  # type: ignore[method-assign]
+
+
 @dataclass
 class PredSnap:
     t: float
@@ -3012,6 +3127,7 @@ class PredScore:
     ka_over_n: int = 0
     ka_checked: int = 0
     mid_samples: tuple = ()
+    sag_rows: tuple = ()
 
 
 def _check_compiled_kv(session: sw.SteerSession) -> None:
@@ -3070,6 +3186,7 @@ def measure_pred_clip(
     surface_tag: bool = False,
     z_extra_m: float = 0.0,
     ka_log: bool = False,
+    sag_cancel: bool = False,
 ) -> PredScore:
     """12 mm @ 20% with an optional swing-hip predicted-force clip.
 
@@ -3107,6 +3224,8 @@ def measure_pred_clip(
             roll_scale=lead_roll_scale,
             pitch_scale=lead_pitch_scale,
         )
+    if sag_cancel:
+        _install_stance_knee_sag(session)
     lipm = session.lipm
     if lipm is None or lipm.op3 is None:
         raise RuntimeError("gait manager walker missing")
@@ -3122,12 +3241,9 @@ def measure_pred_clip(
         "l_knee_pos", "r_knee_pos",
         "l_ank_pitch_pos", "r_ank_pitch_pos",
     )
-    hx_flat = {act: (0.0, 0.0) for act in hx_chain}
-    hx_rug = {act: (0.0, 0.0) for act in hx_chain}
-    ka_names = (
-        "l_knee_pos", "r_knee_pos",
-        "l_ank_pitch_pos", "r_ank_pitch_pos",
-    )
+    hx_flat = {act: (0.0, 0.0, "") for act in hx_chain}
+    hx_rug = {act: (0.0, 0.0, "") for act in hx_chain}
+    ka_names = hx_chain
     ka_hits: list[str] = []
     ka_checked = 0
     suffixes = ("hip_roll", "hip_pitch", "ank_roll") if ankle_roll else ("hip_roll", "hip_pitch")
@@ -3159,6 +3275,9 @@ def measure_pred_clip(
                 _clamp_ctrl_predicted(session, jn, KNEE_NM)
                 if abs(float(data.ctrl[idx]) - before) > 1e-5:
                     clip_n += 1
+        if getattr(session, "_sag_cancel", False) and lipm.phase != "stand":
+            for jn in _stance_knees(lipm):
+                _clamp_ctrl_predicted(session, jn, KNEE_NM)
         pre_t = float(data.time)
         pre: dict[str, tuple[float, float, float, float]] = {}
         if swing in ("L", "R"):
@@ -3276,19 +3395,23 @@ def measure_pred_clip(
                     for act in ka_names:
                         tau = float(session.data.actuator_force[session.act_idx[act]])
                         foot = planes["L" if act.startswith("l_") else "R"]
+                        contact = str(foot["contact"])
                         if abs(tau) >= KNEE_NM:
-                            tag = "rug" if int(foot["on_rug"]) else "flat"
                             ka_hits.append(
-                                f"{act} {tau:+.4f} t {t:.3f} {tag} "
+                                f"{act} {tau:+.4f} t {t:.3f} contact {contact} "
+                                f"geoms {foot['geoms']} "
                                 f"ge_2.33 1 ge_2.45 {int(abs(tau) >= PLANT_NM - 1e-3)}"
                             )
                 for act in hx_chain:
                     tau = float(session.data.actuator_force[session.act_idx[act]])
                     foot = planes["L" if act.startswith("l_") else "R"]
-                    bucket = hx_rug if int(foot["on_rug"]) else hx_flat
-                    prev, _when = bucket[act]
+                    contact = str(foot["contact"])
+                    # Floor contact, and a foot touching nothing, are Track 1.
+                    # A rug geom in the contact list is not called floor.
+                    bucket = hx_flat if contact in ("floor", "none") else hx_rug
+                    prev, _when, _contact = _hx_parts(bucket[act])
                     if abs(tau) > abs(prev):
-                        bucket[act] = (tau, t)
+                        bucket[act] = (tau, t, contact)
             rows.append(Tick(
                 t, swing if swing in ("L", "R") else None, toe_z, 0.0, first_fault,
             ))
@@ -3364,7 +3487,7 @@ def measure_pred_clip(
     used_move = float(cfg.gm_move_s)
     if (
         pitch_move_off or ankle_roll or period_s is not None
-        or world_level or toe_up_rad > 0.0 or hip_lead
+        or world_level or toe_up_rad > 0.0 or hip_lead or sag_cancel
     ):
         parts = ["clip" if clip else "base"]
         parts.append("pitchoff" if pitch_move_off else f"move{used_move * 1000:.0f}")
@@ -3386,6 +3509,8 @@ def measure_pred_clip(
             parts.append(f"T{period_s:.2f}")
         if abs(z_extra_m) > 0.0:
             parts.append(f"z{z_extra_m * 1000.0:.3f}mm")
+        if sag_cancel:
+            parts.append("sag")
         name = "_".join(parts)
     else:
         name = f"{'clip' if clip else 'base'}_move{used_move * 1000:.0f}"
@@ -3582,6 +3707,7 @@ def measure_pred_clip(
         ka_over_n=int(surf["ka_over_n"]),
         ka_checked=int(surf["ka_checked"]),
         mid_samples=tuple(surf["mid_samples"]),  # type: ignore[arg-type]
+        sag_rows=tuple(getattr(session, "_sag_log", ())),
     )
 
 
@@ -3989,6 +4115,200 @@ def _mid_at(
         if row[1] == side and abs(float(row[0]) - t_want) <= 0.004
     ]
     return near[0] if near else None
+
+
+def _sag_stats(rows: tuple, t_want: float, swing_side: str) -> dict[str, float | str | int]:
+    """Peak knee-z offset, and the stance knee at the flat toe tick.
+
+    ``knee_z_mm`` is the applied offset times the pelvis-fixed foot
+    jacobian. Positive raises that foot relative to the pelvis.
+    """
+    empty: dict[str, float | str | int] = {
+        "n": 0,
+        "clamp_n": 0,
+        "peak_mm": float("nan"),
+        "peak_raw_mm": float("nan"),
+        "peak_t": float("nan"),
+        "peak_joint": "",
+        "toe_mm": float("nan"),
+        "toe_raw_mm": float("nan"),
+        "toe_rad": float("nan"),
+        "toe_joint": "",
+        "toe_bias": float("nan"),
+        "toe_con": float("nan"),
+        "toe_pred": float("nan"),
+        "p50_mm": float("nan"),
+        "p90_mm": float("nan"),
+    }
+    if not rows:
+        return empty
+    stance = "l_knee" if swing_side == "R" else "r_knee" if swing_side == "L" else ""
+    abs_mm = [abs(float(row[5])) for row in rows]
+    abs_mm.sort()
+    peak = max(rows, key=lambda row: abs(float(row[5])))
+    near = [
+        row for row in rows
+        if abs(float(row[0]) - t_want) <= 0.004 and (not stance or row[1] == stance)
+    ]
+    if not near:
+        near = [row for row in rows if abs(float(row[0]) - t_want) <= 0.004]
+    toe = near[0] if near else None
+
+    def _pct(frac: float) -> float:
+        if not abs_mm:
+            return float("nan")
+        i = min(len(abs_mm) - 1, max(0, int(round(frac * (len(abs_mm) - 1)))))
+        return abs_mm[i]
+
+    out = dict(empty)
+    out.update({
+        "n": len(rows),
+        "clamp_n": sum(int(row[11]) for row in rows),
+        "peak_mm": float(peak[5]),
+        "peak_raw_mm": float(peak[6]),
+        "peak_t": float(peak[0]),
+        "peak_joint": str(peak[1]),
+        "p50_mm": _pct(0.50),
+        "p90_mm": _pct(0.90),
+    })
+    if toe is not None:
+        out.update({
+            "toe_mm": float(toe[5]),
+            "toe_raw_mm": float(toe[6]),
+            "toe_rad": float(toe[3]),
+            "toe_joint": str(toe[1]),
+            "toe_bias": float(toe[8]),
+            "toe_con": float(toe[9]),
+            "toe_pred": float(toe[7]),
+        })
+    return out
+
+
+def _print_sag(score: PredScore, sag_ref_mm: float = 0.927) -> None:
+    stats = _sag_stats(score.sag_rows, score.flat_toe_t, score.flat_toe_side)
+    print(
+        f"PRED sag_mm {score.name} n {stats['n']} clamp {stats['clamp_n']} "
+        f"peak {float(stats['peak_mm']):+.3f} mm "
+        f"raw {float(stats['peak_raw_mm']):+.3f} mm "
+        f"t {float(stats['peak_t']):.3f} {stats['peak_joint']} "
+        f"p50 {float(stats['p50_mm']):.3f} mm p90 {float(stats['p90_mm']):.3f} mm "
+        f"at_flat_toe {float(stats['toe_mm']):+.3f} mm "
+        f"raw {float(stats['toe_raw_mm']):+.3f} mm "
+        f"applied {float(stats['toe_rad']):+.5f} rad "
+        f"{stats['toe_joint']} "
+        f"bias {float(stats['toe_bias']):+.4f} "
+        f"constraint {float(stats['toe_con']):+.4f} "
+        f"pred {float(stats['toe_pred']):+.4f} "
+        f"beside_sag_share {sag_ref_mm:.3f} mm"
+    )
+
+
+def score_stance_sag() -> None:
+    """Stance-knee sag cancel on the 20 ms base.
+
+    Over-2.33 ticks are tagged by the contact geom. Floor contact is
+    Track 1, so the foot-z chase stops at +0.849 mm. This copy adds the
+    previous tick's ``(qfrc_bias − qfrc_constraint) / kp`` on the stance
+    knee and clamps the predicted force to ±2.33 Nm. A +0.849 mm foot-z
+    add runs only when the zero-add copy holds that bar and the flat toe
+    is still under +2 mm.
+    """
+    print(
+        "PRED sag_plan Contact geom tags every over-2.33 tick. "
+        "Floor contact is Track 1. "
+        "The +1.249 mm add put the right knee on +2.450 Nm at 7.432 s "
+        "with contact geom floor, so the foot-z chase stops at +0.849 mm. "
+        "Sag cancel reads the previous tick. "
+        "Offset is (qfrc_bias - qfrc_constraint) / compiled kp. "
+        "Predicted force stays inside ±2.33 Nm."
+    )
+    base = _pitch20_copy(0.0)
+    print(
+        f"PRED sag_base {base.name} flat_toe {base.flat_toe_mm:.3f} mm "
+        f"t {base.flat_toe_t:.3f} side {base.flat_toe_side} "
+        f"box_centre {base.flat_center_mm:.3f} mm "
+        f"sole_pitch {base.flat_sole_pitch:.5f} rad "
+        f"flat_hx {base.flat_hx_over or 'under'} "
+        f"ka_over {base.ka_over_n} ka_checked {base.ka_checked}"
+    )
+    row = _pitch20_sag(0.0)
+    _report_sag_copy(base, row, 0.0)
+    holds = row.flat_hx_over == ""
+    if not holds:
+        print(
+            "PRED sag Prefer FAIL. Floor-contact hip pitch, knee, or ankle "
+            "pitch is over 2.33 Nm. The +0.849 mm foot-z add was not run. "
+            "Pitch lead stays 20 ms. Toe-up stays 0.020 rad. Period stays 0.500 s."
+        )
+        return
+    if row.flat_toe_mm >= 2.0:
+        print(
+            f"PRED sag clear {row.name} flat_toe {row.flat_toe_mm:.3f} mm "
+            f"t {row.flat_toe_t:.3f} side {row.flat_toe_side}. "
+            "Pitch lead stays 20 ms. Toe-up stays 0.020 rad. Period stays 0.500 s."
+        )
+        return
+    extra = _pitch20_sag(0.849 / 1000.0)
+    _report_sag_copy(base, extra, 0.849)
+    holds_z = extra.flat_hx_over == ""
+    if holds_z and extra.flat_toe_mm >= 2.0:
+        print(
+            f"PRED sag clear {extra.name} flat_toe {extra.flat_toe_mm:.3f} mm "
+            f"t {extra.flat_toe_t:.3f} side {extra.flat_toe_side}. "
+            "Pitch lead stays 20 ms. Toe-up stays 0.020 rad. Period stays 0.500 s."
+        )
+        return
+    print(
+        "PRED sag Prefer FAIL. Stance-knee sag cancel did not clear a flat "
+        "mid-swing contact-box toe of +2 mm with hip pitch, knee, and ankle "
+        "pitch at or under 2.33 Nm on floor contact. "
+        "Pitch lead stays 20 ms. Toe-up stays 0.020 rad. Period stays 0.500 s."
+    )
+
+
+def _pitch20_sag(z_extra_m: float) -> PredScore:
+    """20 ms pitch lead plus stance-knee sag cancel. Roll lead stays 0."""
+    return measure_pred_clip(
+        clip=True,
+        move_s=None,
+        pitch_move_off=True,
+        toe_up_rad=TOE_UP_PEAK,
+        hip_lead=True,
+        lead_roll_scale=0.0,
+        lead_pitch_scale=_pitch_lead_scale(20.0),
+        whole_toe=True,
+        surface_tag=True,
+        z_extra_m=z_extra_m,
+        ka_log=True,
+        sag_cancel=True,
+    )
+
+
+def _report_sag_copy(base: PredScore, row: PredScore, mm: float) -> None:
+    same = _mid_at(base.mid_samples, row.flat_toe_t, row.flat_toe_side)
+    if same is None:
+        d_toe = float("nan")
+        d_centre = float("nan")
+        d_body = float("nan")
+    else:
+        d_toe = row.flat_toe_mm - float(same[2])
+        d_centre = row.flat_center_mm - float(same[3])
+        d_body = row.flat_body_mm - float(same[4])
+    holds = row.flat_hx_over == ""
+    clear = holds and row.flat_toe_mm >= 2.0
+    print(
+        f"PRED sag_copy {mm:.3f} mm {row.name} "
+        f"flat_toe {row.flat_toe_mm:.3f} mm t {row.flat_toe_t:.3f} "
+        f"side {row.flat_toe_side} "
+        f"box_centre {row.flat_center_mm:.3f} mm "
+        f"sole_pitch {row.flat_sole_pitch:.5f} rad "
+        f"d_toe {d_toe:.3f} mm d_centre {d_centre:.3f} mm "
+        f"d_body {d_body:.3f} mm "
+        f"flat_hx {row.flat_hx_over or 'under'} "
+        f"holds_flat {int(holds)} clear {int(clear)} "
+        f"ka_over {row.ka_over_n} ka_checked {row.ka_checked}"
+    )
+    _print_sag(row)
 
 
 def score_pitch20_zlift() -> None:
