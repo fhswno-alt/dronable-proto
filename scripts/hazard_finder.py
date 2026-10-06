@@ -29,9 +29,16 @@ A later in-corridor hit is dropped when that stance already has a
 floor point from the same gait phase and the new point is farther
 than the body has walked since then, plus a small margin. The first
 sighting, with no prior point, is emitted only when that column goes
-low-chroma within 64 px of the contact. A brown texture column is
-not a leg. Width and span are not tightened. Controls latches Day-1
-``stop`` on the flag that remains. This module does not send ``stop``.
+low-chroma within 64 px of the contact. That near-contact gate is
+sim-only. It is not evidence for any-space, and it is not evidence
+for real brown wood under kit exposure. Bedroom left in this sim
+was dropped because that column stays brown. A wood-brown stress
+flattened the stool mesh and the coffee mesh to RGB (84, 62, 42);
+shading kept both stops, and that is still not an any-space clear.
+Width and span are not tightened. The living-right apron stop stays
+a height keep. The entrance rug is Controls. Soft-pass is off.
+Controls latches Day-1 ``stop`` on the flag that remains. This
+module does not send ``stop``.
 
 Moondream's room ask does not return a pixel. It is not called here.
 ``t_cue`` is not ``T_detect``. ``HAZARD_PAD_M`` stays 0.020 and is
@@ -88,11 +95,13 @@ PHASE_DRIFT_MARGIN_M = 0.08
 # Third 8 ms tick of a shift bout. That is the steady one-foot sample.
 # The both-feet exchange is a different pitch and is not this sample.
 PHASE_SAMPLE_TICK = 3
-# A real leg goes gray or black near the contact. The stool is gray at
-# the pixel. The coffee leg is dark 14 px up. The apron rail is dark
-# by 39 px. The bedroom-left texture stays chroma ~42 (no dark pixel,
-# or the first one 234 px up). 64 covers the apron and still misses
-# that texture. This is not a width, span, or height cut.
+# Sim-only near-contact gate. Not evidence for any-space or for real
+# brown wood under kit exposure. In these rooms the stool is gray at
+# the pixel, the coffee leg is dark 14 px up, and the apron rail is
+# dark by 39 px. The bedroom-left texture stays chroma ~42. 64 covers
+# the apron and still misses that texture. The wood-brown stress kept
+# the stool and coffee stops via shading. Not a width, span, or height
+# cut. The apron stop stays.
 LEG_CORE_RISE_PX = 64
 LEG_CORE_CHROMA = 16
 LEG_CORE_LUM = 40
@@ -314,12 +323,15 @@ def confirm_leg_columns(
     cues: tuple[HazardCue, ...],
     rgb: np.ndarray,
 ) -> tuple[HazardCue, ...]:
-    """Drop a column that stays brown above the contact.
+    """Drop a first-sighting column that stays brown above the contact.
 
-    Used on a first sighting, before a same-stance point is stored.
-    The coffee leg, the stool, and the apron rail each go low-chroma
-    inside 64 px. The bedroom-left texture does not. Width, span, and
-    the apron height are not read. This does not send ``stop``.
+    Sim-only. Not evidence for any-space or for real brown wood under
+    kit exposure. In this sim the coffee leg, the stool, and the apron
+    rail go low-chroma inside 64 px. The bedroom-left texture does not.
+    A flat wood-brown render of those hit meshes still stopped, because
+    shading made a low-chroma pixel. That is not an any-space clear.
+    Width, span, and the apron height are not read. This does not send
+    ``stop``.
     """
     if not cues:
         return ()
