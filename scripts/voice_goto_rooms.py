@@ -229,12 +229,15 @@ EAST_CLOSE: tuple[tuple[float, float, float, float, float, float], ...] = (
     (0.20341424894951343, -1.0887848889119358, 0.33164235823040283, -0.2729989872932855, -0.014120531915378008, 0.3550626326053704),
 )
 EAST_LATCH_M = float(statistics.median(row[0] for row in EAST_CLOSE))
-# Tip a3c05f3 kitchen −90°, same wall, ray under 0.40 m, split by
-# leading toe. The committing stop (left toe, error 0.108 m) is not
-# in either list. Contact-box centres sit 14 mm outboard of each
-# ankle-roll axis, so the ray origin flips side with the lead foot.
-# Left has 21 samples. Right has 9, under the living set of 17, so a
-# right stop is scored against its median and cannot CLEAR.
+# Left-toe close rays on wall_hall_e_1 only. The first 21 are tip
+# a3c05f3, with that bout's committing stop (error 0.108 m) left out.
+# The next 24 are tip 80bf2ea after the yaw-0 hold, with this bout's
+# committing stop (error 0.0594 m) left out. Four samples are the same
+# moment on both tips and are stored once. Right-toe samples are not
+# in this list. Living wall_hall_w_2 samples are not in this list.
+# Contact-box centres sit 14 mm outboard of each ankle-roll axis, so
+# the ray origin flips side with the lead foot. Right has 9 samples,
+# under the living set of 17, so a right stop cannot CLEAR.
 TOE_OUTBOARD_M = 0.014
 EAST_L_ERR_M: tuple[float, ...] = (
     0.03321512987238068,
@@ -258,6 +261,30 @@ EAST_L_ERR_M: tuple[float, ...] = (
     0.02472477703146328,
     0.012370575448907656,
     0.004975797972947116,
+    0.05902254006728702,
+    0.04600440059019678,
+    0.06506832389495176,
+    0.0269606371435121,
+    0.05777895156374646,
+    0.0655960982836461,
+    0.045424805087740217,
+    0.06503350787032264,
+    0.026481289163201083,
+    0.054480310039754676,
+    0.06926734355885605,
+    0.048015141765005265,
+    0.06443281216068128,
+    0.030872335419293323,
+    0.05944376400913556,
+    0.06552327062202867,
+    0.04834079119885454,
+    0.06162423618398957,
+    0.027692684605144735,
+    0.056831318683336074,
+    0.0676083041137498,
+    0.04627259878243614,
+    0.06307554547089292,
+    0.02532959742724461,
 )
 EAST_R_ERR_M: tuple[float, ...] = (
     0.02727480416032496,
@@ -272,6 +299,19 @@ EAST_R_ERR_M: tuple[float, ...] = (
 )
 EAST_L_LATCH_M = float(statistics.median(EAST_L_ERR_M))
 EAST_R_LATCH_M = float(statistics.median(EAST_R_ERR_M))
+# Left-only additive correction, fitted on the 45 samples above.
+# predicted = c0 + c_z*cam_z + c_pitch*cam_pitch + c_lead*lead_off.
+# The kitchen stop on tip 80bf2ea is not in the fit. The prediction
+# misses that error by 0.0252 m, so the correction is not the pad.
+EAST_L_FIT_APPLIED = False
+EAST_L_FIT_C0 = 1.1032860951383978
+EAST_L_FIT_CZ = -2.486733769522458
+EAST_L_FIT_CPITCH = 0.939171019133529
+EAST_L_FIT_CLEAD = -0.5589984770891748
+EAST_L_HELD_ERR_M = 0.0594168890832652
+EAST_L_HELD_CAM_Z_M = 0.33485694264068067
+EAST_L_HELD_PITCH_RAD = -0.2617542762292832
+EAST_L_HELD_LEAD_M = -0.017012214281004516
 # wall_hall_e_0 had five close samples on that tip, under the living
 # set of 17, so it keeps pad 0. This run does not invent one.
 DOOR_Z = (0.05, 1.35)
@@ -640,9 +680,11 @@ def _definition() -> DefinitionJson:
             f"{len(SAME_WALL_ERR_M)} errors on {LIVING_WALL} with the "
             f"sim gap under {CLOSE_GAP_M:.2f} m. {EAST_WALL} has its "
             f"own pooled median, {EAST_LATCH_M:.5f} m, from {len(EAST_CLOSE)} "
-            "close samples on tip aac2baa. Left-toe samples on tip "
-            f"a3c05f3 median {EAST_L_LATCH_M:.5f} m "
-            f"(n={len(EAST_L_ERR_M)}). Right-toe samples median "
+            "close samples on tip aac2baa. The left-toe pad is the "
+            f"median of {len(EAST_L_ERR_M)} close left samples, "
+            f"{EAST_L_LATCH_M:.5f} m: 21 from tip a3c05f3 and 24 more "
+            "from the yaw-0 hold, with both committing stops left out. "
+            "Right-toe samples median "
             f"{EAST_R_LATCH_M:.5f} m (n={len(EAST_R_ERR_M)}). The "
             "living median is not copied onto either toe. Contact "
             f"boxes sit {TOE_OUTBOARD_M:.3f} m outboard of each ankle "
@@ -3081,12 +3123,27 @@ def main() -> int:
         raise SystemExit(f"FAIL: east median moved to {EAST_LATCH_M}")
     if abs(EAST_LATCH_M - LATCH_EXTRA_M) < 1e-4:
         raise SystemExit("FAIL: east median copied the living median")
-    if abs(EAST_L_LATCH_M - 0.014262776219442996) > 1e-12:
+    if len(EAST_L_ERR_M) != 45:
+        raise SystemExit(f"FAIL: east left set has {len(EAST_L_ERR_M)} samples")
+    if abs(EAST_L_LATCH_M - 0.045424805087740217) > 1e-12:
         raise SystemExit(f"FAIL: east left median moved to {EAST_L_LATCH_M}")
+    if EAST_L_FIT_APPLIED:
+        raise SystemExit("FAIL: east left additive correction was applied")
+    fit_pred = (
+        EAST_L_FIT_C0
+        + EAST_L_FIT_CZ * EAST_L_HELD_CAM_Z_M
+        + EAST_L_FIT_CPITCH * EAST_L_HELD_PITCH_RAD
+        + EAST_L_FIT_CLEAD * EAST_L_HELD_LEAD_M
+    )
+    fit_resid = EAST_L_HELD_ERR_M - fit_pred
+    if abs(fit_resid - 0.02515308966231159) > 1e-9:
+        raise SystemExit(f"FAIL: east left fit residual moved to {fit_resid}")
+    if abs((EAST_L_HELD_ERR_M - EAST_L_LATCH_M) - 0.013992083995524984) > 1e-12:
+        raise SystemExit("FAIL: east left held-out residual moved")
     if abs(EAST_R_LATCH_M - 0.07279199541829862) > 1e-12:
         raise SystemExit(f"FAIL: east right median moved to {EAST_R_LATCH_M}")
-    if len(EAST_L_ERR_M) != 21 or len(EAST_R_ERR_M) != 9:
-        raise SystemExit("FAIL: east toe sets changed size")
+    if len(EAST_R_ERR_M) != 9:
+        raise SystemExit("FAIL: east right set changed size")
     if _pad_for(EAST_WALL, 0.20) != EAST_LATCH_M:
         raise SystemExit("FAIL: east pooled pad moved")
     if _pad_for(EAST_WALL, 0.20, "L") != EAST_L_LATCH_M:
@@ -3199,6 +3256,10 @@ def main() -> int:
         "east_sample_count": len(EAST_CLOSE),
         "east_l_latch_m": EAST_L_LATCH_M,
         "east_l_sample_count": len(EAST_L_ERR_M),
+        "east_l_fit_applied": EAST_L_FIT_APPLIED,
+        "east_l_held_err_m": EAST_L_HELD_ERR_M,
+        "east_l_held_residual_m": EAST_L_HELD_ERR_M - EAST_L_LATCH_M,
+        "east_l_fit_residual_m": fit_resid,
         "east_r_latch_m": EAST_R_LATCH_M,
         "east_r_sample_count": len(EAST_R_ERR_M),
         "toe_outboard_m": TOE_OUTBOARD_M,
