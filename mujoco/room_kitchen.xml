@@ -46,6 +46,10 @@
     <geom name="room_wall_left" type="box" pos="0.86 1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_wall_right" type="box" pos="0.86 -1.82 1.22" size="1.60 0.045 1.22" material="room_wall" contype="0" conaffinity="0"/>
     <geom name="room_ceiling" type="box" pos="0.86 0 2.48" size="1.64 1.88 0.04" material="room_ceiling" contype="0" conaffinity="0"/>
+    <!-- Hidden group-3 proxies. Visual geoms stay contype 0. Default renderer hides group 3. Floor and ceiling stay non-colliding. -->
+    <geom name="col_room_wall" type="box" pos="2.42 0 1.22" size="0.045 1.82 1.22" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+    <geom name="col_room_wall_left" type="box" pos="0.86 1.82 1.22" size="1.60 0.045 1.22" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+    <geom name="col_room_wall_right" type="box" pos="0.86 -1.82 1.22" size="1.60 0.045 1.22" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
     <!--
       Single-wall run along the back wall, island parallel to it.
       White slab panels and counters are CC0 plaster on boxes. Light-oak
@@ -73,6 +77,24 @@
       <geom name="kitchen_sink" type="mesh" mesh="room_basin" material="room_basin" pos="1.84 -0.05 0.91" quat="0.707107 0 0 0.707107" contype="0" conaffinity="0"/>
       <geom name="kitchen_pendant_a" type="mesh" mesh="room_pendant" material="room_pendant" pos="1.16 -1.12 1.92" contype="0" conaffinity="0"/>
       <geom name="kitchen_pendant_b" type="mesh" mesh="room_pendant" material="room_pendant" pos="1.16 -0.68 1.92" contype="0" conaffinity="0"/>
+      <geom name="col_kitchen_kick" type="box" pos="1.92 -0.355 0.05" size="0.24 1.195 0.05" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_kitchen_cabinet" type="box" pos="1.89 -0.355 0.48" size="0.27 1.195 0.38" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_kitchen_panel_a" type="box" pos="1.592 -1.258 0.48" size="0.028 0.292 0.36" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_kitchen_panel_b" type="box" pos="1.592 -0.656 0.48" size="0.028 0.292 0.36" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_kitchen_panel_c" type="box" pos="1.592 -0.054 0.48" size="0.028 0.292 0.36" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_kitchen_panel_d" type="box" pos="1.592 0.548 0.48" size="0.028 0.292 0.36" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_kitchen_counter" type="box" pos="1.84 -0.355 0.885" size="0.34 1.195 0.025" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_kitchen_splash" type="box" pos="2.358 -0.355 1.16" size="0.012 1.195 0.26" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_kitchen_end" type="box" pos="1.86 -1.66 0.455" size="0.30 0.10 0.455" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_kitchen_pier" type="box" pos="1.87 1.66 1.10" size="0.26 0.10 1.10" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_kitchen_upper_a" type="box" pos="2.18 -1.258 1.78" size="0.16 0.292 0.36" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_kitchen_upper_b" type="box" pos="2.18 -0.656 1.78" size="0.16 0.292 0.36" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_kitchen_upper_c" type="box" pos="2.18 -0.054 1.78" size="0.16 0.292 0.36" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_kitchen_upper_d" type="box" pos="2.18 0.548 1.78" size="0.16 0.292 0.36" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_kitchen_stove" type="box" pos="1.8700 1.2200 0.4500" size="0.2513 0.3238 0.4500" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_kitchen_sink" type="box" pos="1.8400 -0.0500 0.9787" size="0.1737 0.2849 0.0687" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_kitchen_pendant_a" type="box" pos="1.1600 -1.1200 2.1579" size="0.1079 0.1079 0.2379" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_kitchen_pendant_b" type="box" pos="1.1600 -0.6800 2.1579" size="0.1079 0.1079 0.2379" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
     </body>
     <!-- Island is off the lens axis, image-right, so the low frozen camera
          sees the cabinet run. The top still overhangs toward the camera. -->
@@ -80,11 +102,32 @@
       <site name="table" pos="0 0 0.90" size="0.012" group="4" rgba="0.75 0.75 0.72 1"/>
       <geom name="table_base" type="box" pos="0 0 0.43" size="0.26 0.40 0.43" material="room_white" contype="0" conaffinity="0"/>
       <geom name="table_top" type="box" pos="-0.10 0 0.888" size="0.36 0.50 0.028" material="room_stone" contype="0" conaffinity="0"/>
+      <geom name="col_table_base" type="box" pos="0 0 0.43" size="0.26 0.40 0.43" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_table_top" type="box" pos="-0.10 0 0.888" size="0.36 0.50 0.028" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
     </body>
     <body name="chair" pos="0.64 -1.00 0">
       <site name="chair" pos="0 0 0.42" size="0.012" group="4" rgba="0.45 0.45 0.42 1"/>
       <geom name="chair_seat" type="mesh" mesh="room_stool" material="room_stool" pos="0 -0.20 0" contype="0" conaffinity="0"/>
       <geom name="chair_stool_b" type="mesh" mesh="room_stool" material="room_stool" pos="0 0.20 0" contype="0" conaffinity="0"/>
+      <!-- Stool mesh is four legs, a stretcher, and a seat. Boxes follow those parts and leave the space under the seat open. -->
+      <geom name="col_chair_seat" type="box" pos="-0.0000 -0.1986 0.3686" size="0.2283 0.2372 0.1124" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_chair_seat_leg_0" type="box" pos="-0.2178 -0.1248 0.1281" size="0.0174 0.0174 0.1281" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_chair_seat_leg_1" type="box" pos="-0.0477 -0.4303 0.1281" size="0.0172 0.0181 0.1281" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_chair_seat_leg_2" type="box" pos="0.0475 0.0314 0.1281" size="0.0171 0.0170 0.1281" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_chair_seat_leg_3" type="box" pos="0.2180 -0.2726 0.1281" size="0.0172 0.0172 0.1281" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_chair_seat_rail_xn" type="box" pos="-0.2040 -0.1940 0.1056" size="0.0200 0.2350 0.0061" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_chair_seat_rail_xp" type="box" pos="0.2040 -0.1940 0.1056" size="0.0200 0.2350 0.0061" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_chair_seat_rail_yn" type="box" pos="0.0000 -0.4090 0.1056" size="0.2240 0.0200 0.0061" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_chair_seat_rail_yp" type="box" pos="0.0000 0.0210 0.1056" size="0.2240 0.0200 0.0061" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_chair_stool_b" type="box" pos="-0.0000 0.2014 0.3686" size="0.2283 0.2372 0.1124" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_chair_stool_b_leg_0" type="box" pos="-0.2178 0.2752 0.1281" size="0.0174 0.0174 0.1281" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_chair_stool_b_leg_1" type="box" pos="-0.0477 -0.0303 0.1281" size="0.0172 0.0181 0.1281" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_chair_stool_b_leg_2" type="box" pos="0.0475 0.4314 0.1281" size="0.0171 0.0170 0.1281" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_chair_stool_b_leg_3" type="box" pos="0.2180 0.1274 0.1281" size="0.0172 0.0172 0.1281" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_chair_stool_b_rail_xn" type="box" pos="-0.2040 0.2060 0.1056" size="0.0200 0.2350 0.0061" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_chair_stool_b_rail_xp" type="box" pos="0.2040 0.2060 0.1056" size="0.0200 0.2350 0.0061" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_chair_stool_b_rail_yn" type="box" pos="0.0000 -0.0090 0.1056" size="0.2240 0.0200 0.0061" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
+      <geom name="col_chair_stool_b_rail_yp" type="box" pos="0.0000 0.4210 0.1056" size="0.2240 0.0200 0.0061" group="3" contype="1" conaffinity="1" condim="3" friction="1.0 0.1 0.01"/>
     </body>
   </worldbody>
 </mujoco>
