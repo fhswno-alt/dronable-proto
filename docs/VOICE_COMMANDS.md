@@ -32,6 +32,30 @@ A turn is walk-yaw at the forward cap: `vel(+0.056, ±0.250)`. `vx = 0` with a y
 
 Caps stay `vx` **+0.056 / −0.032** m/s and yaw **±0.25** rad/s. This caller does not raise them. The command is not the realized speed or the heading rate.
 
+## Five-room go-to (Prefer FAIL)
+
+Reach was written into `previews/voice_goto_rooms_summary.json` before the five stands. A reach is body COM inside that room's floor box, the same COM having started outside it, min up_z at least 0.90, zero prop contacts, and the bout ending by 53.0 s. The floor box is the axis-aligned XY of every loaded plane named `floor` or `room_floor`. Voice vx stays **+0.056** m/s and yaw **±0.25**. `d_min = 0.150 × (T_detect + T_stop)` with `T_detect = 0` and `T_stop = 0.842` s, so `d_min = 0.1263` m. 0.150 is that hardware bound, not the voice cap. Soft-pass is off. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` is unchanged.
+
+The tree has five room files and no joined scene. Each file's only floor plane is the plant floor, x and y from −3 m to +3 m. The documented 0.60 s stand settles at COM about **−0.003, −0.000** m, inside that box. No doorway spawn exists. A start inside the box is not a reach, so no `vel` was published and the #71 latch was not applied.
+
+| Room | Voice parse | Spawn COM | Started outside | Commanded vel | d_min | Reached |
+| --- | --- | --- | --- | --- | --- | --- |
+| kitchen | refuse | −0.003, −0.000 | false | none | 0.1263 m | false |
+| bathroom | refuse | −0.003, −0.000 | false | none | 0.1263 m | false |
+| living | refuse | −0.003, −0.000 | false | none | 0.1263 m | false |
+| bedroom | refuse | −0.003, −0.000 | false | none | 0.1263 m | false |
+| entrance | refuse | −0.003, −0.000 | false | none | 0.1263 m | false |
+
+Stand contact is none. Stand peak is +0.362 Nm on `l_ank_roll_pos`. min up_z is 1.000. The recogniser was not asked. Not kit-safe. Not go-anywhere.
+
+Next gap: a joined multi-room scene, or a doorway spawn that starts outside the named room's floor box. None is in this tree, and a new scene was not authored.
+
+```bash
+MUJOCO_GL=osmesa python scripts/voice_goto_rooms.py
+```
+
+Exit status is 1. The summary is `previews/voice_goto_rooms_summary.json`.
+
 ## Clip
 
 `MUJOCO_GL=osmesa python scripts/voice_caller.py --clip` plays the claimed nav-left window as phrases: **stand → walk forward → turn left → walk forward → stop**. Times are 1 s, 15 s, 12.5 s, 6 s, then a 2.5 s stop. The bus commands are `stand`, `vel(+0.056, +0.000)`, `vel(+0.056, +0.250)`, `vel(+0.056, +0.000)`, `stop`. Each frame captions the phrase and that bus command. The view is the third-person camera so the body is visible. `kit_cam` stays at `0.050 0.019 0.007` and is not the demo camera.
