@@ -299,6 +299,10 @@ EAST_R_ERR_M: tuple[float, ...] = (
 )
 EAST_L_LATCH_M = float(statistics.median(EAST_L_ERR_M))
 EAST_R_LATCH_M = float(statistics.median(EAST_R_ERR_M))
+# The live left latch is median + MAD of the same 45. The median
+# stays 0.04542 m. The pitch/cam_z/lead fit stays unused.
+EAST_L_MAD_M = float(statistics.median(abs(x - EAST_L_LATCH_M) for x in EAST_L_ERR_M))
+EAST_L_APPLIED_M = EAST_L_LATCH_M + EAST_L_MAD_M
 # Left-only additive correction, fitted on the 45 samples above.
 # predicted = c0 + c_z*cam_z + c_pitch*cam_pitch + c_lead*lead_off.
 # The kitchen stop on tip 80bf2ea is not in the fit. The prediction
@@ -680,11 +684,11 @@ def _definition() -> DefinitionJson:
             f"{len(SAME_WALL_ERR_M)} errors on {LIVING_WALL} with the "
             f"sim gap under {CLOSE_GAP_M:.2f} m. {EAST_WALL} has its "
             f"own pooled median, {EAST_LATCH_M:.5f} m, from {len(EAST_CLOSE)} "
-            "close samples on tip aac2baa. The left-toe pad is the "
-            f"median of {len(EAST_L_ERR_M)} close left samples, "
-            f"{EAST_L_LATCH_M:.5f} m: 21 from tip a3c05f3 and 24 more "
-            "from the yaw-0 hold, with both committing stops left out. "
-            "Right-toe samples median "
+            "close samples on tip aac2baa. The left-toe median of "
+            f"{len(EAST_L_ERR_M)} close left samples is "
+            f"{EAST_L_LATCH_M:.5f} m. The live left latch is that "
+            f"median plus the MAD {EAST_L_MAD_M:.5f} m, so "
+            f"{EAST_L_APPLIED_M:.5f} m. Right-toe samples median "
             f"{EAST_R_LATCH_M:.5f} m (n={len(EAST_R_ERR_M)}). The "
             "living median is not copied onto either toe. Contact "
             f"boxes sit {TOE_OUTBOARD_M:.3f} m outboard of each ankle "
@@ -1114,7 +1118,7 @@ def _pad_for(wall: str, true_gap: float | None, lead_side: str = "") -> float:
     if klass == "living_close":
         return LATCH_EXTRA_M
     if klass == "east_close" and lead_side == "L":
-        return EAST_L_LATCH_M
+        return EAST_L_APPLIED_M
     if klass == "east_close" and lead_side == "R":
         return EAST_R_LATCH_M
     if klass == "east_close":
@@ -3127,6 +3131,10 @@ def main() -> int:
         raise SystemExit(f"FAIL: east left set has {len(EAST_L_ERR_M)} samples")
     if abs(EAST_L_LATCH_M - 0.045424805087740217) > 1e-12:
         raise SystemExit(f"FAIL: east left median moved to {EAST_L_LATCH_M}")
+    if abs(EAST_L_MAD_M - 0.019643518807211546) > 1e-12:
+        raise SystemExit(f"FAIL: east left MAD moved to {EAST_L_MAD_M}")
+    if abs(EAST_L_APPLIED_M - 0.06506832389495176) > 1e-12:
+        raise SystemExit(f"FAIL: east left applied pad moved to {EAST_L_APPLIED_M}")
     if EAST_L_FIT_APPLIED:
         raise SystemExit("FAIL: east left additive correction was applied")
     fit_pred = (
@@ -3146,8 +3154,8 @@ def main() -> int:
         raise SystemExit("FAIL: east right set changed size")
     if _pad_for(EAST_WALL, 0.20) != EAST_LATCH_M:
         raise SystemExit("FAIL: east pooled pad moved")
-    if _pad_for(EAST_WALL, 0.20, "L") != EAST_L_LATCH_M:
-        raise SystemExit("FAIL: east left pad is not the left median")
+    if _pad_for(EAST_WALL, 0.20, "L") != EAST_L_APPLIED_M:
+        raise SystemExit("FAIL: east left pad is not median plus MAD")
     if _pad_for(EAST_WALL, 0.20, "R") != EAST_R_LATCH_M:
         raise SystemExit("FAIL: east right pad is not the right median")
     if abs(EAST_L_LATCH_M - LATCH_EXTRA_M) < 1e-3 or abs(EAST_R_LATCH_M - LATCH_EXTRA_M) < 1e-3:
@@ -3255,6 +3263,9 @@ def main() -> int:
         "east_latch_m": EAST_LATCH_M,
         "east_sample_count": len(EAST_CLOSE),
         "east_l_latch_m": EAST_L_LATCH_M,
+        "east_l_mad_m": EAST_L_MAD_M,
+        "east_l_applied_m": EAST_L_APPLIED_M,
+        "east_l_pad_rule": "median+MAD",
         "east_l_sample_count": len(EAST_L_ERR_M),
         "east_l_fit_applied": EAST_L_FIT_APPLIED,
         "east_l_held_err_m": EAST_L_HELD_ERR_M,
