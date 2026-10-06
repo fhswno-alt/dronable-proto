@@ -4082,6 +4082,9 @@ def _install_inflight_stop(
     lipm = session.lipm
     walker = lipm.op3
     load_n = float(lipm.cfg.unload_n)
+    # The parked stop was scored with the stance slew remembering only
+    # stance writes. A pure walk remembers the swing command too.
+    session._sag_stop_installed = True  # type: ignore[attr-defined]
     orig_tick = lipm.tick
     orig_endpoints = walker.endpoints
     state: dict[str, object] = {
@@ -11635,10 +11638,13 @@ def _install_sagittal_slew(
                     elif dq < -cap:
                         q_des = old - cap
                 prev[jn] = float(q_des)
-            elif not getattr(session, "_sag_torque_cap", False):
-                # Walk only. The swing command is not rate limited, and the
-                # next stance step has to start from it. Leaving prev at the
-                # previous stance pose makes the 1.90 slew open a gap.
+            elif (
+                not getattr(session, "_sag_torque_cap", False)
+                and not getattr(session, "_sag_stop_installed", False)
+            ):
+                # Pure walk. The swing command is not rate limited, and the
+                # next stance step has to start from it. The parked stop
+                # keeps the previous memory so that landing stays put.
                 prev[jn] = float(q_des)
             last_cmd[jn] = float(q_des)
         else:
