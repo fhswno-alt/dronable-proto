@@ -14380,18 +14380,36 @@ def score_mid_swing() -> None:
         if not rug_ok:
             why.append("rug clearance under 0")
         if not support_ok:
-            why.append("mid-SS or DSP ask over 2.33")
+            overs = []
+            for jn, item in stance_mid.items():
+                if abs(float(item[3])) > KNEE_NM + 1e-9:
+                    overs.append(
+                        f"mid-SS {jn} {float(item[3]):+.4f} t {float(item[0]):.3f}"
+                    )
+            for jn, item in stance_dsp.items():
+                if abs(float(item[3])) > KNEE_NM + 1e-9:
+                    overs.append(
+                        f"DSP {jn} {float(item[3]):+.4f} t {float(item[0]):.3f}"
+                    )
+            why.append("; ".join(overs) if overs else "mid-SS or DSP body fault")
         next_lever = (
             "Foot-z, crouch, y_swap, the rail, and the plant stay closed. "
             "The stop stretch stays 0.25 / 1.060×."
         )
-        if swing_ok and toe_bar and (not corners_ok or not support_ok):
+        if swing_ok and toe_bar and not corners_ok:
             next_lever = (
                 "20-80% knee and ankle pitch are inside 2.33 Nm and the flat "
-                "toe stays at or above +2 mm. The miss is a corner under 0 "
-                "or a mid-SS/DSP ask over 2.33 Nm. A higher swing that clears "
-                "the heel has to keep those two bars. Foot-z, crouch, y_swap, "
-                "the rail, and the plant stay closed."
+                "toe stays at or above +2 mm. A contact-box corner is under 0. "
+                "Foot-z, crouch, y_swap, the rail, and the plant stay closed."
+            )
+        elif swing_ok and toe_bar and corners_ok and not support_ok:
+            next_lever = (
+                "20-80% knee and ankle pitch are inside 2.33 Nm, both flat "
+                "toes stay at or above +2 mm, and every contact-box corner "
+                "stays at or above 0. The miss is the mid-SS stance chain. "
+                "A slower walk swing puts the heel under 0 and the stance "
+                "hip further over. Foot-z, crouch, y_swap, the rail, and "
+                "the plant stay closed."
             )
         elif swing_ok and not toe_bar:
             next_lever = (
