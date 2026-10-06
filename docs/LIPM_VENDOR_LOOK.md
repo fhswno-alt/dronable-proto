@@ -1789,6 +1789,8 @@ The 0.020 m pad already counts a floor point as inside the stand corridor until 
 
 No existing leg sits in (0.1067, 0.108] at a forward gap near `d_min`. A leg placed there, so the widened edge is what makes the in/out call, is a room-collider move. The plant file was not edited. That placement is open for MFG/Hardware. The five-room bar is unchanged. Not kit-safe. Not go-anywhere.
 
+On the same entrance straight walk, `col_mat_rug` is a box. The `mat` body is at z 0, the geom pos z is 0.006 m, and the half-height is 0.006 m. The top face is at world z 0.012 m. The sim center z is 0.006 m. The left sole `l_foot_contact` hits that geom at 6.892 s, 11.28 N, in double support. No swing-phase sole corner is over the rug. The first sole corner over the rug is at 6.878 s, still double support, z 0.0218 m, clearance +9.8 mm. The lowest sole corner over the rug is the contact frame, z 0.01198 m, clearance −0.02 mm. The leading bottom corner at that frame is at z 0.0194 m, clearance +7.4 mm. Not kit-safe. Not go-anywhere.
+
 A −10° `head_tilt` walk is not enabled. On that pose the near edge is
 0.077 m at `cam_z` 0.326 m. #67 checked the wood rule at that session
 tilt: the foot contact boxes project to rows 643–749, below the
