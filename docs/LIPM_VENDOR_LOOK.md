@@ -1440,3 +1440,5 @@ The cue is now wired to Day1 `stop` in `scripts/stool_leg_stop.py`. `t_cue` is *
 
 Kit `T_detect_rgb` is the RGB-only wood rule in `scripts/stool_rgb_detect.py`: **0.342 ms** on the `t_cue` frame through `CommandBus.stop`. The rule is already positive at t = 1.60 s while the leg band is still tiny (1968 px), 3/9 frames before `t_cue`, and 0/50 misses from `t_cue` to contact. `d_min` 0.129 m against `v × (T_detect_rgb + T_stop)` = 0.125 m uses Controls' `T_stop` 0.830 s and is not a cue pass. Not a go-to. Soft-pass is off.
 
+Swing-foot check of that rule at session `head_tilt` **−10 deg**, `scripts/swing_foot_wood.py`. Across 50 frames of each locked-kit walk the contact boxes project below the 480-row frame (rows **643–749**, 0 corners inside) and contribute **0** wood pixels. Empty straight wood stays **0.0%** (fire N). Kitchen yaw fires **16/50** with the stool in the ROI and the foot absent. No foot mask. Not a go-to. Soft-pass is off. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`.
+
