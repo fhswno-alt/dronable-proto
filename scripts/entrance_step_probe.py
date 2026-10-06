@@ -13698,6 +13698,341 @@ def score_sag_stop() -> None:
     )
 
 
+def _swing_frac(phase: str, pose: float) -> float:
+    """Single-support fraction. Left SSP is 0.025–0.225. Right is 0.275–0.475."""
+    if phase == "L":
+        start = 0.025
+    elif phase == "R":
+        start = 0.275
+    else:
+        return float("nan")
+    return (pose - start) / 0.200
+
+
+def _keep_ask(best: tuple | None, item: tuple) -> tuple:
+    if best is None or abs(float(item[3])) > abs(float(best[3])):
+        return item
+    return best
+
+
+def score_mid_swing() -> None:
+    """Continuous straight walk on the locked sagittal copy. No stop.
+
+    20–80% toe on both feet, the parked SSP swing-z knee, and the
+    entrance rug when a swing is tagged. Mid-SS and DSP asks are the
+    stance chain. The stop stretch does not arm on this bout.
+    """
+    name = "mid_swing"
+    print(
+        f"PRED {name} plan continuous straight walk. No stop. "
+        f"Day-1 vx {sw.VX_FWD_CAP:.3f} m/s. Yaw 0. Period 0.500 s. "
+        "y_swap 0. init_y 0.005 m. Foot-z 1.170 mm. Less-crouch closed. "
+        "Trim-lead off. Sole-flat stance ankle stays on. "
+        "Stance knee and ankle pitch stay on the 1.90 rad/s slew. "
+        "The stop stretch, freeze, and post-DSP stand write stay off. "
+        "Pass is 20-80% toe at or above 0 mm on both feet, "
+        "swing-leg asks in that window at or under 2.33 Nm, "
+        "and DSP plus mid-SS stance asks at or under 2.33 Nm. "
+        "The early SSP swing-z knee is logged against 2.33 Nm. "
+        "CoM outside the 38 mm box is logged and is not a torque pass. "
+        "Plant, kp, and forcerange stay put."
+    )
+    _require_plant("before", name)
+    held: dict[str, object] = {}
+    t_end = 6.5
+    measure_pred_clip(
+        clip=True,
+        move_s=None,
+        pitch_move_off=True,
+        toe_up_rad=0.025,
+        toe_up_shape="front",
+        toe_full_frac=0.10,
+        hip_lead=True,
+        lead_roll_scale=0.0,
+        lead_pitch_scale=_pitch_lead_scale(20.0),
+        sag_cancel=False,
+        z_profile="phase",
+        ank_trim_l=_RESTORED_ROLL_L,
+        ank_trim_r=_RESTORED_ROLL_R,
+        ank_pitch_trim_l=_RESTORED_PITCH_L,
+        ank_pitch_trim_r=_RESTORED_PITCH_R,
+        z_extra_m=_LEVEL_FOOTZ_UM / 1_000_000.0,
+        t_end=t_end,
+        segments=(
+            sw.DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+            sw.DemoSegment(t_end, "vel", sw.VX_FWD_CAP, 0.0, "forward"),
+        ),
+        steer_out=held,
+        y_swap_m=0.0,
+        lateral_log=True,
+        sole_flat=True,
+        sole_flat_mode="q",
+        y_out_m=0.005,
+        x_scale=1.0,
+        sag_slew_rad_s=1.90,
+        sag_slew_joints=("knee", "ank_pitch"),
+        sag_split=True,
+        surface_tag=True,
+    )
+    summary = _walk_lateral_summary(held, 0.0)
+    summary["x_scale"] = 1.0
+    summary["sag_slew"] = 1.90
+    summary["slew_joints"] = "knee+ank_pitch"
+    toe_mm, toe_t, toe_side, toe_frac = _quiet_flat_toe(held)
+    summary["flat_toe_mm"] = toe_mm
+    summary["flat_toe_t"] = toe_t
+    summary["flat_toe_side"] = toe_side
+    summary["flat_toe_frac"] = toe_frac
+    _print_sag_row(summary)
+
+    rows = held.get("rows")
+    surface = held.get("surface")
+    by_surf: dict[float, dict[str, object]] = {}
+    if isinstance(surface, list):
+        for row in surface:
+            if isinstance(row, dict):
+                by_surf[round(float(row["t"]), 5)] = row
+    flat_best: dict[str, tuple[float, float, float]] = {}
+    rug_best: dict[str, tuple[float, float, float, float]] = {}
+    n_flat = {"L": 0, "R": 0}
+    n_rug = {"L": 0, "R": 0}
+    if isinstance(rows, list):
+        cycles = _swing_cycles(rows, 1.0e9)
+        med_n, _last_n = _cycle_index(cycles)
+        for step, cyc in enumerate(cycles):
+            n = len(cyc)
+            if n < 2 or med_n < 2:
+                continue
+            n_full = med_n if step == len(cycles) - 1 and n < med_n - 1 else n
+            mids: list[tuple[float, Tick, dict[str, object] | None]] = []
+            for j, row in enumerate(cyc):
+                if row.toe_z is None or row.swing not in ("L", "R") or row.t < _WALK_STEADY_S:
+                    continue
+                frac = j / (n_full - 1)
+                if not (0.20 - 1e-12 <= frac <= 0.80 + 1e-12):
+                    continue
+                plane = None
+                surf = by_surf.get(round(row.t, 5))
+                if isinstance(surf, dict):
+                    packed = surf.get(row.swing or "")
+                    if isinstance(packed, dict):
+                        plane = packed
+                mids.append((frac, row, plane))
+            if not mids:
+                continue
+            side = str(mids[0][1].swing)
+            on_rug = any(
+                plane is not None and int(plane.get("on_rug") or 0)
+                for _frac, _row, plane in mids
+            )
+            if on_rug:
+                n_rug[side] = n_rug.get(side, 0) + 1
+                frac, row, plane = min(
+                    mids,
+                    key=lambda item: (
+                        float(item[2]["clear"]) if isinstance(item[2], dict) else float("inf")
+                    ),
+                )
+                clear = float(plane["clear"]) if isinstance(plane, dict) else float("nan")
+                toe = float(row.toe_z or 0.0)
+                prev = rug_best.get(side)
+                if prev is None or clear < prev[0]:
+                    rug_best[side] = (clear, toe, row.t, frac)
+            else:
+                n_flat[side] = n_flat.get(side, 0) + 1
+                frac, row, _plane = min(mids, key=lambda item: float(item[1].toe_z or 0.0))
+                toe = float(row.toe_z or 0.0)
+                prev_f = flat_best.get(side)
+                if prev_f is None or toe < prev_f[0]:
+                    flat_best[side] = (toe, row.t, frac)
+    for side in ("L", "R"):
+        packed_f = flat_best.get(side)
+        if packed_f is None:
+            print(f"PRED {name} flat_toe side {side} missing n_swings {n_flat.get(side, 0)}")
+        else:
+            toe_s, t_s, frac_s = packed_f
+            print(
+                f"PRED {name} flat_toe side {side} {toe_s * 1000.0:+.3f} mm "
+                f"t {t_s:.3f} frac {frac_s:.3f} "
+                f"n_swings {n_flat.get(side, 0)} "
+                f"scuff {int(toe_s < 0.0)} "
+                f"above_2mm {int(toe_s > TOE_BAR_M)}"
+            )
+        packed_r = rug_best.get(side)
+        if packed_r is None:
+            print(f"PRED {name} rug side {side} none n_swings {n_rug.get(side, 0)}")
+        else:
+            clear_s, toe_s, t_s, frac_s = packed_r
+            print(
+                f"PRED {name} rug side {side} clear {clear_s * 1000.0:+.3f} mm "
+                f"toe {toe_s * 1000.0:+.3f} mm t {t_s:.3f} frac {frac_s:.3f} "
+                f"n_swings {n_rug.get(side, 0)} "
+                f"scuff {int(clear_s < 0.0)}"
+            )
+
+    asks = held.get("asks")
+    lateral = held.get("lateral")
+    by_lat: dict[float, dict[str, float | str]] = {}
+    if isinstance(lateral, list):
+        for row in lateral:
+            if isinstance(row, dict):
+                by_lat[round(float(row["t_ask"]), 5)] = row
+    swing_ssp: dict[str, tuple] = {}
+    swing_mid: dict[str, tuple] = {}
+    stance_mid: dict[str, tuple] = {}
+    stance_dsp: dict[str, tuple] = {}
+    if isinstance(asks, list):
+        for item in asks:
+            jn = str(item[1])
+            if jn not in _WALK_LEG:
+                continue
+            t = float(item[0])
+            if t < _WALK_STEADY_S - 1e-9:
+                continue
+            row = by_lat.get(round(t, 5))
+            if row is None:
+                continue
+            phase = str(row["phase"])
+            if phase == "D":
+                stance_dsp[jn] = _keep_ask(stance_dsp.get(jn), item)
+                continue
+            if phase not in ("L", "R"):
+                continue
+            frac = _swing_frac(phase, float(row["pose"]))
+            swing_pref = "l_" if phase == "L" else "r_"
+            stance_pref = "r_" if phase == "L" else "l_"
+            if jn.startswith(swing_pref):
+                if jn.endswith("knee"):
+                    swing_ssp[jn] = _keep_ask(swing_ssp.get(jn), item)
+                if 0.20 - 1e-12 <= frac <= 0.80 + 1e-12:
+                    swing_mid[jn] = _keep_ask(swing_mid.get(jn), item)
+            elif (
+                jn.startswith(stance_pref)
+                and 0.25 - 1e-9 <= frac <= 0.75 + 1e-9
+            ):
+                fn_key = "fn_r" if phase == "L" else "fn_l"
+                sw_key = "fn_l" if phase == "L" else "fn_r"
+                if (
+                    float(row[fn_key]) > _SOLE_FLAT_LOAD_N
+                    and float(row[sw_key]) <= _SOLE_FLAT_LOAD_N
+                ):
+                    stance_mid[jn] = _keep_ask(stance_mid.get(jn), item)
+
+    def _dump(tag: str, bucket: dict[str, tuple]) -> tuple | None:
+        worst = None
+        for jn in _WALK_LEG:
+            item = bucket.get(jn)
+            if item is None:
+                continue
+            row = by_lat.get(round(float(item[0]), 5))
+            frac = float("nan")
+            phase = "-"
+            if row is not None:
+                phase = str(row["phase"])
+                frac = _swing_frac(phase, float(row["pose"]))
+            over = abs(float(item[3])) > KNEE_NM + 1e-9
+            print(
+                f"PRED {name} {tag} {jn} {float(item[3]):+.4f} "
+                f"t {float(item[0]):.3f} phase {phase} frac {frac:.3f} "
+                f"q {_ask_q(item):+.5f} q_des {float(item[2]):+.5f} "
+                f"kp_term {float(item[8]):+.4f} kv_term {float(item[9]):+.4f} "
+                f"omega {float(item[10]):+.4f} "
+                f"ge_2.33 {int(over)}"
+            )
+            if worst is None or abs(float(item[3])) > abs(float(worst[3])):
+                worst = item
+        if worst is None:
+            print(f"PRED {name} {tag} missing")
+        return worst
+
+    knee_worst = _dump("ssp_swing_knee", swing_ssp)
+    mid_j = _dump("swing_20_80", swing_mid)
+    mid_ss = _dump("mid_ss", stance_mid)
+    dsp_w = _dump("dsp", stance_dsp)
+    _print_sag_split("mid_knee", _sag_worst(summary.get("mid_stance"), "knee"), summary)
+    _print_sag_split("mid_ap", _sag_worst(summary.get("mid_stance"), "ank_pitch"), summary)
+    _print_sag_split("dsp_knee", _sag_worst(summary.get("dsp"), "knee"), summary)
+    _print_sag_split("ssp_knee", _sag_worst(summary.get("ssp"), "knee"), summary)
+
+    worst_mid = summary.get("worst_mid")
+    if isinstance(worst_mid, dict):
+        com_row = by_lat.get(round(float(worst_mid["t"]), 5))
+        _print_box_pair(name, "mid", com_row)
+    print(
+        f"PRED {name} com mid_margin {float(summary['mid_margin']) * 1000.0:+.2f} mm "
+        f"n_mid_out {int(summary['n_mid_out'])}/{int(summary['n_mid'])} "
+        f"inside {int(summary['inside'])} "
+        f"half_y {float(summary['half_y']) * 1000.0:.2f} mm "
+        f"fault {summary.get('fault') or 'none'}"
+    )
+
+    toes_ok = bool(flat_best) and all(
+        flat_best[side][0] >= 0.0 for side in ("L", "R") if side in flat_best
+    ) and all(side in flat_best for side in ("L", "R"))
+    rug_ok = all(packed[0] >= 0.0 for packed in rug_best.values())
+    swing_ok = mid_j is not None and abs(float(mid_j[3])) <= KNEE_NM + 1e-9
+    support_ok = (
+        mid_ss is not None
+        and dsp_w is not None
+        and abs(float(mid_ss[3])) <= KNEE_NM + 1e-9
+        and abs(float(dsp_w[3])) <= KNEE_NM + 1e-9
+        and not _body_bad(summary)
+    )
+    knee_over = knee_worst is not None and abs(float(knee_worst[3])) > KNEE_NM + 1e-9
+    toe_bar = bool(flat_best) and all(
+        flat_best[side][0] > TOE_BAR_M for side in ("L", "R")
+    )
+    if not toes_ok or not rug_ok or not swing_ok:
+        why = []
+        if not toes_ok:
+            why.append("flat toe under 0")
+        if not rug_ok:
+            why.append("rug clearance under 0")
+        if not swing_ok:
+            why.append("20-80% swing joint over 2.33")
+        print(
+            f"PRED {name} Prefer FAIL. {'; '.join(why)}. "
+            "y_swap stayed 0. Foot-z stayed 1.170 mm. Less-crouch stayed closed. "
+            "The stop locks stayed put. d_min is not rebuilt. "
+            "CoM outside is not a torque pass. Not kit-safe. "
+            "Plant md5 stays 207f3d5e9c6a72e16f7aa0c8d224f75e."
+        )
+    elif knee_over or not toe_bar or not support_ok or int(summary["inside"]) != 1:
+        gaps = []
+        if knee_over and knee_worst is not None:
+            gaps.append(
+                f"parked SSP swing knee {knee_worst[1]} {float(knee_worst[3]):+.4f} "
+                f"t {float(knee_worst[0]):.3f}"
+            )
+        if not toe_bar:
+            gaps.append("flat 20-80% toe under +2 mm")
+        if not support_ok:
+            gaps.append("mid-SS or DSP ask over 2.33")
+        if int(summary["inside"]) != 1:
+            gaps.append(
+                f"CoM outside mid_margin {float(summary['mid_margin']) * 1000.0:+.2f} mm"
+            )
+        print(
+            f"PRED {name} Prefer FAIL. 20-80% toe stays at or above 0 and "
+            "the 20-80% swing joints stay at or under 2.33 Nm. "
+            f"Next gap: {'; '.join(gaps)}. "
+            "That CoM miss is the y_swap 0 class and is not a torque pass. "
+            "y_swap stayed 0. Foot-z stayed 1.170 mm. Less-crouch stayed closed. "
+            "The stop locks stayed put. d_min is not rebuilt. Not kit-safe. "
+            "Plant md5 stays 207f3d5e9c6a72e16f7aa0c8d224f75e."
+        )
+    else:
+        print(
+            f"PRED {name} CLEAR. 20-80% toes stay at or above 0, "
+            "swing joints in that window stay at or under 2.33 Nm, "
+            "and DSP plus mid-SS stay at or under 2.33 Nm. "
+            "CoM is inside the stance box on the mid ticks. "
+            "d_min is not rebuilt. Not kit-safe until the stop is. "
+            "Plant md5 stays 207f3d5e9c6a72e16f7aa0c8d224f75e."
+        )
+    _require_plant("after", name)
+
+
 def main() -> None:
     print(f"STEP_TILT {STEP_TILT:.6f} rad {math.degrees(STEP_TILT):.2f} deg")
     measure_scuff()
