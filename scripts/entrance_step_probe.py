@@ -11918,17 +11918,14 @@ def _install_sagittal_slew(
     air_stepped: dict[str, float] = {}
 
     def _air_ank(jn: str) -> bool:
-        """Clock-swing ankle pitch or knee on the stop walk, before the stop.
+        """Clock-swing ankle pitch on the stop walk, before the stop command.
 
         The clock can still call a foot swing after it has loaded, and
         double support can still show one foot at 0 N. Both of those
-        writes are this path. A loaded double-support joint stays on the
-        1.90 stance cap. The loaded early-stance knee on the continuous
-        walk is not this path. Ankle roll and the stop stretch stay out.
+        writes are this path. A loaded double-support ankle stays on the
+        1.90 stance cap. Ankle roll and the stop stretch stay out.
         """
-        knee = jn.endswith("knee") and "knee" in suffixes
-        ank = jn.endswith("ank_pitch") and "ank_pitch" in suffixes
-        if not knee and not ank:
+        if not jn.endswith("ank_pitch") or "ank_pitch" not in suffixes:
             return False
         if not getattr(session, "_sag_stop_installed", False):
             return False
@@ -11940,7 +11937,23 @@ def _install_sagittal_slew(
         side = "L" if jn.startswith("l_") else "R"
         return _sole_load_n(session, side) <= _SOLE_FLAT_LOAD_N + 1e-9
 
-    def _toward_air_ank(jn: str, target: float) -> float:
+    def _air_knee(jn: str) -> bool:
+        """Clock-swing knee on the stop walk, before the stop command.
+
+        This is the airborne approach, not the loaded early-stance knee.
+        Double support and the stance leg stay on the stance cap. The
+        continuous-walk seed is not this path.
+        """
+        if not jn.endswith("knee") or "knee" not in suffixes:
+            return False
+        if not getattr(session, "_sag_stop_installed", False):
+            return False
+        if getattr(session, "_sag_torque_cap", False):
+            return False
+        stance = _stance_prefix(_cmd_time(walker))
+        return stance != "both" and not jn.startswith(stance)
+
+    def _toward_air_ank(jn: str, target: float, hold: bool = True) -> float:
         """One 1.90 rad/s step toward the gait ankle, then the 2.33 Nm hold.
 
         The first step may start from a stale stance command. The hold
@@ -11967,6 +11980,11 @@ def _install_sagittal_slew(
         else:
             stepped = float(air_stepped[jn])
             origin = float(prev.get(jn, stepped))
+        if not hold:
+            # Foot is already down. Keep the 1.90 step so the landing
+            # schedule can catch up. The torque hold is the airborne bar.
+            prev[jn] = float(stepped)
+            return float(stepped)
         held, q_now, omega, capped = _hold_inside(jn, stepped)
         # The hold zeros position error once joint speed alone is past
         # 2.33 Nm. A few milliradians the other way puts the signed ask
@@ -12000,6 +12018,13 @@ def _install_sagittal_slew(
     last_cmd: dict[str, float] = {}
 
     def write(jn: str, q_des: float) -> None:
+        if _air_knee(jn):
+            side = "L" if jn.startswith("l_") else "R"
+            airborne = _sole_load_n(session, side) <= _SOLE_FLAT_LOAD_N + 1e-9
+            q_des = _toward_air_ank(jn, float(q_des), hold=airborne)
+            last_cmd[jn] = float(q_des)
+            orig(jn, float(q_des))
+            return
         if _air_ank(jn):
             q_des = _toward_air_ank(jn, float(q_des))
             last_cmd[jn] = float(q_des)
@@ -12176,8 +12201,10 @@ def _install_sagittal_slew(
                 "calls that foot swing, and while that foot is at or under "
                 f"{_SOLE_FLAT_LOAD_N:.1f} N in double support, then inside 2.33 Nm. "
                 "A loaded double-support ankle stays on the stance cap. "
-                "The clock-swing knee uses the same step and the same "
-                "2.33 Nm hold. A loaded stance knee stays on the stance cap. "
+                "The clock-swing knee uses the same step. The 2.33 Nm hold "
+                "is only while that foot is at or under 5.0 N. "
+                "Once it has loaded, the knee keeps the 1.90 rad/s step "
+                "without that hold. A loaded stance knee stays on the stance cap. "
                 "Ankle roll, sole-flat, and the stop stretch stay put."
             )
     print(
