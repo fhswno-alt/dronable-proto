@@ -5,8 +5,10 @@ Controls latches Day-1 stop. This module does not call ``CommandBus``.
 It does not command ``head_tilt``. Soft-pass is off. The plant file is
 not read and not edited.
 
-The ray starts at a kit_cam pixel ``(u, v)``. Intrinsics are the frozen
-camera: 640×480, fovy 104.82, square pixels. The direction is rotated by
+The ray starts at a kit_cam pixel ``(u, v)``. The pixel is an input.
+``hazard_finder`` supplies it from the RGB frame. This module does not
+project a geom. Intrinsics are the frozen camera: 640×480, fovy 104.82,
+square pixels. The direction is rotated by
 the full camera attitude built from body yaw, IMU roll, IMU pitch, and
 ``head_tilt`` (and ``head_pan`` if it is not zero). Pitch is the torso
 IMU pitch: negative is nose-down. The ray intersects the floor plane
