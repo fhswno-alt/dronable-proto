@@ -49,6 +49,15 @@ TOE_BAR_M = 0.002
 # that velocity term near 2.26 Nm. The parked stop stretch stays at
 # 1.90 rad/s and 0.25 / 1.060×. This rate is not that knob.
 _WALK_Z_RATE = 1.55
+# Stop-bout approach swing only. The fraction-0.115 airborne knee is a
+# swing-z slam before the stop command. Knee kv is 1.4573, so this rate
+# keeps that velocity term near 2.26 Nm. It is not the walk schedule and
+# not the post-stop 0.25 / 1.060× stretch. z stays nominal through the
+# stop's own fraction (~0.035) and again by the handoff, so the stop
+# seed and the landing z are the unwarped schedule.
+_STOP_APPROACH_Z_RATE = 1.55
+_STOP_APPROACH_PIN_FRAC = 0.04
+_STOP_APPROACH_HANDOFF = 0.50
 # Loaded-leg stance rates on the continuous walk. Ankle pitch stays at
 # the 1.90 rad/s rate that already cleared it. The knee is slower on
 # its own when that rate still leaves mid-SS over 2.33 Nm. Hip pitch
@@ -648,6 +657,317 @@ def _install_walk_z_stretch(session: sw.SteerSession, rate: float = _WALK_Z_RATE
         "Swing knee and ankle pitch slew at this rate. "
         "The stop stretch stays 0.25 / 1.060× and is not armed here. "
         "Foot-z stays 1.170 mm. y_swap stays 0."
+    )
+
+
+def _fit_stop_approach_z_side(
+    walker: ow.Op3Walker,
+    side: str,
+    rate: float,
+    pin_frac: float,
+    handoff_frac: float,
+) -> dict[str, object] | None:
+    """Warp only the approach of swing z, then return to the live schedule.
+
+    The clock stays the real SSP. z through ``pin_frac`` and from
+    ``handoff_frac`` on is the nominal sample, so the stop command's own
+    fraction and the landing stay unwarped. Between them the knee and
+    ankle pitch stay inside ``rate``. None when that chain does not close.
+    """
+    z_fn = walker._left_z if side == "L" else walker._right_z
+    start = float(walker.l_ssp_start if side == "L" else walker.r_ssp_start)
+    end = float(walker.l_ssp_end if side == "L" else walker.r_ssp_end)
+    dt = float(ow.OP3_CTRL_S)
+    ts: list[float] = []
+    nom: list[float] = []
+    t = start
+    while True:
+        ts.append(t)
+        nom.append(float(z_fn(t)))
+        if t >= end - 1e-12:
+            break
+        t = min(end, t + dt)
+    n = len(ts)
+    span = end - start
+    if span <= 1e-9 or n < 4:
+        return None
+    fracs = [(ts[i] - start) / span for i in range(n)]
+    pin_ids = [i for i in range(n) if fracs[i] <= float(pin_frac) + 1e-12]
+    hand_ids = [i for i in range(n) if fracs[i] + 1e-12 >= float(handoff_frac)]
+    if not pin_ids or not hand_ids:
+        return None
+    pin_lo = pin_ids[-1]
+    pin_hi = hand_ids[0]
+    if pin_hi <= pin_lo + 1:
+        return None
+    grid = np.linspace(min(nom) - 0.006, max(nom) + 0.002, 161)
+    cache: list[list[tuple[float, float] | None]] = []
+    for i in range(n):
+        cache.append([_walk_z_ik(walker, side, ts[i], float(z)) for z in grid])
+    step = float(rate) * dt
+
+    def _nearest(i: int) -> int | None:
+        best: int | None = None
+        best_d = 1e9
+        for k, ik in enumerate(cache[i]):
+            if ik is None:
+                continue
+            dist = abs(float(grid[k]) - nom[i])
+            if dist < best_d:
+                best = k
+                best_d = dist
+        return best
+
+    fixed: dict[int, int] = {}
+    for i in list(range(pin_lo + 1)) + list(range(pin_hi, n)):
+        j = _nearest(i)
+        if j is None:
+            return None
+        fixed[i] = j
+    reachable: list[set[int]] = [set() for _ in range(n)]
+    reachable[pin_hi].add(fixed[pin_hi])
+    for i in range(pin_hi - 1, pin_lo - 1, -1):
+        candidates: range | tuple[int, ...]
+        if i in fixed:
+            candidates = (fixed[i],)
+        else:
+            candidates = range(len(grid))
+        for j in candidates:
+            ik = cache[i][j]
+            if ik is None:
+                continue
+            for k in reachable[i + 1]:
+                nxt = cache[i + 1][k]
+                if nxt is None:
+                    continue
+                if (
+                    abs(ik[0] - nxt[0]) <= step + 1e-8
+                    and abs(ik[1] - nxt[1]) <= step + 1e-8
+                ):
+                    reachable[i].add(j)
+                    break
+    if fixed[pin_lo] not in reachable[pin_lo]:
+        return None
+    path = [fixed[i] for i in range(pin_lo + 1)]
+    for i in range(pin_lo, pin_hi):
+        ik = cache[i][path[-1]]
+        if ik is None:
+            return None
+        best: int | None = None
+        best_key = 1e18
+        for k in reachable[i + 1]:
+            nxt = cache[i + 1][k]
+            if nxt is None:
+                continue
+            if (
+                abs(ik[0] - nxt[0]) > step + 1e-8
+                or abs(ik[1] - nxt[1]) > step + 1e-8
+            ):
+                continue
+            key = abs(float(grid[k]) - nom[i + 1])
+            if best is None or key < best_key:
+                best = k
+                best_key = key
+        if best is None:
+            return None
+        path.append(best)
+    while len(path) < n:
+        path.append(fixed[len(path)])
+    deltas = [float(grid[path[i]]) - float(nom[i]) for i in range(n)]
+    for i in list(range(pin_lo + 1)) + list(range(pin_hi, n)):
+        deltas[i] = 0.0
+    peak_k = 0.0
+    peak_a = 0.0
+    peak_kf = 0.0
+    peak_af = 0.0
+    prev = cache[pin_lo][path[pin_lo]]
+    for i in range(pin_lo + 1, pin_hi + 1):
+        ik = cache[i][path[i]]
+        if ik is None or prev is None:
+            prev = ik
+            continue
+        dk = abs(ik[0] - prev[0]) / dt
+        da = abs(ik[1] - prev[1]) / dt
+        if dk > peak_k:
+            peak_k = dk
+            peak_kf = fracs[i]
+        if da > peak_a:
+            peak_a = da
+            peak_af = fracs[i]
+        prev = ik
+    peak_abs = max(abs(d) for d in deltas)
+    return {
+        "fracs": [float(f) for f in fracs],
+        "deltas": deltas,
+        "peak_abs_m": float(peak_abs),
+        "peak_knee": float(peak_k),
+        "peak_knee_frac": float(peak_kf),
+        "peak_ank": float(peak_a),
+        "peak_ank_frac": float(peak_af),
+        "pin_frac": float(fracs[pin_lo]),
+        "handoff_frac": float(fracs[pin_hi]),
+    }
+
+
+def _segment_stop_s(segments: tuple) -> float:
+    """Wall time the stop segment begins. The script labels that segment stop."""
+    prev = 0.0
+    for seg in segments:
+        if str(getattr(seg, "label", "")) == "stop":
+            return float(prev)
+        prev = float(seg.t_end)
+    raise SystemExit("stop approach stretch needs a segment labeled stop")
+
+
+def _install_stop_approach_z(
+    session: sw.SteerSession,
+    stop_s: float,
+    rate: float = _STOP_APPROACH_Z_RATE,
+) -> None:
+    """Time-stretch the stop bout's approach swing-z. The walk knob stays put.
+
+    Installed only on the stop bout, after the phase lift and the foot-z
+    add. From the stop command the wrapper is off, so the 0.25 / 1.060×
+    stretch still samples the unwarped z. Ankle roll and sole-flat are
+    not this path. The swing knee is the IK of this z. There is no torque
+    hold on it.
+    """
+    lipm = session.lipm
+    if lipm is None or lipm.op3 is None:
+        raise RuntimeError("gait manager walker missing")
+    if float(rate) <= 0.0:
+        raise SystemExit(f"stop approach z rate {rate} is not positive")
+    if float(stop_s) <= 0.0:
+        raise SystemExit(f"stop approach z stop time {stop_s} is not positive")
+    walker = lipm.op3
+    saved_time = float(walker.time)
+    saved_prev = float(walker.previous_x)
+    saved_x = float(walker.x_cmd)
+    saved_y = float(walker.y_cmd)
+    saved_a = float(walker.angle_cmd)
+    saved_run = bool(walker.ctrl_running)
+    saved_amp = (
+        walker._x_move, walker._x_swap, walker._y_move, walker._y_move_shift,
+        walker._y_swap, walker._z_move, walker._z_move_shift, walker._z_swap,
+        walker._z_swap_shift, walker._a_move, walker._a_move_shift,
+    )
+    rates = (float(rate), 1.40, 1.25, 1.10, 0.95)
+    handoffs = (
+        float(_STOP_APPROACH_HANDOFF),
+        0.65,
+        0.80,
+    )
+    chosen_rate = float(rate)
+    chosen_hand = float(_STOP_APPROACH_HANDOFF)
+    left: dict[str, object] | None = None
+    right: dict[str, object] | None = None
+    try:
+        walker.x_cmd = 0.020
+        walker.y_cmd = 0.0
+        walker.angle_cmd = 0.0
+        walker.previous_x = 0.020
+        walker.ctrl_running = True
+        walker.update_movement()
+        for trial in rates:
+            if trial > float(rate) + 1e-12:
+                continue
+            found = False
+            for hand in handoffs:
+                left_try = _fit_stop_approach_z_side(
+                    walker, "L", trial, _STOP_APPROACH_PIN_FRAC, hand,
+                )
+                right_try = _fit_stop_approach_z_side(
+                    walker, "R", trial, _STOP_APPROACH_PIN_FRAC, hand,
+                )
+                if left_try is None or right_try is None:
+                    continue
+                left = left_try
+                right = right_try
+                chosen_rate = float(trial)
+                chosen_hand = float(hand)
+                found = True
+                break
+            if found:
+                break
+    finally:
+        walker.time = saved_time
+        walker.previous_x = saved_prev
+        walker.x_cmd = saved_x
+        walker.y_cmd = saved_y
+        walker.angle_cmd = saved_a
+        walker.ctrl_running = saved_run
+        (
+            walker._x_move, walker._x_swap, walker._y_move, walker._y_move_shift,
+            walker._y_swap, walker._z_move, walker._z_move_shift, walker._z_swap,
+            walker._z_swap_shift, walker._a_move, walker._a_move_shift,
+        ) = saved_amp
+    if left is None or right is None:
+        raise SystemExit(
+            f"stop approach z cannot close at {rate:.2f} rad/s "
+            f"or milder through handoff {handoffs[-1]:.2f}"
+        )
+    session._stop_approach_z = True  # type: ignore[attr-defined]
+    session._stop_approach_z_rate = float(chosen_rate)  # type: ignore[attr-defined]
+    data = lipm.data
+
+    def _warp(orig, fit: dict[str, object], start: float, end: float):
+        fracs = fit["fracs"]
+        deltas = fit["deltas"]
+        if not isinstance(fracs, list) or not isinstance(deltas, list):
+            raise SystemExit("stop approach z table is empty")
+        if len(fracs) < 2 or len(fracs) != len(deltas):
+            raise SystemExit("stop approach z table is empty")
+        xs = [float(v) for v in fracs]
+        ds = [float(v) for v in deltas]
+
+        def _delta(frac: float) -> float:
+            if frac <= xs[0]:
+                return ds[0]
+            if frac >= xs[-1]:
+                return ds[-1]
+            hi = 1
+            while hi < len(xs) - 1 and xs[hi] < frac:
+                hi += 1
+            lo = hi - 1
+            span = xs[hi] - xs[lo]
+            w = 0.0 if span <= 1e-9 else (frac - xs[lo]) / span
+            return ds[lo] * (1.0 - w) + ds[hi] * w
+
+        def z_fn(t: float) -> float:
+            # The stop command and everything after it sample the unwarped
+            # z. The 0.25 / 1.060× fit must not see this approach delta.
+            if float(data.time) + 1e-12 >= float(stop_s):
+                return float(orig(t))
+            tt = float(t)
+            if tt <= start or tt > end:
+                return float(orig(tt))
+            frac = (tt - start) / (end - start)
+            return float(orig(tt)) + _delta(frac)
+
+        return z_fn
+
+    orig_l = walker._left_z
+    orig_r = walker._right_z
+    walker._left_z = _warp(orig_l, left, float(walker.l_ssp_start), float(walker.l_ssp_end))  # type: ignore[method-assign]
+    walker._right_z = _warp(orig_r, right, float(walker.r_ssp_start), float(walker.r_ssp_end))  # type: ignore[method-assign]
+    print(
+        "PRED stop_approach_z "
+        f"rate {chosen_rate:.3f} rad/s "
+        f"pin {float(left['pin_frac']):.3f} "
+        f"handoff {chosen_hand:.3f}. "
+        f"L delta {float(left['peak_abs_m']) * 1000.0:.2f} mm "
+        f"knee {float(left['peak_knee']):.2f} rad/s "
+        f"at {float(left['peak_knee_frac']):.3f} "
+        f"ank {float(left['peak_ank']):.2f} "
+        f"at {float(left['peak_ank_frac']):.3f}. "
+        f"R delta {float(right['peak_abs_m']) * 1000.0:.2f} mm "
+        f"knee {float(right['peak_knee']):.2f} rad/s "
+        f"at {float(right['peak_knee_frac']):.3f}. "
+        "This is the stop-bout approach only. "
+        "Walk swing-z stays 1.55 rad/s and is not installed here. "
+        "From the stop command the delta is off, so the stop stretch "
+        "stays 0.25 / 1.060×. Ankle roll freeze and sole-flat stay put. "
+        "No torque hold on this knee. Foot-z stays 1.170 mm. y_swap stays 0."
     )
 
 
@@ -6154,6 +6474,8 @@ def measure_pred_clip(
         _install_soft_stop(session, driver, soft_trace)
     inflight_trace: list[dict[str, object]] = []
     inflight_edge: dict[str, object] = {}
+    if inflight_stop and not walk_z_stretch:
+        _install_stop_approach_z(session, _segment_stop_s(segments))
     if inflight_stop:
         if steer_out is None:
             raise SystemExit("inflight stop needs the steer log")
@@ -13790,8 +14112,11 @@ def score_sag_stop() -> None:
         "the 2.33 Nm part cap. "
         "From the stop command the swing hip roll, hip yaw, hip pitch, and "
         "ankle roll hold the pre-stop q_des. Planar x/y and sole roll/pitch hold. "
-        "The leftover swing-z is time-stretched so the knee and ankle-pitch "
-        "IK move at or under 1.90 rad/s. The rise above the end height is "
+        "Before the stop, the approach swing-z is time-stretched on its own "
+        "rate so the airborne knee can track. That delta is off from the "
+        "stop command. The leftover swing-z is time-stretched so the knee "
+        "and ankle-pitch IK move at or under 1.90 rad/s. The rise above the "
+        "end height is "
         "scaled down when the full schedule cannot reach the descent "
         "midpoint before the tip. Those two joints slew toward that IK "
         "inside the 2.33 Nm part cap. The clock waits while either "
@@ -14175,6 +14500,7 @@ def score_sag_stop() -> None:
         )
     _print_gait_peaks(name, held, summary)
     _print_air_ank_land(name, held)
+    _print_approach_knee(name, held)
     if held.get("fault"):
         fails.append(f"fault {held.get('fault')} t {float(held.get('fault_t', float('nan'))):.3f}")
     if air_zero:
@@ -14559,6 +14885,144 @@ def _print_air_ank_land(name: str, held: dict[str, object]) -> None:
             f"fn_r {float(landed_sw['fn_r']):.2f}"
         )
         _corners(f"swing_load_{jn}", t_sw, frac_sw_txt)
+
+
+def _print_approach_knee(name: str, held: dict[str, object]) -> None:
+    """Airborne swing knee on the stop bout, before that foot loads.
+
+    The approach is the clock-swing knee while that foot is at or under
+    5 N. The post-stop ankle roll is printed beside it. A torque hold is
+    not this channel.
+    """
+    asks = held.get("asks")
+    lateral = held.get("lateral")
+    if not isinstance(asks, list) or not isinstance(lateral, list):
+        print(f"PRED {name} approach_knee missing")
+        return
+    by_lat: dict[float, dict[str, float | str]] = {}
+    for row in lateral:
+        if isinstance(row, dict):
+            by_lat[round(float(row["t_ask"]), 5)] = row
+    fault_t = float(held.get("fault_t", float("nan")))
+    tipped = bool(held.get("fault")) and math.isfinite(fault_t)
+    trace = held.get("inflight")
+    stop_t = 8.2
+    if isinstance(trace, list):
+        for row in trace:
+            if isinstance(row, dict) and str(row.get("mode")) != "pre":
+                stop_t = float(row["t"])
+                break
+    worst: dict[str, tuple] = {}
+    near: dict[str, tuple] = {}
+    near_df: dict[str, float] = {}
+    for item in asks:
+        jn = str(item[1])
+        if jn not in ("l_knee", "r_knee"):
+            continue
+        t_item = float(item[0])
+        if t_item + 1e-9 >= stop_t:
+            continue
+        if tipped and t_item >= fault_t - 1e-9:
+            continue
+        row = by_lat.get(round(t_item, 5))
+        if row is None:
+            continue
+        phase = str(row["phase"])
+        swinging = (jn.startswith("l_") and phase == "L") or (
+            jn.startswith("r_") and phase == "R"
+        )
+        if not swinging:
+            continue
+        fn_key = "fn_l" if jn.startswith("l_") else "fn_r"
+        if float(row[fn_key]) > _SOLE_FLAT_LOAD_N + 1e-9:
+            continue
+        prev = worst.get(jn)
+        if prev is None or abs(float(item[3])) > abs(float(prev[3])):
+            worst[jn] = item
+        frac = _swing_frac(phase, float(row["pose"]))
+        if math.isfinite(frac):
+            df = abs(frac - _WALK_EARLY_LOG_FRAC)
+            old = near_df.get(jn)
+            if old is None or df < old:
+                near[jn] = item
+                near_df[jn] = df
+    overs: list[str] = []
+    for jn in ("l_knee", "r_knee"):
+        item = worst.get(jn)
+        if item is None:
+            print(f"PRED {name} approach_knee {jn} none")
+            overs.append(f"{jn} missing")
+            continue
+        t_key = round(float(item[0]), 5)
+        row = by_lat.get(t_key)
+        phase = str(row["phase"]) if row is not None else str(item[5])
+        frac = _swing_frac(phase, float(row["pose"])) if row is not None else float("nan")
+        fn_l = float(row["fn_l"]) if row is not None else float("nan")
+        fn_r = float(row["fn_r"]) if row is not None else float("nan")
+        ask = float(item[3])
+        over = abs(ask) > KNEE_NM + 1e-9
+        print(
+            f"PRED {name} approach_knee {jn} {ask:+.4f} "
+            f"t {float(item[0]):.3f} phase {phase} frac {frac:.3f} "
+            f"q {_ask_q(item):+.5f} q_des {float(item[2]):+.5f} "
+            f"kp_term {float(item[8]):+.4f} kv_term {float(item[9]):+.4f} "
+            f"fn_l {fn_l:.2f} fn_r {fn_r:.2f} ge_2.33 {int(over)}"
+        )
+        if over:
+            overs.append(f"{jn} {ask:+.4f} t {float(item[0]):.3f} frac {frac:.3f}")
+        named = near.get(jn)
+        if named is None:
+            continue
+        nrow = by_lat.get(round(float(named[0]), 5))
+        nphase = str(nrow["phase"]) if nrow is not None else str(named[5])
+        nfrac = _swing_frac(nphase, float(nrow["pose"])) if nrow is not None else float("nan")
+        print(
+            f"PRED {name} approach_near {jn} {float(named[3]):+.4f} "
+            f"t {float(named[0]):.3f} frac {nfrac:.3f} "
+            f"fn_l {float(nrow['fn_l']) if nrow is not None else float('nan'):.2f} "
+            f"fn_r {float(nrow['fn_r']) if nrow is not None else float('nan'):.2f}"
+        )
+    roll_worst: tuple | None = None
+    for item in asks:
+        jn = str(item[1])
+        if not jn.endswith("ank_roll"):
+            continue
+        t_item = float(item[0])
+        if t_item + 1e-9 < stop_t:
+            continue
+        if tipped and t_item >= fault_t - 1e-9:
+            continue
+        if roll_worst is None or abs(float(item[3])) > abs(float(roll_worst[3])):
+            roll_worst = item
+    if roll_worst is None:
+        print(f"PRED {name} stop_ank_roll none")
+        overs.append("ank_roll missing")
+    else:
+        ask = float(roll_worst[3])
+        over = abs(ask) > KNEE_NM + 1e-9
+        print(
+            f"PRED {name} stop_ank_roll {roll_worst[1]} {ask:+.4f} "
+            f"t {float(roll_worst[0]):.3f} "
+            f"q {_ask_q(roll_worst):+.5f} q_des {float(roll_worst[2]):+.5f} "
+            f"ge_2.33 {int(over)}"
+        )
+        if over:
+            overs.append(f"{roll_worst[1]} {ask:+.4f} t {float(roll_worst[0]):.3f}")
+    if overs:
+        print(
+            f"PRED {name} approach_knee Prefer FAIL. "
+            + " | ".join(overs)
+            + ". Ankle roll freeze and sole-flat stay on. "
+            "Walk 1.55 and the stop stretch stay put."
+        )
+        return
+    print(
+        f"PRED {name} approach_knee CLEAR. "
+        "Clock-swing knees stay at or under 2.33 Nm while that foot is "
+        "at or under 5 N. Stop ankle roll from the command until any tip "
+        "stays at or under 2.33 Nm. "
+        "Walk 1.55 and the stop stretch stay put."
+    )
 
 
 def score_mid_swing() -> None:
