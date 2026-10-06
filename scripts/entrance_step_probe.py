@@ -60,12 +60,12 @@ _STOP_APPROACH_Z_RATE = 1.55
 # loaded transition only. It is not the continuous-walk seed and it does
 # not read the walk ladder.
 _STOP_ENTRANCE_S = 1.0
-# Loaded left ankle on the stop bout, on the pre-stop descent only.
-# The command may step toward the gait only while it stays within one
-# step of the live joint. Not a swing stretch. The walk ladder is not
-# read. Engage, the first landing, and the earlier steady steps stay
-# on their own slews.
-_STOP_STEADY_ANK_HI = (7.84, 8.20)
+# Loaded left ankle on the stop bout, from the steady mark until the
+# stop command. A step that would put the ask over 2.33 Nm is not
+# taken; the command stays on the nearer side of the live joint.
+# Under-limit steps are unchanged. Not a swing stretch. The walk
+# ladder is not read.
+_STOP_STEADY_ANK_END = 8.20
 # Loaded-leg stance rates on the continuous walk. Ankle pitch stays at
 # the 1.90 rad/s rate that already cleared it. The knee is slower on
 # its own when that rate still leaves mid-SS over 2.33 Nm. Hip pitch
@@ -12611,15 +12611,21 @@ def _install_sagittal_slew(
                     and not getattr(session, "_sag_torque_cap", False)
                 ):
                     t_now = float(lipm.data.time)
-                    in_hi = _STOP_STEADY_ANK_HI[0] <= t_now < _STOP_STEADY_ANK_HI[1]
-                    if in_hi:
-                        # Delayed hold against a gait target the loaded
-                        # joint is not tracking. Do not step further from
-                        # the live joint. A step toward it is one stance
-                        # cap. No torque hold, and z is not rewritten.
+                    if _WALK_STEADY_S - 1e-9 <= t_now < _STOP_STEADY_ANK_END:
+                        # The gait step is already rate-limited. If that
+                        # step would put the loaded ask over 2.33 Nm,
+                        # keep the nearer command. One stance cap toward
+                        # the joint when the previous command is farther.
+                        # No torque hold, and z is not rewritten.
                         q_now = float(lipm.q(jn))
-                        held_cmd = float(old) if old is not None else q_now
-                        if abs(float(q_des) - q_now) > step + 1e-9:
+                        jid = mj.mj_name2id(lipm.model, mj.mjtObj.mjOBJ_JOINT, jn)
+                        omega = float(lipm.data.qvel[int(lipm.model.jnt_dofadr[jid])])
+                        idx = lipm.act_idx[jn + "_pos"]
+                        kp = float(lipm.model.actuator_gainprm[idx, 0])
+                        kv = -float(lipm.model.actuator_biasprm[idx, 2])
+                        ask = kp * (float(q_des) - q_now) - kv * omega
+                        if abs(ask) > KNEE_NM + 1e-9:
+                            held_cmd = float(old) if old is not None else q_now
                             if abs(held_cmd - q_now) + 1e-9 < abs(float(q_des) - q_now):
                                 q_des = held_cmd
                             elif held_cmd > q_now:
@@ -12740,8 +12746,7 @@ def _install_sagittal_slew(
         print(
             "PRED sag_slew stop_steady_ank from the live joint at "
             f"{float(rad_s):.3f} rad/s on the loaded left ankle pitch. "
-            "The command does not step further from that joint through "
-            "the pre-stop descent. "
+            "A step that would put that ask over 2.33 Nm is not taken. "
             "Planar x/y and sole attitude stay on the live step. "
             "z stays live. This is not a swing stretch. "
             "The walk ladder stays off this bout."
@@ -14365,9 +14370,9 @@ def score_sag_stop() -> None:
         "the live joint through that double support. Ankle pitch stays "
         "on its slew. Hip pitch then continues on the engage catch from "
         "that command. z stays live. That catch is not a swing stretch. "
-        "On the loaded left ankle, the pre-stop descent does not step "
-        "the command further from the live joint. Planar x/y and sole "
-        "attitude stay on the live step. "
+        "On the loaded left ankle, a step that would put the ask over "
+        "2.33 Nm is not taken. Planar x/y and sole attitude stay on "
+        "the live step. "
         "z stays live. That catch is not a swing stretch. "
         "Before the stop, the approach swing-z is time-stretched on its own "
         "rate so the airborne knee can track. That delta is off from the "
@@ -15604,7 +15609,7 @@ def _print_steady_ank(name: str, held: dict[str, object]) -> None:
         if str(item[1]) != "l_ank_pitch":
             continue
         t_item = float(item[0])
-        if t_item < _WALK_STEADY_S - 1e-9 or t_item >= _STOP_STEADY_ANK_HI[1] - 1e-9:
+        if t_item < _WALK_STEADY_S - 1e-9 or t_item >= _STOP_STEADY_ANK_END - 1e-9:
             continue
         if worst is None or abs(float(item[3])) > abs(float(worst[3])):
             worst = item
