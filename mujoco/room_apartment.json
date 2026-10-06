@@ -1,0 +1,137 @@
+{
+  "scene": "mujoco/room_apartment.xml",
+  "description": "Joined apartment on the single plant floor. floor_box is the interior floor of that room in world metres, not a geom. Each doorway spawn is in the hall, outside that box, facing the opening. yaw is radians about z; 0 faces +X. common_start is the shared hall pose.",
+  "common_start": {
+    "name": "hall",
+    "x": 0.0,
+    "y": 0.0,
+    "yaw": 0.0
+  },
+  "rooms": {
+    "kitchen": {
+      "floor_box": {
+        "xmin": 1.07,
+        "xmax": 2.92,
+        "ymin": -0.98,
+        "ymax": 0.76
+      },
+      "doorways": [
+        {
+          "name": "kitchen_hall",
+          "opening": {
+            "xmin": 0.99,
+            "xmax": 1.07,
+            "ymin": -0.56,
+            "ymax": 0.34
+          },
+          "clear_width_m": 0.9,
+          "spawn": {
+            "x": 0.29,
+            "y": -0.11,
+            "yaw": 0.0
+          }
+        }
+      ]
+    },
+    "bathroom": {
+      "floor_box": {
+        "xmin": 1.07,
+        "xmax": 2.92,
+        "ymin": 0.84,
+        "ymax": 2.92
+      },
+      "doorways": [
+        {
+          "name": "bathroom_hall",
+          "opening": {
+            "xmin": 0.99,
+            "xmax": 1.07,
+            "ymin": 1.43,
+            "ymax": 2.33
+          },
+          "clear_width_m": 0.9,
+          "spawn": {
+            "x": 0.29,
+            "y": 1.88,
+            "yaw": 0.0
+          }
+        }
+      ]
+    },
+    "living": {
+      "floor_box": {
+        "xmin": -2.92,
+        "xmax": -1.07,
+        "ymin": 0.12,
+        "ymax": 2.92
+      },
+      "doorways": [
+        {
+          "name": "living_hall",
+          "opening": {
+            "xmin": -1.07,
+            "xmax": -0.99,
+            "ymin": 1.07,
+            "ymax": 1.97
+          },
+          "clear_width_m": 0.9,
+          "spawn": {
+            "x": -0.29,
+            "y": 1.52,
+            "yaw": 3.141593
+          }
+        }
+      ]
+    },
+    "bedroom": {
+      "floor_box": {
+        "xmin": 1.07,
+        "xmax": 2.92,
+        "ymin": -2.92,
+        "ymax": -1.06
+      },
+      "doorways": [
+        {
+          "name": "bedroom_hall",
+          "opening": {
+            "xmin": 0.99,
+            "xmax": 1.07,
+            "ymin": -2.44,
+            "ymax": -1.54
+          },
+          "clear_width_m": 0.9,
+          "spawn": {
+            "x": 0.29,
+            "y": -1.99,
+            "yaw": 0.0
+          }
+        }
+      ]
+    },
+    "entrance": {
+      "floor_box": {
+        "xmin": -2.92,
+        "xmax": -1.07,
+        "ymin": -2.92,
+        "ymax": 0.04
+      },
+      "doorways": [
+        {
+          "name": "entrance_hall",
+          "opening": {
+            "xmin": -1.07,
+            "xmax": -0.99,
+            "ymin": -1.89,
+            "ymax": -0.99
+          },
+          "clear_width_m": 0.9,
+          "spawn": {
+            "x": -0.29,
+            "y": -1.44,
+            "yaw": 3.141593
+          }
+        }
+      ]
+    }
+  }
+}
