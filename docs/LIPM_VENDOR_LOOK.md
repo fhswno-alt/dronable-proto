@@ -1362,23 +1362,22 @@ From 4 s to 8 s, `vel(+0.150, +0.25)` yaws at +0.217 rad/s and
 2.330 Nm. The worst other leg sample is hip pitch at 2.401 Nm.
 `vel(0, +0.25)` yaws at +0.213 rad/s.
 
-Nav-left resume heading (Prefer FAIL). Scenario: 1 s stand, 15 s
-forward, 12.5 s `vel(+0.150, +0.25)`, then 6 s `vel(+0.150, 0)`.
-Resume Δyaw ≈ +12.41°. Plant md5
-`207f3d5e9c6a72e16f7aa0c8d224f75e` unchanged. Split: (1) 0–0.68 s
-`applied_yaw` still slewing +0.25→0 at 0.40 rad/s² after the 100 ms
-resend clears the target → body +6.81° (command integral ~+5.22°);
-(2) 0.68–6.0 s `applied_yaw` and the step angle are already 0 →
-leftover left curve +5.60° (body yaw rate +0.034→+0.009 rad/s). That
-is ~half ramp-out, ~half steady leftover curve under `vel(+0.150, 0)`
-— not “turn still commanded.” Soft-pass is off.
+Nav-left resume heading on tip `d00efbf` (Prefer FAIL). Scenario: 1 s
+stand, 15 s forward, 12.5 s `vel(+0.150, +0.25)`, then 6 s
+`vel(+0.150, 0)`. Resume heading **+0.904 m** / **+2.24 deg**. On
+`08731c0` this resume was **+2.57 deg**. The pre-outside-lead resume
+was **+12.41 deg**. The no-ask chain mid is **+2.24 deg** and the
+chained resume is **−3.66 deg**. Plant md5
+`207f3d5e9c6a72e16f7aa0c8d224f75e` unchanged. Soft-pass is off. The
+pre-outside-lead split (slew then leftover curve) is not this row.
 
-Left versus right unload, same plant. The 6 s `vel(+0.150, 0)` after
-the left turn is +12.3°: +6.7° while `applied_yaw` slews +0.25→0 in
-0.69 s (command integral +5.3°), then +5.6° with the yaw command and
-the step angle already 0. The 6 s `vel(+0.150, 0)` after an 11 s
-`vel(+0.150, −0.25)` is −2.2° on the chained walk and −0.6° when that
-right turn follows a straight approach. The slew is 0.40 rad/s² both
+Left versus right unload, same plant, before the outside-foot resume.
+The 6 s `vel(+0.150, 0)` after the left turn was +12.3°: +6.7° while
+`applied_yaw` slews +0.25→0 in 0.69 s (command integral +5.3°), then
++5.6° with the yaw command and the step angle already 0. The 6 s
+`vel(+0.150, 0)` after an 11 s `vel(+0.150, −0.25)` was −2.2° on that
+chain and −0.6° when that right turn follows a straight approach. The
+live chain is the README table. The slew is 0.40 rad/s² both
 ways. On a matching step phase the right ramp moves the body −5.3°
 (command integral −4.5°), and the rest of the window then curves left
 +4.7°, so the ramp and the curve cancel. Straight `vel(+0.150, 0)`

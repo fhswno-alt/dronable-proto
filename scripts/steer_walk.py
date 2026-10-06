@@ -119,22 +119,20 @@ Run:
 The forward clamp is the measured kit body speed, 0.150 m/s.
 Yaw stays ±0.25 rad/s and maps into the OP3 step angle.
 
-Nav-left resume heading on that kit row (Prefer FAIL). Scenario: 1 s
-stand, 15 s forward, 12.5 s vel(+0.150, +0.25), then 6 s vel(+0.150, 0).
-Resume Δyaw ≈ +12.41°. Plant md5 207f3d5e9c6a72e16f7aa0c8d224f75e
-unchanged. Split: (1) 0–0.68 s applied_yaw still slewing +0.25→0 at
-0.40 rad/s² after the 100 ms resend clears the target → body +6.81°
-(command integral ~+5.22°); (2) 0.68–6.0 s applied_yaw and the step
-angle are already 0 → leftover left curve +5.60° (body yaw rate
-+0.034→+0.009 rad/s). That is ~half ramp-out, ~half steady leftover
-curve under vel(+0.150, 0) — not “turn still commanded.” Soft-pass
-is off.
+Nav-left resume heading on Controls tip d00efbf (Prefer FAIL).
+Scenario: 1 s stand, 15 s forward, 12.5 s vel(+0.150, +0.25), then
+6 s vel(+0.150, 0). Resume heading +0.904 m / +2.24 deg. On 08731c0
+this resume was +2.57 deg. The pre-outside-lead resume was +12.41 deg.
+The no-ask chain mid is +2.24 deg and the chained resume is −3.66 deg.
+Plant md5 207f3d5e9c6a72e16f7aa0c8d224f75e unchanged. Soft-pass is off.
+Not go-anywhere.
 
-Left versus right unload on this kit row. The 6 s vel(+0.150, 0) after
-the left turn is +12.3° (+6.7° during the 0.69 s slew, command integral
-+5.3°, then +5.6° with applied_yaw and the step angle already 0). After
-an 11 s vel(+0.150, −0.25) the same 6 s is −2.2° chained and −0.6° from
-a straight approach. The slew is 0.40 rad/s² both ways. On a matching
+Left versus right unload on this kit row, before the outside-foot
+resume. The 6 s vel(+0.150, 0) after the left turn was +12.3° (+6.7°
+during the 0.69 s slew, command integral +5.3°, then +5.6° with
+applied_yaw and the step angle already 0). After an 11 s
+vel(+0.150, −0.25) the same 6 s was −2.2° chained and −0.6° from a
+straight approach. The live chain is the README table. The slew is 0.40 rad/s² both ways. On a matching
 step phase the right ramp moves the body −5.3° (command integral −4.5°)
 and the rest of the window curves left +4.7°, so they cancel. Straight
 vel(+0.150, 0) already curves +4.2° over 27–33 s and +3.5° over
