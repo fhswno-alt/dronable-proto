@@ -4,59 +4,128 @@
   "go_anywhere": false,
   "kit_safe": false,
   "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
-  "plant_file_changed": false,
-  "recogniser": "absent",
-  "map_waypoints": false,
-  "room_script": false,
-  "vel_published": false,
-  "step_off_m": 0.0,
-  "step_off_note": "0 because no vel was published and the walk high-water was not taken. The kitchen-walk +0.017 m is not applied.",
-  "gap": "Voice refuses a room phrase before CommandBus. This tip has no kit_cam room label (room_ask.py and find_room.py are absent; Moondream is not loaded). The #71 finder can report a hazard cue on the stand frame and does not choose vx or yaw.",
+  "definition": {
+    "reached": "Body COM xy of body_link is inside that room's floor box, the bout started with that COM outside the same box, min up_z is at least 0.90, prop contacts are zero, and the bout ends at or before 53.0 s. A start inside the box is not a reach.",
+    "floor_box": "Axis-aligned XY of every loaded plane geom named floor or room_floor. Half-size is the plane size. A single-room file has one such plane, and that plane is that room's floor. The box is not a waypoint and is not passed to a command.",
+    "upright": "min up_z over the bout >= 0.90",
+    "prop_contact": "A contact with normal force >= 0.5 N between a robot geom and any geom other than floor or room_floor.",
+    "time_limit_s": 53.0,
+    "voice_vx_cap": 0.056,
+    "voice_yaw_cap": 0.25,
+    "d_min": "d_min = 0.150 * (T_detect + T_stop). 0.150 is the hardware bound in that formula, not the voice vx cap. T_detect = 0.000 s. T_stop = 0.842 s.",
+    "d_min_m": 0.1263,
+    "soft_pass": false
+  },
+  "scene_files": [
+    "room_bathroom.xml",
+    "room_bedroom.xml",
+    "room_entrance.xml",
+    "room_kitchen.xml",
+    "room_living.xml"
+  ],
+  "joined_scene": false,
+  "doorway_spawn": false,
+  "gap": "No joined multi-room scene and no doorway spawn. Each room file is its own scene, and the documented stand starts on that scene's only floor plane, so the COM starts inside the room floor box. A start-inside pose is not a reach. No new scene was authored.",
   "rooms": [
     {
       "room": "kitchen",
+      "scene": "room_kitchen.xml",
       "phrase": "go to the kitchen",
       "voice_parse": "refuse",
       "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
       "matched_room_words": [
         "kitchen"
       ],
-      "bus_vel_count": 0,
-      "bus_stand_count": 0,
-      "bus_stop_count": 0,
-      "recogniser_label": "absent",
-      "cue_count": 0,
-      "cue": null,
-      "remaining": "no cue",
-      "stop": "not commanded",
-      "contact": null,
+      "recogniser_label": "not asked",
+      "commanded_vx": null,
+      "commanded_yaw": null,
+      "d_min_m": 0.1263,
+      "d_min_v_mps": 0.15,
+      "t_detect_s": 0.0,
+      "t_stop_s": 0.842,
+      "latch_applied": false,
+      "spawn": {
+        "qpos_xyz": [
+          0.0020896980316242324,
+          -0.00018851765602289396,
+          0.23185984219012393
+        ],
+        "yaw_rad": 2.2496271650638666e-05,
+        "com_xyz": [
+          -0.0027910462701022567,
+          -0.00018054834888876954,
+          0.199362420902719
+        ],
+        "up_z": 0.99995466808768
+      },
+      "floor_boxes": [
+        {
+          "geom": "floor",
+          "xmin": -3.0,
+          "xmax": 3.0,
+          "ymin": -3.0,
+          "ymax": 3.0
+        }
+      ],
+      "started_outside": false,
+      "reached": false,
+      "reach_block": "spawn COM is inside the only floor plane of this single-room scene; started_outside is false",
+      "contact": "none",
       "peak_nm": 0.3619768663199655,
       "peak_actuator": "l_ank_roll_pos",
       "min_up_z": 0.9999296015830651
     },
     {
       "room": "bathroom",
+      "scene": "room_bathroom.xml",
       "phrase": "go to the bathroom",
       "voice_parse": "refuse",
       "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
       "matched_room_words": [
         "bathroom"
       ],
-      "bus_vel_count": 0,
-      "bus_stand_count": 0,
-      "bus_stop_count": 0,
-      "recogniser_label": "absent",
-      "cue_count": 0,
-      "cue": null,
-      "remaining": "no cue",
-      "stop": "not commanded",
-      "contact": null,
+      "recogniser_label": "not asked",
+      "commanded_vx": null,
+      "commanded_yaw": null,
+      "d_min_m": 0.1263,
+      "d_min_v_mps": 0.15,
+      "t_detect_s": 0.0,
+      "t_stop_s": 0.842,
+      "latch_applied": false,
+      "spawn": {
+        "qpos_xyz": [
+          0.0020896980316242324,
+          -0.00018851765602289396,
+          0.23185984219012393
+        ],
+        "yaw_rad": 2.2496271650638666e-05,
+        "com_xyz": [
+          -0.0027910462701022567,
+          -0.00018054834888876954,
+          0.199362420902719
+        ],
+        "up_z": 0.99995466808768
+      },
+      "floor_boxes": [
+        {
+          "geom": "floor",
+          "xmin": -3.0,
+          "xmax": 3.0,
+          "ymin": -3.0,
+          "ymax": 3.0
+        }
+      ],
+      "started_outside": false,
+      "reached": false,
+      "reach_block": "spawn COM is inside the only floor plane of this single-room scene; started_outside is false",
+      "contact": "none",
       "peak_nm": 0.3619768663199655,
       "peak_actuator": "l_ank_roll_pos",
       "min_up_z": 0.9999296015830651
     },
     {
       "room": "living",
+      "scene": "room_living.xml",
       "phrase": "go to the living room",
       "voice_parse": "refuse",
       "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
@@ -64,58 +133,139 @@
         "living",
         "room"
       ],
-      "bus_vel_count": 0,
-      "bus_stand_count": 0,
-      "bus_stop_count": 0,
-      "recogniser_label": "absent",
-      "cue_count": 0,
-      "cue": null,
-      "remaining": "no cue",
-      "stop": "not commanded",
-      "contact": null,
+      "recogniser_label": "not asked",
+      "commanded_vx": null,
+      "commanded_yaw": null,
+      "d_min_m": 0.1263,
+      "d_min_v_mps": 0.15,
+      "t_detect_s": 0.0,
+      "t_stop_s": 0.842,
+      "latch_applied": false,
+      "spawn": {
+        "qpos_xyz": [
+          0.0020896980316242324,
+          -0.00018851765602289396,
+          0.23185984219012393
+        ],
+        "yaw_rad": 2.2496271650638666e-05,
+        "com_xyz": [
+          -0.0027910462701022567,
+          -0.00018054834888876954,
+          0.199362420902719
+        ],
+        "up_z": 0.99995466808768
+      },
+      "floor_boxes": [
+        {
+          "geom": "floor",
+          "xmin": -3.0,
+          "xmax": 3.0,
+          "ymin": -3.0,
+          "ymax": 3.0
+        }
+      ],
+      "started_outside": false,
+      "reached": false,
+      "reach_block": "spawn COM is inside the only floor plane of this single-room scene; started_outside is false",
+      "contact": "none",
       "peak_nm": 0.3619768663199655,
       "peak_actuator": "l_ank_roll_pos",
       "min_up_z": 0.9999296015830651
     },
     {
       "room": "bedroom",
+      "scene": "room_bedroom.xml",
       "phrase": "go to the bedroom",
       "voice_parse": "refuse",
       "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
       "matched_room_words": [
         "bedroom"
       ],
-      "bus_vel_count": 0,
-      "bus_stand_count": 0,
-      "bus_stop_count": 0,
-      "recogniser_label": "absent",
-      "cue_count": 0,
-      "cue": null,
-      "remaining": "no cue",
-      "stop": "not commanded",
-      "contact": null,
+      "recogniser_label": "not asked",
+      "commanded_vx": null,
+      "commanded_yaw": null,
+      "d_min_m": 0.1263,
+      "d_min_v_mps": 0.15,
+      "t_detect_s": 0.0,
+      "t_stop_s": 0.842,
+      "latch_applied": false,
+      "spawn": {
+        "qpos_xyz": [
+          0.0020896980316242324,
+          -0.00018851765602289396,
+          0.23185984219012393
+        ],
+        "yaw_rad": 2.2496271650638666e-05,
+        "com_xyz": [
+          -0.0027910462701022567,
+          -0.00018054834888876954,
+          0.199362420902719
+        ],
+        "up_z": 0.99995466808768
+      },
+      "floor_boxes": [
+        {
+          "geom": "floor",
+          "xmin": -3.0,
+          "xmax": 3.0,
+          "ymin": -3.0,
+          "ymax": 3.0
+        }
+      ],
+      "started_outside": false,
+      "reached": false,
+      "reach_block": "spawn COM is inside the only floor plane of this single-room scene; started_outside is false",
+      "contact": "none",
       "peak_nm": 0.3619768663199655,
       "peak_actuator": "l_ank_roll_pos",
       "min_up_z": 0.9999296015830651
     },
     {
       "room": "entrance",
+      "scene": "room_entrance.xml",
       "phrase": "go to the entrance",
       "voice_parse": "refuse",
       "voice_line": "refused: voice does not go to a room; kitchen and bathroom finders are separate, and this caller has no map",
       "matched_room_words": [],
-      "bus_vel_count": 0,
-      "bus_stand_count": 0,
-      "bus_stop_count": 0,
-      "recogniser_label": "absent",
-      "cue_count": 0,
-      "cue": null,
-      "remaining": "no cue",
-      "stop": "not commanded",
-      "contact": null,
+      "recogniser_label": "not asked",
+      "commanded_vx": null,
+      "commanded_yaw": null,
+      "d_min_m": 0.1263,
+      "d_min_v_mps": 0.15,
+      "t_detect_s": 0.0,
+      "t_stop_s": 0.842,
+      "latch_applied": false,
+      "spawn": {
+        "qpos_xyz": [
+          0.0020896980316242324,
+          -0.00018851765602289396,
+          0.23185984219012393
+        ],
+        "yaw_rad": 2.2496271650638666e-05,
+        "com_xyz": [
+          -0.0027910462701022567,
+          -0.00018054834888876954,
+          0.199362420902719
+        ],
+        "up_z": 0.99995466808768
+      },
+      "floor_boxes": [
+        {
+          "geom": "floor",
+          "xmin": -3.0,
+          "xmax": 3.0,
+          "ymin": -3.0,
+          "ymax": 3.0
+        }
+      ],
+      "started_outside": false,
+      "reached": false,
+      "reach_block": "spawn COM is inside the only floor plane of this single-room scene; started_outside is false",
+      "contact": "none",
       "peak_nm": 0.3619768663199655,
       "peak_actuator": "l_ank_roll_pos",
       "min_up_z": 0.9999296015830651
     }
-  ]
+  ],
+  "reached_any": false
 }

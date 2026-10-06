@@ -1,25 +1,24 @@
 #!/usr/bin/env python3
-"""Cold-stand measure of voice go-to for five rooms. Prefer FAIL.
+"""Five-room voice go-to. Prefer FAIL: spawn is already on the room floor.
 
-Each phrase is parsed by scripts/voice_caller.py. A room phrase is
-refused, so CommandBus is not given stand, stop, or vel. There is no
-room recogniser on this tip. Moondream is not loaded. Zero spend.
+Reach is fixed below before any room is scored. A bout counts only when
+the settled stand COM starts outside that room's floor box. These files
+are one room each. Each includes the plant floor plane and nothing else
+named floor. The documented stand is on that plane. There is no joined
+scene and no doorway spawn in this tree. That bout is not a reach.
 
-The pose is the documented quiet stand in scripts/render_kit_cam_room.py.
-One kit_cam frame is passed through the #71 finder: hazard cues, the
-in-corridor too_close gate, and the first-sighting low-chroma confirm.
-That cue is a hazard pixel. It is not a room label and not a distance
-to a named room. No map query, no waypoint, and no find_kitchen path.
-
-The plant file is only hashed. Soft-pass is off. Exit status is 1.
+Voice forward stays +0.056 m/s and yaw ±0.25. 0.150 is only the d_min
+bound. No vel is published for an ineligible bout. The #71 latch is not
+applied to a start-inside walk. Plant file is only hashed. Soft-pass is
+off. Exit status is 1.
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
 
@@ -32,19 +31,19 @@ _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-import hazard_finder as hf
-import mono_toe_gate as gate
 import ray_corridor as rc
 import render_kit_cam_room as rooms
 import steer_walk as sw
 import voice_caller as voice
 
 ROOT = Path(__file__).resolve().parents[1]
-PLANT_XML = sw.PLANT_XML
 SUMMARY_PATH = ROOT / "previews" / "voice_goto_rooms_summary.json"
-RECOGNISER_ABSENT = "absent"
-STEP_OFF_M = 0.0
-LEG_TOKS = ("hip_", "knee", "ank_")
+# Frozen before the score. DEMO_SCRIPT holds forward until this time.
+TIME_LIMIT_S = 53.0
+UPRIGHT_UP_Z = 0.90
+PROP_FORCE_N = 0.5
+T_DETECT_S = 0.0
+FLOOR_GEOM_NAMES = frozenset({"floor", "room_floor"})
 PHRASES: tuple[tuple[str, str], ...] = (
     ("kitchen", "go to the kitchen"),
     ("bathroom", "go to the bathroom"),
@@ -53,149 +52,185 @@ PHRASES: tuple[tuple[str, str], ...] = (
     ("entrance", "go to the entrance"),
 )
 GAP = (
-    "Voice refuses a room phrase before CommandBus. This tip has no "
-    "kit_cam room label (room_ask.py and find_room.py are absent; "
-    "Moondream is not loaded). The #71 finder can report a hazard cue "
-    "on the stand frame and does not choose vx or yaw."
+    "No joined multi-room scene and no doorway spawn. Each room file is "
+    "its own scene, and the documented stand starts on that scene's only "
+    "floor plane, so the COM starts inside the room floor box. A "
+    "start-inside pose is not a reach. No new scene was authored."
 )
 
 
-class CueJson(TypedDict):
-    too_close: bool
-    bottom_clipped: bool
-    column: int
-    contact_row: int
-    span_px: int
-    width_px: int
-    u: float | None
-    v: float | None
-    toe_gap_m: float | None
-    eye_range_m: float | None
-    sideways_m: float | None
-    in_corridor: bool | None
+class FloorBox(TypedDict):
+    geom: str
+    xmin: float
+    xmax: float
+    ymin: float
+    ymax: float
 
 
-class ContactJson(TypedDict):
-    robot_geom: str
-    prop_geom: str
-    force_n: float
+class SpawnJson(TypedDict):
+    qpos_xyz: list[float]
+    yaw_rad: float
+    com_xyz: list[float]
+    up_z: float
 
 
 class RoomJson(TypedDict):
     room: str
+    scene: str
     phrase: str
     voice_parse: str
     voice_line: str
     matched_room_words: list[str]
-    bus_vel_count: int
-    bus_stand_count: int
-    bus_stop_count: int
     recogniser_label: str
-    cue_count: int
-    cue: CueJson | None
-    remaining: str
-    stop: str
-    contact: ContactJson | None
+    commanded_vx: float | None
+    commanded_yaw: float | None
+    d_min_m: float
+    d_min_v_mps: float
+    t_detect_s: float
+    t_stop_s: float
+    latch_applied: bool
+    spawn: SpawnJson
+    floor_boxes: list[FloorBox]
+    started_outside: bool
+    reached: bool
+    reach_block: str
+    contact: str
     peak_nm: float
     peak_actuator: str
     min_up_z: float
 
 
-class SummaryJson(TypedDict):
-    prefer_fail: bool
+class DefinitionJson(TypedDict):
+    reached: str
+    floor_box: str
+    upright: str
+    prop_contact: str
+    time_limit_s: float
+    voice_vx_cap: float
+    voice_yaw_cap: float
+    d_min: str
+    d_min_m: float
     soft_pass: bool
-    go_anywhere: bool
-    kit_safe: bool
-    plant_md5: str
-    plant_file_changed: bool
-    recogniser: str
-    map_waypoints: bool
-    room_script: bool
-    vel_published: bool
-    step_off_m: float
-    step_off_note: str
-    gap: str
-    rooms: list[RoomJson]
-
-
-@dataclass
-class _BusCount:
-    vel_count: int = 0
-    stand_count: int = 0
-    stop_count: int = 0
-
-    def stand(self, now: float) -> str | None:
-        del now
-        self.stand_count += 1
-        return None
-
-    def stop(self, now: float) -> str | None:
-        del now
-        self.stop_count += 1
-        return None
-
-    def vel(self, vx: float, yaw_rate: float, now: float) -> str | None:
-        del vx, yaw_rate, now
-        self.vel_count += 1
-        return None
-
-
-@dataclass(frozen=True)
-class _StandTrace:
-    peak_nm: float
-    peak_actuator: str
-    min_up_z: float
-    contact: ContactJson | None
 
 
 def _plant_md5() -> str:
-    return hashlib.md5(PLANT_XML.read_bytes()).hexdigest()
+    return hashlib.md5(sw.PLANT_XML.read_bytes()).hexdigest()
 
 
-def _recogniser_files_present() -> bool:
-    return (ROOT / "scripts" / "room_ask.py").is_file() or (
-        ROOT / "scripts" / "find_room.py"
-    ).is_file()
+def _definition() -> DefinitionJson:
+    d_min_m = float(rc.d_min(T_DETECT_S))
+    return DefinitionJson(
+        reached=(
+            "Body COM xy of body_link is inside that room's floor box, "
+            "the bout started with that COM outside the same box, "
+            f"min up_z is at least {UPRIGHT_UP_Z:.2f}, prop contacts are "
+            f"zero, and the bout ends at or before {TIME_LIMIT_S:.1f} s. "
+            "A start inside the box is not a reach."
+        ),
+        floor_box=(
+            "Axis-aligned XY of every loaded plane geom named floor or "
+            "room_floor. Half-size is the plane size. A single-room file "
+            "has one such plane, and that plane is that room's floor. "
+            "The box is not a waypoint and is not passed to a command."
+        ),
+        upright=f"min up_z over the bout >= {UPRIGHT_UP_Z:.2f}",
+        prop_contact=(
+            f"A contact with normal force >= {PROP_FORCE_N:.1f} N between "
+            "a robot geom and any geom other than floor or room_floor."
+        ),
+        time_limit_s=TIME_LIMIT_S,
+        voice_vx_cap=voice.FWD_MPS,
+        voice_yaw_cap=voice.YAW_RAD_S,
+        d_min=(
+            "d_min = 0.150 * (T_detect + T_stop). 0.150 is the hardware "
+            "bound in that formula, not the voice vx cap. "
+            f"T_detect = {T_DETECT_S:.3f} s. T_stop = {rc.T_STOP_S:.3f} s."
+        ),
+        d_min_m=d_min_m,
+        soft_pass=False,
+    )
 
 
-def _matched_room_words(phrase: str) -> list[str]:
-    text = voice.normalize_phrase(phrase)
-    hit = sorted(set(text.split()) & voice._ROOM_WORDS)
-    return hit
+def _floor_boxes(model: mj.MjModel) -> list[FloorBox]:
+    boxes: list[FloorBox] = []
+    for geom_id in range(model.ngeom):
+        name = mj.mj_id2name(model, mj.mjtObj.mjOBJ_GEOM, geom_id) or ""
+        if name not in FLOOR_GEOM_NAMES:
+            continue
+        if int(model.geom_type[geom_id]) != int(mj.mjtGeom.mjGEOM_PLANE):
+            continue
+        pos = np.asarray(model.geom_pos[geom_id], dtype=np.float64)
+        size = np.asarray(model.geom_size[geom_id], dtype=np.float64)
+        boxes.append(
+            FloorBox(
+                geom=name,
+                xmin=float(pos[0] - size[0]),
+                xmax=float(pos[0] + size[0]),
+                ymin=float(pos[1] - size[1]),
+                ymax=float(pos[1] + size[1]),
+            )
+        )
+    return boxes
 
 
-def _parse_row(room: str, phrase: str) -> tuple[voice.VoiceCommand, _BusCount, list[str]]:
-    command = voice.parse_phrase(phrase)
-    bus = _BusCount()
-    caller = voice.VoiceCaller(bus)
-    heard = caller.hear(phrase, 0.0)
-    if heard != command.line:
-        raise SystemExit(f"FAIL {room}: hear line {heard!r} != parse {command.line!r}")
-    if command.kind == "refuse" and caller.command is not None:
-        raise SystemExit(f"FAIL {room}: a refusal replaced the bus command")
-    return command, bus, _matched_room_words(phrase)
+def _inside(com_x: float, com_y: float, boxes: list[FloorBox]) -> bool:
+    for box in boxes:
+        if box["xmin"] <= com_x <= box["xmax"] and box["ymin"] <= com_y <= box["ymax"]:
+            return True
+    return False
 
 
-def _is_wall(name: str) -> bool:
-    return name.startswith("col_room_wall") or name == "col_entrance_sill"
+def _yaw(data: mj.MjData, body_id: int) -> float:
+    rot = np.asarray(data.xmat[body_id], dtype=np.float64).reshape(3, 3)
+    return float(math.atan2(rot[1, 0], rot[0, 0]))
 
 
-def _prop_contact(model: mj.MjModel, data: mj.MjData) -> ContactJson | None:
-    hit = gate._prop_hit(model, data)
-    if hit is None:
-        return None
-    robot, prop, force_n = hit
-    if _is_wall(prop):
-        return None
-    return ContactJson(robot_geom=robot, prop_geom=prop, force_n=force_n)
+def _prop_contact(model: mj.MjModel, data: mj.MjData, robot_bodies: set[str]) -> str:
+    best_name = ""
+    best_force = 0.0
+    for index in range(data.ncon):
+        con = data.contact[index]
+        names = []
+        bodies = []
+        for geom_id in (int(con.geom1), int(con.geom2)):
+            names.append(mj.mj_id2name(model, mj.mjtObj.mjOBJ_GEOM, geom_id) or "")
+            body_id = int(model.geom_bodyid[geom_id])
+            bodies.append(mj.mj_id2name(model, mj.mjtObj.mjOBJ_BODY, body_id) or "")
+        if names[0] in FLOOR_GEOM_NAMES or names[1] in FLOOR_GEOM_NAMES:
+            continue
+        robot = [body in robot_bodies for body in bodies]
+        if robot[0] == robot[1]:
+            continue
+        force = np.zeros(6, dtype=np.float64)
+        mj.mj_contactForce(model, data, index, force)
+        normal = float(force[0])
+        if normal < PROP_FORCE_N:
+            continue
+        prop = names[0] if robot[1] else names[1]
+        if normal > best_force:
+            best_force = normal
+            best_name = prop
+    if best_name == "":
+        return "none"
+    return f"{best_name} {best_force:.1f} N"
 
 
-def _settle(
+def _robot_bodies(plant: mj.MjModel) -> set[str]:
+    names: set[str] = set()
+    for body_id in range(plant.nbody):
+        name = mj.mj_id2name(plant, mj.mjtObj.mjOBJ_BODY, body_id) or ""
+        if name != "":
+            names.add(name)
+    return names
+
+
+def _stand(
     model: mj.MjModel,
     data: mj.MjData,
     targets: dict[str, float],
     com_z: float,
-) -> _StandTrace:
+    robot_bodies: set[str],
+) -> tuple[SpawnJson, str, float, str, float]:
     data.qpos[:] = 0.0
     data.qvel[:] = 0.0
     data.qpos[2] = com_z
@@ -208,9 +243,8 @@ def _settle(
         joint_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, joint_name)
         if joint_id < 0:
             raise SystemExit(f"FAIL: stand joint missing: {joint_name}")
-        data.qpos[model.jnt_qposadr[joint_id]] = value
-    wg_set = sw.wg.set_ctrl
-    wg_set(model, data, targets, act_idx)
+        data.qpos[int(model.jnt_qposadr[joint_id])] = value
+    sw.wg.set_ctrl(model, data, targets, act_idx)
     mj.mj_forward(model, data)
     body_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "body_link")
     if body_id < 0:
@@ -219,7 +253,7 @@ def _settle(
     peak_signed = 0.0
     peak_name = ""
     min_up_z = 1.0
-    contact: ContactJson | None = None
+    contact = "none"
     steps = int(round(rooms.STAND_SETTLE_S / float(model.opt.timestep)))
     for _ in range(steps):
         mj.mj_step(model, data)
@@ -227,134 +261,34 @@ def _settle(
         if up_z < min_up_z:
             min_up_z = up_z
         for name, index in act_idx.items():
-            if not any(tok in name for tok in LEG_TOKS):
+            if "hip_" not in name and "knee" not in name and "ank_" not in name:
                 continue
             force = float(data.actuator_force[index])
             if abs(force) > peak_abs:
                 peak_abs = abs(force)
                 peak_signed = force
                 peak_name = name
-        hit = _prop_contact(model, data)
-        if hit is not None and (contact is None or hit["force_n"] > contact["force_n"]):
+        hit = _prop_contact(model, data, robot_bodies)
+        if hit != "none":
             contact = hit
     if peak_name == "":
         raise SystemExit("FAIL: no leg actuator force during the stand")
-    return _StandTrace(peak_signed, peak_name, min_up_z, contact)
-
-
-def _joint_q(model: mj.MjModel, data: mj.MjData, name: str) -> float:
-    joint_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, name)
-    if joint_id < 0:
-        return 0.0
-    return float(data.qpos[int(model.jnt_qposadr[joint_id])])
-
-
-def _finder_cues(
-    model: mj.MjModel,
-    data: mj.MjData,
-    rgb: np.ndarray,
-) -> tuple[hf.HazardCue, ...]:
-    body_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "body_link")
-    cam_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_CAMERA, "kit_cam")
-    if body_id < 0 or cam_id < 0:
-        raise SystemExit("FAIL: stand frame missing body_link or kit_cam")
-    rot = np.asarray(data.xmat[body_id], dtype=np.float64).reshape(3, 3)
-    yaw, pitch, roll = rc.imu_from_body(rot)
-    del yaw
-    cam = np.asarray(data.cam_xpos[cam_id], dtype=np.float64)
-    fwd = gate.body_forward_xy(data, body_id)
-    body = rc.BodyFrame(
-        (float(data.qpos[0]), float(data.qpos[1])),
-        (float(fwd[0]), float(fwd[1])),
+    com = np.asarray(data.subtree_com[body_id], dtype=np.float64)
+    spawn = SpawnJson(
+        qpos_xyz=[float(data.qpos[0]), float(data.qpos[1]), float(data.qpos[2])],
+        yaw_rad=_yaw(data, body_id),
+        com_xyz=[float(com[0]), float(com[1]), float(com[2])],
+        up_z=float(data.xmat[body_id].reshape(3, 3)[2, 2]),
     )
-    pose = rc.KitCamPose((float(cam[0]), float(cam[1]), float(cam[2])))
-    tilt = _joint_q(model, data, "head_tilt")
-    pan = _joint_q(model, data, "head_pan")
-    cues = hf.corridor_gate_cues(
-        hf.find_hazard_cues(rgb),
-        cam=pose,
-        body=body,
-        imu_roll_rad=roll,
-        imu_pitch_rad=pitch,
-        head_tilt_rad=tilt,
-        yaw_rate=0.0,
-        step_off_m=STEP_OFF_M,
-        head_pan_rad=pan,
-    )
-    # No prior floor point on a cold stand, so the first-sighting gate applies.
-    return hf.confirm_leg_columns(cues, rgb)
-
-
-def _cue_json(
-    model: mj.MjModel,
-    data: mj.MjData,
-    cue: hf.HazardCue,
-) -> CueJson:
-    toe_gap: float | None = None
-    eye: float | None = None
-    side: float | None = None
-    inside: bool | None = None
-    if cue.u is not None and cue.v is not None and not cue.too_close:
-        body_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "body_link")
-        cam_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_CAMERA, "kit_cam")
-        rot = np.asarray(data.xmat[body_id], dtype=np.float64).reshape(3, 3)
-        _yaw, pitch, roll = rc.imu_from_body(rot)
-        cam = np.asarray(data.cam_xpos[cam_id], dtype=np.float64)
-        fwd = gate.body_forward_xy(data, body_id)
-        estimate = rc.estimate_hazard(
-            cue.u,
-            cue.v,
-            cam=rc.KitCamPose((float(cam[0]), float(cam[1]), float(cam[2]))),
-            body=rc.BodyFrame(
-                (float(data.qpos[0]), float(data.qpos[1])),
-                (float(fwd[0]), float(fwd[1])),
-            ),
-            imu_roll_rad=roll,
-            imu_pitch_rad=pitch,
-            head_tilt_rad=_joint_q(model, data, "head_tilt"),
-            yaw_rate=0.0,
-            step_off_m=STEP_OFF_M,
-            hazard_pad_m=rc.HAZARD_PAD_M,
-            head_pan_rad=_joint_q(model, data, "head_pan"),
-        )
-        if estimate is not None:
-            toe_gap = estimate.toe_gap_m
-            eye = estimate.eye_range
-            side = estimate.sideways_m
-            inside = estimate.in_corridor
-    return CueJson(
-        too_close=cue.too_close,
-        bottom_clipped=cue.bottom_clipped,
-        column=cue.column,
-        contact_row=cue.contact_row,
-        span_px=cue.span_px,
-        width_px=cue.width_px,
-        u=cue.u,
-        v=cue.v,
-        toe_gap_m=toe_gap,
-        eye_range_m=eye,
-        sideways_m=side,
-        in_corridor=inside,
-    )
-
-
-def _remaining(cue: CueJson | None) -> str:
-    if cue is None:
-        return "no cue"
-    if cue["too_close"]:
-        return "too_close flag, no ray, latch not called"
-    if cue["toe_gap_m"] is None:
-        return "cue without a floor ray"
-    return (
-        f"hazard toe_gap {cue['toe_gap_m']:+.3f} m "
-        f"(not a room distance; step_off {STEP_OFF_M:.3f})"
-    )
+    return spawn, contact, peak_signed, peak_name, min_up_z
 
 
 def _measure_room(
     scene: rooms.RoomScene,
     targets: dict[str, float],
     com_z: float,
+    robot_bodies: set[str],
+    d_min_m: float,
 ) -> RoomJson:
     phrase = ""
     for name, text in PHRASES:
@@ -363,117 +297,144 @@ def _measure_room(
             break
     if phrase == "":
         raise SystemExit(f"FAIL: no phrase for {scene.name}")
-    command, bus, words = _parse_row(scene.name, phrase)
-    if not scene.xml_path.is_file():
-        raise SystemExit(f"FAIL: missing {scene.xml_path}")
+    command = voice.parse_phrase(phrase)
+    bus_vel = 0
+    caller_bus = _CountBus()
+    caller = voice.VoiceCaller(caller_bus)
+    heard = caller.hear(phrase, 0.0)
+    if heard != command.line:
+        raise SystemExit(f"FAIL {scene.name}: hear {heard!r} != {command.line!r}")
+    bus_vel = caller_bus.vel_count
+    if bus_vel != 0:
+        raise SystemExit(f"FAIL {scene.name}: voice published vel before a reach bout")
     model = mj.MjModel.from_xml_path(str(scene.xml_path))
     data = mj.MjData(model)
-    trace = _settle(model, data, targets, com_z)
-    renderer = mj.Renderer(model, height=rc.HEIGHT, width=rc.WIDTH)
-    try:
-        renderer.update_scene(data, camera="kit_cam")
-        rgb = np.asarray(renderer.render(), dtype=np.uint8).copy()
-    finally:
-        renderer.close()
-    cues = _finder_cues(model, data, rgb)
-    primary = _cue_json(model, data, cues[0]) if cues else None
+    spawn, contact, peak, peak_name, min_up_z = _stand(
+        model, data, targets, com_z, robot_bodies,
+    )
+    boxes = _floor_boxes(model)
+    if not boxes:
+        raise SystemExit(f"FAIL {scene.name}: no floor plane in the loaded scene")
+    com_x = spawn["com_xyz"][0]
+    com_y = spawn["com_xyz"][1]
+    inside = _inside(com_x, com_y, boxes)
+    started_outside = not inside
+    # The other reach bars are not consulted once the start is inside.
+    reached = False
+    if started_outside:
+        raise SystemExit(
+            f"FAIL {scene.name}: start is outside the floor box; "
+            "this measure does not walk a joined scene that is not in the tree"
+        )
+    block = (
+        "spawn COM is inside the only floor plane of this single-room "
+        "scene; started_outside is false"
+    )
+    words = sorted(set(voice.normalize_phrase(phrase).split()) & voice._ROOM_WORDS)
     return RoomJson(
         room=scene.name,
+        scene=scene.xml_name,
         phrase=phrase,
         voice_parse=command.kind,
         voice_line=command.line,
         matched_room_words=words,
-        bus_vel_count=bus.vel_count,
-        bus_stand_count=bus.stand_count,
-        bus_stop_count=bus.stop_count,
-        recogniser_label=RECOGNISER_ABSENT,
-        cue_count=len(cues),
-        cue=primary,
-        remaining=_remaining(primary),
-        stop="not commanded",
-        contact=trace.contact,
-        peak_nm=trace.peak_nm,
-        peak_actuator=trace.peak_actuator,
-        min_up_z=trace.min_up_z,
+        recogniser_label="not asked",
+        commanded_vx=None,
+        commanded_yaw=None,
+        d_min_m=d_min_m,
+        d_min_v_mps=float(rc.V_MPS),
+        t_detect_s=T_DETECT_S,
+        t_stop_s=float(rc.T_STOP_S),
+        latch_applied=False,
+        spawn=spawn,
+        floor_boxes=boxes,
+        started_outside=started_outside,
+        reached=reached,
+        reach_block=block,
+        contact=contact,
+        peak_nm=peak,
+        peak_actuator=peak_name,
+        min_up_z=min_up_z,
     )
 
 
-def _summary(rows: list[RoomJson], before: str) -> SummaryJson:
-    vel = any(row["bus_vel_count"] != 0 for row in rows)
-    return SummaryJson(
-        prefer_fail=True,
-        soft_pass=False,
-        go_anywhere=False,
-        kit_safe=False,
-        plant_md5=before,
-        plant_file_changed=_plant_md5() != before,
-        recogniser=RECOGNISER_ABSENT,
-        map_waypoints=False,
-        room_script=False,
-        vel_published=vel,
-        step_off_m=STEP_OFF_M,
-        step_off_note=(
-            "0 because no vel was published and the walk high-water was "
-            "not taken. The kitchen-walk +0.017 m is not applied."
-        ),
-        gap=GAP,
-        rooms=rows,
-    )
+class _CountBus:
+    def __init__(self) -> None:
+        self.vel_count = 0
+
+    def stand(self, now: float) -> str | None:
+        del now
+        return None
+
+    def stop(self, now: float) -> str | None:
+        del now
+        return None
+
+    def vel(self, vx: float, yaw_rate: float, now: float) -> str | None:
+        del vx, yaw_rate, now
+        self.vel_count += 1
+        return None
 
 
-def _print_row(row: RoomJson) -> None:
-    contact = "none"
-    if row["contact"] is not None:
-        contact = (
-            f"{row['contact']['prop_geom']} {row['contact']['force_n']:.1f} N"
-        )
-    cue = "none"
-    if row["cue"] is not None:
-        cue = (
-            f"col={row['cue']['column']} too_close={row['cue']['too_close']} "
-            f"span={row['cue']['span_px']} w={row['cue']['width_px']}"
-        )
-    print(
-        f"{row['room']}  parse={row['voice_parse']}  "
-        f"words={','.join(row['matched_room_words']) or '-'}  "
-        f"label={row['recogniser_label']}  cues={row['cue_count']}  {cue}  "
-        f"remaining={row['remaining']}  stop={row['stop']}  "
-        f"contact={contact}  peak={row['peak_nm']:+.3f} Nm "
-        f"{row['peak_actuator']}  min_up_z={row['min_up_z']:.3f}  "
-        f"vel={row['bus_vel_count']}",
-        flush=True,
-    )
+def _write(payload: dict[str, object]) -> None:
+    SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SUMMARY_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
 def main() -> int:
-    if _recogniser_files_present():
-        raise SystemExit(
-            "FAIL: a room recogniser file is on this tip; this measure "
-            "assumes it is absent and will not call it"
-        )
     before = _plant_md5()
     if before != sw.PLANT_MD5 or before != voice.PLANT_MD5:
         raise SystemExit(f"FAIL: plant md5 {before}")
-    if abs(rc.HAZARD_PAD_M - 0.020) > 1e-12:
-        raise SystemExit(f"FAIL: hazard pad moved to {rc.HAZARD_PAD_M}")
+    if abs(voice.FWD_MPS - 0.056) > 1e-12:
+        raise SystemExit(f"FAIL: voice forward cap moved to {voice.FWD_MPS}")
+    if abs(voice.YAW_RAD_S - 0.25) > 1e-12:
+        raise SystemExit(f"FAIL: voice yaw cap moved to {voice.YAW_RAD_S}")
+    if abs(rc.V_MPS - 0.150) > 1e-12:
+        raise SystemExit(f"FAIL: d_min speed bound moved to {rc.V_MPS}")
+    scene_files = sorted(path.name for path in (ROOT / "mujoco").glob("room_*.xml"))
+    definition = _definition()
+    header: dict[str, object] = {
+        "prefer_fail": True,
+        "soft_pass": False,
+        "go_anywhere": False,
+        "kit_safe": False,
+        "plant_md5": before,
+        "definition": definition,
+        "scene_files": scene_files,
+        "joined_scene": False,
+        "doorway_spawn": False,
+        "gap": GAP,
+        "rooms": [],
+    }
+    _write(header)
     sw.apply_frozen_forward_gait()
     targets, com_z = rooms._stand_targets()
+    plant = mj.MjModel.from_xml_path(str(sw.PLANT_XML))
+    robot_bodies = _robot_bodies(plant)
+    d_min_m = float(definition["d_min_m"])
     rows: list[RoomJson] = []
     for name in rooms.ROOM_ORDER:
-        row = _measure_room(rooms.ROOMS[name], targets, com_z)
+        row = _measure_room(rooms.ROOMS[name], targets, com_z, robot_bodies, d_min_m)
         rows.append(row)
-        _print_row(row)
-    after = _plant_md5()
-    if after != before:
+        spawn = row["spawn"]
+        print(
+            f"{row['room']}  parse={row['voice_parse']}  "
+            f"spawn_com={spawn['com_xyz'][0]:+.3f},{spawn['com_xyz'][1]:+.3f}  "
+            f"qpos={spawn['qpos_xyz'][0]:+.3f},{spawn['qpos_xyz'][1]:+.3f}  "
+            f"started_outside={row['started_outside']}  reached={row['reached']}  "
+            f"commanded_vx=None  d_min={row['d_min_m']:.4f}  "
+            f"latch={row['latch_applied']}  contact={row['contact']}  "
+            f"peak={row['peak_nm']:+.3f} {row['peak_actuator']}",
+            flush=True,
+        )
+    if _plant_md5() != before:
         raise SystemExit("FAIL: plant file changed during the measure")
-    summary = _summary(rows, before)
-    SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SUMMARY_PATH.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
-    print(
-        "Prefer FAIL  soft-pass=off  go-anywhere=false  "
-        f"plant={before}  recogniser=absent  vel_published=false",
-        flush=True,
-    )
+    if definition != _definition():
+        raise SystemExit("FAIL: reach definition changed after the measure")
+    header["rooms"] = rows
+    header["reached_any"] = False
+    _write(header)
+    print("Prefer FAIL  soft-pass=off  reached_any=false", flush=True)
     print(GAP, flush=True)
     return 1
 

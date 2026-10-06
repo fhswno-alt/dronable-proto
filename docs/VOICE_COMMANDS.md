@@ -34,19 +34,21 @@ Caps stay `vx` **+0.056 / −0.032** m/s and yaw **±0.25** rad/s. This caller d
 
 ## Five-room go-to (Prefer FAIL)
 
-`scripts/voice_goto_rooms.py` says "go to the kitchen", "go to the bathroom", "go to the living room", "go to the bedroom", and "go to the entrance". Each phrase is refused. `CommandBus` receives no `stand`, `stop`, or `vel`. There is no room recogniser on this tip (`scripts/room_ask.py` and `scripts/find_room.py` are absent). Moondream is not loaded. Zero spend. The pose is the documented quiet stand in `scripts/render_kit_cam_room.py` (0.60 s). One `kit_cam` frame goes through the #71 finder (cues, in-corridor `too_close` gate, first-sighting low-chroma confirm). That finder does not choose a heading. No map, no waypoint, and no `find_kitchen` path. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` is unchanged. Soft-pass is off. `step_off` stays 0 because no walk high-water was taken. The kitchen-walk +0.017 m is not applied.
+Reach was written into `previews/voice_goto_rooms_summary.json` before the five stands. A reach is body COM inside that room's floor box, the same COM having started outside it, min up_z at least 0.90, zero prop contacts, and the bout ending by 53.0 s. The floor box is the axis-aligned XY of every loaded plane named `floor` or `room_floor`. Voice vx stays **+0.056** m/s and yaw **±0.25**. `d_min = 0.150 × (T_detect + T_stop)` with `T_detect = 0` and `T_stop = 0.842` s, so `d_min = 0.1263` m. 0.150 is that hardware bound, not the voice cap. Soft-pass is off. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` is unchanged.
 
-This is not the #71 open-loop yaw matrix. Those bouts are scripted `vel` approaches. They are not a voice go-to.
+The tree has five room files and no joined scene. Each file's only floor plane is the plant floor, x and y from −3 m to +3 m. The documented 0.60 s stand settles at COM about **−0.003, −0.000** m, inside that box. No doorway spawn exists. A start inside the box is not a reach, so no `vel` was published and the #71 latch was not applied.
 
-| Room | Voice parse | Recogniser | Remaining / cue | Stop / contact | Peak |
-| --- | --- | --- | --- | --- | --- |
-| kitchen | refuse (`kitchen`) | absent | no cue | not commanded, 0 prop contacts | +0.362 Nm `l_ank_roll_pos` |
-| bathroom | refuse (`bathroom`) | absent | no cue | not commanded, 0 prop contacts | +0.362 Nm `l_ank_roll_pos` |
-| living | refuse (`living`, `room`) | absent | no cue | not commanded, 0 prop contacts | +0.362 Nm `l_ank_roll_pos` |
-| bedroom | refuse (`bedroom`) | absent | no cue | not commanded, 0 prop contacts | +0.362 Nm `l_ank_roll_pos` |
-| entrance | refuse (no room word; `go to ` prefix) | absent | no cue | not commanded, 0 prop contacts | +0.362 Nm `l_ank_roll_pos` |
+| Room | Voice parse | Spawn COM | Started outside | Commanded vel | d_min | Reached |
+| --- | --- | --- | --- | --- | --- | --- |
+| kitchen | refuse | −0.003, −0.000 | false | none | 0.1263 m | false |
+| bathroom | refuse | −0.003, −0.000 | false | none | 0.1263 m | false |
+| living | refuse | −0.003, −0.000 | false | none | 0.1263 m | false |
+| bedroom | refuse | −0.003, −0.000 | false | none | 0.1263 m | false |
+| entrance | refuse | −0.003, −0.000 | false | none | 0.1263 m | false |
 
-The stand peak is the same in every scene because the phrase never walks and the furniture never touches the robot. min up_z is 1.000. The refusal line on every phrase is the room line. Not kit-safe. Not go-anywhere.
+Stand contact is none. Stand peak is +0.362 Nm on `l_ank_roll_pos`. min up_z is 1.000. The recogniser was not asked. Not kit-safe. Not go-anywhere.
+
+Next gap: a joined multi-room scene, or a doorway spawn that starts outside the named room's floor box. None is in this tree, and a new scene was not authored.
 
 ```bash
 MUJOCO_GL=osmesa python scripts/voice_goto_rooms.py
