@@ -54,6 +54,14 @@ that latch: the frame after the gap first falls to ``d_min + 0.05``
 adds 0.10 m to that floor point's toe gap, then the finder is
 normal again. The older row-model stress remains in this file and
 is not the latch.
+
+On the open ±0.25 walks, existing furniture-leg centers enter the
+strip between 0.0867 m and 0.108 m on kitchen left, both living
+turns, bathroom right, and entrance right. The 0.020 m pad already
+counts a point as inside the stand corridor until |sideways| passes
+0.1067 m. The only centers past that line are 0.57 m or more ahead,
+so widening the outside edge is not what stops these walks. No room
+collider was moved.
 """
 from __future__ import annotations
 

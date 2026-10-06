@@ -211,7 +211,7 @@ name after the stop is the hitting leg. Longer hits of that leg
 stay on their own tracks, and the firing eye stays short. A one-frame
 stress adds 0.10 m to the toe gap of the floor point that first
 reached d_min + 0.05. The latch keeps the shorter gap and the stop
-time does not move. The same chain at T_detect = 0 does not clear the five furnished rooms. Kitchen left and living straight stop on the prop the unstopped walk hits. Entrance straight hits the rug with no stop. Other bouts false-stop, including last-row too_close with no prop on the 9 s path. Not kit-safe. Not go-anywhere. The row source
+time does not move. The same chain at T_detect = 0 does not clear the five furnished rooms. Kitchen left and living straight stop on the prop the unstopped walk hits. Entrance straight hits the rug with no stop. Other bouts false-stop, including last-row too_close with no prop on the 9 s path. On the open ±0.25 walks, existing leg centers do enter the 0.0867–0.108 m outside strip on kitchen left, both living turns, bathroom right, and entrance right. The 0.020 m pad already includes that strip in the stand corridor until |sideways| passes 0.1067 m, and the only centers past that line are still 0.57 m or more ahead. No leg was moved. A close leg that is in-corridor only because the outside edge widens to 0.108 m is not in these scenes. Not kit-safe. Not go-anywhere. The row source
 is still a sim projection. Not go-anywhere. Soft-pass is off.
 """
 from __future__ import annotations

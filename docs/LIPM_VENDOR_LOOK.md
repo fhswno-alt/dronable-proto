@@ -1783,6 +1783,12 @@ The same chain at `T_detect` = 0 does not clear the five furnished rooms. Every 
 | entrance | left −0.25 | 5.408 s `too_close` | none | 0, unstopped also 0 | +2.280 Nm |
 | entrance | right +0.25 | none | | 0 | hip roll +2.278 Nm |
 
+Existing furniture legs were checked on the open ±0.25 walks, with no room XML moved. A leg center enters the strip between the stand outer edge, 0.0867 m, and the yaw-outside edge, 0.108 m, on kitchen left, living left, living right, bathroom right, and entrance right. Kitchen right, bathroom left, both bedroom turns, and entrance left do not. The close crossings are kitchen-left `col_chair_stool_b_leg_2` at 6.280 s (sideways +0.088 m, 0.193 m ahead) and `col_chair_seat_leg_2` down to 0.234 m ahead at +0.090 m, and living-right `col_coffee_leg_2` at sideways −0.091 m with 0.093 m ahead. The other crossings are still 0.57 m to 1.76 m ahead.
+
+The 0.020 m pad already counts a floor point as inside the stand corridor until |sideways| passes 0.1067 m. Widening the outside edge to 0.108 m changes that call only for |sideways| in (0.1067, 0.128]. Inside the named strip that leaves (0.1067, 0.108]. The only centers there are far: living-right `col_coffee_leg_0` at 0.567 m (side −0.107 m) and entrance-right console legs at 1.49 m and beyond (side −0.107 m to −0.108 m). Those gaps stay above `d_min`. They do not stop the walk. The close crossings are inside the stand corridor once the pad is applied. Kitchen left stops at 5.864 s with the saved point at sideways +0.069 m, before `stool_b_leg_2` enters the strip. Living right's close crossing is on the open walk, after the unmatched `too_close` at 4.000 s, so the latch never sees it.
+
+No existing leg sits in (0.1067, 0.108] at a forward gap near `d_min`. A leg placed there, so the widened edge is what makes the in/out call, is a room-collider move. The plant file was not edited. That placement is open for MFG/Hardware. The five-room bar is unchanged. Not kit-safe. Not go-anywhere.
+
 A −10° `head_tilt` walk is not enabled. On that pose the near edge is
 0.077 m at `cam_z` 0.326 m. #67 checked the wood rule at that session
 tilt: the foot contact boxes project to rows 643–749, below the
