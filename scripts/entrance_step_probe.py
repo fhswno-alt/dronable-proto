@@ -27,6 +27,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import mujoco as mj
 import numpy as np
@@ -44,6 +45,11 @@ KNEE_NM = 2.33
 PLANT_NM = 2.45
 KNEE_KP = 45.0
 TOE_BAR_M = 0.002
+# Swing ankle-roll trim cap. This is not a world-level sole and not body roll.
+ANK_TRIM_CAP = 0.025
+# "About 0.6 mm" for the centre minus front-outside drop. Outside this, no trim.
+SOLE_FO_LO_MM = 0.50
+SOLE_FO_HI_MM = 0.70
 # Track 1 torques are the flat-floor window. The rug-window knee at
 # 7.232 s is Track 2 and does not fail this bar.
 T_TRACK1 = 7.0
@@ -1006,6 +1012,50 @@ def _install_yswap_lead(session: sw.SteerSession, lead_s: float) -> None:
     walker._swap_y_before_swing = led  # type: ignore[method-assign]
 
 
+def _install_swing_ank_roll_trim(
+    session: sw.SteerSession,
+    add_l: float,
+    add_r: float,
+) -> None:
+    """Add a constant to the swing ankle-roll ctrl. Stance is not rewritten.
+
+    The add is the leftover sole roll at the first scored tick, in joint
+    radians, capped at ±0.025. It is not a world-level sole and it does
+    not cancel body roll. Left and right are whatever the sign check passed.
+    """
+    if abs(add_l) > ANK_TRIM_CAP + 1e-12 or abs(add_r) > ANK_TRIM_CAP + 1e-12:
+        raise SystemExit(
+            f"ankle-roll trim L {add_l} R {add_r} exceeds ±{ANK_TRIM_CAP:.3f}"
+        )
+    print(
+        f"PRED ank_roll_trim L {add_l:+.5f} rad R {add_r:+.5f} rad "
+        f"cap ±{ANK_TRIM_CAP:.3f} rad. Swing ankle roll only. "
+        "Not a world-level sole. Stance ankle roll is not rewritten. "
+        "Body roll is not cancelled by this add."
+    )
+    lipm = session.lipm
+    if lipm is None or lipm.op3 is None:
+        raise RuntimeError("gait manager walker missing")
+    adds = {"L": float(add_l), "R": float(add_r)}
+    orig = lipm._tick_gait_manager
+
+    def wrapped(walking: bool) -> None:
+        orig(walking)
+        if not walking or session.bus.fault:
+            return
+        swing = lipm._gm_swing
+        if swing not in ("L", "R"):
+            return
+        delta = adds[swing]
+        if abs(delta) <= 1e-12:
+            return
+        act = ("l_" if swing == "L" else "r_") + "ank_roll_pos"
+        idx = session.act_idx[act]
+        session.data.ctrl[idx] = float(session.data.ctrl[idx]) + delta
+
+    lipm._tick_gait_manager = wrapped  # type: ignore[method-assign]
+
+
 def _capture_sole_tick(session: sw.SteerSession, t: float, side: str) -> dict[str, object]:
     corners = _box_corner_table(session, side)
     scored = max(corners, key=lambda row: row[2])
@@ -1884,7 +1934,7 @@ def _print_chain_bar(name: str, surface_rows: list[dict[str, object]]) -> None:
         f"ge_2.33 {int(abs(tau) >= KNEE_NM)} "
         f"ge_2.45 {int(abs(tau) >= PLANT_NM - 1e-3)}"
     )
-    for key in ("l_hip_roll", "r_hip_roll"):
+    for key in ("l_hip_roll", "r_hip_roll", "l_ank_roll", "r_ank_roll"):
         if not any(key in row for row in surface_rows):
             continue
         hit_r = _best(_knee(key))
@@ -3398,6 +3448,8 @@ class PredScore:
     sag_rows: tuple = ()
     flat_min_fracs: tuple = ()
     roll_hx_over: str = ""
+    sole_ticks: tuple = ()
+    ank_hx_over: str = ""
 
 
 def _check_compiled_kv(session: sw.SteerSession) -> None:
@@ -3465,6 +3517,10 @@ def measure_pred_clip(
     toe_full_frac: float = 0.15,
     yswap_lead_s: float = 0.0,
     roll_log: bool = False,
+    sole_corner_log: bool = False,
+    ank_trim_l: float = 0.0,
+    ank_trim_r: float = 0.0,
+    ank_log: bool = False,
 ) -> PredScore:
     """12 mm @ 20% with an optional swing-hip predicted-force clip.
 
@@ -3492,6 +3548,12 @@ def measure_pred_clip(
         raise SystemExit(f"yswap lead {yswap_lead_s} s is negative")
     if sag_cancel and yswap_lead_s > 0.0:
         raise SystemExit("yswap lead is not stacked on stance sag cancel")
+    if abs(ank_trim_l) > ANK_TRIM_CAP + 1e-12 or abs(ank_trim_r) > ANK_TRIM_CAP + 1e-12:
+        raise SystemExit(
+            f"ankle-roll trim L {ank_trim_l} R {ank_trim_r} exceeds ±{ANK_TRIM_CAP:.3f}"
+        )
+    if world_level and (abs(ank_trim_l) > 1e-12 or abs(ank_trim_r) > 1e-12):
+        raise SystemExit("ankle-roll trim is not a world-level sole")
     cfg = sw.locked_kit_config()
     if move_s is not None:
         cfg = replace(cfg, gm_move_s=float(move_s))
@@ -3541,6 +3603,8 @@ def measure_pred_clip(
         _install_swing_knee_lead(session, knee_lead_s)
     if sag_cancel:
         _install_stance_knee_sag(session)
+    if abs(ank_trim_l) > 1e-12 or abs(ank_trim_r) > 1e-12:
+        _install_swing_ank_roll_trim(session, ank_trim_l, ank_trim_r)
     lipm = session.lipm
     if lipm is None or lipm.op3 is None:
         raise RuntimeError("gait manager walker missing")
@@ -3561,7 +3625,10 @@ def measure_pred_clip(
     roll_chain = ("l_hip_roll_pos", "r_hip_roll_pos") if roll_log else ()
     roll_flat = {act: (0.0, 0.0, "") for act in roll_chain}
     roll_rug = {act: (0.0, 0.0, "") for act in roll_chain}
-    ka_names = hx_chain + roll_chain
+    ank_chain = ("l_ank_roll_pos", "r_ank_roll_pos") if ank_log else ()
+    ank_flat = {act: (0.0, 0.0, "") for act in ank_chain}
+    ank_rug = {act: (0.0, 0.0, "") for act in ank_chain}
+    ka_names = hx_chain + roll_chain + ank_chain
     ka_hits: list[str] = []
     ka_checked = 0
     suffixes = ("hip_roll", "hip_pitch", "ank_roll") if ankle_roll else ("hip_roll", "hip_pitch")
@@ -3722,6 +3789,15 @@ def measure_pred_clip(
                     surf_row["r_hip_roll"] = float(
                         session.data.actuator_force[session.act_idx["r_hip_roll_pos"]]
                     )
+                if ank_log:
+                    surf_row["l_ank_roll"] = float(
+                        session.data.actuator_force[session.act_idx["l_ank_roll_pos"]]
+                    )
+                    surf_row["r_ank_roll"] = float(
+                        session.data.actuator_force[session.act_idx["r_ank_roll_pos"]]
+                    )
+                if sole_corner_log and swing in ("L", "R"):
+                    surf_row["sole_tick"] = _sole_tick_capture(session, swing)
                 if yswap_lead_s > 0.0:
                     stand_l = float(lipm.q_stand.get("l_ank_roll", 0.0))
                     stand_r = float(lipm.q_stand.get("r_ank_roll", 0.0))
@@ -3758,6 +3834,14 @@ def measure_pred_clip(
                     foot = planes["L" if act.startswith("l_") else "R"]
                     contact = str(foot["contact"])
                     bucket = roll_flat if contact in ("floor", "none") else roll_rug
+                    prev, _when, _contact = _hx_parts(bucket[act])
+                    if abs(tau) > abs(prev):
+                        bucket[act] = (tau, t, contact)
+                for act in ank_chain:
+                    tau = float(session.data.actuator_force[session.act_idx[act]])
+                    foot = planes["L" if act.startswith("l_") else "R"]
+                    contact = str(foot["contact"])
+                    bucket = ank_flat if contact in ("floor", "none") else ank_rug
                     prev, _when, _contact = _hx_parts(bucket[act])
                     if abs(tau) > abs(prev):
                         bucket[act] = (tau, t, contact)
@@ -3839,6 +3923,7 @@ def measure_pred_clip(
         or world_level or toe_up_rad > 0.0 or hip_lead or sag_cancel
         or z_profile != "phase" or knee_lead_s > 0.0 or toe_up_shape != "sine"
         or yswap_lead_s > 0.0 or abs(toe_full_frac - 0.15) > 1e-9
+        or abs(ank_trim_l) > 1e-12 or abs(ank_trim_r) > 1e-12
     ):
         parts = ["clip" if clip else "base"]
         parts.append("pitchoff" if pitch_move_off else f"move{used_move * 1000:.0f}")
@@ -3882,6 +3967,8 @@ def measure_pred_clip(
             parts.append("sag")
         if yswap_lead_s > 0.0:
             parts.append(f"yswap{yswap_lead_s * 1000:.0f}ms")
+        if abs(ank_trim_l) > 1e-12 or abs(ank_trim_r) > 1e-12:
+            parts.append("anktrim")
         name = "_".join(parts)
     else:
         name = f"{'clip' if clip else 'base'}_move{used_move * 1000:.0f}"
@@ -4066,6 +4153,30 @@ def measure_pred_clip(
             f"matched {int(ank_split <= 1e-4)} "
             "shift lat is the same on both ankle rolls"
         )
+    ank_hits: list[str] = []
+    if ank_log:
+        for act, packed in ank_flat.items():
+            tau, when, contact = _hx_parts(packed)
+            over = abs(tau) >= KNEE_NM
+            if over:
+                ank_hits.append(f"{act} {tau:+.4f} t {when:.3f} contact {contact}")
+            print(
+                f"PRED {name} hx_flat {act} {tau:+.4f} t {when:.3f} "
+                f"contact {contact or '-'} "
+                f"abs {abs(tau):.4f} ge_2.33 {int(over)} "
+                f"ge_2.45 {int(abs(tau) >= PLANT_NM - 1e-3)}"
+            )
+        for act, packed in ank_rug.items():
+            tau, when, contact = _hx_parts(packed)
+            print(
+                f"PRED {name} hx_rug {act} {tau:+.4f} t {when:.3f} "
+                f"contact {contact or '-'} "
+                f"abs {abs(tau):.4f} ge_2.33 {int(abs(tau) >= KNEE_NM)} "
+                f"ge_2.45 {int(abs(tau) >= PLANT_NM - 1e-3)}"
+            )
+    sole_ticks: tuple = ()
+    if sole_corner_log and surface_rows:
+        sole_ticks = _print_sole_208(name, rows, surface_rows)
     klog = getattr(session, "_knee_lead_log", None)
     if klog:
         clamps = sum(int(row[4]) for row in klog)
@@ -4119,6 +4230,8 @@ def measure_pred_clip(
         sag_rows=tuple(getattr(session, "_sag_log", ())),
         flat_min_fracs=tuple(surf.get("flat_min_fracs", ())),  # type: ignore[arg-type]
         roll_hx_over=", ".join(roll_hits),
+        sole_ticks=sole_ticks,
+        ank_hx_over=", ".join(ank_hits),
     )
 
 
@@ -5947,6 +6060,616 @@ def score_toe_sooner() -> None:
         f"toe copies {bits}. yswap {ybits}. "
         "The 20-80% window was not moved. Sag cancel stayed off. "
         "y_swap amplitude stayed 0.020 m. Pitch lead stays 20 ms. Period stays 0.500 s."
+    )
+
+
+_CORNER_ORDER = ("front-outside", "front-inside", "heel-outside", "heel-inside")
+
+
+def _sole_tick_capture(session: sw.SteerSession, side: str) -> dict[str, object]:
+    """Corners, sole roll, ankle-roll ctrl, and the pose at this swing tick."""
+    corners = _box_corner_table(session, side)
+    roll, drop, half, inside = _sole_roll(session, side)
+    center_z = float(sum(z for _label, z, _off in corners) / len(corners))
+    scored = max(corners, key=lambda row: row[2])
+    lowest = min(corners, key=lambda row: row[1])
+    fo = next((float(z) for label, z, _off in corners if label == "front-outside"), None)
+    if fo is None:
+        raise SystemExit("front-outside corner missing")
+    act = ("l_" if side == "L" else "r_") + "ank_roll_pos"
+    return {
+        "roll": float(roll),
+        "inside_drop": float(drop),
+        "inside": inside,
+        "half": float(half),
+        "center_z": center_z,
+        "corners": tuple((str(label), float(z), float(off)) for label, z, off in corners),
+        "scored_label": str(scored[0]),
+        "scored_z": float(scored[1]),
+        "low_label": str(lowest[0]),
+        "low_z": float(lowest[1]),
+        "front_outside_z": float(fo),
+        "drop_fo_m": center_z - float(fo),
+        "ank_ctrl": float(session.data.ctrl[session.act_idx[act]]),
+        "qpos": np.array(session.data.qpos, dtype=np.float64, copy=True),
+    }
+
+
+def _emit_sole_208(name: str, tag: str, pack: dict[str, object]) -> None:
+    corners = _corner_map(pack["corners"])
+    centre = float(pack["center_z"])
+    print(
+        f"PRED {name} {tag} side {pack['side']} t {float(pack['t']):.3f} "
+        f"frac {float(pack['frac']):.3f} "
+        f"sole_roll {float(pack['roll']):+.5f} rad "
+        f"inside {pack['inside']} "
+        f"inside_drop {float(pack['inside_drop']) * 1000:+.3f} mm "
+        f"centre {centre * 1000:+.3f} mm "
+        f"tick_toe {float(pack['toe_z']) * 1000:+.3f} mm "
+        f"swing_min_toe {float(pack['swing_min_toe']) * 1000:+.3f} mm "
+        f"swing_min_frac {float(pack['swing_min_frac']):.3f} "
+        f"ank_ctrl {float(pack['ank_ctrl']):+.5f} rad"
+    )
+    for label in _CORNER_ORDER:
+        z, off = corners[label]
+        drop_mm = (centre - z) * 1000.0
+        print(
+            f"PRED {name} {tag} corner {label} z {z * 1000:+.3f} mm "
+            f"centre_minus_corner {drop_mm:+.3f} mm "
+            f"forward {off * 1000:.1f} mm "
+            f"scored {int(label == pack['scored_label'])} "
+            f"lowest {int(label == pack['low_label'])}"
+        )
+    drop_mm = float(pack["drop_fo_m"]) * 1000.0
+    about = int(SOLE_FO_LO_MM - 1e-9 <= drop_mm <= SOLE_FO_HI_MM + 1e-9)
+    print(
+        f"PRED {name} {tag} scored {pack['scored_label']} "
+        f"lowest {pack['low_label']} "
+        f"centre_minus_front_outside {drop_mm:+.3f} mm "
+        f"about_0.6 {about} window_mm {SOLE_FO_LO_MM:.2f} {SOLE_FO_HI_MM:.2f}"
+    )
+
+
+def _corner_map(corners: object) -> dict[str, tuple[float, float]]:
+    out: dict[str, tuple[float, float]] = {}
+    if not isinstance(corners, tuple):
+        raise SystemExit("sole corners missing")
+    for row in corners:
+        label, z, off = row  # type: ignore[misc]
+        out[str(label)] = (float(z), float(off))
+    for label in _CORNER_ORDER:
+        if label not in out:
+            raise SystemExit(f"sole corner {label} missing")
+    return out
+
+
+def _print_sole_208(
+    name: str,
+    rows: list[Tick],
+    surface_rows: list[dict[str, object]],
+) -> tuple[dict[str, object], ...]:
+    """First scored tick of the worst flat swing, and each foot's own worst."""
+    by_t = {round(float(row["t"]), 5): row for row in surface_rows}
+    cycles = _swing_cycles(rows, T_END + 1.0)
+    med_n, _last_n = _cycle_index(cycles)
+    target = 5.0 / 24.0
+    foot_best: dict[str, dict[str, object]] = {}
+    for _step, cyc in enumerate(cycles):
+        n = len(cyc)
+        if n < 2 or med_n < 2:
+            continue
+        n_full = med_n if _step == len(cycles) - 1 and n < med_n - 1 else n
+        window: list[tuple[float, Tick, dict[str, object]]] = []
+        for j, row in enumerate(cyc):
+            if row.toe_z is None or row.swing is None:
+                continue
+            frac = j / (n_full - 1)
+            if not (0.20 - 1e-12 <= frac <= 0.80 + 1e-12):
+                continue
+            surf = by_t.get(round(row.t, 5))
+            if surf is None:
+                continue
+            plane = surf[row.swing]
+            sole = surf.get("sole_tick")
+            if not isinstance(plane, dict) or not isinstance(sole, dict):
+                continue
+            window.append((frac, row, sole))
+        if not window:
+            continue
+        tagged = []
+        rug = False
+        for frac, row, _sole in window:
+            surf = by_t.get(round(row.t, 5))
+            if surf is None or row.swing is None:
+                continue
+            plane = surf[row.swing]
+            if isinstance(plane, dict) and int(plane["on_rug"]):
+                rug = True
+            tagged.append((frac, row))
+        if rug or not tagged:
+            continue
+        worst = min(window, key=lambda item: float(item[1].toe_z or 0.0))
+        tick = min(window, key=lambda item: (abs(item[0] - target), item[0]))
+        frac, row, sole = tick
+        side = str(row.swing or "")
+        pack: dict[str, object] = {
+            "side": side,
+            "t": float(row.t),
+            "frac": float(frac),
+            "toe_z": float(row.toe_z or 0.0),
+            "swing_min_toe": float(worst[1].toe_z or 0.0),
+            "swing_min_frac": float(worst[0]),
+            "roll": float(sole["roll"]),
+            "inside_drop": float(sole["inside_drop"]),
+            "inside": str(sole["inside"]),
+            "center_z": float(sole["center_z"]),
+            "corners": sole["corners"],
+            "scored_label": str(sole["scored_label"]),
+            "low_label": str(sole["low_label"]),
+            "front_outside_z": float(sole["front_outside_z"]),
+            "drop_fo_m": float(sole["drop_fo_m"]),
+            "ank_ctrl": float(sole["ank_ctrl"]),
+            "qpos": sole["qpos"],
+            "is_worst": 0,
+        }
+        prev = foot_best.get(side)
+        if prev is None or float(pack["swing_min_toe"]) < float(prev["swing_min_toe"]):
+            foot_best[side] = pack
+    if not foot_best:
+        raise SystemExit(f"{name} sole_208 missed every flat swing")
+    worst_pack = min(foot_best.values(), key=lambda item: float(item["swing_min_toe"]))
+    worst_pack["is_worst"] = 1
+    _emit_sole_208(name, "sole_208", worst_pack)
+    for side in ("L", "R"):
+        pack = foot_best.get(side)
+        if pack is None:
+            print(f"PRED {name} sole_208_foot side {side} missed")
+            continue
+        _emit_sole_208(name, "sole_208_foot", pack)
+    return tuple(foot_best[side] for side in ("L", "R") if side in foot_best)
+
+
+def _sole_view(model: mj.MjModel, data: mj.MjData) -> SimpleNamespace:
+    return SimpleNamespace(
+        model=model,
+        data=data,
+        bid_body=mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "body_link"),
+        bid_lf=mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "l_ank_roll_link"),
+        bid_rf=mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "r_ank_roll_link"),
+        gid_lfoot=mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "l_foot_contact"),
+        gid_rfoot=mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "r_foot_contact"),
+    )
+
+
+def _ank_roll_adr(model: mj.MjModel, side: str) -> int:
+    jn = ("l_" if side == "L" else "r_") + "ank_roll"
+    jid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, jn)
+    if jid < 0:
+        raise SystemExit(f"missing joint {jn}")
+    return int(model.jnt_qposadr[jid])
+
+
+def _pose_sole(
+    model: mj.MjModel,
+    data: mj.MjData,
+    view: SimpleNamespace,
+    qpos: np.ndarray,
+    adr: int,
+    side: str,
+    add: float,
+) -> dict[str, object]:
+    data.qpos[:] = qpos
+    data.qvel[:] = 0.0
+    data.qpos[adr] = float(qpos[adr]) + float(add)
+    mj.mj_forward(model, data)
+    roll, inside_drop, _half, inside = _sole_roll(view, side)
+    corners = tuple(
+        (str(label), float(z), float(off))
+        for label, z, off in _box_corner_table(view, side)
+    )
+    centre = float(sum(z for _label, z, _off in corners) / len(corners))
+    fo = next(z for label, z, _off in corners if label == "front-outside")
+    return {
+        "roll": float(roll),
+        "inside_drop": float(inside_drop),
+        "inside": inside,
+        "center_z": centre,
+        "front_outside_z": float(fo),
+        "drop_fo_m": centre - float(fo),
+        "corners": corners,
+    }
+
+
+def _sign_ok(base: dict[str, object], after: dict[str, object]) -> bool:
+    """|sole roll| must fall, and a low front-outside corner must not drop further."""
+    if abs(float(after["roll"])) > abs(float(base["roll"])) + 1e-5:
+        return False
+    if (
+        float(base["drop_fo_m"]) > 0.0
+        and float(after["drop_fo_m"]) > float(base["drop_fo_m"]) + 5e-5
+    ):
+        return False
+    return True
+
+
+def _print_sign(
+    tag: str,
+    side: str,
+    t: float,
+    bout_roll: float,
+    base: dict[str, object],
+    after: dict[str, object],
+    d_per: float,
+    raw: float,
+    add: float,
+    flipped: int,
+    ank_ctrl: float,
+) -> None:
+    mismatch = abs(float(base["roll"]) - bout_roll)
+    print(
+        f"PRED sole_sign {tag} side {side} t {t:.3f} "
+        f"bout_roll {bout_roll:+.5f} rad replay_roll {float(base['roll']):+.5f} rad "
+        f"replay_mismatch {mismatch:.5f} rad "
+        f"droll_per_rad {d_per:+.5f} raw {raw:+.5f} add {add:+.5f} rad "
+        f"flipped {flipped} cap {ANK_TRIM_CAP:.3f} "
+        f"roll_after {float(after['roll']):+.5f} rad "
+        f"inside {base['inside']} "
+        f"inside_drop {float(base['inside_drop']) * 1000:+.3f} "
+        f"to {float(after['inside_drop']) * 1000:+.3f} mm "
+        f"inside_lowered {int(float(after['inside_drop']) > float(base['inside_drop']) + 1e-6)} "
+        f"centre_minus_front_outside {float(base['drop_fo_m']) * 1000:+.3f} "
+        f"to {float(after['drop_fo_m']) * 1000:+.3f} mm "
+        f"ank_ctrl {ank_ctrl:+.5f} target {ank_ctrl + add:+.5f} "
+        "not_world_level 1"
+    )
+    corners = _corner_map(after["corners"])
+    centre = float(after["center_z"])
+    for label in _CORNER_ORDER:
+        z, _off = corners[label]
+        print(
+            f"PRED sole_sign {tag} corner {side} {label} "
+            f"z {z * 1000:+.3f} mm "
+            f"centre_minus_corner {(centre - z) * 1000:+.3f} mm"
+        )
+
+
+def _clip_trim(add: float) -> float:
+    return max(-ANK_TRIM_CAP, min(ANK_TRIM_CAP, float(add)))
+
+
+def _choose_add(
+    model: mj.MjModel,
+    data: mj.MjData,
+    view: SimpleNamespace,
+    tick: dict[str, object],
+) -> dict[str, object] | None:
+    """Joint add that cancels leftover sole roll. None means do not run the trim."""
+    side = str(tick["side"])
+    qpos = np.asarray(tick["qpos"], dtype=np.float64)
+    adr = _ank_roll_adr(model, side)
+    base = _pose_sole(model, data, view, qpos, adr, side, 0.0)
+    nudged = _pose_sole(model, data, view, qpos, adr, side, 0.01)
+    d_per = (float(nudged["roll"]) - float(base["roll"])) / 0.01
+    bout_roll = float(tick["roll"])
+    mismatch = abs(float(base["roll"]) - bout_roll)
+    if mismatch > 5e-3:
+        print(
+            f"PRED sole_sign side {side} replay_mismatch {mismatch:.5f} rad "
+            "exceeds 0.005. Trim copy was not run."
+        )
+        return None
+    if abs(d_per) < 1e-4:
+        print(
+            f"PRED sole_sign side {side} droll_per_rad {d_per:+.5f} "
+            "does not move sole roll. Trim copy was not run."
+        )
+        return None
+    raw = -float(base["roll"]) / d_per
+    add = _clip_trim(raw)
+    after = _pose_sole(model, data, view, qpos, adr, side, add)
+    flipped = 0
+    if not _sign_ok(base, after):
+        add = _clip_trim(-add)
+        after = _pose_sole(model, data, view, qpos, adr, side, add)
+        flipped = 1
+        if not _sign_ok(base, after):
+            print(
+                f"PRED sole_sign side {side} both signs raise |sole roll| "
+                "or the front-outside drop. Trim copy was not run."
+            )
+            _print_sign(
+                "reject", side, float(tick["t"]), bout_roll, base, after,
+                d_per, raw, add, flipped, float(tick["ank_ctrl"]),
+            )
+            return None
+    _print_sign(
+        "tick", side, float(tick["t"]), bout_roll, base, after,
+        d_per, raw, add, flipped, float(tick["ank_ctrl"]),
+    )
+    return {
+        "side": side,
+        "t": float(tick["t"]),
+        "bout_roll": bout_roll,
+        "ank_ctrl": float(tick["ank_ctrl"]),
+        "qpos": qpos,
+        "adr": adr,
+        "base": base,
+        "after": after,
+        "d_per": d_per,
+        "raw": raw,
+        "add": add,
+        "flipped": flipped,
+    }
+
+
+def _match_mirror(
+    model: mj.MjModel,
+    data: mj.MjData,
+    view: SimpleNamespace,
+    chosen: dict[str, dict[str, object]],
+    worst_side: str,
+) -> dict[str, float]:
+    """Opposite signs and the worst foot's magnitude, unless that raises |sole roll|."""
+    left = float(chosen["L"]["add"])
+    right = float(chosen["R"]["add"])
+    if left * right >= 0.0:
+        print(
+            f"PRED sole_sign pair_mirror 0 L {left:+.5f} R {right:+.5f}. "
+            "A mirrored sign raises |sole roll| on one foot. "
+            "Adds stay the probed signs."
+        )
+        return {"L": left, "R": right}
+    mag = abs(float(chosen[worst_side]["add"]))
+    out: dict[str, float] = {}
+    for side in ("L", "R"):
+        own = float(chosen[side]["add"])
+        trial = _clip_trim(math.copysign(mag, own))
+        if abs(trial - own) <= 1e-9:
+            out[side] = own
+            continue
+        qpos = np.asarray(chosen[side]["qpos"], dtype=np.float64)
+        after = _pose_sole(
+            model, data, view, qpos, int(chosen[side]["adr"]), side, trial,
+        )
+        base = chosen[side]["base"]
+        if not isinstance(base, dict) or not _sign_ok(base, after):
+            out[side] = own
+            print(
+                f"PRED sole_sign pair_mag_keep side {side} "
+                f"trial {trial:+.5f} own {own:+.5f}. "
+                "Matching the worst-foot magnitude raises |sole roll| "
+                "or the front-outside drop."
+            )
+            continue
+        out[side] = trial
+        _print_sign(
+            "mirror", side, float(chosen[side]["t"]), float(chosen[side]["bout_roll"]),
+            base, after, float(chosen[side]["d_per"]), float(chosen[side]["raw"]),
+            trial, int(chosen[side]["flipped"]), float(chosen[side]["ank_ctrl"]),
+        )
+    matched = int(abs(abs(out["L"]) - abs(out["R"])) <= 1e-9)
+    print(
+        f"PRED sole_sign pair_mirror 1 mag {mag:.5f} "
+        f"L {out['L']:+.5f} R {out['R']:+.5f} "
+        f"magnitudes_matched {matched} worst_side {worst_side}"
+    )
+    return out
+
+
+def _require_plant(tag: str) -> None:
+    digest = sw._md5(sw.PLANT_XML)
+    print(f"PRED sole_level plant_md5 {digest} {tag}")
+    if digest != sw.PLANT_MD5:
+        raise SystemExit(f"plant md5 {digest} != {sw.PLANT_MD5}")
+
+
+def _sole_level_copy(ank_trim_l: float = 0.0, ank_trim_r: float = 0.0) -> PredScore:
+    """A10+025. Pitch lead 20 ms, roll lead 0, sag cancel off. No y_swap."""
+    return measure_pred_clip(
+        clip=True,
+        move_s=None,
+        pitch_move_off=True,
+        toe_up_rad=0.025,
+        toe_up_shape="front",
+        toe_full_frac=0.10,
+        hip_lead=True,
+        lead_roll_scale=0.0,
+        lead_pitch_scale=_pitch_lead_scale(20.0),
+        whole_toe=True,
+        surface_tag=True,
+        ka_log=True,
+        early_log=True,
+        sag_cancel=False,
+        z_profile="phase",
+        sole_corner_log=True,
+        ank_trim_l=ank_trim_l,
+        ank_trim_r=ank_trim_r,
+        ank_log=True,
+    )
+
+
+def _foot_tick(row: PredScore, side: str) -> dict[str, object] | None:
+    for tick in row.sole_ticks:
+        if isinstance(tick, dict) and tick.get("side") == side:
+            return tick
+    return None
+
+
+def _worst_tick(row: PredScore) -> dict[str, object]:
+    found = [
+        tick for tick in row.sole_ticks
+        if isinstance(tick, dict) and int(tick.get("is_worst", 0)) == 1
+    ]
+    if not found:
+        raise SystemExit(f"{row.name} sole_208 worst tick missing")
+    return found[0]
+
+
+def _roll_bits(row: PredScore) -> str:
+    bits: list[str] = []
+    for side in ("L", "R"):
+        tick = _foot_tick(row, side)
+        if tick is None:
+            bits.append(f"{side} missed")
+            continue
+        bits.append(
+            f"{side} sole_roll {float(tick['roll']):+.5f} rad "
+            f"centre_minus_front_outside {float(tick['drop_fo_m']) * 1000:+.3f} mm "
+            f"scored {tick['scored_label']} lowest {tick['low_label']} "
+            f"t {float(tick['t']):.3f}"
+        )
+    return " ".join(bits)
+
+
+def _report_sole(label: str, row: PredScore, tick: dict[str, object]) -> None:
+    drop_mm = float(tick["drop_fo_m"]) * 1000.0
+    print(
+        f"PRED sole_level {label} {row.name} "
+        f"flat_worst {row.flat_toe_mm:.3f} mm t {row.flat_toe_t:.3f} "
+        f"side {row.flat_toe_side} "
+        f"vs_plus2 {row.flat_toe_mm - 2.0:+.3f} mm "
+        f"sole_roll {float(tick['roll']):+.5f} rad "
+        f"centre_minus_front_outside {drop_mm:+.3f} mm "
+        f"scored {tick['scored_label']} lowest {tick['low_label']} "
+        f"flat_hx {row.flat_hx_over or 'under'} "
+        f"ank_hx {row.ank_hx_over or 'under'} "
+        f"ka_over {row.ka_over_n} ka_checked {row.ka_checked}"
+    )
+
+
+def score_sole_level() -> None:
+    """Measure sole roll on A10+025, then trim swing ankle roll only if the drop is ~0.6 mm.
+
+    The trim is not a world-level sole. It does not ask the ankle for body roll.
+    A10+030 and the y_swap copies are not run. Sag cancel stays off.
+    """
+    print(
+        "PRED sole_level_plan A10+030 was not run. A05+025 was not run. "
+        "A00+025 was not run. y_swap was not re-run. Sag cancel stays off. "
+        "Base is A10+025: toe-up 0.025 rad full by 10%, held through 80%, "
+        "20 ms pitch lead, roll lead 0, period 0.500 s, swing-hip clip, "
+        "hip pitch off the 20 ms approach. "
+        "Step 1 logs sole roll and the four corners at fraction 0.208 "
+        "on the worst flat swing. "
+        f"About 0.6 mm means centre minus front-outside between "
+        f"{SOLE_FO_LO_MM:.2f} and {SOLE_FO_HI_MM:.2f} mm. "
+        "Outside that window the trim copy is not run. "
+        f"The trim adds at most ±{ANK_TRIM_CAP:.3f} rad on the swing ankle roll. "
+        "It is not a world-level sole. Body roll is not the ankle target. "
+        "One kinematic tick per foot is printed before that sweep."
+    )
+    _require_plant("before")
+    measured = _sole_level_copy()
+    _require_plant("after_measure")
+    tick = _worst_tick(measured)
+    drop_mm = float(tick["drop_fo_m"]) * 1000.0
+    about = SOLE_FO_LO_MM - 1e-9 <= drop_mm <= SOLE_FO_HI_MM + 1e-9
+    _report_sole("measure", measured, tick)
+    print(f"PRED sole_level measure_feet {_roll_bits(measured)}")
+    if not about:
+        print(
+            f"PRED sole_level STOP centre_minus_front_outside {drop_mm:+.3f} mm "
+            f"is outside {SOLE_FO_LO_MM:.2f}-{SOLE_FO_HI_MM:.2f} mm. "
+            "Trim copy was not run."
+        )
+        print(
+            "PRED sole_level Prefer FAIL. "
+            f"A10+025 flat_worst {measured.flat_toe_mm:+.3f} mm "
+            f"t {measured.flat_toe_t:.3f} side {measured.flat_toe_side} "
+            f"sole_roll {float(tick['roll']):+.5f} rad "
+            f"centre_minus_front_outside {drop_mm:+.3f} mm "
+            f"scored {tick['scored_label']} lowest {tick['low_label']} "
+            f"flat_hx {measured.flat_hx_over or 'under'} "
+            f"ank_hx {measured.ank_hx_over or 'under'}. "
+            f"feet {_roll_bits(measured)}. "
+            "The ankle-roll trim was not run. A10+030 was not run. "
+            "y_swap was not re-run. Less-crouch was not run. "
+            "Pitch lead stays 20 ms. Period stays 0.500 s. "
+            "Not kit-safe. Not go-anywhere."
+        )
+        return
+    model = mj.MjModel.from_xml_path(SCENE)
+    data = mj.MjData(model)
+    view = _sole_view(model, data)
+    chosen: dict[str, dict[str, object]] = {}
+    for side in ("L", "R"):
+        foot = _foot_tick(measured, side)
+        if foot is None:
+            print(
+                f"PRED sole_level STOP side {side} sole_208_foot missed. "
+                "Trim copy was not run."
+            )
+            print(
+                "PRED sole_level Prefer FAIL. "
+                "A foot had no flat 0.208 tick, so the ankle-roll trim was not run. "
+                "Less-crouch was not run. Not kit-safe. Not go-anywhere."
+            )
+            return
+        picked = _choose_add(model, data, view, foot)
+        if picked is None:
+            print(
+                "PRED sole_level Prefer FAIL. "
+                "The sign check refused the ankle-roll trim before the sweep. "
+                f"measure flat_worst {measured.flat_toe_mm:+.3f} mm "
+                f"sole_roll {float(tick['roll']):+.5f} rad "
+                f"centre_minus_front_outside {drop_mm:+.3f} mm "
+                f"scored {tick['scored_label']}. "
+                "Less-crouch was not run. Not kit-safe. Not go-anywhere."
+            )
+            return
+        chosen[side] = picked
+    adds = _match_mirror(model, data, view, chosen, str(tick["side"]))
+    trimmed = _sole_level_copy(adds["L"], adds["R"])
+    _require_plant("after_trim")
+    tick_b = _worst_tick(trimmed)
+    drop_b = float(tick_b["drop_fo_m"]) * 1000.0
+    _report_sole("trim", trimmed, tick_b)
+    print(f"PRED sole_level trim_feet {_roll_bits(trimmed)}")
+    cleared = (
+        trimmed.flat_toe_mm >= 2.0
+        and trimmed.flat_hx_over == ""
+        and trimmed.ank_hx_over == ""
+    )
+    if cleared:
+        print(
+            "PRED sole_level clear "
+            f"{trimmed.name} flat_worst {trimmed.flat_toe_mm:.3f} mm "
+            f"t {trimmed.flat_toe_t:.3f} side {trimmed.flat_toe_side}. "
+            f"before sole_roll {float(tick['roll']):+.5f} rad "
+            f"centre_minus_front_outside {drop_mm:+.3f} mm "
+            f"scored {tick['scored_label']}. "
+            f"after sole_roll {float(tick_b['roll']):+.5f} rad "
+            f"centre_minus_front_outside {drop_b:+.3f} mm "
+            f"scored {tick_b['scored_label']} "
+            f"flat_hx under ank_hx under. "
+            f"adds L {adds['L']:+.5f} R {adds['R']:+.5f}. "
+            "Not kit-safe. Not go-anywhere."
+        )
+        return
+    print(
+        "PRED sole_level Prefer FAIL. "
+        "The swing ankle-roll trim did not clear a flat mid-swing contact-box "
+        "toe of +2 mm with both knees and both ankle rolls at or under 2.33 Nm "
+        "on floor contact. "
+        f"measure flat_worst {measured.flat_toe_mm:+.3f} mm "
+        f"sole_roll {float(tick['roll']):+.5f} rad "
+        f"centre_minus_front_outside {drop_mm:+.3f} mm "
+        f"scored {tick['scored_label']} lowest {tick['low_label']} "
+        f"flat_hx {measured.flat_hx_over or 'under'} "
+        f"ank_hx {measured.ank_hx_over or 'under'}. "
+        f"trim flat_worst {trimmed.flat_toe_mm:+.3f} mm "
+        f"t {trimmed.flat_toe_t:.3f} side {trimmed.flat_toe_side} "
+        f"sole_roll {float(tick_b['roll']):+.5f} rad "
+        f"centre_minus_front_outside {drop_b:+.3f} mm "
+        f"scored {tick_b['scored_label']} lowest {tick_b['low_label']} "
+        f"flat_hx {trimmed.flat_hx_over or 'under'} "
+        f"ank_hx {trimmed.ank_hx_over or 'under'}. "
+        f"adds L {adds['L']:+.5f} R {adds['R']:+.5f}. "
+        f"measure_feet {_roll_bits(measured)}. "
+        f"trim_feet {_roll_bits(trimmed)}. "
+        "Less-crouch was not run. A10+030 was not run. y_swap was not re-run. "
+        "Pitch lead stays 20 ms. Period stays 0.500 s. "
+        "Not kit-safe. Not go-anywhere."
     )
 
 
