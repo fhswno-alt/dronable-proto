@@ -672,6 +672,132 @@ def _fk_leading_toe(session: sw.SteerSession, side: str, ctrl: np.ndarray) -> tu
     return lead, min(lows)
 
 
+def _fk_sole(
+    session: sw.SteerSession,
+    side: str,
+    ctrl: np.ndarray,
+    freejoint: np.ndarray | None,
+) -> dict[str, float]:
+    """Leading-bottom z for ``ctrl``. ``freejoint`` replaces the live root when set."""
+    from mono_toe_gate import torso_pitch
+
+    data = session.data
+    model = session.model
+    saved = np.array(data.qpos, dtype=np.float64, copy=True)
+    if freejoint is not None:
+        data.qpos[0:7] = freejoint
+    pref = "r_" if side == "R" else "l_"
+    for jn in ("hip_yaw", "hip_roll", "hip_pitch", "knee", "ank_pitch", "ank_roll"):
+        name = pref + jn
+        jid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, name)
+        adr = int(model.jnt_qposadr[jid])
+        data.qpos[adr] = float(ctrl[session.act_idx[name + "_pos"]])
+    mj.mj_forward(model, data)
+    bid = session.bid_rf if side == "R" else session.bid_lf
+    gid = session.gid_rfoot if side == "R" else session.gid_lfoot
+    lead = _leading_toe_z(session, side)
+    origin = np.asarray(data.xpos[bid], dtype=np.float64)
+    rot = np.asarray(data.xmat[bid], dtype=np.float64).reshape(3, 3)
+    fwd = body_forward_xy(data, session.bid_body)
+    body_xy = np.asarray(data.xpos[session.bid_body, :2], dtype=np.float64)
+    best_off = -1e9
+    best_local_z = 0.0
+    for corner in _box_bottom_corners(model, data, bid, gid):
+        off = float(np.dot(corner[:2] - body_xy, fwd))
+        if off > best_off:
+            best_off = off
+            best_local_z = float((rot.T @ (corner - origin))[2])
+    out = {
+        "lead": lead,
+        "ank_z": float(origin[2]),
+        "local_z": best_local_z,
+        "body_z": float(data.xpos[session.bid_body][2]),
+        "pitch": torso_pitch(data, session.bid_body),
+    }
+    data.qpos[:] = saved
+    mj.mj_forward(model, data)
+    return out
+
+
+def measure_phase_cmd() -> None:
+    """Commanded sole at 30/50/70% of the 3.344–3.536 s right swing, two pelvis frames."""
+    session = sw.SteerSession(
+        video=False, scene_xml=Path(SCENE), lipm=sw.locked_kit_config(),
+    )
+    lipm = session.lipm
+    assert lipm is not None
+    for side, gid in (("L", session.gid_lfoot), ("R", session.gid_rfoot)):
+        pos = np.asarray(session.model.geom_pos[gid], dtype=np.float64)
+        half = np.asarray(session.model.geom_size[gid], dtype=np.float64)
+        print(
+            f"PLANT {side} pos_z {pos[2]:.4f} half_z {half[2]:.4f} "
+            f"bottom {pos[2] - half[2]:.4f} half_xy {half[0]:.4f} {half[1]:.4f} "
+            f"match {abs(half[0] - sw.FOOT_HALF_X) < 1e-6 and abs(half[1] - sw.FOOT_HALF_Y) < 1e-6}"
+        )
+    driver = sw.ScriptedDriver((
+        sw.DemoSegment(1.0, "stand", 0.0, 0.0, "stand"),
+        sw.DemoSegment(3.7, "vel", sw.VX_FWD_CAP, 0.0, "forward"),
+    ))
+    goal = np.zeros(session.model.nu, dtype=np.float64)
+    have = {"ok": False}
+    orig = lipm._tick_gait_manager
+    stand_free: np.ndarray | None = None
+
+    def wrapped(walking: bool) -> None:
+        orig(walking)
+        goal[:] = np.array(session.data.ctrl, dtype=np.float64, copy=True)
+        have["ok"] = lipm._gm_swing == "R"
+
+    lipm._tick_gait_manager = wrapped  # type: ignore[method-assign]
+    rows: list[tuple[float, np.ndarray, np.ndarray]] = []
+    while float(session.data.time) < 3.7 - 1e-9:
+        driver.publish(session.bus, float(session.data.time))
+        session.step()
+        t = float(session.data.time)
+        if t < 1.0 - 1e-9:
+            from mono_toe_gate import torso_pitch
+            stand_free = np.array(session.data.qpos[0:7], dtype=np.float64, copy=True)
+            stand_body_z = float(session.data.xpos[session.bid_body][2])
+            stand_pitch = torso_pitch(session.data, session.bid_body)
+        if have["ok"] and 3.30 < t < 3.60:
+            rows.append((t, goal.copy(), np.array(session.data.qpos[0:7], dtype=np.float64, copy=True)))
+    assert stand_free is not None
+    # The published window is the contiguous right swing around 3.384 s.
+    hit = [row for row in rows if 3.344 - 1e-3 <= row[0] <= 3.536 + 1e-3]
+    if len(hit) < 3:
+        print("PHASE rows", len(hit))
+        return
+    t0 = hit[0][0]
+    t1 = hit[-1][0]
+    span = t1 - t0
+    print(
+        f"PHASE_WINDOW {t0:.3f} {t1:.3f} n {len(hit)} "
+        f"stand_body_z {stand_body_z:.6f} stand_pitch {stand_pitch:.4f}"
+    )
+    samples: list[tuple[float, float, dict[str, float], dict[str, float]]] = []
+    for t, ctrl, live_free in hit:
+        frac = 0.0 if span <= 1e-9 else (t - t0) / span
+        live = _fk_sole(session, "R", ctrl, live_free)
+        nominal = _fk_sole(session, "R", ctrl, stand_free)
+        samples.append((t, frac, live, nominal))
+        print(
+            f"PHASE t {t:.3f} frac {frac:.3f} live {live['lead']:.6f} "
+            f"nominal {nominal['lead']:.6f} ank {live['ank_z']:.6f} "
+            f"local_z {live['local_z']:.6f} body_z {live['body_z']:.6f} "
+            f"pitch {live['pitch']:.4f}"
+        )
+    for target in (0.30, 0.50, 0.70):
+        t, frac, live, nominal = min(samples, key=lambda row: abs(row[1] - target))
+        print(
+            f"PHASE_PICK {target:.2f} t {t:.3f} frac {frac:.3f} "
+            f"live {live['lead']:.6f} nominal {nominal['lead']:.6f} "
+            f"delta {live['lead'] - nominal['lead']:.6f} "
+            f"body_z {live['body_z']:.6f} pitch {live['pitch']:.4f} "
+            f"local_z {live['local_z']:.6f} ank_minus_lead {live['ank_z'] - live['lead']:.6f}"
+        )
+    session.assert_plant_unchanged()
+
+
 def measure_cmd_toe() -> None:
     """Commanded right-swing toe height at the 3.384 s scuff, from the gait target."""
     session = sw.SteerSession(
