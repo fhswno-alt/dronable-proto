@@ -287,6 +287,10 @@ class Op3Walker:
         self._z_swap_shift = 0.0
         self._a_move = 0.0
         self._a_move_shift = 0.0
+        # Lateral cart-table offset, metres, added to both foot y targets.
+        # Positive moves the feet toward +y in the hip frame, so the pelvis
+        # sits toward -y. y_swap_cmd is a different channel and stays put.
+        self.preview_y = 0.0
         self.period = self.period_cmd
         self.pelvis_swing = 0.0
         self.l_ssp_start = 0.0
@@ -581,7 +585,7 @@ class Op3Walker:
         """
         t = self.time
         swap_x = wsin(t, self.x_swap_period, math.pi, self._x_swap, 0.0)
-        swap_y = self._swap_y_before_swing(t)
+        swap_y = self._swap_y_before_swing(t) + float(self.preview_y)
         swap_z = wsin(t, self.z_swap_period, 1.5 * math.pi, self._z_swap, self._z_swap_shift)
         if t <= self.l_ssp_start:
             left = self._leg_move(self.l_ssp_start, self.l_ssp_start, self.l_ssp_start, 1.0, False)
