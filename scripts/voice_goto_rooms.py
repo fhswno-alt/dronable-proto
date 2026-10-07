@@ -363,14 +363,18 @@ E0_R_THIN_PAD_M = 0.029336655418528076
 E0_R_THIN_N = 2
 E0_R_THIN_RESIDUAL_M = 0.023811270186193986
 E0_R_THIN_ERR_M = 0.05314792560472206
-# Live rule on this wall×toe only: the kitchen near_k window.
-# Last 5 right samples with ray ≤ 0.30 m. The commit is left out.
-# The pad stays undefined until that window holds 5 samples, so a
-# 2-sample median cannot latch. Left samples are not in the pad.
+# Tip 7bb7d31 filled that same last-5 window and took its full
+# median. The stop reproduced the 0.04391 m pad and the −0.0187 m
+# residual. That full-window median is not the latch.
+# Live rule on this wall×toe only: fill the same window (ray ≤ 0.30 m,
+# last 5, commit excluded). The pad stays undefined until 5 samples
+# are in it. The pad is then the median of the 3 closest-ray samples
+# in that window, not the median of all 5. Left samples are not in it.
 E0_R_NEAR_GATE_M = EAST_L_NEAR_GATE_M
 E0_R_NEAR_K = EAST_L_NEAR_K
 E0_R_NEAR_MIN_N = EAST_L_NEAR_K
-E0_R_LIVE = "e0_r_dense"
+E0_R_CLOSE_N = 3
+E0_R_LIVE = "e0_r_close3"
 EAST_L_Q75_RESIDUAL_M = -0.03175107940399083
 EAST_L_Q75_RAY_M = 0.23443045430153236
 EAST_L_Q75_ERR_M = 0.02769268460514473
@@ -710,6 +714,7 @@ class RoomJson(TypedDict):
     wall_stop_lead_m: float | None
     wall_stop_lead_side: str
     wall_stop_pad_m: float | None
+    e0_r_close3: list[list[float]]
     east_left: EastLeftFact
     approach_band: ApproachBand
     wall_residual_max_m: float | None
@@ -882,13 +887,16 @@ def _definition() -> DefinitionJson:
             f"{EAST_L_NEAR_GATE_M:.2f} m. The commit sample is left "
             "out. An empty window keeps pad 0 and does not borrow an "
             "east or living pad. "
-            f"{E0_WALL} right toe uses that same last-{E0_R_NEAR_K} "
-            f"median once its own ray is at or under "
+            f"{E0_WALL} right toe fills that same last-{E0_R_NEAR_K} "
+            f"window once its own ray is at or under "
             f"{E0_R_NEAR_GATE_M:.2f} m. The pad stays undefined until "
-            f"{E0_R_NEAR_MIN_N} samples are in the window. "
-            f"The scored 0.30 m miss is pad {E0_R_FAIL_PAD_M:.5f} m "
+            f"{E0_R_NEAR_MIN_N} samples are in the window. The live "
+            f"pad is the median of the {E0_R_CLOSE_N} closest-ray "
+            "samples in that window, not the median of the whole "
+            "window. "
+            f"The scored full-window miss is pad {E0_R_FAIL_PAD_M:.5f} m "
             f"(N={E0_R_FAIL_N}), residual {E0_R_FAIL_RESIDUAL_M:+.4f} m, "
-            "and is not a frozen pad. "
+            "and is not the latch. "
             f"The scored 0.25 m miss is pad {E0_R_THIN_PAD_M:.5f} m "
             f"(N={E0_R_THIN_N}), residual {E0_R_THIN_RESIDUAL_M:+.4f} m, "
             "and is not the latch. "
@@ -1377,16 +1385,47 @@ def _other_near_pad(seen: list[tuple[float, float]]) -> tuple[float, int, bool]:
     return _median_pad(_near_k_errs(seen))
 
 
-def _e0_r_near_pad(seen: list[tuple[float, float]]) -> tuple[float, int, bool]:
-    """wall_hall_e_0 right toe only. Kitchen near window, full K required.
+def _e0_r_window(seen: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Last K wall_hall_e_0 right samples inside the near gate.
 
-    A shorter window stays undefined so a 2-sample median cannot latch.
-    Left samples are not in seen. The commit sample is not in seen.
+    The commit sample is not in seen. Left samples are not in seen.
     """
-    prior = _band_errs(seen, E0_R_NEAR_GATE_M, E0_R_NEAR_K)
-    if len(prior) < E0_R_NEAR_MIN_N:
-        return 0.0, len(prior), False
-    return _median_pad(prior)
+    chosen = [
+        (float(ray), float(err))
+        for ray, err in seen
+        if float(ray) <= E0_R_NEAR_GATE_M
+    ]
+    if len(chosen) > E0_R_NEAR_K:
+        return chosen[-E0_R_NEAR_K:]
+    return chosen
+
+
+def _e0_r_picked(seen: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Three closest rays inside a filled e_0 right window.
+
+    An unfilled window returns nothing, so the latch stays dark.
+    Ties break toward the smaller error, then the earlier sample.
+    """
+    window = _e0_r_window(seen)
+    if len(window) < E0_R_NEAR_MIN_N:
+        return []
+    order = sorted(
+        enumerate(window),
+        key=lambda item: (item[1][0], item[1][1], item[0]),
+    )
+    return [pair for _index, pair in order[:E0_R_CLOSE_N]]
+
+
+def _e0_r_near_pad(seen: list[tuple[float, float]]) -> tuple[float, int, bool]:
+    """wall_hall_e_0 right toe only.
+
+    The window is the kitchen near window. The pad is the median of
+    the three closest rays in it, not the median of all five.
+    """
+    window = _e0_r_window(seen)
+    if len(window) < E0_R_NEAR_MIN_N:
+        return 0.0, len(window), False
+    return _median_pad([err for _ray, err in _e0_r_picked(seen)])
 
 
 def _residual_m(err: float | None, pad: float) -> float | None:
@@ -2336,6 +2375,7 @@ def _run_room(
     other_near: dict[tuple[str, str], list[tuple[float, float]]] = {}
     other_near_n = 0
     e0_r_seen: list[tuple[float, float]] = []
+    e0_close3: list[list[float]] = []
     near_rule = EAST_L_LIVE
     east_l_min_ray: float | None = None
     east_l_min_t: float | None = None
@@ -2923,6 +2963,11 @@ def _run_room(
                                 bout.yaw_on = abs(session.bus.applied_yaw_rate) > 1e-6
                                 session.step()
                                 ticks += 1
+                                if near_rule == E0_R_LIVE:
+                                    e0_close3 = [
+                                        [float(ray), float(err)]
+                                        for ray, err in _e0_r_picked(e0_r_seen)
+                                    ]
                                 stop = _Stop(
                                     path="floor_edge",
                                     reason=(
@@ -2939,6 +2984,15 @@ def _run_room(
                                         f"cam_pitch={float(reading['cam_pitch_rad']):+.4f} "
                                         f"lead={float(reading['lead_off_m']):+.4f} "
                                         f"lead_side={reading['lead_side']}"
+                                        + (
+                                            " close3="
+                                            + ",".join(
+                                                f"{ray:.5f}/{err:.5f}"
+                                                for ray, err in _e0_r_picked(e0_r_seen)
+                                            )
+                                            if near_rule == E0_R_LIVE
+                                            else ""
+                                        )
                                     ),
                                     hit_xy=None,
                                     on_shadow=False,
@@ -3284,6 +3338,7 @@ def _run_room(
             wall_stop_lead_m=wall_stop_lead,
             wall_stop_lead_side=wall_stop_lead_side,
             wall_stop_pad_m=wall_stop_pad,
+            e0_r_close3=e0_close3,
             east_left=EastLeftFact(
                 hold=east_l_hold,
                 presented=(
@@ -3556,8 +3611,10 @@ def main() -> int:
         raise SystemExit(f"FAIL: e0 right near K moved to {E0_R_NEAR_K}")
     if E0_R_NEAR_MIN_N != 5:
         raise SystemExit(f"FAIL: e0 right min N moved to {E0_R_NEAR_MIN_N}")
-    if E0_R_LIVE != "e0_r_dense":
+    if E0_R_LIVE != "e0_r_close3":
         raise SystemExit(f"FAIL: e0 right live rule {E0_R_LIVE}")
+    if E0_R_CLOSE_N != 3:
+        raise SystemExit(f"FAIL: e0 right close count moved to {E0_R_CLOSE_N}")
     if E0_R_FAIL_N != 5 or abs(E0_R_FAIL_PAD_M - 0.0439108831389442) > 1e-12:
         raise SystemExit("FAIL: the e0 right 0.30 m miss moved")
     if abs(E0_R_FAIL_RESIDUAL_M) <= RANGE_ERR_MAX_M:
@@ -3585,22 +3642,58 @@ def main() -> int:
         (0.23, 0.026),
         (0.22, 0.025),
     ])
-    if not e0_demo_on or e0_demo_n != 5 or abs(e0_demo_pad - 0.033) > 1e-12:
+    if not e0_demo_on or e0_demo_n != 3 or abs(e0_demo_pad - 0.026) > 1e-12:
         raise SystemExit(f"FAIL: e0 right near pad moved to {e0_demo_pad} n={e0_demo_n}")
-    if abs(e0_demo_pad - E0_R_FAIL_PAD_M) < 1e-3:
-        raise SystemExit("FAIL: e0 right near pad copied the 0.04391 miss")
-    if abs(e0_demo_pad - E0_R_THIN_PAD_M) < 1e-3:
-        raise SystemExit("FAIL: e0 right near pad copied the thin miss")
-    e0_cap_pad, e0_cap_n, e0_cap_on = _e0_r_near_pad([
-        (0.30, 0.090),
+    if abs(e0_demo_pad - 0.033) < 1e-12:
+        raise SystemExit("FAIL: e0 right pad used the full last-5 median")
+    e0_demo_pick = _e0_r_picked([
         (0.28, 0.054),
         (0.26, 0.044),
         (0.24, 0.033),
         (0.23, 0.026),
         (0.22, 0.025),
     ])
-    if not e0_cap_on or e0_cap_n != 5 or abs(e0_cap_pad - e0_demo_pad) > 1e-12:
+    if e0_demo_pick != [(0.22, 0.025), (0.23, 0.026), (0.24, 0.033)]:
+        raise SystemExit(f"FAIL: e0 right close3 moved to {e0_demo_pick}")
+    if abs(e0_demo_pad - E0_R_FAIL_PAD_M) < 1e-3:
+        raise SystemExit("FAIL: e0 right near pad copied the 0.04391 miss")
+    if abs(e0_demo_pad - E0_R_THIN_PAD_M) < 1e-3:
+        raise SystemExit("FAIL: e0 right near pad copied the thin miss")
+    e0_order_pad, e0_order_n, e0_order_on = _e0_r_near_pad([
+        (0.21, 0.040),
+        (0.30, 0.080),
+        (0.29, 0.070),
+        (0.28, 0.060),
+        (0.27, 0.050),
+    ])
+    e0_order_pick = _e0_r_picked([
+        (0.21, 0.040),
+        (0.30, 0.080),
+        (0.29, 0.070),
+        (0.28, 0.060),
+        (0.27, 0.050),
+    ])
+    if (
+        not e0_order_on
+        or e0_order_n != 3
+        or abs(e0_order_pad - 0.050) > 1e-12
+        or e0_order_pick != [(0.21, 0.040), (0.27, 0.050), (0.28, 0.060)]
+    ):
+        raise SystemExit(
+            f"FAIL: e0 close3 followed recency {e0_order_pad} {e0_order_pick}"
+        )
+    e0_cap_pad, e0_cap_n, e0_cap_on = _e0_r_near_pad([
+        (0.20, 0.010),
+        (0.28, 0.054),
+        (0.26, 0.044),
+        (0.24, 0.033),
+        (0.23, 0.026),
+        (0.22, 0.025),
+    ])
+    if not e0_cap_on or e0_cap_n != 3 or abs(e0_cap_pad - e0_demo_pad) > 1e-12:
         raise SystemExit(f"FAIL: e0 right cap moved to {e0_cap_pad} n={e0_cap_n}")
+    if abs(e0_cap_pad - 0.025) < 1e-12:
+        raise SystemExit("FAIL: e0 close3 reached outside the last-5 window")
     e0_far_pad, e0_far_n, e0_far_on = _e0_r_near_pad([
         (0.31, 0.090),
         (0.29, 0.050),
@@ -3841,6 +3934,7 @@ def main() -> int:
         "e0_r_near_gate_m": E0_R_NEAR_GATE_M,
         "e0_r_near_k": E0_R_NEAR_K,
         "e0_r_near_min_n": E0_R_NEAR_MIN_N,
+        "e0_r_close_n": E0_R_CLOSE_N,
         "east_l_sample_count": len(EAST_L_ERR_M),
         "w2_l_latch_m": W2_L_LATCH_M,
         "w2_l_sample_count": len(W2_L_ERR_M),
