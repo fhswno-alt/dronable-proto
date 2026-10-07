@@ -374,6 +374,11 @@ E0_R_THIN_ERR_M = 0.05314792560472206
 # Pad 0.04034 m, N=5, error 0.02519 m, residual −0.0152 m. Not the latch.
 # Tip 3e4c255 dropped the min and max errors and meant the other three.
 # Pad 0.04051 m, N=3, error 0.02519 m, residual −0.0153 m. Not the latch.
+# Tip 9c3a119 dropped the farthest ray and meant the other four.
+# Pad 0.03668 m, N=4, error 0.05315 m, residual +0.0165 m.
+# That near_k class is Prefer FAIL-parked under yaw 0. The latch stays
+# this rule. Do not replace it with another aggregator, an interpolate,
+# a fatter pad, a thinner window, or a cross-bout fit.
 # Live rule on this wall×toe only: the same filled window (ray ≤ 0.30 m,
 # last 5, commit excluded, dark until 5 samples). Drop the farthest ray
 # and take the mean of the other four. A tie on that ray drops the
@@ -392,6 +397,11 @@ E0_R_TRIM_PAD_M = 0.04050543713119664
 E0_R_TRIM_N = 3
 E0_R_TRIM_RESIDUAL_M = -0.015311854562454985
 E0_R_TRIM_ERR_M = 0.025193582568741657
+E0_R_CLOSE4_PAD_M = 0.036677473490582896
+E0_R_CLOSE4_SCORED_N = 4
+E0_R_CLOSE4_RESIDUAL_M = 0.016470452114139167
+E0_R_CLOSE4_ERR_M = 0.05314792560472206
+E0_R_PARKED = True
 E0_R_NEAR_GATE_M = EAST_L_NEAR_GATE_M
 E0_R_NEAR_K = EAST_L_NEAR_K
 E0_R_NEAR_MIN_N = EAST_L_NEAR_K
@@ -915,9 +925,15 @@ def _definition() -> DefinitionJson:
             f"{E0_R_NEAR_GATE_M:.2f} m. The pad stays undefined until "
             f"{E0_R_NEAR_MIN_N} samples are in the window. The live "
             "pad drops the farthest ray and takes the mean of the other "
-            f"{E0_R_CLOSE4_N}. The trimmed mean, the full mean, the "
+            f"{E0_R_CLOSE4_N}. That near_k class is Prefer FAIL-parked "
+            "under yaw 0 after the scored residual "
+            f"{E0_R_CLOSE4_RESIDUAL_M:+.4f} m. Another aggregator is not "
+            "the next latch. The trimmed mean, the full mean, the "
             "median of the window, and the median of its three closest "
             "rays are recorded and are not the latch. "
+            f"The scored closest-4 mean is pad {E0_R_CLOSE4_PAD_M:.5f} m "
+            f"(N={E0_R_CLOSE4_SCORED_N}), residual "
+            f"{E0_R_CLOSE4_RESIDUAL_M:+.4f} m, and is the parked latch. "
             f"The scored trimmed mean is pad {E0_R_TRIM_PAD_M:.5f} m "
             f"(N={E0_R_TRIM_N}), residual {E0_R_TRIM_RESIDUAL_M:+.4f} m, "
             "and is not the latch. "
@@ -3714,6 +3730,14 @@ def main() -> int:
         raise SystemExit(f"FAIL: e0 right min N moved to {E0_R_NEAR_MIN_N}")
     if E0_R_LIVE != "e0_r_close4":
         raise SystemExit(f"FAIL: e0 right live rule {E0_R_LIVE}")
+    if not E0_R_PARKED:
+        raise SystemExit("FAIL: e0 right near_k class was unparked")
+    if E0_R_CLOSE4_SCORED_N != 4 or abs(E0_R_CLOSE4_PAD_M - 0.036677473490582896) > 1e-12:
+        raise SystemExit("FAIL: the e0 closest-4 miss moved")
+    if abs(E0_R_CLOSE4_RESIDUAL_M) <= RANGE_ERR_MAX_M:
+        raise SystemExit("FAIL: the e0 closest-4 residual was marked clear")
+    if abs(E0_R_CLOSE4_ERR_M - (E0_R_CLOSE4_PAD_M + E0_R_CLOSE4_RESIDUAL_M)) > 1e-12:
+        raise SystemExit("FAIL: e0 closest-4 error does not match the residual")
     if E0_R_CLOSE4_N != 4:
         raise SystemExit(f"FAIL: e0 right close4 count moved to {E0_R_CLOSE4_N}")
     if E0_R_CLOSE_N != 3:
@@ -4127,6 +4151,9 @@ def main() -> int:
         "e0_r_trim_n": E0_R_TRIM_N,
         "e0_r_trim_residual_m": E0_R_TRIM_RESIDUAL_M,
         "e0_r_close4_n": E0_R_CLOSE4_N,
+        "e0_r_close4_pad_m": E0_R_CLOSE4_PAD_M,
+        "e0_r_close4_residual_m": E0_R_CLOSE4_RESIDUAL_M,
+        "e0_r_parked": E0_R_PARKED,
         "e0_r_pad_rule": E0_R_LIVE,
         "e0_r_near_gate_m": E0_R_NEAR_GATE_M,
         "e0_r_near_k": E0_R_NEAR_K,
