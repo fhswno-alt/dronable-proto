@@ -660,6 +660,8 @@ def run_attempt(
     zmp_pos_stats = _empty_fracs()
     decl_cop_stats = _empty_fracs()
     decl_com_stats = _empty_fracs()
+    decl_cop_mm: list[float] = []
+    decl_ss_mm: list[float] = []
     tau_peak = 0.0
     tau_joint = ""
     tau_t = 0.0
@@ -755,6 +757,10 @@ def run_attempt(
             d_label, d_cop_mm, d_com_mm, d_cop_out, d_com_out = _declared_polygon(session)
             _note_declared(decl_cop_stats, d_label, d_cop_mm, d_cop_out)
             _note_declared(decl_com_stats, d_label, d_com_mm, d_com_out)
+            if d_cop_mm is not None and math.isfinite(d_cop_mm):
+                decl_cop_mm.append(float(d_cop_mm))
+                if d_label in ("ss_L", "ss_R"):
+                    decl_ss_mm.append(float(d_cop_mm))
         for jn in LEG_JOINTS:
             hist = q_hist[jn]
             hist.append(float(lipm.q(jn)))
@@ -945,6 +951,12 @@ def run_attempt(
         "ask_over": len(over),
         "com_min_m": com_min_m,
         "zmp_min_m": zmp_min_m,
+        "cop_p1_mm": float(np.percentile(decl_cop_mm, 1)) if decl_cop_mm else float("nan"),
+        "cop_p5_mm": float(np.percentile(decl_cop_mm, 5)) if decl_cop_mm else float("nan"),
+        "cop_p50_mm": float(np.percentile(decl_cop_mm, 50)) if decl_cop_mm else float("nan"),
+        "ss_cop_p5_mm": float(np.percentile(decl_ss_mm, 5)) if decl_ss_mm else float("nan"),
+        "ss_cop_p50_mm": float(np.percentile(decl_ss_mm, 50)) if decl_ss_mm else float("nan"),
+        "ss_cop_min_mm": float(min(decl_ss_mm)) if decl_ss_mm else float("nan"),
         "com_out_frac": com_frac,
         "zmp_out_frac": zmp_frac,
         "com_frac": _frac_dict(decl_com_stats if not kit_baseline else com_stats),

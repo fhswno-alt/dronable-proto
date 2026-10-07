@@ -2221,3 +2221,52 @@ Scored against the declared box, whole bout, soft-pass off. Contact CoP is the Z
 
 46 cells, 0 fails. The worst cell is the shape-1 3.60 s nominal walk. Right hip roll 2.3106 Nm at 8.176 s, q −0.00839 rad, q_des +0.02372 rad, omega +0.6026 rad/s, headroom to 2.33 Nm +0.0194 Nm, 0 ticks over, hard_cap 0. Contact CoP minimum is +0.002 mm, outside 0. CoM minimum is +20.76 mm. min up_z is 0.960. The shape-0 worst ask is the 3.57 s +1 tick delay, left hip roll 2.2306 Nm at 11.736 s, under 2.33 Nm and 0.0306 Nm over the 2.20 Nm headroom. The flat 3.57 s bout is right knee 2.0535 Nm at 9.248 s, headroom to 2.20 Nm +0.1465 Nm, contact CoP on the polygon edge (+0.00 mm) with outside fraction 0, CoM +20.29 mm. The old mass −5% hip-roll 4.06 Nm, friction-1.2 ankle 8.08 Nm, and latency −1 ankle 3.56 Nm do not recur. The clip `docs/media/voice_vx_056_side_front.mp4` was rendered again on this gait: stand 3.00 s, vel(0.056, 0) for 11.00 s, stop 6.00 s, side and front, 30 fps, 600 frames, 20.00 s, fault none. Not kit-safe. Not go-anywhere.
 
+The +0.00 mm in that table is the whole-bout minimum, and it is a box face. On the shape-0 3.57 s bout before the toe schedule, 1800 ticks and 335 single-support ticks, contact CoP p1/p5/p50 were +0.00 / +0.01 / +23.56 mm. Single support p1/p5/p50/min were +0.00 / +0.00 / +17.09 / +0.004 mm. The fraction of single-support ticks under 2 mm was 0.230, and the fraction under 5 mm was the same 0.230. Those ticks sat under 0.2 mm. The stance polygon alone was p1/p5/p50 +13.10 / +13.86 / +24.47 mm. The sample that read +0.00 mm was the other foot: the declared swing foot still carried about 5–6 N on two contacts, local x exactly +67.5 mm, the toe face. The stance foot on those ticks still had +22 to +28 mm of its own slack. The sole span was about 1 mm. Capture-point error peaked at 12.4 mm, inside the 20 mm deadzone, so preview_y and the hip-roll term were 0. No clamp pins the CoP to the face.
+
+The swing ankle now takes a clocked toe-up. Left pitch is positive and right pitch is negative. It is full by a quarter of the swing and held 0.28 s after single support ends. The walk uses 0.040 rad. The stop uses 0.010 rad. It is slewed at 0.35 rad/s, the command stays within 16 mrad of the measured angle, and it replaces the ankle target so the ask log sees one write. A stop amplitude of 0.000 rad put the nominal whole-bout minimum back on the face at +0.003 mm. A stop amplitude of 0.020 rad put the +1 tick delay's left hip roll at 2.3987 Nm at 11.736 s. 0.010 rad keeps the nominal whole-bout minimum at +6.64 mm and that delay at 2.2667 Nm. Raising the walk amplitude to 0.060 rad dropped the heavy single-support minimum to +2.95 mm. At 0.075 rad the nominal single-support minimum was +4.86 mm and the delayed knee and the light knee both went over 2.33 Nm. That lever stops at 0.040 rad.
+
+Shape 0 is the voice gait. `gait_for_command` does not select shape 1. On this toe schedule the shape-1 3.60 s right hip roll is 2.3354 Nm at 8.176 s, 0.0054 Nm over 2.33 Nm. Those cells are dropped, not retuned.
+
+Scored again, plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`, soft-pass off, whole bout. SS CoP is the single-support minimum. Bout CoP is the whole-bout minimum. p5 is the whole-bout 5th percentile. Dwell is the fraction of single-support ticks under 5 mm. A row is inside the single-support bar only when SS CoP is ≥ +5 mm, CoM is ≥ 0, the unclamped ask is ≤ 2.33 Nm, the outside count is 0, hard_cap is 0, and min up_z is ≥ 0.90. A bout minimum under +5 mm is not called inside. Numbers are in `previews/com_zmp_declared.json`.
+
+| Period | Cell | Ask Nm | Joint | t | CoM mm | SS CoP | SS p5 | Bout CoP | p5 | Dwell | Result |
+| ---: | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 3.57 | nominal, shape 0 | 2.1602 | r_hip_pitch | 9.024 | +20.15 | +8.78 | +11.92 | +6.64 | +12.47 | 0 | inside |
+| 3.57 | seeds 0–2 | 2.1602 | r_hip_pitch | 9.024 | +20.15 | +8.75 | +11.61 | +6.62 | +12.31 | 0 | inside |
+| 3.57 | seeds 3, 5, 7, 9 | 2.1602 | r_hip_pitch | 9.024 | +20.15 | +8.77 | +11.62 | +0.00 | +12.30 | 0 | SS only |
+| 3.57 | seeds 4, 6, 8 | 2.1602 | r_hip_pitch | 9.024 | +20.15 | +8.75 | +11.62 | +3.87 | +12.26 | 0 | SS only |
+| 3.57 | mass −5% | 2.1429 | r_hip_pitch | 9.024 | +20.08 | +9.10 | +12.67 | +7.31 | +13.18 | 0 | inside |
+| 3.57 | mass +5% | 2.1486 | r_hip_pitch | 9.032 | +20.22 | +7.65 | +10.90 | +0.001 | +11.58 | 0 | SS only |
+| 3.57 | friction 1.2 | 2.1699 | l_knee | 11.840 | +19.94 | +11.35 | +13.35 | +0.001 | +12.45 | 0 | SS only |
+| 3.57 | friction 1.4 | 2.1372 | r_hip_pitch | 9.032 | +20.03 | +9.86 | +13.22 | +0.002 | +13.38 | 0 | SS only |
+| 3.57 | friction 1.6 | 2.1602 | r_hip_pitch | 9.024 | +20.15 | +8.78 | +11.92 | +6.64 | +12.47 | 0 | inside |
+| 3.57 | latency +1 | 2.2667 | r_hip_pitch | 9.032 | +19.87 | +9.32 | +11.92 | +6.63 | +12.47 | 0 | inside |
+| 3.57 | latency −1 | 2.1451 | l_knee | 11.872 | +20.30 | +8.20 | +11.60 | +6.59 | +12.23 | 0 | inside |
+| 3.57 | entrance rug | 2.1160 | l_hip_pitch | 7.232 | +20.15 | +0.00 | +8.54 | +0.00 | +10.64 | 0.036 | FAIL |
+| 3.57 | start/stop ×5 | 2.1602 | r_hip_pitch | 9.024 | +20.15 | +8.78 | +11.92 | +6.64 | +14.82 | 0 | inside |
+| 3.60 | nominal, shape 0 | 2.1500 | l_hip_pitch | 10.840 | +20.07 | +8.60 | +11.48 | +6.63 | +12.36 | 0 | inside |
+| 3.60 | seeds 0–2 | 2.1500 | l_hip_pitch | 10.840 | +20.07 | +8.60 | +11.41 | +6.61 | +12.31 | 0 | inside |
+| 3.60 | seeds 3, 5, 7, 9 | 2.1500 | l_hip_pitch | 10.840 | +20.07 | +8.68 | +11.68 | +0.00 | +12.22 | 0 | SS only |
+| 3.60 | seeds 4, 6, 8 | 2.1500 | l_hip_pitch | 10.840 | +20.07 | +8.78 | +11.50 | +3.87 | +12.18 | 0 | SS only |
+| 3.60 | mass −5% | 2.1351 | r_hip_pitch | 9.040 | +20.00 | +8.83 | +12.68 | +7.30 | +13.22 | 0 | inside |
+| 3.60 | mass +5% | 2.1384 | r_hip_pitch | 9.048 | +20.13 | +6.76 | +11.02 | +0.001 | +11.50 | 0 | SS only |
+| 3.60 | friction 1.2 | 2.1052 | r_hip_pitch | 9.056 | +19.85 | +11.25 | +12.71 | +0.001 | +12.48 | 0 | SS only |
+| 3.60 | friction 1.4 | 2.1271 | l_hip_pitch | 10.848 | +19.94 | +8.95 | +12.92 | +0.002 | +13.41 | 0 | SS only |
+| 3.60 | friction 1.6 | 2.1500 | l_hip_pitch | 10.840 | +20.07 | +8.60 | +11.48 | +6.63 | +12.36 | 0 | inside |
+| 3.60 | latency +1 | 2.2678 | r_hip_pitch | 9.048 | +19.79 | +9.14 | +11.83 | +6.62 | +12.47 | 0 | inside |
+| 3.60 | latency −1 | 2.0359 | r_hip_pitch | 9.040 | +20.35 | +8.10 | +11.74 | +6.58 | +12.31 | 0 | inside |
+| 3.60 | entrance rug | 2.1158 | l_hip_pitch | 7.264 | +20.07 | +0.00 | +8.46 | +0.00 | +10.55 | 0.039 | FAIL |
+| 3.60 | start/stop ×5 | 2.1500 | l_hip_pitch | 10.840 | +20.07 | +8.60 | +11.48 | +6.63 | +14.82 | 0 | inside |
+| 3.60 | shape 1 nominal | 2.3354 | r_hip_roll | 8.176 | +20.75 | +8.14 | +10.22 | +7.09 | +11.24 | 0 | dropped |
+| 3.60 | shape 1 mass −5% | 2.3237 | r_hip_roll | 8.176 | +20.82 | +8.36 | +11.52 | +0.003 | +12.10 | 0 | dropped |
+| 3.60 | shape 1 friction 1.2 | 2.3227 | l_hip_roll | 9.968 | +22.18 | +6.18 | +12.05 | +0.001 | +11.67 | 0 | dropped |
+| 3.60 | shape 1 latency −1 | 2.1451 | r_hip_roll | 8.168 | +20.80 | +7.92 | +10.24 | +7.05 | +11.15 | 0 | dropped |
+| 3.70 | shape 1 nominal | 2.2822 | r_hip_roll | 8.352 | +20.80 | +9.20 | +10.42 | +0.002 | +11.13 | 0 | dropped |
+| 6.40 | slow, shape 1 | 2.0055 | r_hip_roll | 2.816 | +21.64 | +9.85 | +10.38 | +6.50 | +10.82 | 0 | dropped |
+
+Flat shape 0 keeps every single-support tick at or above +5 mm. Dwell under 5 mm is 0 on those 38 cells. The nominal 3.57 s bout is contact CoP p1/p5/p50 +8.65 / +12.47 / +23.00 mm, single-support minimum +8.78 mm, single-support p5 +11.92 mm, whole-bout minimum +6.64 mm. CoM minimum is +20.15 mm. min up_z is 0.958. hard_cap is 0. The worst voice ask is the 3.60 s +1 tick delay, right hip pitch 2.2678 Nm at 9.048 s, headroom to 2.33 Nm +0.0622 Nm. It is 0.0678 Nm over the 2.20 Nm headroom. The nominal ask is right hip pitch 2.1602 Nm at 9.024 s.
+
+Eighteen of those 38 also keep the whole-bout minimum at or above +5 mm. The other twenty do not, and the miss is not single support. Seeds 3, 5, 7, and 9 are one stand tick at 0.008 s: the seeded foot carries about 5.2 N on two toe contacts, local x +97.5 mm, and the walk never returns there. Seeds 4, 6, and 8 are the same spawn, spread through about 0.16 s, bout minimum +3.87 to +4.10 mm. Mass +5% is three to five walk double-support ticks: the light foot is at 5.0–5.2 N on the toe face and the stance foot still has about +25 mm. Friction 1.2 and 1.4 are one double-support tick near the start of the gait clock, before the toe-up is scheduled. Single-support dwell on all of those is 0.
+
+The entrance rug fails the single-support bar. At 9.312 s on the 3.57 s row the right foot has 5.63 N, two floor contacts and two rug contacts, and the combined CoP is +0.08 mm inside the toe face. The left foot, the declared stance, has +30.86 mm. Dwell under 5 mm is 0.036 (3.57 s) and 0.039 (3.60 s). The lip is 20 mm and the swing gap is 4 mm. The foot does not clear it. min up_z stays 0.957. Ask stays 2.1160 Nm. The clip `docs/media/voice_vx_056_side_front.mp4` was rendered again on this toe-up gait: stand 3.00 s, vel(0.056, 0) for 11.00 s, stop 6.00 s, side and front, 30 fps, 600 frames, 20.00 s, fault none. Not kit-safe. Not go-anywhere.
+

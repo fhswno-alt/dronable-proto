@@ -634,15 +634,46 @@ class LipmWalker:
         self._stab_preview_m = self._slew(self._stab_preview_m, target, 0.020)
         return -float(com) + self._stab_preview_m
 
-    def _stabilize_contacts(self) -> None:
-        """Ankle roll/pitch and hip roll from measured CoP, DCM, and trunk lean.
+    def _swing_toe_bias(self, side: Side) -> float:
+        """Joint radians that raise the swing toe. Zero on the stance foot.
 
-        The offset is a tanh of the error, then a fixed-rate slew. The
-        write is write_clipped, the same path as the gait target. This
-        does not solve q_des so the signed ask equals ±2.33 Nm.
+        Full by a quarter of the swing and held 0.28 s into the landing,
+        so the heel shares load before the normal crosses 5 N. +pitch
+        raises the left toe. The right ankle is the opposite sign.
+        The walk uses 0.040 rad. The stop uses 0.010 rad: 0.008 rad is
+        enough to keep the flat stop off the toe face, and 0.020 rad
+        drives the delayed hip roll through 2.33 Nm.
+        """
+        walker = self.op3
+        if walker is None or walker.period <= 1e-6:
+            return 0.0
+        if side == "L":
+            t0 = float(walker.l_ssp_start)
+            t1 = float(walker.l_ssp_end)
+        else:
+            t0 = float(walker.r_ssp_start)
+            t1 = float(walker.r_ssp_end)
+        t = float(walker.time) % float(walker.period)
+        sign = 1.0 if side == "L" else -1.0
+        amp = 0.010 if self.preview_stage == "stop" else 0.040
+        if t0 < t <= t1:
+            u = (t - t0) / max(t1 - t0, 1e-6)
+            s = min(1.0, u / 0.25)
+            s = s * s * (3.0 - 2.0 * s)
+            return sign * amp * s
+        if t1 < t <= t1 + 0.28:
+            return sign * amp
+        return 0.0
+
+    def _stabilize_contacts(self) -> None:
+        """Hip roll from the capture point.
+
+        Quiet inside 20 mm, and off during the stop. The swing-foot ankle
+        is retargeted in the joint write, so this does not add a second
+        ankle command. It does not solve q_des so the signed ask equals
+        ±2.33 Nm.
         """
         err = self._dcm_error_y()
-        up = self.data.xmat[self.bid_body].reshape(3, 3)[:, 2]
         dead = max(0.0, abs(err) - 0.020)
         hip_t = 0.0 if self.preview_stage == "stop" else math.copysign(0.005 * math.tanh(dead / 0.025), err)
         self._stab_hip = self._slew(self._stab_hip, hip_t, 0.15)
@@ -652,28 +683,6 @@ class LipmWalker:
                 continue
             if abs(self._stab_hip) > 1e-6:
                 self.write_clipped(name, float(self.data.ctrl[idx]) + self._stab_hip)
-        for side in ("L", "R"):
-            loaded = self.foot_normal(side) >= float(self.cfg.unload_n)
-            local = self._cop_local(side) if loaded else None
-            if local is None:
-                roll_t = 0.0
-                pitch_t = 0.0
-            else:
-                center = np.asarray(self.model.geom_pos[self.gid[side], :2], dtype=np.float64)
-                err_y = float(local[1] - center[1]) + 0.012 * float(up[1])
-                err_x = float(local[0] - center[0]) + 0.012 * float(up[0])
-                roll_t = 0.008 * math.copysign(math.tanh(max(0.0, abs(err_y) - 0.012) / 0.010), err_y)
-                sign = 1.0 if side == "L" else -1.0
-                pitch_raw = math.copysign(math.tanh(max(0.0, abs(err_x) - 0.012) / 0.010), err_x)
-                pitch_t = COP_PITCH_SIGN * sign * 0.008 * pitch_raw
-            self._stab_roll[side] = self._slew(self._stab_roll[side], roll_t, 0.35)
-            self._stab_pitch[side] = self._slew(self._stab_pitch[side], pitch_t, 0.35)
-            for kind, store in (("ank_roll", self._stab_roll), ("ank_pitch", self._stab_pitch)):
-                jn = self.pref(side) + kind
-                idx = self.act_idx.get(jn + "_pos")
-                if idx is None:
-                    continue
-                self.write_clipped(jn, float(self.data.ctrl[idx]) + store[side])
 
     def _write_preview_joints(self, joints: dict[str, float] | None) -> None:
         for jn in (
@@ -685,6 +694,24 @@ class LipmWalker:
             self.preview_ik_fail += 1
             self._write_unused()
             return
+        # Swing-foot toe lift, scheduled from the clock so it is in place
+        # before the landing. The gait ankle dives as the leg extends and
+        # the toe meets the floor alone. The offset is slewed, then the
+        # command is kept within 16 mrad of the measured angle so a late
+        # gap does not become an ankle spike.
+        for side in ("L", "R"):
+            jn = self.pref(side) + "ank_pitch"
+            if jn not in joints:
+                continue
+            gait = float(joints[jn])
+            q = self.q(jn)
+            self._stab_pitch[side] = self._slew(self._stab_pitch[side], self._swing_toe_bias(side), 0.35)
+            want = gait + self._stab_pitch[side]
+            gap = want - q
+            if abs(gap) > 0.016:
+                want = q + math.copysign(0.016, gap)
+            if abs(want - gait) > 1e-6:
+                joints[jn] = want
         for name, val in joints.items():
             # Straight preview walk. No yaw budget, no ±2.33 solve.
             # write_clipped still keeps non-sagittal joints inside the
