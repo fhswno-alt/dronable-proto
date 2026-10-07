@@ -347,6 +347,20 @@ EAST_L_NEWMIN_RESIDUAL_M = 0.03450859273365606
 EAST_L_NEAR_GATE_M = 0.30
 EAST_L_NEAR_K = 5
 EAST_L_LIVE = "near_k"
+# Bedroom −90° on tip 51ae123. wall_hall_e_0 right toe, last 5 of
+# ray ≤ 0.30 m, pad 0.04391 m, stop error 0.02519 m, residual
+# −0.0187 m. The median sat on the high phase and the gate crossed
+# on the low phase. Not a clear. Not applied to any other wall.
+E0_WALL = "wall_hall_e_0"
+E0_R_FAIL_PAD_M = 0.0439108831389442
+E0_R_FAIL_N = 5
+E0_R_FAIL_RESIDUAL_M = -0.018717300570202544
+E0_R_FAIL_ERR_M = 0.025193582568741657
+# One step near that stop spans about 0.03 m of ray. 0.25 m is
+# inside that last step and above the scored stop ray 0.223 m.
+# K=3 stays in the cap instead of reaching the previous step.
+E0_R_NEAR_GATE_M = 0.25
+E0_R_NEAR_K = 3
 EAST_L_Q75_RESIDUAL_M = -0.03175107940399083
 EAST_L_Q75_RAY_M = 0.23443045430153236
 EAST_L_Q75_ERR_M = 0.02769268460514473
@@ -858,6 +872,12 @@ def _definition() -> DefinitionJson:
             f"{EAST_L_NEAR_GATE_M:.2f} m. The commit sample is left "
             "out. An empty window keeps pad 0 and does not borrow an "
             "east or living pad. "
+            f"{E0_WALL} right toe does not use that 0.30 m window. "
+            f"The scored miss there is pad {E0_R_FAIL_PAD_M:.5f} m "
+            f"(N={E0_R_FAIL_N}), residual {E0_R_FAIL_RESIDUAL_M:+.4f} m. "
+            f"Its live latch is the last {E0_R_NEAR_K} of its own "
+            f"samples with ray at or under {E0_R_NEAR_GATE_M:.2f} m. "
+            "Left samples on that wall are not in the pad. "
             "East right-toe samples median "
             f"{EAST_R_LATCH_M:.5f} m (n={len(EAST_R_ERR_M)}). An unknown "
             "toe gets pad 0. Contact "
@@ -1302,12 +1322,19 @@ def _pad_for(wall: str, true_gap: float | None, lead_side: str = "") -> float:
     return 0.0
 
 
+def _band_errs(
+    seen: list[tuple[float, float]], gate_m: float, k: int,
+) -> list[float]:
+    """Last K errors whose ray is inside one wall's near gate."""
+    chosen = [err for ray, err in seen if ray <= gate_m]
+    if len(chosen) > k:
+        return chosen[-k:]
+    return chosen
+
+
 def _near_k_errs(seen: list[tuple[float, float]]) -> list[float]:
     """Last K left errors whose ray is inside the near-stop gate."""
-    chosen = [err for ray, err in seen if ray <= EAST_L_NEAR_GATE_M]
-    if len(chosen) > EAST_L_NEAR_K:
-        return chosen[-EAST_L_NEAR_K:]
-    return chosen
+    return _band_errs(seen, EAST_L_NEAR_GATE_M, EAST_L_NEAR_K)
 
 
 def _east_l_bout_pad(prior: list[float]) -> tuple[float, bool]:
@@ -1319,16 +1346,25 @@ def _east_l_bout_pad(prior: list[float]) -> tuple[float, bool]:
     return 0.0, False
 
 
+def _median_pad(prior: list[float]) -> tuple[float, int, bool]:
+    if not prior:
+        return 0.0, 0, False
+    return float(statistics.median(prior)), len(prior), True
+
+
 def _other_near_pad(seen: list[tuple[float, float]]) -> tuple[float, int, bool]:
     """Same last-K near median for a wall that is not east or living.
 
     The commit sample is not in seen. An empty window does not invent
-    a pad and does not copy another wall.
+    a pad and does not copy another wall. wall_hall_e_0 right toe
+    does not use this window.
     """
-    prior = _near_k_errs(seen)
-    if not prior:
-        return 0.0, 0, False
-    return float(statistics.median(prior)), len(prior), True
+    return _median_pad(_near_k_errs(seen))
+
+
+def _e0_r_near_pad(seen: list[tuple[float, float]]) -> tuple[float, int, bool]:
+    """wall_hall_e_0 right toe only. Tighter than the 0.30 m window."""
+    return _median_pad(_band_errs(seen, E0_R_NEAR_GATE_M, E0_R_NEAR_K))
 
 
 def _residual_m(err: float | None, pad: float) -> float | None:
@@ -2277,6 +2313,8 @@ def _run_room(
     east_l_pad_n = 0
     other_near: dict[tuple[str, str], list[tuple[float, float]]] = {}
     other_near_n = 0
+    e0_r_seen: list[tuple[float, float]] = []
+    near_rule = EAST_L_LIVE
     east_l_min_ray: float | None = None
     east_l_min_t: float | None = None
     east_l_min_heading: float | None = None
@@ -2564,7 +2602,11 @@ def _run_room(
                     residual = _residual_m(err, pad) if defined else None
                 else:
                     pad = _pad_for(true_name, true_gap, side) if same else 0.0
-                    if same and base == "other_wall_close" and side in ("L", "R"):
+                    if same and true_name == E0_WALL and side == "R":
+                        bout_pad, _bout_n, bout_defined = _e0_r_near_pad(e0_r_seen)
+                        if bout_defined:
+                            pad = bout_pad
+                    elif same and base == "other_wall_close" and side in ("L", "R"):
                         bout_pad, _bout_n, bout_defined = _other_near_pad(
                             other_near.get((true_name, side), []),
                         )
@@ -2704,6 +2746,7 @@ def _run_room(
                         base = _geom_class(true_name, true_gap) if same else "reject"
                         klass = _toe_class(base, side) if same else "reject"
                         pad_defined = True
+                        near_rule = EAST_L_LIVE
                         if same and base == "east_close" and side == "L":
                             near_errs = _near_k_errs(east_l_seen)
                             east_l_pad_n = len(near_errs)
@@ -2711,11 +2754,19 @@ def _run_room(
                             residual = _residual_m(err, pad) if pad_defined else None
                         else:
                             pad = _pad_for(true_name, true_gap, side) if same else 0.0
-                            if same and base == "other_wall_close" and side in ("L", "R"):
+                            if same and true_name == E0_WALL and side == "R":
+                                bout_pad, bout_n, bout_defined = _e0_r_near_pad(e0_r_seen)
+                                other_near_n = bout_n
+                                near_rule = "e0_r_near"
+                                if bout_defined:
+                                    pad = bout_pad
+                                    pad_defined = True
+                            elif same and base == "other_wall_close" and side in ("L", "R"):
                                 bout_pad, bout_n, bout_defined = _other_near_pad(
                                     other_near.get((true_name, side), []),
                                 )
                                 other_near_n = bout_n
+                                near_rule = EAST_L_LIVE
                                 if bout_defined:
                                     pad = bout_pad
                                     pad_defined = True
@@ -2857,7 +2908,7 @@ def _run_room(
                                         f"ray={true_gap} "
                                         f"pad={pad:.5f} gate={gate:.3f} "
                                         f"online_n={other_near_n if klass == 'other_wall_close' else east_l_pad_n} "
-                                        f"rule={EAST_L_LIVE} "
+                                        f"rule={near_rule} "
                                         f"residual={residual} "
                                         f"heading={heading:+.3f} "
                                         f"cam_z={float(reading['cam_z_m']):.3f} "
@@ -2883,6 +2934,15 @@ def _run_room(
                             ):
                                 east_l_seen.append((float(true_gap), float(err)))
                             if (
+                                EAST_L_LIVE == "near_k"
+                                and true_name == E0_WALL
+                                and side == "R"
+                                and err is not None
+                                and true_gap is not None
+                                and float(true_gap) <= E0_R_NEAR_GATE_M
+                            ):
+                                e0_r_seen.append((float(true_gap), float(err)))
+                            elif (
                                 EAST_L_LIVE == "near_k"
                                 and base == "other_wall_close"
                                 and side in ("L", "R")
@@ -3466,6 +3526,27 @@ def main() -> int:
     ])
     if near_demo != [0.02, 0.03, 0.04, 0.05, 0.06]:
         raise SystemExit(f"FAIL: near-k set moved to {near_demo}")
+    if abs(E0_R_NEAR_GATE_M - 0.25) > 1e-12 or E0_R_NEAR_GATE_M >= EAST_L_NEAR_GATE_M:
+        raise SystemExit(f"FAIL: e0 right near gate moved to {E0_R_NEAR_GATE_M}")
+    if E0_R_NEAR_K != 3:
+        raise SystemExit(f"FAIL: e0 right near K moved to {E0_R_NEAR_K}")
+    if E0_R_FAIL_N != 5 or abs(E0_R_FAIL_PAD_M - 0.0439108831389442) > 1e-12:
+        raise SystemExit("FAIL: the e0 right 0.30 m miss moved")
+    if abs(E0_R_FAIL_RESIDUAL_M) <= RANGE_ERR_MAX_M:
+        raise SystemExit("FAIL: the e0 right overshoot was marked clear")
+    if abs(E0_R_FAIL_ERR_M - (E0_R_FAIL_PAD_M + E0_R_FAIL_RESIDUAL_M)) > 1e-12:
+        raise SystemExit("FAIL: e0 right error does not match the residual")
+    e0_demo_pad, e0_demo_n, e0_demo_on = _e0_r_near_pad([
+        (0.28, 0.054),
+        (0.26, 0.044),
+        (0.24, 0.033),
+        (0.23, 0.026),
+        (0.22, 0.025),
+    ])
+    if not e0_demo_on or e0_demo_n != 3 or abs(e0_demo_pad - 0.026) > 1e-12:
+        raise SystemExit(f"FAIL: e0 right near pad moved to {e0_demo_pad} n={e0_demo_n}")
+    if abs(e0_demo_pad - E0_R_FAIL_PAD_M) < 1e-3:
+        raise SystemExit("FAIL: e0 right near pad copied the 0.30 m miss")
     if abs(EAST_L_ONLINE_RESIDUAL_M) <= RANGE_ERR_MAX_M:
         raise SystemExit("FAIL: the failed online residual was marked clear")
     if EAST_L_ONLINE_N != 22:
@@ -3688,6 +3769,11 @@ def main() -> int:
         "other_wall_pad_rule": EAST_L_LIVE,
         "other_wall_near_gate_m": EAST_L_NEAR_GATE_M,
         "other_wall_near_k": EAST_L_NEAR_K,
+        "e0_r_fail_pad_m": E0_R_FAIL_PAD_M,
+        "e0_r_fail_n": E0_R_FAIL_N,
+        "e0_r_fail_residual_m": E0_R_FAIL_RESIDUAL_M,
+        "e0_r_near_gate_m": E0_R_NEAR_GATE_M,
+        "e0_r_near_k": E0_R_NEAR_K,
         "east_l_sample_count": len(EAST_L_ERR_M),
         "w2_l_latch_m": W2_L_LATCH_M,
         "w2_l_sample_count": len(W2_L_ERR_M),
