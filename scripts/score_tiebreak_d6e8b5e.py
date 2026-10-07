@@ -341,6 +341,9 @@ def _hinge_lines(row: dict[str, object]) -> list[str]:
     if not isinstance(qvel, dict) and not isinstance(speed, dict):
         return []
     lines = ["", "Hinge speed and trunk vx:"]
+    torque = row.get("speed_torque")
+    if isinstance(torque, dict):
+        lines.append(str(torque.get("status")))
     if isinstance(speed, dict):
         lines.append(
             f"Period T {_n(speed.get('period_s'), 3)} s, commanded vx "
@@ -608,7 +611,10 @@ def main() -> None:
     qvel = row.get("qvel") if isinstance(row.get("qvel"), dict) else {}
     trunk_speed = row.get("trunk_speed") if isinstance(row.get("trunk_speed"), dict) else {}
     qvel_reasons = list(qvel.get("fail_reasons") or [])
-    fail = mfg + step_reasons + [str(item) for item in qvel_reasons]
+    speed_torque = row.get("speed_torque") if isinstance(row.get("speed_torque"), dict) else {}
+    hinge_pairs = row.get("hinge_pairs") if isinstance(row.get("hinge_pairs"), dict) else {}
+    torque_reasons = list(speed_torque.get("fail_reasons") or [])
+    fail = mfg + step_reasons + [str(item) for item in qvel_reasons] + [str(item) for item in torque_reasons]
     verdict = "CLEAR" if not fail else "Prefer FAIL"
     gait = _gait_label(strict)
     note = _note(row, strict, contact_only, swings, counts, disagree, meta, cop_ok, gait, verdict, fail)
@@ -649,6 +655,8 @@ def main() -> None:
         "fault_reasons": row["fault_reasons"],
         "qvel": _jsonable(qvel),
         "trunk_speed": _jsonable(trunk_speed),
+        "speed_torque": _jsonable(speed_torque),
+        "hinge_pairs": _jsonable(hinge_pairs),
         "stepping": _jsonable(strict),
         "stepping_contact_count": _jsonable(contact_only),
         "swings": swings,
@@ -694,6 +702,8 @@ def main() -> None:
         "plant_md5": payload_row["plant_md5"],
         "qvel": payload_row["qvel"],
         "trunk_speed": payload_row["trunk_speed"],
+        "speed_torque": payload_row["speed_torque"],
+        "hinge_pairs": payload_row["hinge_pairs"],
     })
     retro.splice_hinge_doc()
 

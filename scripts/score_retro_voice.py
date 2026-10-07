@@ -217,6 +217,27 @@ def _hinge_block(step_bars, rec: Recorder, period: float, vx: float) -> dict[str
     omega = np.asarray(rec.omega, dtype=np.float64) if rec.omega else np.zeros((0, 12))
     stage = np.asarray(rec.stage, dtype=object)
     qvel = step_bars.hinge_speed_report(LEG_JOINTS, t, omega, stage)
+    tau_m = np.full((len(rec.pair_tau), len(LEG_JOINTS)), np.nan, dtype=np.float64)
+    qv_m = np.full_like(tau_m, np.nan)
+    for i, (tau_row, qv_row) in enumerate(zip(rec.pair_tau, rec.pair_qvel)):
+        for j, (tau, qvel_abs) in enumerate(zip(tau_row, qv_row)):
+            if tau is not None:
+                tau_m[i, j] = float(tau)
+            if qvel_abs is not None:
+                qv_m[i, j] = float(qvel_abs)
+    torque = step_bars.speed_torque_check(
+        LEG_JOINTS, t, tau_m, qv_m, stage,
+        no_load_speed=None, stall_torque=None, voltage=None,
+    )
+    pairs = {
+        "t_s": [float(item) for item in rec.cols["t"]],
+        "tau_nm": {
+            name: [row[i] for row in rec.pair_tau] for i, name in enumerate(LEG_JOINTS)
+        },
+        "qvel_rad_s": {
+            name: [row[i] for row in rec.pair_qvel] for i, name in enumerate(LEG_JOINTS)
+        },
+    }
     speed = step_bars.trunk_speed_line(
         t,
         np.asarray(rec.trunk_x, dtype=np.float64),
@@ -226,7 +247,7 @@ def _hinge_block(step_bars, rec: Recorder, period: float, vx: float) -> dict[str
         period_s=period,
         vx_cmd_m_s=vx,
     )
-    return {"qvel": qvel, "trunk_speed": speed}
+    return {"qvel": qvel, "trunk_speed": speed, "speed_torque": torque, "hinge_pairs": pairs}
 
 
 def _leg_q(model, data) -> list[float]:
@@ -266,15 +287,78 @@ class Recorder:
         self.trunk_y: list[float] = []
         self.trunk_yaw: list[float] = []
         self._dof: list[int] | None = None
+        self.pair_tau: list[list[float | None]] = []
+        self.pair_qvel: list[list[float | None]] = []
         self._orig = sw.SteerSession.step
 
         def _step(session, *args, **kwargs):
+            if session.lipm is not None:
+                self._arm_ask_log(session.lipm)
             report = self._orig(session, *args, **kwargs)
             if self.on:
                 self._sample(session)
             return report
 
         sw.SteerSession.step = _step  # type: ignore[method-assign]
+
+    def _arm_ask_log(self, walker) -> None:
+        """Record unclamped |τ| and |qvel| at each leg write. The command is unchanged."""
+        if getattr(walker, "_pair_log", None) is not None:
+            return
+        walker._pair_log = []
+
+        def _log(jn: str, q_des: float) -> None:
+            if jn not in LEG_JOINTS:
+                return
+            act = jn + "_pos"
+            idx = walker.act_idx.get(act)
+            if idx is None:
+                return
+            q = float(walker.q(jn))
+            jid = mj.mj_name2id(walker.model, mj.mjtObj.mjOBJ_JOINT, jn)
+            omega = float(walker.data.qvel[int(walker.model.jnt_dofadr[jid])])
+            kp = float(walker.model.actuator_gainprm[idx, 0])
+            kv = -float(walker.model.actuator_biasprm[idx, 2])
+            total = abs(kp * (float(q_des) - q)) + abs(kv * omega)
+            walker._pair_log.append((jn, float(total), abs(omega)))
+
+        orig = walker.write_clipped
+
+        def wrapped(jn: str, q_des: float) -> None:
+            _log(jn, q_des)
+            orig(jn, q_des)
+
+        walker.write_clipped = wrapped  # type: ignore[method-assign]
+        limited = getattr(walker, "write_force_limited", None)
+        if limited is not None:
+            def wrapped_limited(jn: str, q_des: float, limit_nm: float | None = None) -> None:
+                _log(jn, q_des)
+                limited(jn, q_des, limit_nm)
+
+            walker.write_force_limited = wrapped_limited  # type: ignore[method-assign]
+
+    def _drain_pairs(self, walker) -> None:
+        log = getattr(walker, "_pair_log", None)
+        writes = list(log) if log is not None else []
+        if log is not None:
+            log.clear()
+        best: dict[str, tuple[float, float]] = {}
+        for name, tau, qvel in writes:
+            prev = best.get(name)
+            if prev is None or tau > prev[0]:
+                best[name] = (tau, qvel)
+        tau_row: list[float | None] = []
+        qvel_row: list[float | None] = []
+        for name in LEG_JOINTS:
+            got = best.get(name)
+            if got is None:
+                tau_row.append(None)
+                qvel_row.append(None)
+            else:
+                tau_row.append(got[0])
+                qvel_row.append(got[1])
+        self.pair_tau.append(tau_row)
+        self.pair_qvel.append(qvel_row)
 
     def _leg_omega(self, model, data) -> list[float]:
         if self._dof is None:
@@ -340,6 +424,7 @@ class Recorder:
         self.trunk_x.append(float(origin[0]))
         self.trunk_y.append(float(origin[1]))
         self.trunk_yaw.append(yaw)
+        self._drain_pairs(walker)
         if self.half_x is None:
             self.half_x = float(session.model.geom_size[int(walker.gid["L"]), 0])
         n = len(cols["t"])
@@ -360,6 +445,8 @@ class Recorder:
         self.trunk_x = []
         self.trunk_y = []
         self.trunk_yaw = []
+        self.pair_tau = []
+        self.pair_qvel = []
 
 
 def _q_err(step_bars, cols, q_rows: list[list[float]]) -> np.ndarray:
@@ -596,6 +683,8 @@ def run_voice(sw, step_bars, label: str, pr: int, sha: str, rooms: tuple[str, ..
         row.update({
             "qvel": _jsonable(hinge["qvel"]),
             "trunk_speed": _jsonable(hinge["trunk_speed"]),
+            "speed_torque": _jsonable(hinge["speed_torque"]),
+            "hinge_pairs": _jsonable(hinge["hinge_pairs"]),
             "script": "voice_goto_rooms._run_room",
             "config": "locked_kit_config",
             "phrase": phrases[name],
@@ -936,6 +1025,43 @@ def merge_hinge_row(row: dict[str, object]) -> dict[str, object]:
     return payload
 
 
+def _corner_cell(tick: object) -> str:
+    if not isinstance(tick, dict):
+        return "none"
+    return (
+        f"|qvel| {_num(tick.get('qvel_rad_s'), 4)} rad/s, "
+        f"|τ| {_num(tick.get('tau_nm'), 4)} Nm "
+        f"at {_num(tick.get('t_s'), 3)} s {tick.get('stage')}"
+    )
+
+
+def _corner_lines(speed_torque: object) -> list[str]:
+    if not isinstance(speed_torque, dict):
+        return []
+    lines = [
+        str(speed_torque.get("status")),
+        "",
+        "| Joint | Largest \\|qvel\\| at \\|τ\\|≥2 Nm | Largest \\|τ\\| at \\|qvel\\|≥4 rad/s |",
+        "| --- | --- | --- |",
+    ]
+    corners = speed_torque.get("corners")
+    if isinstance(corners, list):
+        for corner in corners:
+            if not isinstance(corner, dict):
+                continue
+            lines.append(
+                "| "
+                + " | ".join([
+                    str(corner.get("joint")),
+                    _corner_cell(corner.get("max_qvel_at_tau")),
+                    _corner_cell(corner.get("max_tau_at_qvel")),
+                ])
+                + " |"
+            )
+    lines.append("")
+    return lines
+
+
 def hinge_markdown(payload: dict[str, object] | None = None) -> str:
     if payload is None:
         if not HINGE_JSON.is_file():
@@ -961,6 +1087,15 @@ def hinge_markdown(payload: dict[str, object] | None = None) -> str:
         "displacement over the bus `move` window, divided by that window's",
         "duration. The ratio is reported. It is not a separate cutoff.",
         "",
+        "Each leg hinge logs the per-tick pair `(|unclamped τ|, |qvel|)` in",
+        "`previews/walk_hinge_speed.json`. Unclamped τ is",
+        "`|kp·(q_des−q)| + |kv·ω|` at the write. `no_load_speed`, `stall_torque`,",
+        "and `voltage` are unset, so the speed-torque line is pending the HW",
+        "datasheet. While it is pending, each joint reports the tick with the",
+        "largest `|qvel|` at `|τ| ≥ 2` Nm and the tick with the largest `|τ|`",
+        "at `|qvel| ≥ 4` rad/s. When the line is set, a tick fails when",
+        "`|qvel|` exceeds `no_load·(1 − |τ|/stall)`.",
+        "",
     ]
     for row in rows:
         if not isinstance(row, dict):
@@ -977,6 +1112,7 @@ def hinge_markdown(payload: dict[str, object] | None = None) -> str:
             f"Hinge-speed bar {passed}. "
             f"Plant `{row.get('plant_md5_before')}` before and `{row.get('plant_md5')}` after."
         )
+        lines.extend(_corner_lines(row.get("speed_torque")))
         lines.append(
             f"Period T {_num(speed.get('period_s'), 3)} s, commanded vx "
             f"{_num(speed.get('vx_cmd_m_s'), 4)} m/s, actual trunk vx "
@@ -1077,6 +1213,8 @@ def main() -> None:
                 "plant_md5": row.get("plant_md5_after"),
                 "qvel": qvel,
                 "trunk_speed": row.get("trunk_speed"),
+                "speed_torque": row.get("speed_torque"),
+                "hinge_pairs": row.get("hinge_pairs"),
             })
         splice_hinge_doc()
         return

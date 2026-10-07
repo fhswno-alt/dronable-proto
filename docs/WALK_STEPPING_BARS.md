@@ -215,6 +215,7 @@ Against the posted row: unclamped right hip roll 2.2567 Nm at 2.832 s matches. D
 Fail reasons: step fraction 0.794 is under 0.90 (airborne forward 0.1536 m, contact forward 0.0399 m); airborne advance 0.0763 m on L at 5.224 s is outside ±20% of vx·T (1.1200 m). vx·T/2 is the stance-to-stance spacing (0.5600 m), not this travel.
 
 Hinge speed and trunk vx:
+speed-torque line pending HW datasheet
 Period T 20.000 s, commanded vx 0.0560 m/s, actual trunk vx 0.0060 m/s (forward 0.1321 m over 22.000 s along the trunk heading), ratio 0.107.
 Peak |qvel| bar 5.82 rad/s passes. The plant has no velocity cap.
 
@@ -246,7 +247,33 @@ ratio. Actual trunk vx is the trunk origin's heading-frame forward
 displacement over the bus `move` window, divided by that window's
 duration. The ratio is reported. It is not a separate cutoff.
 
+Each leg hinge logs the per-tick pair `(|unclamped τ|, |qvel|)` in
+`previews/walk_hinge_speed.json`. Unclamped τ is
+`|kp·(q_des−q)| + |kv·ω|` at the write. `no_load_speed`, `stall_torque`,
+and `voltage` are unset, so the speed-torque line is pending the HW
+datasheet. While it is pending, each joint reports the tick with the
+largest `|qvel|` at `|τ| ≥ 2` Nm and the tick with the largest `|τ|`
+at `|qvel| ≥ 4` rad/s. When the line is set, a tick fails when
+`|qvel|` exceeds `no_load·(1 − |τ|/stall)`.
+
 `d6e8b5e` `voice-20` STEPS, Prefer FAIL. Hinge-speed bar passes. Plant `207f3d5e9c6a72e16f7aa0c8d224f75e` before and `207f3d5e9c6a72e16f7aa0c8d224f75e` after.
+speed-torque line pending HW datasheet
+
+| Joint | Largest \|qvel\| at \|τ\|≥2 Nm | Largest \|τ\| at \|qvel\|≥4 rad/s |
+| --- | --- | --- |
+| l_hip_yaw | none | none |
+| l_hip_roll | |qvel| 0.5696 rad/s, |τ| 2.1034 Nm at 2.848 s walk | none |
+| l_hip_pitch | none | none |
+| l_knee | |qvel| 0.5904 rad/s, |τ| 2.1763 Nm at 10.528 s walk | none |
+| l_ank_pitch | none | none |
+| l_ank_roll | none | none |
+| r_hip_yaw | none | none |
+| r_hip_roll | |qvel| 0.5894 rad/s, |τ| 2.2488 Nm at 2.848 s walk | none |
+| r_hip_pitch | none | none |
+| r_knee | |qvel| 0.5691 rad/s, |τ| 2.1815 Nm at 15.152 s walk | none |
+| r_ank_pitch | none | none |
+| r_ank_roll | none | none |
+
 Period T 20.000 s, commanded vx 0.0560 m/s, actual trunk vx 0.0060 m/s (forward 0.1321 m over 22.000 s), ratio 0.107.
 
 | Joint | Peak rad/s | t s | Stage | Headroom rad/s |
@@ -265,6 +292,23 @@ Period T 20.000 s, commanded vx 0.0560 m/s, actual trunk vx 0.0060 m/s (forward 
 | l_hip_yaw | 0.0405 | 23.520 | stop | 5.7795 |
 
 `51ae123` `kitchen-m90` STEPS, other bars not re-judged. Hinge-speed bar passes. Plant `207f3d5e9c6a72e16f7aa0c8d224f75e` before and `207f3d5e9c6a72e16f7aa0c8d224f75e` after.
+speed-torque line pending HW datasheet
+
+| Joint | Largest \|qvel\| at \|τ\|≥2 Nm | Largest \|τ\| at \|qvel\|≥4 rad/s |
+| --- | --- | --- |
+| l_hip_yaw | none | none |
+| l_hip_roll | |qvel| 2.6229 rad/s, |τ| 9.1863 Nm at 2.320 s ss_L | none |
+| l_hip_pitch | |qvel| 1.4463 rad/s, |τ| 6.4207 Nm at 18.816 s ss_L | none |
+| l_knee | |qvel| 2.6216 rad/s, |τ| 8.7266 Nm at 9.416 s ds | none |
+| l_ank_pitch | |qvel| 1.8105 rad/s, |τ| 3.1508 Nm at 8.216 s stand | none |
+| l_ank_roll | |qvel| 1.7505 rad/s, |τ| 5.5176 Nm at 1.584 s ss_R | none |
+| r_hip_yaw | none | none |
+| r_hip_roll | |qvel| 2.6183 rad/s, |τ| 9.1622 Nm at 9.976 s ss_R | none |
+| r_hip_pitch | |qvel| 1.8124 rad/s, |τ| 7.1622 Nm at 35.976 s stand | none |
+| r_knee | |qvel| 3.6088 rad/s, |τ| 10.1742 Nm at 14.440 s stand | none |
+| r_ank_pitch | |qvel| 1.7696 rad/s, |τ| 5.0850 Nm at 12.464 s ds | none |
+| r_ank_roll | |qvel| 1.7397 rad/s, |τ| 5.5044 Nm at 1.848 s ss_L | none |
+
 Period T 0.500 s, commanded vx 0.0560 m/s, actual trunk vx 0.0240 m/s (forward 0.5316 m over 22.128 s), ratio 0.429.
 
 | Joint | Peak rad/s | t s | Stage | Headroom rad/s |

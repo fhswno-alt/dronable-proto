@@ -1221,6 +1221,7 @@ class AskSample:
     signed_nm: float
     sum_nm: float
     stage: str = ""
+    qvel_abs: float = 0.0
 
 
 @dataclass
@@ -1270,30 +1271,42 @@ def _install_ask_log(walker: lipm_gait.LipmWalker, bucket: list[AskSample]) -> N
     This is the unclamped ask Controls posted. The hook does not change the
     command that is written.
     """
+    def _log(jn: str, q_des: float) -> None:
+        if jn not in LEG_JOINTS:
+            return
+        act = jn + "_pos"
+        idx = walker.act_idx.get(act)
+        if idx is None:
+            return
+        q = float(walker.q(jn))
+        jid = mj.mj_name2id(walker.model, mj.mjtObj.mjOBJ_JOINT, jn)
+        omega = float(walker.data.qvel[int(walker.model.jnt_dofadr[jid])])
+        kp = float(walker.model.actuator_gainprm[idx, 0])
+        kv = -float(walker.model.actuator_biasprm[idx, 2])
+        kp_term = kp * (float(q_des) - q)
+        signed = kp_term - kv * omega
+        bucket.append(AskSample(
+            t_s=float(walker.data.time),
+            joint=jn,
+            signed_nm=float(signed),
+            sum_nm=float(abs(kp_term) + abs(kv * omega)),
+            qvel_abs=abs(omega),
+        ))
+
     orig = walker.write_clipped
 
     def wrapped(jn: str, q_des: float) -> None:
-        if jn in LEG_JOINTS:
-            act = jn + "_pos"
-            idx = walker.act_idx.get(act)
-            if idx is not None:
-                q = float(walker.q(jn))
-                jid = mj.mj_name2id(walker.model, mj.mjtObj.mjOBJ_JOINT, jn)
-                omega = float(walker.data.qvel[int(walker.model.jnt_dofadr[jid])])
-                kp = float(walker.model.actuator_gainprm[idx, 0])
-                kv = -float(walker.model.actuator_biasprm[idx, 2])
-                kp_term = kp * (float(q_des) - q)
-                signed = kp_term - kv * omega
-                total = abs(kp_term) + abs(kv * omega)
-                bucket.append(AskSample(
-                    t_s=float(walker.data.time),
-                    joint=jn,
-                    signed_nm=float(signed),
-                    sum_nm=float(total),
-                ))
+        _log(jn, q_des)
         orig(jn, q_des)
 
     walker.write_clipped = wrapped  # type: ignore[method-assign]
+    limited = getattr(walker, "write_force_limited", None)
+    if limited is not None:
+        def wrapped_limited(jn: str, q_des: float, limit_nm: float | None = None) -> None:
+            _log(jn, q_des)
+            limited(jn, q_des, limit_nm)
+
+        walker.write_force_limited = wrapped_limited  # type: ignore[method-assign]
 
 
 def _preview_config(spec: PreviewRowSpec) -> lipm_gait.LipmConfig:
@@ -1438,6 +1451,45 @@ def _apply_perturb(session: steer_walk.SteerSession, perturb: Perturb) -> None:
         touched = True
     if touched:
         mj.mj_forward(model, data)
+
+
+def _tick_pair(
+    asks: list[AskSample],
+    names: tuple[str, ...],
+) -> tuple[list[float | None], list[float | None]]:
+    """One (|unclamped τ|, |qvel|) pair per joint for the writes in this tick.
+
+    Unclamped τ is |kp·(q_des−q)| + |kv·ω|, the same ask the torque bar uses.
+    If a joint is written more than once, the pair is the write with the
+    largest |τ|, and |qvel| is the speed at that write.
+    """
+    best: dict[str, AskSample] = {}
+    for sample in asks:
+        prev = best.get(sample.joint)
+        if prev is None or sample.sum_nm > prev.sum_nm:
+            best[sample.joint] = sample
+    tau: list[float | None] = []
+    qvel: list[float | None] = []
+    for name in names:
+        sample = best.get(name)
+        if sample is None:
+            tau.append(None)
+            qvel.append(None)
+        else:
+            tau.append(float(sample.sum_nm))
+            qvel.append(float(sample.qvel_abs))
+    return tau, qvel
+
+
+def _pair_matrix(rows: list[list[float | None]], n_joints: int) -> np.ndarray:
+    if not rows:
+        return np.zeros((0, n_joints), dtype=np.float64)
+    out = np.full((len(rows), n_joints), np.nan, dtype=np.float64)
+    for i, row in enumerate(rows):
+        for j, value in enumerate(row):
+            if value is not None:
+                out[i, j] = float(value)
+    return out
 
 
 def _asks_by_joint(asks: list[AskSample]) -> list[dict[str, object]]:
@@ -1728,6 +1780,8 @@ def run_preview_row(
             raise RuntimeError(f"{spec.name}: missing joint {name}")
         leg_dof.append(int(session.model.jnt_dofadr[jid]))
     qvel_abs_rows: list[list[float]] = []
+    pair_tau: list[list[float | None]] = []
+    pair_qvel: list[list[float | None]] = []
     stage_ticks: list[str] = []
     trunk_x: list[float] = []
     trunk_y: list[float] = []
@@ -1764,6 +1818,9 @@ def run_preview_row(
         n_ask = len(asks)
         session.step()
         stage_name = str(getattr(walker, "preview_stage", "unknown"))
+        tau_tick, qvel_tick = _tick_pair(asks[n_ask:], LEG_JOINTS)
+        pair_tau.append(tau_tick)
+        pair_qvel.append(qvel_tick)
         for sample in asks[n_ask:]:
             sample.stage = stage_name
         if walker.op3.y_swap_cmd != 0.0:
@@ -1932,6 +1989,26 @@ def run_preview_row(
     qvel_reasons = qvel_report.get("fail_reasons")
     if isinstance(qvel_reasons, list):
         fail_reasons.extend(str(reason) for reason in qvel_reasons)
+    pair_tau_m = _pair_matrix(pair_tau, len(LEG_JOINTS))
+    pair_qvel_m = _pair_matrix(pair_qvel, len(LEG_JOINTS))
+    speed_torque = step_bars.speed_torque_check(
+        LEG_JOINTS,
+        np.asarray(times, dtype=np.float64),
+        pair_tau_m,
+        pair_qvel_m,
+        np.asarray(stage_ticks, dtype=object),
+        no_load_speed=None,
+        stall_torque=None,
+        voltage=None,
+    )
+    torque_reasons = speed_torque.get("fail_reasons")
+    if isinstance(torque_reasons, list):
+        fail_reasons.extend(str(reason) for reason in torque_reasons)
+    hinge_pairs = {
+        "t_s": times,
+        "tau_nm": {name: [row[i] for row in pair_tau] for i, name in enumerate(LEG_JOINTS)},
+        "qvel_rad_s": {name: [row[i] for row in pair_qvel] for i, name in enumerate(LEG_JOINTS)},
+    }
     trunk_speed = step_bars.trunk_speed_line(
         np.asarray(times, dtype=np.float64),
         np.asarray(trunk_x, dtype=np.float64),
@@ -2024,6 +2101,8 @@ def run_preview_row(
         "stepping": stepping,
         "qvel": qvel_report,
         "trunk_speed": trunk_speed,
+        "speed_torque": speed_torque,
+        "hinge_pairs": hinge_pairs,
     }
 
 
@@ -3158,7 +3237,9 @@ def render_stepping_md(payloads: list[dict[str, object]]) -> str:
         "  (HX-35H no-load, 0.18 s/60°). The plant has no velocity cap. Headroom is",
         "  5.82 − peak. A miss names the joint, the peak, the time, and the stage.",
         "  Preview rows use `preview_stage`. A voice bout with no preview stage uses",
-        "  the gait phase.",
+        "  the gait phase. Each tick also logs `(|unclamped τ|, |qvel|)`.",
+        "  The speed-torque line (`|qvel| ≤ no_load·(1 − |τ|/stall)`) stays unset",
+        "  until a datasheet supplies `no_load_speed`, `stall_torque`, and `voltage`.",
         "",
         "Each row also reports period T, commanded vx, actual trunk vx, and the",
         "ratio. Actual trunk vx is the trunk origin's heading-frame forward",

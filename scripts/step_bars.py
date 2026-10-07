@@ -37,6 +37,11 @@ KIT_X_RAIL_M = 0.020
 # (π/3)/0.18 ≈ 5.8178 rad/s. The bar is the stated 5.82 rad/s. The plant
 # has no joint velocity limit; this cutoff lives in the scorer.
 LEG_QVEL_BAR = 5.82
+# Corner ticks reported while the speed-torque line is unset. These are
+# report thresholds, not a motor curve.
+TAU_CORNER_NM = 2.0
+QVEL_CORNER_RAD_S = 4.0
+SPEED_TORQUE_PENDING = "speed-torque line pending HW datasheet"
 
 
 def hinge_speed_report(
@@ -90,6 +95,136 @@ def hinge_speed_report(
         "fail_reasons": reasons,
         "passes": not reasons,
     }
+
+
+def _corner_tick(
+    times: np.ndarray,
+    tau: np.ndarray,
+    omega: np.ndarray,
+    stages: np.ndarray,
+    pick: np.ndarray,
+    *,
+    rank: np.ndarray,
+) -> dict[str, object] | None:
+    if not np.any(pick):
+        return None
+    chosen = np.flatnonzero(pick)
+    idx = int(chosen[int(np.argmax(rank[pick]))])
+    return {
+        "t_s": float(times[idx]),
+        "tau_nm": float(tau[idx]),
+        "qvel_rad_s": float(omega[idx]),
+        "stage": str(stages[idx]),
+    }
+
+
+def speed_torque_check(
+    names: tuple[str, ...] | list[str],
+    t: np.ndarray,
+    tau_abs: np.ndarray,
+    omega_abs: np.ndarray,
+    stage: np.ndarray,
+    *,
+    no_load_speed: float | None = None,
+    stall_torque: float | None = None,
+    voltage: float | None = None,
+) -> dict[str, object]:
+    """Speed-torque check. The motor line stays unset until HW supplies it.
+
+    With ``no_load_speed``, ``stall_torque``, or ``voltage`` left None, the
+    status is ``SPEED_TORQUE_PENDING`` and nothing is failed. Each joint
+    still reports the tick with the largest ``|qvel|`` at ``|τ| ≥ 2`` Nm
+    and the tick with the largest ``|τ|`` at ``|qvel| ≥ 4`` rad/s.
+
+    When all three are set, each tick must satisfy
+    ``|qvel| ≤ no_load_speed * (1 − |τ| / stall_torque)``. Voltage is
+    recorded and does not scale that line. The worst margin is folded into
+    the row verdict.
+    """
+    labels = [str(name) for name in names]
+    times = np.asarray(t, dtype=np.float64)
+    tau = np.asarray(tau_abs, dtype=np.float64)
+    omega = np.asarray(omega_abs, dtype=np.float64)
+    stages = np.asarray(stage, dtype=object)
+    pending = no_load_speed is None or stall_torque is None or voltage is None
+    empty: dict[str, object] = {
+        "status": SPEED_TORQUE_PENDING if pending else "speed-torque line",
+        "no_load_speed": no_load_speed,
+        "stall_torque": stall_torque,
+        "voltage": voltage,
+        "tau_corner_nm": TAU_CORNER_NM,
+        "qvel_corner_rad_s": QVEL_CORNER_RAD_S,
+        "corners": [],
+        "worst": None,
+        "fail_reasons": [],
+        "passes": True,
+    }
+    if times.shape[0] < 1 or tau.ndim != 2 or tau.shape != omega.shape or tau.shape[1] != len(labels):
+        empty["fail_reasons"] = ["no speed-torque samples"]
+        empty["passes"] = False
+        empty["status"] = "no speed-torque samples"
+        return empty
+    if stages.shape[0] != times.shape[0]:
+        empty["fail_reasons"] = ["speed-torque stage trace does not match the ticks"]
+        empty["passes"] = False
+        empty["status"] = "no speed-torque samples"
+        return empty
+    corners: list[dict[str, object]] = []
+    for col, name in enumerate(labels):
+        joint_tau = tau[:, col]
+        joint_omega = omega[:, col]
+        known = np.isfinite(joint_tau) & np.isfinite(joint_omega)
+        corners.append({
+            "joint": name,
+            "max_qvel_at_tau": _corner_tick(
+                times, joint_tau, joint_omega, stages,
+                known & (joint_tau >= TAU_CORNER_NM - 1e-12),
+                rank=joint_omega,
+            ),
+            "max_tau_at_qvel": _corner_tick(
+                times, joint_tau, joint_omega, stages,
+                known & (joint_omega >= QVEL_CORNER_RAD_S - 1e-12),
+                rank=joint_tau,
+            ),
+        })
+    empty["corners"] = corners
+    if pending:
+        return empty
+    no_load = float(no_load_speed)
+    stall = float(stall_torque)
+    if not math.isfinite(no_load) or not math.isfinite(stall) or stall <= 0.0 or no_load < 0.0:
+        empty["status"] = "speed-torque line is not usable"
+        empty["fail_reasons"] = ["speed-torque line is not usable"]
+        empty["passes"] = False
+        return empty
+    worst: dict[str, object] | None = None
+    for col, name in enumerate(labels):
+        joint_tau = tau[:, col]
+        joint_omega = omega[:, col]
+        known = np.isfinite(joint_tau) & np.isfinite(joint_omega)
+        for idx in np.flatnonzero(known):
+            limit = no_load * (1.0 - float(joint_tau[idx]) / stall)
+            margin = limit - float(joint_omega[idx])
+            if worst is None or margin < float(worst["margin_rad_s"]):
+                worst = {
+                    "joint": name,
+                    "t_s": float(times[idx]),
+                    "stage": str(stages[idx]),
+                    "tau_nm": float(joint_tau[idx]),
+                    "qvel_rad_s": float(joint_omega[idx]),
+                    "limit_rad_s": float(limit),
+                    "margin_rad_s": float(margin),
+                }
+    empty["worst"] = worst
+    if worst is not None and float(worst["margin_rad_s"]) < -1e-12:
+        empty["fail_reasons"] = [
+            f"speed-torque margin {float(worst['margin_rad_s']):.4f} rad/s on "
+            f"{worst['joint']} at {float(worst['t_s']):.3f} s stage {worst['stage']} "
+            f"(|τ| {float(worst['tau_nm']):.4f} Nm, |qvel| {float(worst['qvel_rad_s']):.4f} rad/s, "
+            f"limit {float(worst['limit_rad_s']):.4f} rad/s)"
+        ]
+        empty["passes"] = False
+    return empty
 
 
 def trunk_speed_line(
@@ -609,6 +744,32 @@ def self_test() -> int:
         vx_cmd_m_s=0.056,
     )
     expect(turned["actual_vx_m_s"] is not None and abs(float(turned["actual_vx_m_s"]) - 0.0042) < 1e-9, "heading-frame forward, not world +x")
+    n_st = 3
+    st_t = np.array([0.1, 0.2, 0.3], dtype=np.float64)
+    st_tau = np.array([[3.0, 0.4], [2.1, 0.2], [0.5, 1.5]], dtype=np.float64)
+    st_qv = np.array([[0.2, 4.5], [1.5, 6.0], [0.1, 1.0]], dtype=np.float64)
+    st_stage = np.array(["walk", "walk", "stop"], dtype=object)
+    pending = speed_torque_check(
+        ("l_knee", "r_knee"), st_t, st_tau, st_qv, st_stage,
+        no_load_speed=None, stall_torque=None, voltage=None,
+    )
+    expect(pending["status"] == SPEED_TORQUE_PENDING, "unset line stays pending")
+    expect(pending["passes"] is True, "a pending line does not fail the row")
+    expect(pending["no_load_speed"] is None and pending["stall_torque"] is None and pending["voltage"] is None, "line parameters stay unset")
+    by_corner = {str(row["joint"]): row for row in pending["corners"]}
+    l_at_tau = by_corner["l_knee"]["max_qvel_at_tau"]
+    r_at_qv = by_corner["r_knee"]["max_tau_at_qvel"]
+    expect(isinstance(l_at_tau, dict) and abs(float(l_at_tau["qvel_rad_s"]) - 1.5) < 1e-12, "largest |qvel| at |τ|≥2")
+    expect(isinstance(r_at_qv, dict) and abs(float(r_at_qv["tau_nm"]) - 0.4) < 1e-12, "largest |τ| at |qvel|≥4")
+    supplied = speed_torque_check(
+        ("l_knee",), st_t, st_tau[:, :1], st_qv[:, :1], st_stage,
+        no_load_speed=1.0, stall_torque=10.0, voltage=1.0,
+    )
+    expect(supplied["passes"] is False, "a supplied line can fail")
+    worst = supplied["worst"]
+    expect(isinstance(worst, dict) and worst["joint"] == "l_knee", "worst joint is named")
+    expect(isinstance(worst, dict) and abs(float(worst["t_s"]) - 0.2) < 1e-12, "worst tick is named")
+    expect(isinstance(worst, dict) and float(worst["margin_rad_s"]) < 0.0, "worst margin is negative")
     if failures:
         for msg in failures:
             print(f"FAIL {msg}")
