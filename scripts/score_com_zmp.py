@@ -46,6 +46,9 @@ STEP_PITCH_DEG = 3.0
 STEP_LEN_TOL = 0.20
 STEP_SWING_LO = 0.20
 STEP_SWING_HI = 0.80
+# Feet at double support, each side of the pelvis, for the 3.60 s example
+# (vx·T/2 = 0.10 m, so each foot is vx·T/4 = 0.05 m from the pelvis).
+DS_FOOT_M = 0.050
 FOOT_HALF_X_M = 0.0675
 COP_P5_MM = 5.0
 AIR_N = 1.0
@@ -596,6 +599,10 @@ def _trunk_pitch(session: sw.SteerSession) -> float:
     return math.atan2(-float(R[2, 0]), math.hypot(float(R[0, 0]), float(R[1, 0])))
 
 
+def _within(value: float, target: float) -> bool:
+    return abs(value - target) <= STEP_LEN_TOL * abs(target)
+
+
 def _swing_window_z(iv: list[dict[str, float | str]], side: str) -> tuple[float, float]:
     """Min and max of the lowest sole corner over 20–80% of the swing."""
     t0 = float(iv[0]["t"])
@@ -619,18 +626,27 @@ def _step_honesty(
     vx: float,
     period_s: float,
 ) -> dict[str, object]:
-    """Per swing: lowest-corner clearance, slip, step fraction, airborne advance.
+    """Per swing: clearance, slip, step length, and world airborne advance.
+
+    ``period`` is one full L+R cycle. ``update_time`` puts the left
+    single support in the first half and the right single support in
+    the second, and the clock wraps at ``period``. One step is T/2.
+
+    Step length is the fore/aft world placement of the landing foot
+    relative to the stance foot, and the bar is vx·T/2. World airborne
+    advance is the swing foot's world-x change while it is in the air,
+    and the bar is the stride vx·T. At double support the two feet sit
+    at ±vx·T/4 from the pelvis. All three are ±20%.
 
     Clearance is the lowest of the four bottom corners of the 135×76 mm
-    contact box, and the bar uses the minimum of that height over 20–80%
-    of the swing. Airborne advance is the swing foot's world-x change
-    from the first airborne tick to the last. Commanded step length is
-    ``vx·T/2``. A completed step lands, is airborne for more than 10
-    ticks, and keeps that corner at least 8 mm up through the window.
-    A truncated swing that never lands is not a step. Zero completed
-    steps fails. Every completed step must land within ±20% of vx·T/2.
+    contact box, minimum over 20–80% of the swing. A completed step
+    lands, is airborne for more than 10 ticks, and keeps that corner at
+    least 8 mm up through the window. A truncated swing that never lands
+    is not scored. Zero completed steps fails.
     """
-    cmd = abs(float(vx)) * float(period_s) / 2.0
+    step_cmd = abs(float(vx)) * float(period_s) / 2.0
+    stride_cmd = abs(float(vx)) * float(period_s)
+    ds_cmd = step_cmd / 2.0
 
     def intervals(side: str) -> list[list[dict[str, float | str]]]:
         out: list[list[dict[str, float | str]]] = []
@@ -677,6 +693,7 @@ def _step_honesty(
             if not landed:
                 continue
             air_adv = (air_x1 - air_x0) if n_air > 0 else 0.0
+            place = float(iv[-1][side + "x"]) - float(iv[-1][other + "x"])
             slip = math.hypot(
                 float(iv[-1][other + "x"]) - float(iv[0][other + "x"]),
                 float(iv[-1][other + "y"]) - float(iv[0][other + "y"]),
@@ -694,6 +711,11 @@ def _step_honesty(
                 "slip_mm": slip * 1000.0,
                 "frac": frac,
                 "air_mm": air_adv * 1000.0,
+                "place_mm": place * 1000.0,
+                "fore_mm": float(iv[-1][side + "fore"]) * 1000.0,
+                "fore_other_mm": float(iv[-1][other + "fore"]) * 1000.0,
+                "crouch_mm": float(iv[-1][side + "cz"]) * 1000.0,
+                "crouch_other_mm": float(iv[-1][other + "cz"]) * 1000.0,
                 "air_fwd_mm": air * 1000.0,
                 "con_mm": con * 1000.0,
                 "net_mm": (float(iv[-1][side + "x"]) - float(iv[0][side + "x"])) * 1000.0,
@@ -714,10 +736,16 @@ def _step_honesty(
     n = len(done_rows)
     airs = [float(s["air_mm"]) for s in done_rows]
     air_report = airs if airs else [float(s["air_mm"]) for s in swings]
-    len_ok = (
-        n >= 1
-        and cmd > 1e-6
-        and all(abs(a / 1000.0 - cmd) <= STEP_LEN_TOL * cmd for a in airs)
+    place_ok = bool(swings) and step_cmd > 1e-6 and all(
+        _within(float(s["place_mm"]) / 1000.0, step_cmd) for s in swings
+    )
+    stride_ok = bool(swings) and stride_cmd > 1e-6 and all(
+        _within(float(s["air_mm"]) / 1000.0, stride_cmd) for s in swings
+    )
+    ds_ok = bool(swings) and ds_cmd > 1e-6 and all(
+        _within(float(s["fore_mm"]) / 1000.0, ds_cmd)
+        and _within(float(s["fore_other_mm"]) / 1000.0, -ds_cmd)
+        for s in swings
     )
     return {
         "n_steps": float(n),
@@ -730,8 +758,14 @@ def _step_honesty(
         "step_frac": (min(float(s["frac"]) for s in scored)) if scored else float("nan"),
         "adv_mm": (min(float(s["net_mm"]) for s in scored)) if scored else float("nan"),
         "air_mm": (min(air_report)) if air_report else float("nan"),
-        "cmd_mm": cmd * 1000.0,
-        "len_ok": len_ok,
+        "place_mm": (min(float(s["place_mm"]) for s in swings)) if swings else float("nan"),
+        "cmd_mm": step_cmd * 1000.0,
+        "stride_mm": stride_cmd * 1000.0,
+        "ds_mm": ds_cmd * 1000.0,
+        "place_ok": place_ok,
+        "stride_ok": stride_ok,
+        "ds_ok": ds_ok,
+        "len_ok": place_ok and stride_ok and ds_ok,
         "x_amp_mm": abs(x_amp) * 1000.0,
         "pitch_deg": math.degrees(pitch1 - pitch0),
         "v_m_s": v,
@@ -873,6 +907,17 @@ def run_attempt(
     rug_peak = 0.0
     foot_rows: list[dict[str, float | str]] = []
     x_amp_seen = 0.0
+
+    def _body_id(name: str) -> int:
+        bid = int(mj.mj_name2id(session.model, mj.mjtObj.mjOBJ_BODY, name))
+        if bid < 0:
+            raise SystemExit(f"missing body {name}")
+        return bid
+
+    bid_pelvis = _body_id("body_link")
+    bid_hip = {"L": _body_id("l_hip_pitch_link"), "R": _body_id("r_hip_pitch_link")}
+    bid_ank = {"L": _body_id("l_ank_pitch_link"), "R": _body_id("r_ank_pitch_link")}
+    leg_m = float(lipm.op3.lengths.thigh_m + lipm.op3.lengths.calf_m)
     while float(session.data.time) < t_end - 1e-12:
         now = float(session.data.time)
         if driver is not None:
@@ -1018,6 +1063,19 @@ def run_attempt(
                 )
                 rec[side + "fn"] = float(lipm.foot_normal(side))
                 rec[side + "n"] = float(_n_ground(session, side))
+                pel = np.asarray(session.data.xpos[bid_pelvis], dtype=np.float64)
+                forward = np.asarray(session.data.xmat[bid_pelvis], dtype=np.float64).reshape(3, 3)[:, 0].copy()
+                forward[2] = 0.0
+                norm = float(np.linalg.norm(forward))
+                if norm > 1e-9:
+                    forward /= norm
+                foot = np.asarray(session.data.geom_xpos[gid], dtype=np.float64)
+                delta = foot - pel
+                delta[2] = 0.0
+                rec[side + "fore"] = float(np.dot(delta, forward))
+                rec[side + "cz"] = float(
+                    session.data.xpos[bid_hip[side]][2] - session.data.xpos[bid_ank[side]][2]
+                )
             foot_rows.append(rec)
         if kind in ("L", "R") and com_mm < worst_com:
             worst_com = com_mm
@@ -1173,10 +1231,28 @@ def run_attempt(
         "step_frac": honesty["step_frac"],
         "adv_mm": honesty["adv_mm"],
         "air_mm": honesty["air_mm"],
+        "place_mm": honesty["place_mm"],
         "cmd_mm": honesty["cmd_mm"],
+        "stride_mm": honesty["stride_mm"],
+        "ds_mm": honesty["ds_mm"],
+        "place_ok": honesty["place_ok"],
+        "stride_ok": honesty["stride_ok"],
+        "ds_ok": honesty["ds_ok"],
         "len_ok": honesty["len_ok"],
         "n_swings": honesty["n_swings"],
         "steps": honesty["steps"],
+        "leg_m": leg_m,
+        "reach_mm": math.sqrt(max(0.0, leg_m * leg_m - DS_FOOT_M * DS_FOOT_M)) * 1000.0,
+        "crouch_mm": (
+            min(float(r[side + "cz"]) for r in foot_rows for side in ("L", "R")) * 1000.0
+            if foot_rows else float("nan")
+        ),
+        "crouch_ask_mm": (
+            min(float(nearest[side + "cz"]) for side in ("L", "R")) * 1000.0
+            if foot_rows and ask_all is not None and (
+                nearest := min(foot_rows, key=lambda r: abs(float(r["t"]) - ask_all.t))
+            ) else float("nan")
+        ),
         "x_amp_mm": honesty["x_amp_mm"],
         "pitch_deg": honesty["pitch_deg"],
         "v_step_m_s": honesty["v_m_s"],
@@ -1309,12 +1385,20 @@ def _print_result(result: dict[str, object]) -> None:
         f"sep {float(result['sep_mm']):.2f} mm "
         f"(x {float(result['x_amp_mm']):.2f}) "
         f"frac {float(result['step_frac']):.3f} "
+        f"place {float(result['place_mm']):.1f} mm "
+        f"(step {float(result['cmd_mm']):.1f}, {result['place_ok']}) "
         f"air {float(result['air_mm']):.1f} mm "
-        f"cmd {float(result['cmd_mm']):.1f} mm "
-        f"(±{STEP_LEN_TOL * 100.0:.0f}%, len {result['len_ok']}) "
-        f"adv {float(result['adv_mm']):.1f} mm "
+        f"(stride {float(result['stride_mm']):.1f}, {result['stride_ok']}) "
+        f"ds ±{float(result['ds_mm']):.1f} mm ({result['ds_ok']}) "
         f"pitch {float(result['pitch_deg']):+.2f} deg "
         f"v {float(result['v_step_m_s']):.4f} m/s"
+    )
+    print(
+        f"  crouch min {float(result['crouch_mm']):.1f} mm "
+        f"at ask {float(result['crouch_ask_mm']):.1f} mm "
+        f"leg {float(result['leg_m']) * 1000.0:.1f} mm "
+        f"reach at ±{DS_FOOT_M * 1000.0:.0f} mm is {float(result['reach_mm']):.1f} mm "
+        f"ask {float(result['ask_nm']):.4f} Nm (bar {ASK_NM:.2f})"
     )
     steps = result.get("steps")
     if isinstance(steps, list) and steps:
@@ -1325,8 +1409,13 @@ def _print_result(result: dict[str, object]) -> None:
             print(
                 f"  {mark} {step['side']} "
                 f"t {float(step['t0']):.3f}-{float(step['t1']):.3f} "
-                f"air {float(step['air_mm']):.1f} mm "
-                f"cmd {float(result['cmd_mm']):.1f} mm "
+                f"place {float(step['place_mm']):+.1f} mm "
+                f"(step {float(result['cmd_mm']):.1f}) "
+                f"air {float(step['air_mm']):+.1f} mm "
+                f"(stride {float(result['stride_mm']):.1f}) "
+                f"pel {float(step['fore_mm']):+.1f}/{float(step['fore_other_mm']):+.1f} mm "
+                f"(DS ±{float(result['ds_mm']):.1f}) "
+                f"crouch {float(step['crouch_mm']):.1f}/{float(step['crouch_other_mm']):.1f} mm "
                 f"clear {float(step['clear_mm']):.2f} mm "
                 f"(peak {float(step['peak_mm']):.2f}) "
                 f"slip {float(step['slip_mm']):.2f} mm "
