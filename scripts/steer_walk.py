@@ -1515,8 +1515,14 @@ class SteerSession:
         distance: float | None = None,
         azimuth: float | None = None,
         elevation: float | None = None,
+        sole_box: bool = False,
     ) -> np.ndarray:
-        """Pixels of the current mjData. Does not step and does not mj_forward."""
+        """Pixels of the current mjData. Does not step and does not mj_forward.
+
+        ``sole_box`` tints the two contact boxes for this frame only and
+        draws the floor line at z=0. The rgba is restored before return.
+        Physics does not read it.
+        """
         if self.renderer is None:
             raise RuntimeError("renderer not created")
         if lookat is None:
@@ -1531,10 +1537,100 @@ class SteerSession:
             self.cam.elevation = float(elevation)
         # mj_step already forwarded. A second mj_forward here changes the
         # contact warm-start and tips this gait before the stop.
-        self.renderer.update_scene(self.data, self.cam)
-        self._draw_foot_trace()
-        raw = np.ascontiguousarray(self.renderer.render().copy(), dtype=np.uint8)
+        saved = self._tint_sole_boxes() if sole_box else None
+        try:
+            self.renderer.update_scene(self.data, self.cam)
+            self._draw_foot_trace()
+            raw = np.ascontiguousarray(self.renderer.render().copy(), dtype=np.uint8)
+            if sole_box:
+                self._paint_floor_line(raw)
+        finally:
+            if saved is not None:
+                self._restore_sole_boxes(saved)
         return wg._burn_overlay(raw, lines)
+
+    def _tint_sole_boxes(self) -> dict[int, np.ndarray]:
+        """Coloured contact boxes, with the ankle mesh ghosted behind them.
+
+        The ankle-roll mesh sole bottoms at −23.09 mm in the body frame.
+        The contact box bottom is at −26.0 mm. The mesh floats 2.91 mm
+        above the box the scorer measures. An opaque mesh writes the depth
+        buffer and hides that box, so this frame ghosts the visual geoms on
+        the same body. The rgba is restored before return.
+        """
+        saved: dict[int, np.ndarray] = {}
+        if self.lipm is None:
+            return saved
+        colors = {
+            "L": np.array([0.15, 0.85, 0.95, 0.55], dtype=np.float32),
+            "R": np.array([0.95, 0.45, 0.10, 0.55], dtype=np.float32),
+        }
+        for side, rgba in colors.items():
+            gid = int(self.lipm.gid[side])
+            saved[gid] = np.array(self.model.geom_rgba[gid], dtype=np.float32).copy()
+            self.model.geom_rgba[gid] = rgba
+            body = int(self.model.geom_bodyid[gid])
+            for i in range(int(self.model.ngeom)):
+                if int(self.model.geom_bodyid[i]) != body or i == gid:
+                    continue
+                if int(self.model.geom_group[i]) == 0:
+                    continue
+                if i in saved:
+                    continue
+                saved[i] = np.array(self.model.geom_rgba[i], dtype=np.float32).copy()
+                ghost = saved[i].copy()
+                ghost[3] = np.float32(0.28)
+                self.model.geom_rgba[i] = ghost
+        return saved
+
+    def _restore_sole_boxes(self, saved: dict[int, np.ndarray]) -> None:
+        for gid, rgba in saved.items():
+            self.model.geom_rgba[gid] = rgba
+
+    def _paint_floor_line(self, raw: np.ndarray) -> None:
+        """Yellow pixels of the plane z=0 under the sole.
+
+        A scene box on z=0 is hidden by the floor plane, so the line is
+        the projection of that plane onto this frame. No mj_forward.
+        """
+        if self.renderer is None:
+            return
+        cam = self.renderer.scene.camera[0]
+        eye = np.array(cam.pos, dtype=np.float64)
+        fwd = np.array(cam.forward, dtype=np.float64)
+        up = np.array(cam.up, dtype=np.float64)
+        fwd /= np.linalg.norm(fwd) or 1.0
+        up /= np.linalg.norm(up) or 1.0
+        right = np.cross(fwd, up)
+        right /= np.linalg.norm(right) or 1.0
+        fovy = math.radians(float(self.model.vis.global_.fovy))
+        height, width = raw.shape[:2]
+        aspect = width / height
+        tan = math.tan(fovy / 2.0)
+
+        def project(point: np.ndarray) -> tuple[float, float] | None:
+            rel = point - eye
+            depth = float(np.dot(rel, fwd))
+            if depth < 1e-4:
+                return None
+            ndc_x = float(np.dot(rel, right)) / depth / (tan * aspect)
+            ndc_y = float(np.dot(rel, up)) / depth / tan
+            return (ndc_x * 0.5 + 0.5) * width, (0.5 - ndc_y * 0.5) * height
+
+        x0 = float(self.cam.lookat[0])
+        y0 = float(self.cam.lookat[1])
+        a = project(np.array([x0 - 0.16, y0, 0.0], dtype=np.float64))
+        b = project(np.array([x0 + 0.16, y0, 0.0], dtype=np.float64))
+        if a is None or b is None:
+            return
+        span = max(1, int(math.hypot(b[0] - a[0], b[1] - a[1])))
+        xs = np.linspace(a[0], b[0], span)
+        ys = np.linspace(a[1], b[1], span)
+        color = np.array([255, 230, 40], dtype=np.uint8)
+        for t in (-1, 0, 1):
+            yy = np.clip(np.rint(ys).astype(np.int32) + t, 0, height - 1)
+            xx = np.clip(np.rint(xs).astype(np.int32), 0, width - 1)
+            raw[yy, xx] = color
 
     def _draw_foot_trace(self) -> None:
         """World-frame foot spheres. Empty unless this clip asked for them.

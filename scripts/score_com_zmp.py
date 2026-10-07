@@ -1777,6 +1777,7 @@ def _write_frames_body(session, driver, t_end, folder, next_frame, frame_dt, ima
         close = session.render(
             ["sole  " + lines[0], lines[1], lines[2]],
             lookat=look, distance=FOOT_CAM_M, azimuth=90.0, elevation=FOOT_CAM_ELEV_DEG,
+            sole_box=True,
         )
         if float(session.data.time) != t_before or not np.allclose(session.data.qpos, q_before):
             raise SystemExit("render changed mjData")
