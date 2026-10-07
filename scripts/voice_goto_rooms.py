@@ -449,7 +449,9 @@ EAST_L_HELD_CAM_Z_M = 0.33485694264068067
 EAST_L_HELD_PITCH_RAD = -0.2617542762292832
 EAST_L_HELD_LEAD_M = -0.017012214281004516
 # wall_hall_e_0 had five close samples on that tip, under the living
-# set of 17, so it keeps pad 0. This run does not invent one.
+# set of 17, so its frozen pad stays 0. A bout that walks its own
+# toe into the 0.30 m band can use the same last-5 median. It does
+# not copy an east or living pad.
 DOOR_Z = (0.05, 1.35)
 RAY_STEP = 8
 ROOM_GEOMS: dict[str, tuple[str, ...]] = {
@@ -838,6 +840,11 @@ def _definition() -> DefinitionJson:
             f"of the last {EAST_L_NEAR_K} left samples whose ray is "
             f"at or under {EAST_L_NEAR_GATE_M:.2f} m. The sample that "
             "crosses the gate is left out. "
+            "Any other wall uses that same median on its own leading "
+            "toe once that ray is at or under "
+            f"{EAST_L_NEAR_GATE_M:.2f} m. The commit sample is left "
+            "out. An empty window keeps pad 0 and does not borrow an "
+            "east or living pad. "
             "East right-toe samples median "
             f"{EAST_R_LATCH_M:.5f} m (n={len(EAST_R_ERR_M)}). An unknown "
             "toe gets pad 0. Contact "
@@ -1296,6 +1303,18 @@ def _east_l_bout_pad(prior: list[float]) -> tuple[float, bool]:
     if prior:
         return float(statistics.median(prior)), True
     return 0.0, False
+
+
+def _other_near_pad(seen: list[tuple[float, float]]) -> tuple[float, int, bool]:
+    """Same last-K near median for a wall that is not east or living.
+
+    The commit sample is not in seen. An empty window does not invent
+    a pad and does not copy another wall.
+    """
+    prior = _near_k_errs(seen)
+    if not prior:
+        return 0.0, 0, False
+    return float(statistics.median(prior)), len(prior), True
 
 
 def _residual_m(err: float | None, pad: float) -> float | None:
@@ -2236,6 +2255,8 @@ def _run_room(
     east_l_hold = False
     east_l_seen: list[tuple[float, float]] = []
     east_l_pad_n = 0
+    other_near: dict[tuple[str, str], list[tuple[float, float]]] = {}
+    other_near_n = 0
     east_l_min_ray: float | None = None
     east_l_min_t: float | None = None
     east_l_min_heading: float | None = None
@@ -2523,6 +2544,12 @@ def _run_room(
                     residual = _residual_m(err, pad) if defined else None
                 else:
                     pad = _pad_for(true_name, true_gap, side) if same else 0.0
+                    if same and base == "other_wall_close" and side in ("L", "R"):
+                        bout_pad, _bout_n, bout_defined = _other_near_pad(
+                            other_near.get((true_name, side), []),
+                        )
+                        if bout_defined:
+                            pad = bout_pad
                     residual = _residual_m(err, pad) if same else None
                 wall_contacts.append(_wall_hit(
                     float(session.data.time),
@@ -2664,7 +2691,15 @@ def _run_room(
                             residual = _residual_m(err, pad) if pad_defined else None
                         else:
                             pad = _pad_for(true_name, true_gap, side) if same else 0.0
-                            residual = _residual_m(err, pad) if same else None
+                            if same and base == "other_wall_close" and side in ("L", "R"):
+                                bout_pad, bout_n, bout_defined = _other_near_pad(
+                                    other_near.get((true_name, side), []),
+                                )
+                                other_near_n = bout_n
+                                if bout_defined:
+                                    pad = bout_pad
+                                    pad_defined = True
+                            residual = _residual_m(err, pad) if same and pad_defined else None
                         heading = _yaw(session.data, session.bid_body)
                         approach.append(ApproachJson(
                             t=now,
@@ -2781,7 +2816,7 @@ def _run_room(
                                         f"toe_gap={float(gap):.3f} "
                                         f"ray={true_gap} "
                                         f"pad={pad:.5f} gate={gate:.3f} "
-                                        f"online_n={east_l_pad_n} "
+                                        f"online_n={other_near_n if klass == 'other_wall_close' else east_l_pad_n} "
                                         f"rule={EAST_L_LIVE} "
                                         f"residual={residual} "
                                         f"heading={heading:+.3f} "
@@ -2807,6 +2842,17 @@ def _run_room(
                                 and float(true_gap) <= EAST_L_NEAR_GATE_M
                             ):
                                 east_l_seen.append((float(true_gap), float(err)))
+                            if (
+                                EAST_L_LIVE == "near_k"
+                                and base == "other_wall_close"
+                                and side in ("L", "R")
+                                and err is not None
+                                and true_gap is not None
+                                and float(true_gap) <= EAST_L_NEAR_GATE_M
+                            ):
+                                other_near.setdefault((true_name, side), []).append(
+                                    (float(true_gap), float(err)),
+                                )
                         elif same:
                             class_reject_count += 1
                             if (
@@ -3422,7 +3468,25 @@ def main() -> int:
     if _pad_for(EAST_WALL, 1.0, "L") != 0.0:
         raise SystemExit("FAIL: far east ray took a pad")
     if _pad_for("wall_hall_e_0", 0.20, "L") != 0.0:
-        raise SystemExit("FAIL: an unmeasured close wall took a pad")
+        raise SystemExit("FAIL: an unmeasured close wall took a frozen pad")
+    if _pad_for("wall_hall_e_0", 0.20, "R") != 0.0:
+        raise SystemExit("FAIL: east-0 right borrowed a frozen pad")
+    if _pad_for("wall_hall_e_2", 0.20, "L") != 0.0 or _pad_for("wall_hall_w_1", 0.20, "R") != 0.0:
+        raise SystemExit("FAIL: another wall borrowed a frozen pad")
+    other_pad, other_n, other_defined = _other_near_pad([
+        (0.35, 0.09),
+        (0.29, 0.01),
+        (0.28, 0.03),
+        (0.22, 0.05),
+    ])
+    if not other_defined or other_n != 3 or abs(other_pad - 0.03) > 1e-12:
+        raise SystemExit(f"FAIL: other-wall near pad moved to {other_pad} n={other_n}")
+    if _other_near_pad([]) != (0.0, 0, False):
+        raise SystemExit("FAIL: empty other-wall window invented a pad")
+    if _other_near_pad([(0.31, 0.04)]) != (0.0, 0, False):
+        raise SystemExit("FAIL: a ray past the near gate entered the other-wall pad")
+    if abs(_other_near_pad([(0.29, EAST_L_LATCH_M), (0.28, W2_R_LATCH_M)])[0] - statistics.median([EAST_L_LATCH_M, W2_R_LATCH_M])) > 1e-12:
+        raise SystemExit("FAIL: other-wall near pad is not its own median")
     if _pad_for(LIVING_WALL, 0.20, "L") != W2_L_LATCH_M:
         raise SystemExit("FAIL: living left pad is not the left median")
     if len(W2_R_ERR_M) != 49:
@@ -3567,6 +3631,9 @@ def main() -> int:
         "east_l_q75_ray_m": EAST_L_Q75_RAY_M,
         "east_l_q75_err_m": EAST_L_Q75_ERR_M,
         "east_l_pad_rule": EAST_L_LIVE,
+        "other_wall_pad_rule": EAST_L_LIVE,
+        "other_wall_near_gate_m": EAST_L_NEAR_GATE_M,
+        "other_wall_near_k": EAST_L_NEAR_K,
         "east_l_sample_count": len(EAST_L_ERR_M),
         "w2_l_latch_m": W2_L_LATCH_M,
         "w2_l_sample_count": len(W2_L_ERR_M),
