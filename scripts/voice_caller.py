@@ -18,6 +18,36 @@ stand, walk forward, turn left, walk forward, stop. Same times, same
 vel(+0.056, 0) and vel(+0.056, +0.25). It is not a second arc and not
 a room crossing. Half-cap vel(+0.028, yaw) is the finder trim, not this arc.
 
+Locked-kit resume on the same window shape (Prefer FAIL), commanded as
+vel(+0.150, …) on --bus-kit, not by the phrases in this file. Scenario:
+1 s stand, 15 s forward, 12.5 s vel(+0.150, +0.25), then 6 s
+vel(+0.150, 0). Resume Δyaw ≈ +12.41°. Plant md5
+207f3d5e9c6a72e16f7aa0c8d224f75e unchanged. Split: (1) 0–0.68 s
+applied_yaw still slewing +0.25→0 at 0.40 rad/s² after the 100 ms
+resend clears the target → body +6.81° (command integral ~+5.22°);
+(2) 0.68–6.0 s applied_yaw and the step angle are already 0 → leftover
+left curve +5.60° (body yaw rate +0.034→+0.009 rad/s). That is ~half
+ramp-out, ~half steady leftover curve under vel(+0.150, 0) — not
+“turn still commanded.” Soft-pass is off.
+
+The same 6 s vel(+0.150, 0) after an 11 s right turn is −2.2° chained
+and −0.6° from a straight approach. The slew is 0.40 rad/s² both ways.
+On a matching step phase the right ramp is −5.3° of body yaw (command
+integral −4.5°) and the rest of the window curves left +4.7° with
+applied_yaw and the step angle already 0, so they cancel. Straight
+vel(+0.150, 0) already curves +4.2° over 27–33 s and +3.5° over
+28.5–34.5 s. Hip-yaw targets are 0 in that stretch. Stop snaps yaw to 0
+in one tick; after a right turn the heading kick runs about +11° to
+−10° across 0.37 s of step phase. Five cold straight walks net +0.50°
+over 30 s and the cold start still swings the left foot first. After
+a turn the straight resume swings the outside foot, and the pose
+chases the live gait over that double support instead of stepping
+0.342 rad in one tick. Post-left 6 s is +1.4°, post-right stays
+−2.0°. The left turn finishes at +156.4° in 12.5 s; the right turn
+finishes at −148.6° in 11.0 s (7.8° shorter because the hold is
+shorter). Hip roll while yawing stays at or under 2.33 Nm. First right-lead step knees after stand are 1.749 / 1.152 Nm,
+under 2.33. This file still publishes the 0.056 phrases.
+
 Go to the kitchen, the bathroom, anywhere, SLAM, a map, a waypoint, or
 a strafe is refused. Kitchen and bathroom finders are other scripts.
 Tonight is voice → bus motion only.
@@ -63,7 +93,7 @@ YAW_RAD_S = 0.25
 SOFT_VX = 0.028
 RESEND_S = 0.10
 TIMEOUT_S = 0.200
-PLANT_MD5 = "71b2c86d133ebc603f58b99c53e496f3"
+PLANT_MD5 = "207f3d5e9c6a72e16f7aa0c8d224f75e"
 KIT_CAM_POS = (0.050, 0.019, 0.007)
 KIT_CAM_POS_TEXT = "0.050 0.019 0.007"
 

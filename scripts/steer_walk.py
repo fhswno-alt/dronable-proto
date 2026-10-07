@@ -5,9 +5,9 @@ Velocity only. No waypoints, goals, maps, door commands, or joint targets.
 
 Plant (Hardware freeze, plus the approved kit_cam copy):
   mujoco/ainex_hiwonder/ainex_controls_m2_145.xml
-  Foot contact box 145×86 mm (half-size 0.0725 × 0.043 m, friction 1.6).
+  Foot contact box 135×76 mm (half-size 0.0675 × 0.038 m, friction 1.6).
   Toe spheres are visual (contype 0) and do not hold weight.
-  Legs ±2.1 Nm (hip/knee kp 40–45, ankle kp 35). Arms/head ±0.7 Nm.
+  Legs ±2.45 Nm (hip/knee kp 40–45, ankle kp 35). Arms/head ±0.7 Nm.
   kit_cam is a child of head_tilt_link: pos 0.050 0.019 0.007, xyaxes
   0 -1 0 0 0 1, fovy 104.82, plus a zero-mass non-contact site. No door
   geometry. This file does not load gate_f / OptC / door plants. The demo
@@ -38,18 +38,13 @@ Clamps (what we actually apply — not the raw request):
                 while reversing. Realized retreat is about two to three body
                 lengths, then stop. Not a Gate Q pass.
   |yaw_rate|  ≤ YAW_RATE_CAP (0.25 rad/s). While walking forward this scales
-                the outside step longer than the inside step and adds a
-                hip-yaw bias clipped at YAW_HIP_CLIP. Both hip-yaw joints
-                use axis −Z, so that same bias toes the swing foot the
-                other way. Left subtracts TURN_LEFT_BIAS first. Right keeps
-                the full clip, and the swing foot used to land toed against
-                the turn (heading stalled near −16°). The swing leg now
-                keeps TURN_RIGHT_SWING_YAW_SCALE of that command; the stance
-                leg does not. Heading that remains after stop is the measured
-                turn. Once the gait has already been walking for
-                ESTABLISHED_GAIT_S the open-loop left drift has settled, so a
-                left command drops that bias and uses a slightly longer
-                outside step. Cold-start turns finish before that gate.
+                the outside step longer than the inside step. Heading change
+                is the airborne foot: hip yaw stays 0 through stance and
+                double support, then the swing foot toes into the turn and
+                plants. +hip yaw toes the foot right (axis −Z), so a left
+                command uses a negative swing hip yaw. Reverse does not use
+                that toe. vx=0 yaw still does not turn this plant in place.
+                Heading that remains after stop is the measured turn.
                 vx and yaw_rate are applied together; the nav clips walk,
                 arc, walk, then stop. The multi clip chains both claimed
                 holds without stopping between them: forward, left arc
@@ -77,12 +72,21 @@ Clamps (what we actually apply — not the raw request):
 
 Gait: scripts/walk_gait_ainex.py gait_targets. Forward uses a shorter cadence
 than Gate D CSF50 (that basin crawled at ~1 cm/s): T=0.55 s, hip amp 0.24 rad,
-DS=0.1375 s, stance-slip damper 25 N/(m/s) instead of CSF50's 115. CP swing
-and mild stance VIK stay on. Feet, friction, kp, and ±2.1 Nm are unchanged;
-the legs still pin at 2.1 Nm. Balance assist stays off (it locks yaw and
-fakes speed). Residual npz stays off. This is not a clean-walk or Gate E
-PASS. If many legs pin, or up_z approaches a tip, applied velocity is capped
-(not compounded). Tip / collapse latches mode=fault and stands.
+DS=0.1375 s, stance-slip damper 25 N/(m/s) instead of CSF50's 115. Lateral
+COM shift is 0.16 rad (was 0.275) so the torso does not waddle as hard.
+Forward swing adds LOOK_KNEE_LIFT at mid-swing. While yaw is near zero the
+contralateral shoulder is slewed up to LOOK_ARM_SCALE_STRAIGHT; a yaw command
+slews it back to LOOK_ARM_SCALE. Both stay inside the existing ±0.7 Nm clip.
+Reverse keeps the un-lifted knee: a shorter DS or more swing dorsiflex
+dropped the retreat under up_z 0.90. CP swing and mild stance VIK stay on.
+Feet, friction, kp, and ±2.1 Nm are unchanged; the legs still pin at 2.1 Nm.
+Balance assist stays off (it locks yaw and fakes speed). The stance-vx npz
+residual stays off. A forward-only swing residual (hold, contact preload,
+stance push) is in this file and measured off: the swing knee is already on
+the ±2.1 Nm clip, and the variants that stay upright do not raise the median
+sole enough to see. This is not a clean-walk or Gate E PASS.
+If many legs pin, or up_z approaches a tip, applied velocity is capped (not
+compounded). Tip / collapse latches mode=fault and stands.
 
 Honesty: pure yaw (vx=0) still runs a reduced forward CPG because this plant
 has no turn-in-place gait, so some +X creep is expected. Reverse mirrors hip
@@ -107,7 +111,108 @@ Run:
   MUJOCO_GL=osmesa python scripts/steer_walk.py --no-video
   MUJOCO_GL=glfw  python scripts/steer_walk.py --view
   python scripts/steer_walk.py --self-test
+  MUJOCO_GL=osmesa python scripts/steer_walk.py --bus-kit
   MUJOCO_GL=osmesa python scripts/demo_8pm_motion.py
+
+`--bus-kit` drives the locked kit walk (500 ms, 20 ms servo, stance
++0.005 m per foot) through this bus. `--view` uses that same row.
+The forward clamp is the measured kit body speed, 0.150 m/s.
+Yaw stays ±0.25 rad/s and maps into the OP3 step angle.
+
+Nav-left resume heading on that kit row (Prefer FAIL). Scenario: 1 s
+stand, 15 s forward, 12.5 s vel(+0.150, +0.25), then 6 s vel(+0.150, 0).
+Resume Δyaw ≈ +12.41°. Plant md5 207f3d5e9c6a72e16f7aa0c8d224f75e
+unchanged. Split: (1) 0–0.68 s applied_yaw still slewing +0.25→0 at
+0.40 rad/s² after the 100 ms resend clears the target → body +6.81°
+(command integral ~+5.22°); (2) 0.68–6.0 s applied_yaw and the step
+angle are already 0 → leftover left curve +5.60° (body yaw rate
++0.034→+0.009 rad/s). That is ~half ramp-out, ~half steady leftover
+curve under vel(+0.150, 0) — not “turn still commanded.” Soft-pass
+is off.
+
+Left versus right unload on this kit row. The 6 s vel(+0.150, 0) after
+the left turn is +12.3° (+6.7° during the 0.69 s slew, command integral
++5.3°, then +5.6° with applied_yaw and the step angle already 0). After
+an 11 s vel(+0.150, −0.25) the same 6 s is −2.2° chained and −0.6° from
+a straight approach. The slew is 0.40 rad/s² both ways. On a matching
+step phase the right ramp moves the body −5.3° (command integral −4.5°)
+and the rest of the window curves left +4.7°, so they cancel. Straight
+vel(+0.150, 0) already curves +4.2° over 27–33 s and +3.5° over
+28.5–34.5 s. Hip-yaw targets are 0 once the step angle is 0. a_move
+follows the yaw sign and the shift stays +|a|. Steady rates are +0.217
+and −0.233 rad/s. Stop snaps yaw to 0 in one tick; after a right turn
+the heading kick runs about +11° to −10° across 0.37 s of step phase.
+
+Five cold starts of 1 s stand then 30 s vel(+0.150, 0) match (std 0).
+Every one starts in double support at gait time 0 and the first swing
+foot is the left foot: stand resets the step clock, and the cycle
+swings left first. Δyaw is −1.46° at 6 s, +1.39° at 15 s, +0.50° at
+30 s. Mean body yaw rate is +0.0003 rad/s. Two-second slices rock
+about −2.9° to +1.9°. The +3° to +4° windows are that rock, not a
+steady left bias. An extra 0.25 s of stand does not change the lead
+foot. Starting the clock half a period later (probe only) swings the
+right foot first and the 30 s net is −2.55°. Cold stand→forward
+stays left-first: right-first Δyaw at 30 s is −2.60°, and the first
+right-lead step knees are 1.749 / 1.152 Nm, under 2.33. After a yaw
+target returns to 0 the next double support swings the outside foot.
+A one-tick clock park stepped the targets 0.342 rad. The pose now
+chases the live gait over that double support (0.056 s); the largest
+tick is 0.062 rad, the same as the walk's own largest tick. The
+post-left 6 s is +1.4°. The post-right 6 s does not move the clock
+and is −2.0°. The left turn (12.5 s) finishes at +156.4° and the
+right turn (11.0 s) at −148.6°. The right arc is 7.8° shorter because
+the hold is shorter; the right rate is −0.236 rad/s, which is not
+the low one.
+
+Hip roll while yawing used to cross 2.33 Nm on the empty plant
+(l_hip_roll −2.36 Nm at 3.42 s on 1 s stand then 8 s vel(+0.150,
+−0.25)). The stance hip is the left leg during the right swing, and
+damping adds to the spring. While applied yaw is away from 0 the
+hip-roll command uses the 2.33 Nm prediction budget. The same window
+then peaks at −2.27 Nm. Straight walking is not on that budget.
+Forcerange stays ±2.45 Nm. The stop hold limits every leg joint
+(hip yaw, hip roll, hip pitch, knee, ankle pitch, ankle roll) to a
+2.28 Nm prediction, rewritten each physics step from the live q and
+ω. Measured peaks on that hold are 2.280 Nm, 0.05 under 2.33. A
+command written once per tick left hip pitch at 2.309 Nm on one
+phase. The bus is stood on the next 8 ms tick. Body settle, T_stop, is
+0.832 s on the empty-plant straight walk stopped at gait clock
+0.322 s, with 8.2 cm of COM path. The kitchen body-COM settle of the
+toe-gap stop is 0.842 s, and that longer sample is the T_stop in
+d_min. Clear distance stays d_min = v × (T_detect + T_stop) with
+v = 0.150 m/s, compared as toe_gap = eye_range − toe_offset.
+The gate offset is the furthest either toe reaches during the walk,
++0.017 m on the right foot, not the sole at one frame. The compare is
+(eye_range − step_off − buffer) against d_min, with buffer 0.03 m or
+0.05 m. 0.1263 m at T_detect = 0 is the floor, not a safe gap.
+T_detect 0.033 s and 0.100 s are placeholders, not kit measurements.
+The 0.342 ms RGB compute is not kit T_detect. Those six stops have 0
+prop contacts and a stop peak of −2.280 Nm. They fire on an off-axis
+stool leg whose eye range reads about 0.18 m short, so the clearance
+is not a calibrated toe gap. Not kit-safe. A −10° head-down walk is
+not enabled. The Day-1 kitchen stop calls ray_corridor.estimate_hazard
+and stops when the hit is in the foot corridor and toe_gap_m is at or
+under d_min. That gap already includes the 20 mm pad and the step
+offset. No 3–5 cm buffer is added. On this walk the latch is the
+hitting stool leg, not the off-axis one. A stress with the pad frozen
+at 0.035 m stops earlier on that same leg and still leaves the
+off-axis leg outside the corridor. The Day-1 kitchen stop reads
+hazard_finder cues on the kit_cam frame and also stops on too_close.
+On this walk the cue path stops on the hitting leg before too_close,
+earlier than the sim-projection latch because the firing frame reads
+about 1 cm short. Earlier samples on the same walk read long, including
+an in-corridor leg_2 sample of +0.116 m at 5.312 s, while the true gap
+is still above d_min. The shortest-gap latch carries that floor point
+in body x, y, and yaw and drops it outside the corridor. A new cue
+joins a saved point only within 0.035 m after that re-read. That
+radius is frozen before the run. Sim leg names are not a key. On
+this walk it fires at the same time as the cue latch. The report
+name after the stop is the hitting leg. Longer hits of that leg
+stay on their own tracks, and the firing eye stays short. A one-frame
+stress adds 0.10 m to the toe gap of the floor point that first
+reached d_min + 0.05. The latch keeps the shorter gap and the stop
+time does not move. The same chain at T_detect = 0 does not clear the five furnished rooms. Kitchen left and living straight stop on the prop the unstopped walk hits. Entrance straight hits the rug with no stop. col_mat_rug top is z 0.012 m. The left sole hits it at 6.892 s, 11.28 N, in double support, with the lowest sole corner 0.02 mm under that top. No swing-phase sole is over the rug. The leading corner at the hit is 7.4 mm above the top. That 12 mm top is a step-on, not a Day-1 stop. Walking ankles on it stay at or under 1.282 Nm. The left sole spans the edge at 7.016 s, heel on the floor and toe on the rug, 10.4 mm of corner tilt. CoP stays in the sole. min up_z is 0.934. At 7.560 s the bus flags airborne because the floor-only check ignores the rug; up_z is 0.979. On 640 swing ticks the sole minimum is -3.11 mm and the p90 is 17.51 mm. SWING_TOE_MIN_M is -0.003066 on 640 swing ticks before the 7.560 s fault. The toe p90 is 0.025967 and is report-only. The arm line is that minimum minus 0.002, -0.005066. The minimum is under 2 mm, so the gait scuffs: raise the clearance, do not disarm the line. The negative toe is a 3.2 deg toe-down corner still carrying 12.9 N, penetration equal to the corner, while the hip-frame command is 3.0 mm above stand. The 12 mm rug stays a step-on. MID_SWING_TOE_MIN_M is -0.003066 on the middle 20-80% of each swing, with p90 0.024671 report-only. That tick is still a loaded contact. From 7.016 s to 7.560 s both ankle pitches stay 1.37 rad inside ±2.09. The command holds a fixed ±0.262 rad off hip plus knee. Torso pitch goes from -14.2° to -11.4°. A swing-height copy at gm_z_m 0.034 is not the locked kit. Its mid-swing toe min is -0.002859 at 3.128 s with 5.3 N on the floor, and airborne moves from 7.560 s to 7.568 s. An ankle copy adds 0.088656 rad of toe-up on a split sole and flags airborne at 7.512 s, with the mid-swing toe still -0.003066. Walking ankles stay under 2.33 Nm and CoP stays in the sole. Both copies Prefer FAIL. Locked gm_z_m stays 0.020. The rug step is a flat-foot fight: the ankle holds the hip-plus-knee offset and does not take the 4.4 deg tilt, and that pitches the body. The swing toe at 3.384 s is the right foot. Over 3.344-3.536 s hip pitch peaks at +1.331 Nm and the knee at +1.582 Nm, under 2.33 and under 2.45. The commanded toe at that tick is -0.003205 m and the actual toe is -0.003066 m, 0.000139 m above the command. The command is on the floor, so the scuff is trajectory shape. That -0.003205 m is the live pelvis: the same target on the stand pelvis is +0.007686 m. The gap is -0.010890 m. Pelvis drop is -0.001742 m. The body-frame offset to the leading corner is +0.109801 m forward, -0.098448 m lateral, and -0.181185 m down. The live world horizontal offset is 0.097288 m, with 0.050028 m of it forward. Pitch times that forward offset is -0.001865 m, and pitch times the horizontal offset is -0.003627 m. The exact forward-axis term is -0.003937 m. The roll piece of the same rotation is -0.007631 m. droll times the -0.098448 m lateral offset is -0.007986 m. After drop, that pitch piece, and that roll piece, the residual is +0.002419 m, the body-up axis, and the four terms add to -0.010890 m. Over 3.344-3.536 s the left hip roll peaks at -2.121 Nm and the left ankle roll at -1.007 Nm, both under 2.33 and under 2.45. The 0.081 rad pelvis roll is the walk pose, not an HX-35H limit. A stance-hip offset of -0.0566 rad on the left and +0.0566 rad on the right, not the 1.29/40 rad term, leaves the mid-swing toe at -0.003022 m, puts the right hip on +2.45 Nm at 1.272 s, and flags airborne at 7.560 s. Pelvis roll at 3.384 s is 0.0475 rad and the swing peak is -0.1134 rad. Peak |cmd-q| stays 0.0608 rad. Adding an 8 mm early Bezier bump leaves the toe at -0.002143 m and the right hip on +2.45 Nm, with airborne at 7.552 s. Prefer FAIL. A position servo keeps |cmd-q| near tau/kp, about 0.05 rad at 2 Nm and hip-roll kp 40. That gap is not a fail. The score is dq_unoffset, actual hip roll minus the un-offset kinematic target, and the pelvis roll. The constant +/-0.0566 rad offset steps on in one tick. A ramped copy adds that offset only on the current stance hip and fades it across double support. The 1.29 Nm term stays off. At 0.25x the toe is -0.003002 m at 3.128 s on 11.2 N, airborne is at 7.560 s, and every leg stays under 2.33 Nm. The four hip peaks are left roll -1.988 Nm, right roll +2.055 Nm, left pitch +1.667 Nm, and right pitch -1.682 Nm. Pelvis roll at 3.384 s is 0.0686 rad (window peak +0.0842 rad at 3.344 s). dq_unoffset at 3.384 s is -0.0476 rad left and -0.0506 rad right. At 0.50x the toe is -0.002668 m, the knee is +2.395 Nm at 7.426 s, airborne is at 7.568 s, pelvis roll at 3.384 s is 0.0576 rad, and dq_unoffset is -0.0530 / -0.0510 rad. The four hips are -2.134, +2.197, +1.573, and -1.625 Nm. At 1.0x the toe is -0.001981 m, the right knee is on +2.45 Nm at 7.424 s, the left hip roll is -2.339 Nm, airborne is at 7.824 s, pelvis roll at 3.384 s is 0.0347 rad, and dq_unoffset is -0.0550 / -0.0524 rad. The other hips are +2.305, +1.601, and +1.523 Nm. A Bezier alone at 8 mm leaves the toe at -0.001785 m and the knee at +2.101 Nm, airborne at 7.560 s, hips -2.052 / +2.081 / +1.321 / -1.301 Nm. At 10 mm the toe is -0.001293 m, the knee is +2.221 Nm, airborne is at 7.560 s, and the hips are -2.051 / +2.077 / +1.336 / -1.291 Nm. The 0.25x ramp plus that 10 mm Bezier leaves the toe at -0.001352 m, the knee at +2.433 Nm, airborne at 7.560 s, pelvis roll at 3.384 s at 0.0457 rad, and dq_unoffset at -0.0426 / -0.0504 rad. The four hips are -1.986, +2.014, +1.316, and -1.286 Nm. min up_z stays 0.934. None of those copies clears. The flat-floor scuff is a separate bar from the rug: mid-swing toe above +0.002 m, and every leg under 2.33 Nm. Airborne at 7.560 s is not that bar. Shifting an 8-12 mm bump peak from 20% of single support to 25%, 30%, or 35% lowers the toe at fraction 0.208. The best same-walk copy is a 12 mm bump that still peaks at 20%: toe -0.000807 m at 2.872 s, command at that tick +0.008407 m, right knee +2.316 Nm, and the other seven of hip roll, hip pitch, knee, and ankle pitch stay under 2.33 Nm. Pelvis roll at 3.384 s is 0.0314 rad. Prefer FAIL. The 0.25x ramp on that bump puts the right knee on +2.45 Nm. A 30 ms earlier start of the same 12 mm bump leaves the toe at +0.000508 m and ends at x 0.820 m instead of 0.942 m. On the rug, walking the split-sole ankle toward the 4.4 deg step writes the left ankle to +0.4149 rad at 7.016 s (q +0.4815, sole tilt +0.1533 rad, floor 15.5 N, rug 15.6 N). The right foot is already off the floor. The left knee reaches -2.45 Nm at 7.176 s. The tip is at 7.528 s, margin -1.016, min up_z -1. Prefer FAIL. Neither track clears. The 9.21 mm between the 12 mm bump command (+8.41 mm) and the scored toe (-0.81 mm) at 2.872 s is not a pelvis term: drop, pitch, and roll of that gap are 0. The contact geom is 0.32 mm behind qpos. The other 8.89 mm is the swing leg, and stepping hip roll then hip pitch from q to the goal accounts for +6.24 mm and +6.29 mm. Holding those errors takes 4.01 Nm and 4.37 Nm, over 2.33. The knee error raises the toe relative to the goal. A taller bump is a dead end at these kp values. The rug now counts as ground for the airborne flag, and the support margin uses the body COM. The floor-only check still flags airborne at 7.560 s and stops at x 0.920 m. With the rug counted, the baseline does not flag, up_z at 7.560 s is 0.979, the margin is +1.0 mm, and x finishes at 1.011 m. The 12 mm swing finishes at up_z 0.991, margin -1.2 mm, x 1.028 m. The 0.25x hip ramp finishes at up_z 0.981, margin -2.0 mm, x 1.015 m. Neither tips. At 7.016 s the rug face crosses the left sole at heel-to-toe fraction 0.915, toe-side lever 11.5 mm. The measured sole is +0.1533 rad. The stance ankle adds gain times that live tilt, rate-capped, and only on a foot that has floor and rug contact. At 0.012 rad/tick the 0.25x and 0.50x copies are the same +0.012 rad first write, up_z 0.975, margin +1.8 mm, no leg at 2.33 Nm. At a 0.050 rad cap the first writes are +0.038 rad and +0.050 rad, and up_z is 0.968 and 0.962. No tip. The toe stays -3.07 mm. Not kit-safe. Not go-anywhere. At the 12 mm tick the hip-roll and hip-pitch asks are 4.01 Nm and 4.37 Nm at sim kp 40/45, while actuator_force is -0.027 Nm and +0.366 Nm, inside +/-2.45 Nm. Prefer FAIL at sim kp 40/45. Slower 6-10 mm rises leave the actual toe at -2.28 to -1.29 mm. A 10 mm early hold reaches -1.06 mm and rails the right knee at +2.45 Nm. At 7.016 s the left heel corner is -1.2 mm. Edge fraction 0.915 is atan(12/123.5) = 5.55 deg, and the contact clouds are 4.96 deg. The contact-tilt ankle on the 12 mm bump leaves the toe at -0.81 mm, with up_z 0.988 or 0.972 and no tip. At 2.872 s, right hip-roll ctrl is 0.132 rad against an IK target of 0.182 rad (the 0.060 rad write_clipped band; hip roll is not in the move approach) and right hip-pitch ctrl is 0.800 rad against 0.829 rad (gm_move_s 0.020 s, not the 0.150 s Bezier move). Applied force is +0.030 Nm and +0.595 Nm, inside ±2.45 Nm. Compiled kv is 1.703 and 1.810, and (kp*(ctrl-q) - force) / kv equals qdot. The 8/12/20/30 ms copies shift foot z. Passing IK straight into ctrl raises the mid-swing toe to +2.510 mm at x 1.028 m and rails both knees at ±2.45 Nm. Hips only leaves the toe at +0.305 mm and rails both hip rolls. Prefer FAIL. The band and the 20 ms approach stay. A sim-only swing-hip clip keeps kp*(ctrl-q) - kv*qdot inside ±2.33 Nm using the compiled kv and the live qdot. At 2.872 s the right hip roll sits on the IK with predicted and actuator force -0.219 Nm; the hip pitch gap is 0.038 rad. The toe is -1.002 mm and the right knee hits +2.45 Nm, so the 20 ms approach stays. The 0.98 band is not raised. Taking hip pitch out of the 20 ms approach, clip kept and period 0.500 s, puts hip-pitch ctrl on the IK at 2.872 s with predicted force +0.694 Nm. The mid-swing toe is -0.247 mm. Every leg stays under 2.33 Nm before 7.0 s. Sole roll is +0.01317 rad and the inside edge is 0.50 mm high. The same clip on swing ankle roll, kv 1.1876, leaves the toe at -2.066 mm. Prefer FAIL. The scored toe is the contact box, bottom -26 mm, front 97.5 mm, not the viz sphere at -24 mm and 87 mm. At 2.872 s the low corner is front-outside. Sole pitch is +0.01382 rad toe-down. The IK sole target is level in the pelvis frame. World-leveling the swing sole rails before 7.0 s. A 0.020 rad sine toe-up on the -0.247 mm baseline leaves the mid-swing toe at -0.013 mm under 2.33 Nm before 7.0 s. Prefer FAIL. Track 1 parks on the kit kp/kv bench. On that copy at 2.872 s the contact-box center is +1.215 mm and the low corner is front-outside at +0.025 mm. The commanded add is -0.01346 rad, sine 0.673 of 0.020 at gait fraction 0.235, not at cycle fraction 0.208. At 6.968 s the low corner is still front-outside, -0.013 mm, box center +1.251 mm, sole pitch +0.00993 rad toe-down, sole roll +0.01565 rad. The 24 step minima before 7.0 s are all at cycle fraction 0.208 and the lowest is that -0.013 mm. A 0.030 rad clear was not run. A swing-hip lead of compiled kv/kp, 42.57 ms on hip roll and 40.23 ms on hip pitch, on that toe-up copy leaves the contact-box toe at +1.696 mm and puts both hip rolls on ±2.450 Nm before 7.0 s. The write-time clip shortens 249 of 1400 swing-hip targets. At 2.872 s hip-pitch ctrl is 0.032 rad ahead of the IK and hip-roll ctrl is behind it. Prefer FAIL. Period stays 0.500 s. The 400 ms kit period was not run. The 0.600 s period on that same toe-up copy, with no hip lead, swing 0.240 s, holds 2.33 Nm and leaves the before-7.0 contact-box toe at +1.411 mm (1.088 s, fraction 0.207, left, front-outside; lowest heel-outside +0.640 mm). Peak |actuator_force| before 7.0 s is the right hip pitch at +1.994 Nm. Peak |IK-q| is the left hip roll at 1.648 s (IK -0.160671, ctrl -0.127677, q -0.029523, force -1.727 Nm). x at 7.0 s is 0.676 m. The 0.650 s period, swing 0.260 s, clears the before-7.0 bar at +3.880 mm (1.104 s, fraction 0.226, left, front-outside; lowest heel-outside +2.682 mm; box center +4.444 mm). Peak force before 7.0 s is the same +1.994 Nm hip pitch. Peak |IK-q| is the right hip roll at 1.368 s (IK 0.162851, ctrl 0.140966, q 0.039680, force +1.689 Nm). The mid-swing toe after 7.0 s is -0.619 mm at 7.536 s. x at 7.0 s is 0.621 m. Adding the hip lead on the 0.650 s period clears the before-7.0 bar at +4.328 mm (same tick and corner; lowest heel-outside +3.198 mm). Peak force stays +1.994 Nm. Peak |IK-q| is the right hip roll at 2.016 s (IK 0.162851, ctrl 0.137449, q 0.036637, force +1.672 Nm). The write clip keeps that roll ctrl behind the current IK, 149 of 1416 writes. The after-7.0 toe is -0.987 mm at 7.536 s. x at 7.0 s is 0.620 m. No fault. min up_z 0.934. The predicted clip is sim-only. The locked period stays 0.500 s. Not kit-safe. Not go-anywhere. Pitch-only hip lead at period 0.500 s advances hip pitch 40.23 ms and leaves hip roll at 0.00 ms. Ankle roll is not led. Foot z is not shifted. The worst 20–80% contact-box toe on the whole bout is +0.756 mm at 3.128 s, fraction 0.208, left, front-outside, which is also the lowest corner. At that tick left hip pitch ctrl equals the future IK, -0.858631 rad, 0.042 rad ahead of IK -0.816631 rad. Right knee peaks at +2.363 Nm at 7.432 s, over 2.33 Nm and under the 2.45 Nm plant rail. Hip pitch peaks are +2.040 Nm and +2.035 Nm, left knee -2.007 Nm, ankle pitch -1.579 Nm and -1.509 Nm, all under 2.33 Nm. Hip rolls are -2.128 Nm and +2.121 Nm, under 2.33 Nm. No fault. min up_z 0.934. Prefer FAIL. The half-roll lead was not run. The extra foot-z lift was not run. Period stays 0.500 s. Not kit-safe. Not go-anywhere. At the same 7.432 s tick the no-lead knees are -1.348 Nm and +1.015 Nm, both under 2.33 Nm. Contact geoms are floor, rug normal is 0.00 N, and both leading corners sit above the 12 mm rug top while two corners of each foot are inside the rug box. The 28 mid-swings split 23 flat / 5 rug with no lead, flat worst +0.025 mm at 2.872 s, and 24 flat / 4 rug with the 40.23 ms lead, flat worst +0.756 mm at 3.128 s. Rug clearance on that lead is +2.536 mm at 7.992 s. The -0.013 mm whole-walk minimum at 6.968 s is on a rug-tagged swing; that tick itself is floor. Shorter pitch leads, roll lead 0, all hold the flat pitch chain under 2.33 Nm: 35 ms flat toe +0.745 mm, 30 ms +0.750 mm, 20 ms +0.764 mm, 10 ms +0.662 mm. The 7.432 s right knee is +2.354 / +2.349 / +2.263 / +2.178 Nm on those four. The 20 ms copy is the best flat toe and is still under +2 mm. Prefer FAIL on the flat toe. Contact geoms at 7.432 s are floor, and the right knee there is +2.363 Nm, so that sample retires the 40.23 ms lead. The base is the 20 ms pitch lead. On that copy the worst flat mid-swing box centre is +1.551 mm at 2.872 s, right, toe +0.764 mm, sole pitch +0.00600 rad. Foot-z minimum is +0.449 mm. The sweep is +0.449 / +0.849 / +1.249 / +1.649 / +2.049 mm on the swing foot, toe-up held at 0.020 rad. Flat toes are +0.957, +1.191, +1.280, +1.432, and +1.582 mm, all at 2.872 s, right. The z add matches the request. At +2.049 mm the world centre rises +0.650 mm, the body drops 0.472 mm, and 0.927 mm is sag. Flat hip pitch, knee, and ankle pitch stay under 2.33 Nm. Knee and ankle pitch were checked on 1025 ticks. The overs on the three larger adds are floor contact, up to +2.450 Nm at 7.424-7.432 s, so the foot-z chase stops at +0.849 mm. Prefer FAIL. The flat toe stays under +2 mm. Pitch lead stays 20 ms. Period stays 0.500 s. Stance-knee sag cancel adds (qfrc_bias - qfrc_constraint) / kp 45 from the previous tick and clamps predicted force at +/-2.33 Nm. With no extra foot-z the flat toe falls to +0.099 mm at 2.616 s, left, centre +0.833 mm, sole pitch +0.00309 rad. Floor-contact hip pitch, knee, and ankle pitch stay under 2.33 Nm on 1025 ticks. The formula's knee drop peaks at -0.962 mm, beside the 0.927 mm sag share. At that toe tick the formula is -0.393 mm and predicted force is on +2.330 Nm. The +0.849 mm add on the same cancel leaves the flat toe at +0.440 mm. Prefer FAIL. Pitch lead stays 20 ms. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` is unchanged. Not kit-safe. Not go-anywhere. Lift-off timing, sag cancel off. The 20-80% window stays. Every swing's minimum in that window is cycle fraction 0.208. A, toe-up full by 15% and held through 80%, flat toe +1.128 mm at 3.128 s, left, floor chain under 2.33 Nm. B, 12 mm smoothstep full by 10% and held through 40%, flat toe +0.673 mm at 2.872 s, right, under the +0.764 mm base. C, both, +1.026 mm at 2.872 s. D, swing knee 8 ms and 16 ms, toes +0.624 mm and +0.680 mm, right knee +2.450 Nm and +2.449 Nm at 7.432 s, contact floor. E, 8 mm rise on the clip and the 20 ms lead, flat toe -0.710 mm, floor knees under 2.33 Nm (the earlier -1.60 mm / +2.45 Nm was before this clip and lead). The 10 mm rise is +0.092 mm and the right knee is +2.434 Nm at 7.432 s, contact floor. Prefer FAIL. Best under-bar flat toe is +1.128 mm. Plant md5 unchanged. Not kit-safe. Not go-anywhere. Earlier toe-up, sag cancel off, 20-80% window unchanged. A10 0.020 rad full by 10% is +1.199 mm, A05 full by 5% is +1.311 mm, A15+025 0.025 rad full by 15% is +1.239 mm, A10+025 0.025 rad full by 10% is +1.385 mm, all at 3.128 s, left, floor pitch chain under 2.33 Nm, every flat minimum still fraction 0.208. On A10+025 the 0.167 tick is still loaded (toe -0.547 mm, normal 0.807 N, dist -0.547 mm) and the scored 0.208 tick is unloaded (toe +1.385 mm, normal 0 N, dist none). y_swap sampled 8 ms and 16 ms earlier on A10+025, amplitude 0.020 m, leaves the flat toe at -0.183 mm and -0.068 mm and the right knee at +2.443 Nm and +2.439 Nm at 7.424 s, contact floor. Floor hip rolls stay under 2.33 Nm. The shift lat stays the same on both ankle rolls. Prefer FAIL. Best under-bar flat toe is +1.385 mm. Plant md5 unchanged. Not kit-safe. Not go-anywhere. Sole-roll level on that A10+025 copy, at fraction 0.208 on the worst flat swing (left, 3.128 s): sole roll -0.00740 rad, box centre +1.865 mm, front-outside +1.385 mm, centre minus front-outside +0.480 mm. That corner is the scored corner and the lowest. Front-inside +1.947 mm, heel-outside +1.784 mm, heel-inside +2.346 mm. The inside edge is 0.281 mm high. The right foot's worst flat tick is 2.872 s, sole roll +0.00644 rad, centre minus front-outside +0.354 mm. About 0.6 mm means 0.50-0.70 mm, so the swing ankle-roll trim was not run. Floor knees -1.965 Nm and +2.192 Nm. Floor ankle rolls -1.780 Nm and -1.596 Nm. All under 2.33 Nm. A10+030 was not run. y_swap was not re-run. Less-crouch was not run. Not kit-safe. Not go-anywhere. Combined level trim of leftover sole roll and sole pitch on A10+025, swing ankle only, each add capped at +/-0.025 rad. Not a world-level sole. Roll adds match at +0.00662 rad and -0.00662 rad. Pitch stays per foot, +0.00210 rad and -0.00069 rad. No sign flip. The qpos replay centre rises +0.115 mm on the left (expect +0.136 mm) and +0.100 mm on the right after the roll match (expect +0.108 mm). That replay is not the walking toe. Walking centre rise is +0.231 mm left and +0.140 mm right. Level trim alone: flat worst +1.830 mm at 2.872 s, right, centre +2.001 mm, sole roll +0.00185 rad, sole pitch +0.00150 rad, front-outside +1.830 mm, centre minus corner +0.171 mm. Floor knees -1.973 Nm and +2.103 Nm. Ankle pitch -1.271 Nm (contact none) and -1.477 Nm (floor). Ankle rolls -1.780 Nm and -1.596 Nm. All under 2.33 Nm. The 0.170 mm shortfall was the foot-z command. That copy's flat worst is +1.859 mm at 2.872 s, right, 0.141 mm short, centre +2.036 mm, front-outside +1.859 mm. Floor knees -1.970 Nm and +2.093 Nm. Ankle pitch -1.273 Nm (none) and -1.475 Nm (floor). Ankle rolls unchanged. The floor knee stayed under 2.33 Nm, so less-crouch was not started. Prefer FAIL. +2 mm did not clear. Not kit-safe. Not go-anywhere. Trim lead advances only the leftover sole add, by the compiled ankle lag: roll kv 1.1876 / kp 35 is 33.93 ms, pitch kv 1.1980 / kp 35 is 34.23 ms. The gate opens at gait fraction 0.235000, cycle fraction 0.208333. Trim weight is 0 before that, and the schedule is 0 by 0.92 of swing. No sign flip. Roll adds +0.00641 rad and -0.00641 rad. Pitch +0.00217 rad and -0.00040 rad. At 0.208 the worst flat tick is left at 3.128 s: sole roll -0.00703847 rad, sole pitch +0.00301729 rad, centre +1.923767 mm, front-outside +1.452646 mm, centre minus corner +0.471120 mm, front-inside +1.987563 mm, heel-outside +1.859970 mm, heel-inside +2.394887 mm. Flat toe +1.452646 mm. Raw gap to +2 mm is 0.547354 mm. Floored hundredth 0.54 mm. The sole is not under 0.0005 rad. Floor knees -1.9641 Nm and +2.1725 Nm. Ankle pitch +1.3133 Nm and -1.5540 Nm. Ankle rolls -1.7796 Nm and -1.5959 Nm. All under 2.33 Nm. Foot-z then steps 0.100 mm from 0.270 mm. The 1.270 mm step stops on the right knee +2.4300 Nm at 7.432 s, contact floor. Flat toe +1.884446 mm, raw gap 0.115554 mm, floored hundredth 0.11 mm. The last step under 2.33 Nm is 1.170 mm, toe +1.853298 mm, raw gap 0.146702 mm, floored hundredth 0.14 mm. Both stalled short of +2 mm. Less-crouch is next. init_z_offset was not invented. Less-crouch was not run. Prefer FAIL. Not kit-safe. Not go-anywhere. The gated trim lead stays off. Restored constant level trim plus foot-z 1.170 mm on A10+025: roll +0.00662 / -0.00662 rad, pitch +0.00210 / -0.00069 rad. Both ankle-roll axes are +1 0 0, ctrlrange +/-2.090 rad. Worst flat tick at 0.208333 is left at 3.128 s: sole roll -0.00167885 rad, sole pitch +0.00151348 rad, centre +2.387138 mm, front-outside +2.221182 mm (scored and lowest, centre minus corner +0.165956 mm), front-inside +2.348775 mm (+0.038364 mm), heel-outside +2.425502 mm (-0.038364 mm), heel-inside +2.553094 mm (-0.165956 mm). Flat toe +2.221182 mm. Raw gap 2 - toe is -0.221182 mm. The scorer floors that signed gap to -0.23. The surplus to a hundredth, without raising the toe, is 0.22 mm. The MFG +2.15 mm figure is a check (measured minus guess +0.071182 mm). Tilt check 0.165956 mm equals that centre-minus-front-outside drop. Right foot at 2.872 s: roll +0.00037182 rad, pitch +0.00031265 rad, centre +2.417606 mm, corners +2.382373 / +2.410631 / +2.424581 / +2.452839 mm. Floor knees -2.0549 Nm and +2.1404 Nm. Floor+rug left knee -2.1106 Nm. Ankle pitch -1.2889 Nm (contact none) and -1.5574 Nm (floor); floor+rug left ankle pitch +1.3146 Nm. Ankle rolls -1.7796 Nm and -1.5959 Nm. All under 2.33 Nm. The flat toe clears +2 mm. Derivative trim lead was not run. Less-crouch was not opened. Not kit-safe. Not go-anywhere. Steer whole-walk on that same stack, trim lead off, less-crouch closed. Stand, straight through 8.2 s, stop, yaw left at +0.25 rad/s, stop, yaw right at -0.25 rad/s, stop, end 21.6 s. The left segment's applied yaw reaches +0.25000 rad/s. The right segment's applied yaw reaches -0.25000 rad/s. The yaw_seen line stores the absolute peak, so both print +0.25000. No bus fault. The whole-walk 20-80% left toe is +1.608609 mm at 17.728 s, cycle fraction 0.208333, yaw_right, yaw -0.25000, phase swing, contact none. Scored corner and lowest corner are front-outside. Centre +2.102492 mm. Front-outside +1.608609 mm, centre minus corner +0.493883 mm. Front-inside +2.106890 mm, centre minus corner -0.004398 mm. Heel-outside +2.098093 mm, centre minus corner +0.004398 mm. Heel-inside +2.596375 mm, centre minus corner -0.493883 mm. Raw gap 2 - toe is +0.391391 mm. The scorer floors that gap to 0.39 mm. Lift-off of that swing is 17.688 s, fraction 0.000000, toe -0.754636 mm, contact floor, geoms floor. Scored front-outside, lowest front-inside. Centre -1.252968 mm. Front-outside -0.754636 mm, centre minus corner -0.498332 mm. Front-inside -1.917529 mm, centre minus corner +0.664561 mm. Heel-outside -0.588408 mm, centre minus corner -0.664561 mm. Heel-inside -1.751301 mm, centre minus corner +0.498332 mm. The whole-walk 20-80% right toe is -1.162939 mm at 14.328 s, fraction 0.250000, yaw_left, yaw +0.25000, phase swing, contact floor, geoms floor. Scored corner and lowest corner are front-inside. Centre -0.708646 mm. Front-outside -1.158787 mm, centre minus corner +0.450140 mm. Front-inside -1.162939 mm, centre minus corner +0.454293 mm. Heel-outside -0.254354 mm, centre minus corner -0.454293 mm. Heel-inside -0.258506 mm, centre minus corner -0.450140 mm. Raw gap 2 - toe is +3.162939 mm. Floored hundredth 3.16 mm. Lift-off of that swing is 14.304 s, fraction 0.000000, toe -0.854463 mm, contact floor. Scored front-inside, lowest front-outside. Centre -1.247810 mm. Front-outside -1.886326 mm, centre minus corner +0.638516 mm. Front-inside -0.854463 mm, centre minus corner -0.393347 mm. Heel-outside -1.641157 mm, centre minus corner +0.393347 mm. Heel-inside -0.609294 mm, centre minus corner -0.638516 mm. Rug clearance at the toe-min tick is +1.767310 mm at 11.784 s, right, fraction 0.208333, yaw_left, yaw +0.25000. Absolute toe +13.767310 mm. Surface rug, contact none, on_rug 1. Scored and lowest front-outside. Centre +14.178412 mm. Front-outside +13.767310 mm, centre minus corner +0.411102 mm. Front-inside +14.236270 mm, centre minus corner -0.057858 mm. Heel-outside +14.120554 mm, centre minus corner +0.057858 mm. Heel-inside +14.589514 mm, centre minus corner -0.411102 mm. Raw gap 2 - clearance is +0.232690 mm. Floored hundredth 0.23 mm. Lift-off of that rug swing is 11.744 s, toe +11.160744 mm, clearance -0.839256 mm, contact rug, geoms col_mat_rug. Scored front-outside, lowest front-inside. Centre +10.754460 mm. Front-outside +11.160744 mm, centre minus corner -0.406284 mm. Front-inside +10.064808 mm, centre minus corner +0.689652 mm. Heel-outside +11.444112 mm, centre minus corner -0.689652 mm. Heel-inside +10.348176 mm, centre minus corner +0.406284 mm. Floor or floor+rug peaks: left knee +2.2800 Nm at 20.608 s, contact floor, stop, raw headroom 0.050000 Nm, hundredths 0.05. Right knee +2.3375 Nm at 12.952 s, contact floor, yaw_left, raw headroom -0.007515 Nm, hundredths -0.01. Left ankle pitch -2.1722 Nm at 12.504 s, floor+rug, yaw_left, raw headroom 0.157840 Nm, hundredths 0.15. Right ankle pitch +2.2013 Nm at 12.560 s, floor, yaw_left, raw headroom 0.128670 Nm, hundredths 0.12. Left ankle roll -2.2800 Nm at 20.608 s, floor, stop, raw headroom 0.050000 Nm, hundredths 0.05. Right ankle roll +1.9738 Nm at 12.968 s, floor, yaw_left, raw headroom 0.356178 Nm, hundredths 0.35. Left hip roll -2.2364 Nm at 14.336 s, floor, yaw_left, raw headroom 0.093640 Nm, hundredths 0.09. Right hip roll +2.2430 Nm at 17.720 s, floor, yaw_right, raw headroom 0.087013 Nm, hundredths 0.08. The 7.432 s right knee is still +2.1404 Nm. It is not the floor peak on this bout. Unclamped turning asks, kp*(q_des-q)-kv*omega, before the yaw budget: right hip roll +4.2372 Nm at 15.872 s, q_des +0.14078 rad, yaw -0.11200 rad/s, phase shift, force_limited, limit 2.33 Nm, measured +1.7631 Nm, contact floor, raw headroom -1.907176 Nm, hundredths -1.91. Right knee -6.3249 Nm at 13.296 s, q_des -1.35402 rad, yaw +0.25000, phase swing, clipped, no force limit, measured -1.8075 Nm, contact floor, raw headroom -3.994887 Nm, hundredths -4.00. Left hip roll -4.3120 Nm at 16.128 s, q_des -0.14244 rad, yaw -0.21440, phase shift, force_limited, limit 2.33 Nm, measured -1.7914 Nm, contact floor, raw headroom -1.982033 Nm, hundredths -1.99. Left knee +6.2326 Nm at 13.040 s, q_des +1.35408 rad, yaw +0.25000, phase swing, clipped, measured +1.7398 Nm, contact rug, raw headroom -3.902578 Nm, hundredths -3.91. Later-stop unclamped asks, limit 2.28 Nm: left hip roll +1.2543 Nm at 8.200 s, measured -0.6646 Nm, contact rug, raw headroom 1.075736 Nm, hundredths 1.07. Right hip roll -5.6472 Nm at 20.600 s, measured -0.1155 Nm, contact none, raw headroom -3.317244 Nm, hundredths -3.32. Left knee -4.7885 Nm at 8.200 s, measured -1.4143 Nm, contact rug, raw headroom -2.458509 Nm, hundredths -2.46. Right knee +13.0915 Nm at 14.400 s, measured +0.2788 Nm, contact none, raw headroom -10.761549 Nm, hundredths -10.77. The measured 2.2800 Nm peaks are that stop clamp. Prefer FAIL. Both whole-walk toes are under +2 mm, the rug clearance is under +2 mm, the floor right knee is over 2.33 Nm, and the unclamped hip-roll and knee asks on the turns and on the later stops are over 2.33 Nm. Trim lead stayed off. Less-crouch was not opened. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` is unchanged. Not kit-safe. Not go-anywhere. Command ramp on that same stack. Soft-pass stays off. Trim lead stays off. Less-crouch stays closed. Foot-z stays 1.170 mm. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` is unchanged. On the snap bout the right toe at 14.328 s is -1.162939 mm, fraction 0.250000, yaw +0.25000. Centre -0.708646 mm. Sole roll -0.00005 rad. Sole pitch +0.00670 rad, toe-down. Front-outside -1.158787 mm, centre minus corner +0.450140 mm. Front-inside -1.162939 mm, +0.454293 mm, scored and lowest. Heel-outside -0.254354 mm. Heel-inside -0.258506 mm. The front edge is the low edge. Roll is about zero, so the tilt is pitch, and the centre is already under the floor. Right knee at 12.952 s, contact floor, yaw_left: actuator force +2.3375 Nm, joint damping force -0.1003 Nm (plant damping 0.0800 times omega +1.2534 rad/s, sign -damping*omega), sum +2.2372 Nm, qfrc_passive -0.0996 Nm. The actuator is over 2.33 Nm, raw headroom -0.007515 Nm, hundredths -0.01. The sum is under 2.33 Nm. The actuator still counts. This tick is not a 2.280 Nm clamp plus a 0.056 Nm damper. Left hip roll at 14.336 s is actuator -2.2364 Nm and damping -0.1084 Nm, sum -2.3448 Nm. Right hip roll at 17.720 s is actuator +2.2430 Nm and damping +0.1063 Nm, sum +2.3493 Nm. Those sums are over 2.33 Nm. Unclamped snap peaks split into kp*(q_des-q) and -kv*omega. Turn right hip roll +4.2372 Nm at 15.872 s, kp +5.3271, kv -1.0899, kp dominates. Turn right knee -6.3249 Nm at 13.296 s, kp -8.4632, kv +2.1383, kp dominates. Turn left hip roll -4.3120 Nm at 16.128 s, kp -5.3265, kv +1.0145, kp dominates. Turn left knee +6.2326 Nm at 13.040 s, kp +9.3436, kv -3.1110, kp dominates. Stop right knee +13.0915 Nm at 14.400 s, kp +13.1089, kv -0.0174, kp dominates. The overs are the position term. The ramp latches step length and yaw at the OP3 movement boundaries, gait time 0, phase1 0.125 s, and phase3 0.375 s, and spreads the change over 2 periods. From the anchor to frac 1.000 is 1.024 s, 2.05 periods of 0.500 s. The straight stop goes from vx +0.1500 at 8.296 s to vx 0 at 9.320 s. Yaw left goes from 0 at 10.728 s to +0.25000 at 11.752 s. Yaw right goes from 0 at 19.280 s to -0.25000 at 20.304 s. Settle holds that zero step for 0.500 s. hold_stand is not the stop. Vendor gait_manager, as copied in gait_manager_traj.py, publishes rot 0 on the forward demo and no yaw column in the dsp table or the speed gears. That phase-boundary update is the published smoothing. No rad/s cap under +/-0.25 is in that set, so the lower caps are 0.20 and then 0.15. At +/-0.25 the ramp still Prefer FAILs. It tips at 21.096 s, margin -0.083. Unclamped asks, all kp-dominant and all over 2.33 Nm: turn left hip roll -5.5251 Nm at 20.192 s, yaw -0.22400, kp -6.5207, kv +0.9956; turn right knee +12.6156 Nm at 21.096 s on the fault stand write, kp +13.0298; stop left knee +6.1409 Nm at 8.224 s, yaw 0, kp +8.5374, kv -2.3966; stop right knee -5.9742 Nm at 8.480 s, kp -8.1355. Measured floor right hip roll +2.3723 Nm at 17.016 s, contact floor, stop, raw headroom -0.042280 Nm, hundredths -0.05. Whole-walk left toe +1.074939 mm at 17.464 s, fraction 0.208333, centre +2.266390 mm, sole roll -0.00903 rad, sole pitch +0.01257 rad, scored front-inside. Corners +1.761212 / +1.074939 / +3.457840 / +2.771568 mm. Raw gap +0.925061 mm, floored hundredth 0.92 mm. Right toe -1.229813 mm at 20.000 s, centre +0.477040 mm, sole roll +0.05382 rad, sole pitch -0.00500 rad. Corners -1.229813 / +2.858482 / -1.904403 / +2.183893 mm. Raw gap +3.229813 mm, floored hundredth 3.22 mm. Rug clearance +1.763119 mm at 12.600 s, right, absolute toe +13.763119 mm, surface rug. Corners +14.076663 / +13.763119 / +14.511272 / +14.197729 mm. Raw gap +0.236881 mm, floored hundredth 0.23 mm. At +/-0.20 the cruise reaches +/-0.20000 and the bout tips at 21.144 s, margin -0.083. Turn left knee +6.1554 Nm at 13.344 s, yaw +0.20000, kp +8.2737, kv -2.1183. Stop left knee stays +6.1409 Nm at 8.224 s. Floor right knee +2.4500 Nm at 21.056 s. Left toe +2.221182 mm at 3.128 s, the straight tick, surplus floored hundredth -0.23. Right toe +0.814970 mm at 17.720 s, floored hundredth 1.18 short. Centre +1.078090 mm. Corners +0.814970 / +1.706283 / +0.449898 / +1.341211 mm. Rug clearance +1.794184 mm at 12.600 s, floored hundredth 0.20 short. At +/-0.15 the cruise reaches +/-0.15000 and the bout tips at 25.160 s, margin -0.066. Turn left knee +6.1302 Nm at 24.328 s, yaw -0.15000, kp +8.8534, kv -2.7233. The fault writes a right-knee ask of +15.3724 Nm at 25.160 s. Stop left knee stays +6.1409 Nm at 8.224 s. Floor knees are -2.4500 Nm at 20.512 s and +2.4500 Nm at 21.296 s. Left toe -0.291185 mm at 23.840 s, floored hundredth 2.29. Right toe -2.616074 mm at 22.048 s, floored hundredth 4.61. Rug-tagged clearance +0.956466 mm at 14.392 s, left, the tick surface is floor and on_rug is 1, floored hundredth 1.04. Turning asks stay over 2.33 Nm at +/-0.25, +/-0.20, and +/-0.15. kp dominates each of those overs. A doorway re-point is a finite heading change, separate from this cruise. At 0.15 rad/s a quarter turn is 10.47 s. At 0.20 rad/s it is 7.85 s. That lower cap can carry the re-point. It does not put the turning ask under 2.33 Nm. Foot-z was not raised. Less-crouch stayed closed. Not kit-safe. Not go-anywhere. Soft stop, yaw held at 0, on that same stack. Vendor walk-to-stand was read first. OP3 Op3Walker.stop zeros the step on the stop call and sets time to 0, the double support before the left swing, with no wait and no decay. gait_manager_traj has no stop. The live path then writes the stand pose. This bout does not. Straight Day-1 vx +0.150 m/s, stop command at 8.200 s, yaw 0 the whole bout. The stop arrives in left single support, gait time 0.032 s, step length +0.02000 m. Freeze is 8.400 s at gait time 0.229 s. Left load is 0.00 N and right load is 16.77 N, so the full step holds until both feet exceed 5 N. Decay starts at 8.456 s, loads 6.14 N and 22.08 N, and the step length falls to 0 over 5 periods, 2.500 s, with the clock frozen. Level trim stays on both ankles. The landing toe-down schedule stays off while the step is falling. Prefer FAIL. Unclamped left knee +6.1409 Nm at 8.224 s. q +1.16437 rad, q_des +1.35409 rad, kp_term +8.5374 Nm, kv_term -2.3966 Nm, kp dominates, phase swing, left single support fraction 0.195, gait time 0.064 s, mode finish, step length still +0.02000 m. Not double support. Left sole centre +12.185736 mm, roll +0.00093 rad, pitch +0.00600 rad, load 0.52 N. Corners heel-inside +12.555583 mm, heel-outside +12.626543 mm, front-inside +11.744928 mm, front-outside +11.815889 mm. Right sole centre +10.684042 mm, roll -0.00904 rad, pitch +0.00835 rad, load 30.01 N. Corners heel-outside +11.591102 mm, heel-inside +10.904336 mm, front-outside +10.463748 mm, front-inside +9.776981 mm. The double-support morph peak is right knee +1.2773 Nm at 8.440 s, kv dominates, under 2.33 Nm, and it is not the stop peak. Left sole there is still unloaded, centre +18.351963 mm, load 0.00 N. Actuator peak from the stop is left ankle pitch -1.6713 Nm at 8.200 s, under +/-2.45 Nm. Soft-pass stays off. Body speed settles in 0.816 s. That T_stop is not a pass. d_min is not rebuilt. The old d_min 0.1263 m is not claimed. Yaw ramp and +/-0.15 stay closed. Turns are not scored. Foot-z stays 1.170 mm. Less-crouch stays closed. Trim lead stays off. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` is unchanged. Not kit-safe. Not go-anywhere. Inflight stop, yaw 0. At 8.200 s the airborne foot is the right one (0.00 N) and the left is loaded (26.47 N). Right planar x/y and roll/pitch do not jump from 8.192 s to 8.200 s (dx -0.00021 m, dy +0.00002 m). q_des does, dknee_des +0.01506 rad. The pin holds the pre-stop x/y and roll/pitch. z stays live. The DSP snap fires at 8.432 s. With no step-length change the left knee is still +5.8728 Nm at 8.224 s, q_des +1.35409 rad, kp-dominant. The next-stride decay over one period leaves that ask at +5.9483 Nm, q +1.17286 rad, q_des +1.35589 rad, kp +8.2364 Nm, kv -2.2881 Nm, step length +0.01904 m, left load 2.38 N, right load 36.09 N. A zero step on that next stride, right foot still pinned, leaves q_des +1.33362 rad and the ask +6.3681 Nm at 8.216 s. The knee target is the swing-z schedule. T_stop 0.744 s is not a pass. d_min is not rebuilt. The old d_min 0.1263 m is not claimed. Foot-z stays 1.170 mm. Less-crouch stays closed. Trim lead stays off. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` is unchanged. Not kit-safe. Not go-anywhere. Stance-chain freeze pins the loaded left leg. Left knee_des stays +1.11022 rad, hip_roll_des -0.15964 rad, and hip_pitch_des -0.66655 rad at 8.192 s, 8.200 s, and 8.224 s. IK matches the pin (delta 0) and the pelvis rolls stay 0. x_move stays +0.02000 m on the stop tick. The DSP snap is 8.224 s, loads 15.72 N and 18.10 N. Prefer FAIL. The peak unclamped ask is left ankle roll -4.5042 Nm at 8.200 s (q -0.00129 rad, q_des -0.15964 rad, kp -5.5422 Nm, kv +1.0380 Nm). Left hip roll -3.6776 Nm, left knee -2.5088 Nm, right hip roll -3.3182 Nm, right ankle roll -2.4033 Nm, and the airborne right knee +2.6025 Nm at 8.224 s stay over 2.33 Nm. Stance q_des did not climb. IK and CoM were frozen. Actuator peak is left knee -1.6866 Nm at 8.200 s. T_stop 0.616 s is not a pass. d_min is not rebuilt. The old d_min 0.1263 m is not claimed. A continuous walk with no stop is already over: DSP left ankle roll -4.7852 Nm at 2.560 s, and the -0.15964 rad command is gait y_swap with level trim 0. DSP roll asks clear at y_swap 0.011 m with the CoM 4.81 mm outside the stance box; 0.015 m stays inside and DSP left hip roll is still -3.3170 Nm. The stop slew at 0.020 m holds the double-support window on the 2.33 Nm cap, and the airborne tick before it is still left ankle roll -4.5042 Nm. Prefer FAIL. Sole-flat loaded ankle (q_des equals measured q above 5 N) at y_swap 0.020 m leaves DSP hip roll at +4.4847 Nm and the mid-SS CoM 9.39 mm outside the 38 mm box; widening init_y to 0.025 m moves that margin to -32.50 mm, and y_swap 0 at kit init_y is still -6.27 mm outside with a dug corner. Prefer FAIL. At y_swap 0 a 1.90 rad/s stance slew on both knee and ankle pitch clears mid-SS and DSP (right knee +2.3070 Nm, right ankle pitch -2.1889 Nm, flat toe +12.957 mm), while 1.95 rad/s fails at right knee +2.3305 Nm, knee-only at that rate still leaves ankle pitch at -2.9708 Nm, a zero step leaves the knee at +4.0185 Nm, and the CoM stays -5.95 mm outside. Prefer FAIL. On the soft stop the swing hip roll, hip yaw, hip pitch, and ankle roll hold the pre-stop targets, planar x/y and sole roll/pitch hold, and the swing knee and ankle pitch stay on the swing-z IK. That knee is +8.0985 Nm at 8.224 s (the tick before the stop was -0.8591 Nm) and the swing ankle pitch is +3.6375 Nm at 8.216 s. The stance right knee stays +2.3300 Nm on the 1.90 rad/s bar. Loaded hips step toward stand only after both feet are over 5 N and stay under 2.33 Nm before the tip. The body tips at 8.528 s, both contact boxes stay outside, and the +11.199 mm toe is this y_swap 0 copy, not the +2.22 mm clear at y_swap 0.020. d_min is not rebuilt. The leftover swing-z rise is scaled to 0.25 and stretched by 1.060 so the knee and ankle pitch follow at or under 1.90 rad/s. Both feet are over 5 N before the tip, left 17.48 N and right 6.27 N at 8.392 s. Touchdown at 8.384 s is heel-inside -1.953 mm, not a toe dig. Every leg ask before the tip stays at or under 2.33 Nm, the right knee stays +2.3300 Nm, and the body still tips at 8.512 s, margin -0.068, so this is not kit-safe. On the continuous walk the 20-80% toes stay at +12.983 mm left and +12.957 mm right, mid-SS and DSP stay at or under 2.33 Nm, and the swing ankle pitch still asks -4.3410 Nm at 3.152 s, so that walk is not kit-safe. The walk swing-z stretch at 1.55 rad/s brings those 20-80% knees to +1.4740 Nm and -1.4372 Nm and the ankle pitches to -2.1981 Nm and +2.1455 Nm, with flat toes +6.788 mm and +6.991 mm, and the mid-SS right knee is +2.3824 Nm at 2.672 s, so that walk is still not kit-safe. The loaded hip pitch slew at 1.90 rad/s and the loaded knee slew at 1.75 rad/s bring the mid-SS right hip pitch to -1.8358 Nm and the right knee to +2.3004 Nm, with flat toes +6.711 mm and +6.908 mm, and that walk is still not kit-safe. The loaded knee slew at 1.55 rad/s through fraction 0.13 brings the early-stance right knee to +2.2963 Nm, with the fraction 0.115 tick loaded at 29.23 N and asking +2.2956 Nm, and that walk is still not kit-safe. A whole-gait scan leaves the soft-stop right ankle pitch at -7.8537 Nm at 8.144 s, before the stop, and the steady walk right ankle pitch at -2.3690 Nm at 2.224 s, fraction 0.860, and that walk is still not kit-safe. The stop-walk airborne ankle pitch now stays at or under 2.33 Nm, right +2.3300 Nm at 1.416 s with that foot at 0 N. The first load after that channel is 1.496 s at 14.74 N, right corners all at or above +2.113 mm. After the stop the swing left foot loads at 5.53 N. The continuous-walk stand-to-walk tick at 1.000 s now stays under 1.5 Nm. A clock-swing hold on the stop-bout approach knee brings that ask under 2.33 Nm and the foot still exceeds 5 N, and the post-stop front-outside goes to -1.243 mm, so that slew is not kept. The stop-bout approach swing-z, closest to the live z at 1.55 rad/s and off from the stop command, brings the fraction-0.115 left knee to -0.1395 Nm at 1.560 s with that foot at 0 N. Post-stop touchdown stays 8.384 s at 9.28 N with all four corners at or above +2.659 mm, stop ankle roll stays at or under 1.2968 Nm, and the stop stretch stays 1.060 / 0.25 with catch 0.020 s. The stop-bout entrance at 1.000 s stays at or under 2.33 Nm, and the first landing double support at 1.232 s stays at or under 2.33 Nm. The engage tick still holds the live joint, with left foot 11.37 N and right foot 11.06 N, and both soles are under the floor (lowest corner -0.840 mm). At 1.232 s the left foot is 10.95 N and the right foot is 13.35 N. The landing knee peaks at -2.2947 Nm. Post-stop corners stay at or above +4.549 mm. The steady left ankle pitch at 7.968 s is -2.3070 Nm, left foot 26.05 N. The continuous steady right ankle pitch at 2.224 s is -1.8892 Nm, right foot 17.44 N. The steady peak is -2.3166 Nm at 2.208 s. The ±2.3300 Nm writes are a signed-ask solve onto the bar. The unclamped sum |kp*(q_des−q)| + |kv*ω| is over 2.33 Nm on those ticks. Torque stays open. Tip and CoM await Dave. That walk is still not kit-safe. Commanded leading corner is -0.000501 m at 30%, +0.011144 m at 50%, and +0.019190 m at 70% of that swing. Late lift. The sole bottom is 0.026 m below the ankle roll in the plant and in the forward kinematics. MFG lock: that 0.026 m is the IK ankle-to-sole on both sim and kit. The outsole is the plant box bottom, not a stack under the 0.026 m. The -3.2 mm is not an outsole stack. The Prefer FAIL lead is the live pelvis against the nominal stand pelvis. Adding 0.018 m of mid-swing hip-frame z commands a leading corner of 0.014538 m, above 0.012 m plus 0.002 m, and the actual toe at that tick is -0.003014 m on 4.6 N. Airborne is at 7.544 s. Knees stay under 2.33 Nm. Prefer FAIL. Dropping the flat offset for a 0.076885 rad tilt on a split sole tips at 7.448 s with the left knee on -2.45 Nm. Prefer FAIL. An earlier lift adds hip-frame z from toe-off through 40% of single support. At +0.012 m the 20-30% command minimum is 0.009511 m at 3.128 s, the mid-swing toe is +0.000781 m, the walking knee is +2.350 Nm at 7.426 s, and airborne is at 7.552 s. At +0.013 m the left knee is already on -2.45 Nm at 1.128 s and the command is still 0.010495 m. At +0.020 m the 20-30% command minimum is 0.016742 m and the mid-swing toe is +0.003149 m, with the left knee on -2.45 Nm at 1.124 s and airborne at 7.536 s. Prefer FAIL. The 20-30% command does not clear 0.014 m without the knee rail. The split-sole drop scored again and is unchanged. A compliant ankle that tracks the split-sole joint tips at 7.520 s with the right knee on the 2.45 Nm rail. A mid-swing knee flex capped at 2.33 Nm leaves the toe at -0.003069 and still flags airborne at 7.560 s. Both Prefer FAIL. Other bouts false-stop, including last-row too_close with no prop on the 9 s path. On the open ±0.25 walks, existing leg centers do enter the 0.0867–0.108 m outside strip on kitchen left, both living turns, bathroom right, and entrance right. The 0.020 m pad already includes that strip in the stand corridor until |sideways| passes 0.1067 m, and the only centers past that line are still 0.57 m or more ahead. No leg was moved. A close leg that is in-corridor only because the outside edge widens to 0.108 m is not in these scenes. Not kit-safe. Not go-anywhere. The row source
+is still a sim projection. Not go-anywhere. Soft-pass is off.
 """
 from __future__ import annotations
 
@@ -118,7 +223,7 @@ import math
 import os
 import sys
 import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Literal
 
@@ -136,6 +241,9 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 import walk_gait_ainex as wg  # noqa: E402
+import lipm_gait as lipm_gait  # noqa: E402
+import op3_walk  # noqa: E402
+from lipm_gait import LipmConfig, LipmWalker  # noqa: E402
 from walk_gait import TELEOP_DEADBAND, TELEOP_RATE_LIMIT  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -143,7 +251,9 @@ PLANT_XML = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145.xml"
 # Walk plant after kit_cam moved to 0.050 0.019 0.007. Feet, friction,
 # forcerange, kp, and mass are the same as the e3feef97… insert. Pre-camera
 # freeze was fc94709c84f5598d4474ecfc4bb41fdc.
-PLANT_MD5 = "71b2c86d133ebc603f58b99c53e496f3"
+# Plant thaw from cursor/plant-thaw-legs-foot-6f10 (PR #43): legs ±2.45 Nm,
+# foot contact 135×76 mm. Was 71b2c86d… at ±2.1 and 145×86.
+PLANT_MD5 = "207f3d5e9c6a72e16f7aa0c8d224f75e"
 KIT_CAM_POS = (0.050, 0.019, 0.007)
 KIT_CAM_FOVY = 104.82
 # xyaxes "0 -1 0 0 0 1" → camera-frame columns (x, y, z). Look is −Z = +X.
@@ -155,20 +265,21 @@ KIT_CAM_AXES = (
 PREVIEWS = ROOT / "previews"
 
 # Frozen contact box (half-size, m) and servo ranges. Checked, never written.
-FOOT_HALF_X = 0.0725
-FOOT_HALF_Y = 0.0430
+FOOT_HALF_X = 0.0675
+FOOT_HALF_Y = 0.0380
 FOOT_FRICTION = 1.6
-LEG_TAU = 2.1
+LEG_TAU = 2.45
 ARM_TAU = 0.7
 SAT_FRAC = 0.98
 
 # vx that maps to CPG amplitude 1. Full-stick forward is below this: 0.080
 # yaws off and tips near Δx 1.2 m. Do not divide amplitude by VX_FWD_CAP.
 GAIT_AMP_VX = 0.08
-# Full-stick forward command. |applied_vx| / GAIT_AMP_VX is the CPG amplitude,
-# so this cap is amplitude 0.70. Realized body speed is slower than the
-# command (~0.04 m/s). Not a torque-limit increase.
-VX_FWD_CAP = 0.056
+# Full-stick forward command on the kit walk. This is the measured body
+# speed at the longest step that stays inside the knee sag budget, not the
+# old 0.056 m/s CPG stick. CPG amplitude still divides by GAIT_AMP_VX and
+# saturates at 1. KIT_BODY_PER_X * KIT_X_RAIL_M = 7.50 * 0.020 = 0.150.
+VX_FWD_CAP = lipm_gait.KIT_BODY_PER_X * lipm_gait.KIT_X_RAIL_M
 # |vx| / GAIT_AMP_VX = 0.40. This command, with REVERSE_PLANT_KD, is the
 # upright retreat. A larger reverse command shortens the distance before a tip.
 VX_BACK_CAP = 0.032
@@ -206,14 +317,69 @@ TURN_STEP_ASYM_ESTABLISHED = 0.24
 # 0.60 still walks forward (Δx stays with the left turn) and the early
 # stall is gone. Stance hip yaw is not scaled. Not a yaw-cap or plant change.
 TURN_RIGHT_SWING_YAW_SCALE = 0.60
+# Forward step look. Reverse does not take the knee lift or the arm scale:
+# shortening DS or raising swing dorsiflex tipped the retreat under up_z 0.90.
+# COM shift was 0.275 rad and read as a toy waddle. 0.16 rad still unweights
+# the swing leg enough for the extra knee flexion to clear the sole.
+LOOK_COM_SHIFT = 0.16
+# Added at mid-swing on top of KNEE_SWING, forward only. Ankle pitch moves
+# with the knee so the sole stays roughly flat while the leg shortens.
+LOOK_KNEE_LIFT = 0.38
+# gait_targets already swings the opposite shoulder. 1.0 is a few degrees.
+# 3.4 is about ±0.11 rad and still looks frozen from the side, but a cold
+# left turn at 6.0 tips (min up_z 0.42, then -1). Straight walking slews
+# up to 11.0 (measured shoulder peak-to-peak about 0.67 rad, torque still
+# clipped at ±0.7 Nm) and a yaw command slews back to 3.4. 11.0 keeps
+# nav-left near +61 deg and the chained right arc near -90 deg. 11.4 tips
+# nav-multi. 9.0 tips the left arc. Do not nudge this without re-running
+# smoke, nav-left, nav-right, and nav-multi.
+LOOK_ARM_SCALE = 3.4
+LOOK_ARM_SCALE_STRAIGHT = 11.0
+LOOK_ARM_SLEW = 8.0  # scale units per second
+# Airborne hip yaw at full yaw stick (rad). +joint toes the foot right.
+LOOK_TOE_LEFT = 0.10
+LOOK_TOE_RIGHT = 0.12
+# Right yaw after a long straight compounds the 0.20 outside-step with the
+# airborne toe and can spin past the support box. A shorter right step keeps
+# the cold-start right arc and the post-straight right arc upright.
+LOOK_RIGHT_STEP_ASYM = 0.10
 # vx=0 and yaw!=0: reduced forward CPG so a step exists to yaw on.
 INPLACE_YAW_AMP = 0.35
+# Swing residual. Forward only, after CP swing and stance VIK. Defaults off.
+# Measured on the shipped gait, straight walk, swing sole median 2.31 cm,
+# contact fraction during swing 0.00 (the foot is already ~2 cm up, so a
+# contact-triggered swing kick never fires). Knee / hip-pitch / ankle-pitch
+# sit on the ±2.1 Nm clip for much of the swing; position error is several
+# tenths of a radian, so more swing flexion command does not add torque.
+#   hold (don't reverse into extension while sole < 4.5 cm): median 2.31 cm
+#   contact preload 0.20 rad while the foot is still down: median 2.45 cm
+#   preload 0.45 rad and above lowers the sole (the hip crouches)
+#   stance push 0.10 rad: median 2.59 cm, straight yaw +5.6 deg in 3 s
+#   stance push 0.25 rad: median 2.84 cm, straight yaw +9.4 deg in 3 s
+#   stance push 0.40 rad: tips (min up_z −1)
+# None of the upright cases is a visible step, and the larger pushes walk
+# off heading. Left off so the open-loop baseline (arms ~0.67 rad, sole
+# ~2.4 cm, left arc ~+61 deg) stays the shipped gait. Not a torque or period
+# change. Reverse never takes it.
+USE_SWING_HOLD_RESIDUAL = False
+SWING_HOLD_CLEAR_M = 0.045
+SWING_HOLD_S_MAX = 0.72
+SWING_HOLD_FADE = 0.12
+SWING_HOLD_MARGIN = 0.05
+SWING_HOLD_CLIP = 0.35
+USE_SWING_PRELOAD = False
+SWING_PRELOAD_RAD = 0.20
+SWING_PRELOAD_PHASE0 = 0.48
+USE_STANCE_PUSH = False
+STANCE_PUSH_RAD = 0.10
+STANCE_PUSH_PHASE0 = 0.22
+STANCE_PUSH_PHASE1 = 0.48
 
 # Joint-space constants, scaled into velocity units (see module docstring).
 DEADBAND_VX = TELEOP_DEADBAND * VX_FWD_CAP
 DEADBAND_YAW = TELEOP_DEADBAND * YAW_RATE_CAP
 # Plant slew is tighter than TELEOP_RATE_LIMIT so stand→full gait is not one frame.
-VX_SLEW = 0.08  # m/s^2  (0 → 0.056 cap in 0.70 s)
+VX_SLEW = 0.08  # m/s^2  (0 → 0.150 cap in 1.875 s)
 YAW_SLEW = 0.40  # rad/s^2
 
 COMMAND_TIMEOUT_S = 0.200
@@ -585,6 +751,121 @@ CLIP_SCRIPTS: dict[str, tuple[DemoSegment, ...]] = {
     "nav-multi": NAV_MULTI_SCRIPT,
 }
 
+# Accepted kit row. Do not retune these to chase a bus measurement.
+BUS_KIT_STAND_S = 0.50
+BUS_KIT_VEL_S = 6.00
+BUS_KIT_STOP_S = 7.60
+# A 2 ms sample on the forcerange is a rail. The bar is under this.
+BUS_KIT_RAIL_NM = 2.449
+
+
+def locked_kit_config() -> LipmConfig:
+    """Locked kit walk the Day-1 bus actuates. Plant file is not touched."""
+    return LipmConfig(
+        name="kit500",
+        clear_m=0.020,
+        arms=True,
+        schedule="gait_manager",
+        gm_period_s=0.500,
+        gm_dsp=0.20,
+        gm_y_swap_m=0.020,
+        gm_x_m=0.020,
+        gm_z_m=0.020,
+        gm_z_swap_m=0.006,
+        gm_pelvis_deg=5.0,
+        gm_hip_pitch_deg=15.0,
+        gm_start_lead="L",
+        gm_resume_lead="outside",
+        gm_crouch_m=0.025,
+        gm_move_s=0.020,
+    )
+
+
+BUS_KIT_SCRIPT: tuple[DemoSegment, ...] = (
+    DemoSegment(BUS_KIT_STAND_S, "stand", 0.0, 0.0, "stand"),
+    DemoSegment(BUS_KIT_VEL_S, "vel", VX_FWD_CAP, 0.0, "forward"),
+    DemoSegment(BUS_KIT_STOP_S, "stop", 0.0, 0.0, "stop"),
+)
+
+# Cleared voice row. vel at or under this speed selects it. The kit row
+# stays the config for anything faster. Do not retune the kit to match.
+VOICE_VX_M_S = 0.056
+VOICE_PERIOD_S = 3.57
+VOICE_DSP = 0.70
+VOICE_AMP_M = 0.043
+VOICE_Z_M = 0.004
+VOICE_ARM_S = 2.40
+VOICE_PREVIEW_R = 1.0e-4
+# 0 is the straight double-support ramp. 1 is the raised cosine, whose
+# hip-roll peak at 3.60 s was 2.3135 Nm.
+VOICE_PREVIEW_SHAPE = 0.0
+
+
+def voice_preview_config() -> LipmConfig:
+    """Lateral preview that holds the voice-speed bout under 2.20 Nm.
+
+    y_swap stays 0. The sway is preview_y. Stand before the first step
+    is the level sole. Stop after the walk is the preview soft stop,
+    not the kit stand solve.
+    """
+    return LipmConfig(
+        name="voice056",
+        clear_m=VOICE_Z_M,
+        arms=True,
+        schedule="gait_manager",
+        gm_period_s=VOICE_PERIOD_S,
+        gm_dsp=VOICE_DSP,
+        gm_y_swap_m=0.0,
+        gm_x_m=0.020,
+        gm_z_m=VOICE_Z_M,
+        gm_z_swap_m=0.0,
+        gm_pelvis_deg=0.0,
+        gm_hip_pitch_deg=15.0,
+        gm_start_lead="L",
+        gm_crouch_m=0.025,
+        gm_move_s=0.020,
+        preview_amp_m=VOICE_AMP_M,
+        preview_arm_s=VOICE_ARM_S,
+        preview_r=VOICE_PREVIEW_R,
+        preview_shape=VOICE_PREVIEW_SHAPE,
+    )
+
+
+def gait_for_command(vx: float, yaw_rate: float) -> LipmConfig:
+    """Day-1 vel(vx, yaw_rate) picks the walk. Stand and stop do not.
+
+    vx at or under 0.056 m/s, including reverse, selects the voice
+    preview. yaw_rate is accepted on that same gait and is applied as
+    cycle yaw. It does not select a second walk. A faster forward
+    command stays on the locked kit. The bus stop snaps applied speed
+    to 0, and this config then returns through the soft stop.
+    """
+    if not math.isfinite(float(yaw_rate)):
+        raise ValueError("yaw_rate is not finite")
+    if float(vx) <= VOICE_VX_M_S + 1e-12:
+        return voice_preview_config()
+    return locked_kit_config()
+
+
+def voice_bus_script(
+    stand_s: float,
+    walk_s: float,
+    stop_s: float,
+    yaw_rate: float = 0.0,
+) -> tuple[DemoSegment, ...]:
+    """stand, then 10 Hz vel(0.056, yaw), then one stop.
+
+    Walk duration is what sets the gait phase at the stop. A longer
+    quiet stand or a longer settled stop does not move that phase.
+    """
+    t_vel = float(stand_s) + float(walk_s)
+    t_stop = t_vel + float(stop_s)
+    return (
+        DemoSegment(float(stand_s), "stand", 0.0, 0.0, "stand"),
+        DemoSegment(t_vel, "vel", VOICE_VX_M_S, float(yaw_rate), "forward"),
+        DemoSegment(t_stop, "stop", 0.0, 0.0, "stop"),
+    )
+
 
 class ScriptedDriver:
     """Resend vel at 10 Hz. stand once; stop once. Silence is the watchdog's job."""
@@ -690,7 +971,7 @@ def apply_frozen_forward_gait() -> None:
     wg.HIP_PITCH_AMP = 0.24
     wg.HIP_BIAS_FWD = 0.06
     wg.DS_S = 0.1375
-    wg.COM_SHIFT_AMP = 0.275
+    wg.COM_SHIFT_AMP = LOOK_COM_SHIFT
     wg.COM_SHIFT_LEAD = 0.23
     wg.KNEE_STANCE = 0.40
     wg.KNEE_SWING = 0.80
@@ -728,6 +1009,114 @@ def gait_amp_and_dir(report: TickReport) -> tuple[float, int]:
         amp = INPLACE_YAW_AMP * min(1.0, abs(report.applied_yaw_rate) / YAW_RATE_CAP)
         return amp, 1
     return 0.0, 0
+
+
+def style_forward_step(
+    qdes: dict[str, float], gait_t: float, yaw_rate: float,
+) -> None:
+    """Forward-only step look. Does not run on reverse or on stand.
+
+    Knee lift shortens the swing leg. Shoulder scale is the contralateral
+    term already in gait_targets. Hip yaw is 0 on the planted foot and toes
+    the airborne foot into the turn, then holds that angle into touchdown.
+    """
+    qdes["l_sho_pitch"] = qdes.get("l_sho_pitch", 0.0) * LOOK_ARM_SCALE
+    qdes["r_sho_pitch"] = qdes.get("r_sho_pitch", 0.0) * LOOK_ARM_SCALE
+    qdes["l_el_pitch"] = 0.32 + 0.10 * abs(qdes["l_sho_pitch"])
+    qdes["r_el_pitch"] = 0.32 + 0.10 * abs(qdes["r_sho_pitch"])
+    ds_frac = max(0.08, min(0.55, float(wg.DS_S) / max(float(wg.GAIT_T), 1e-3)))
+    ds_end = 0.50 + ds_frac
+    swing_len = max(0.18, 1.0 - ds_end)
+    phi = (gait_t / max(float(wg.GAIT_T), 1e-6)) % 1.0
+    if LOOK_KNEE_LIFT > 0.0:
+        for side, knee_sign, ank_sign in (("L", 1.0, 1.0), ("R", -1.0, -1.0)):
+            leg_phase = wg.phase_leg(phi, side)
+            if leg_phase < ds_end:
+                continue
+            swing_s = _clamp((leg_phase - ds_end) / swing_len, 0.0, 1.0)
+            lift = LOOK_KNEE_LIFT * math.sin(math.pi * (swing_s ** 0.55))
+            pref = "l_" if side == "L" else "r_"
+            qdes[f"{pref}knee"] = _clamp(qdes.get(f"{pref}knee", 0.0) + knee_sign * lift, -2.0, 2.0)
+            qdes[f"{pref}ank_pitch"] = _clamp(
+                qdes.get(f"{pref}ank_pitch", 0.0) + ank_sign * lift, -1.2, 1.2,
+            )
+    if abs(yaw_rate) <= 1e-4:
+        return
+    stick = min(1.0, abs(yaw_rate) / YAW_RATE_CAP)
+    if yaw_rate > 0.0:
+        swing_joint = -LOOK_TOE_LEFT * stick
+    else:
+        swing_joint = LOOK_TOE_RIGHT * stick
+    for side, name in (("L", "l_hip_yaw"), ("R", "r_hip_yaw")):
+        leg_phase = wg.phase_leg(phi, side)
+        if leg_phase < ds_end:
+            qdes[name] = 0.0
+            continue
+        swing_s = _clamp((leg_phase - ds_end) / swing_len, 0.0, 1.0)
+        blend = min(1.0, swing_s / 0.72)
+        blend = blend * blend * (3.0 - 2.0 * blend)
+        qdes[name] = swing_joint * blend
+
+
+def swing_hold_residual(
+    sole_m: float, swing_s: float, flex_q: float, flex_cmd: float,
+) -> float:
+    """Extra flexion (rad) so a low swing sole is not yanked into extension.
+
+    Zero when the sole is already clear, the landing fade has started, or
+    the CPG is still commanding more flexion than the joint has reached.
+    The return value is added in the flexion direction; it does not exceed
+    the gap up to the current joint plus a small margin.
+    """
+    if not USE_SWING_HOLD_RESIDUAL:
+        return 0.0
+    if swing_s < 0.0 or swing_s >= SWING_HOLD_S_MAX:
+        return 0.0
+    if sole_m >= SWING_HOLD_CLEAR_M:
+        return 0.0
+    if flex_cmd >= flex_q + SWING_HOLD_MARGIN:
+        return 0.0
+    fade_at = SWING_HOLD_S_MAX - SWING_HOLD_FADE
+    margin = SWING_HOLD_MARGIN
+    if swing_s > fade_at:
+        # Fade the margin only. Scaling the whole gap left the error negative,
+        # so the knee stayed on the extension clip and the sole did not move.
+        fade = max(0.0, (SWING_HOLD_S_MAX - swing_s) / max(SWING_HOLD_FADE, 1e-6))
+        margin *= fade
+    gap = (flex_q + margin) - flex_cmd
+    return min(SWING_HOLD_CLIP, max(0.0, gap))
+
+
+def swing_preload_residual(leg_phase: float, ds_end: float, in_contact: bool) -> float:
+    """Extra flexion (rad) on a planted foot that is about to swing.
+
+    Ramps from SWING_PRELOAD_PHASE0 to toe-off. Zero once the foot is up
+    or the leg is already in swing.
+    """
+    if not USE_SWING_PRELOAD or not in_contact:
+        return 0.0
+    if leg_phase < SWING_PRELOAD_PHASE0 or leg_phase >= ds_end:
+        return 0.0
+    span = max(ds_end - SWING_PRELOAD_PHASE0, 1e-6)
+    u = max(0.0, min(1.0, (leg_phase - SWING_PRELOAD_PHASE0) / span))
+    u = u * u * (3.0 - 2.0 * u)
+    return SWING_PRELOAD_RAD * u
+
+
+def stance_push_residual(leg_phase: float, in_contact: bool) -> float:
+    """Knee extension (positive rad) on a planted stance leg.
+
+    The caller subtracts this from the flexion command. Zero in swing,
+    in double support, and when the foot is up.
+    """
+    if not USE_STANCE_PUSH or not in_contact:
+        return 0.0
+    if leg_phase < STANCE_PUSH_PHASE0 or leg_phase >= STANCE_PUSH_PHASE1:
+        return 0.0
+    span = max(STANCE_PUSH_PHASE1 - STANCE_PUSH_PHASE0, 1e-6)
+    u = max(0.0, min(1.0, (leg_phase - STANCE_PUSH_PHASE0) / span))
+    # Peak mid-window, off at both ends, so toe-off is not a step in command.
+    return STANCE_PUSH_RAD * math.sin(math.pi * u)
 
 
 def swing_hip_yaw_scale(yaw_rate: float, direction: int, leg_phase: float) -> float:
@@ -839,7 +1228,7 @@ def plant_problems(
             continue
         size = model.geom_size[gid]
         if abs(float(size[0]) - FOOT_HALF_X) > 1e-6 or abs(float(size[1]) - FOOT_HALF_Y) > 1e-6:
-            problems.append(f"{gname} size {size[:2].tolist()} != 145×86 half-size")
+            problems.append(f"{gname} size {size[:2].tolist()} != 135×76 half-size")
         if abs(float(model.geom_friction[gid, 0]) - FOOT_FRICTION) > 1e-6:
             problems.append(f"{gname} friction {model.geom_friction[gid, 0]} != {FOOT_FRICTION}")
     for gname in ("l_toe_viz", "r_toe_viz"):
@@ -867,6 +1256,21 @@ class PoseSample:
     cop_out: float
 
 
+def _geom_touch(model: mj.MjModel, data: mj.MjData, bid: int, gid: int) -> bool:
+    """True when ``bid`` is in a contact pair with geom ``gid``. No height fallback."""
+    for i in range(data.ncon):
+        c = data.contact[i]
+        b1 = int(model.geom_bodyid[c.geom1])
+        b2 = int(model.geom_bodyid[c.geom2])
+        root1 = int(model.body_weldid[b1])
+        root2 = int(model.body_weldid[b2])
+        foot = root1 == bid or root2 == bid or b1 == bid or b2 == bid
+        other = int(c.geom1) == gid or int(c.geom2) == gid
+        if foot and other:
+            return True
+    return False
+
+
 class SteerSession:
     """One frozen-plant sim. Commands go through `bus`; `step` is one 50 Hz tick.
 
@@ -882,6 +1286,10 @@ class SteerSession:
         video: bool,
         scene_xml: Path | None = None,
         initial_yaw: float = 0.0,
+        cam_distance: float = 1.25,
+        cam_azimuth: float = 135.0,
+        cam_elevation: float = -18.0,
+        lipm: LipmConfig | None = None,
     ) -> None:
         problems = []
         if not PLANT_XML.is_file():
@@ -910,12 +1318,20 @@ class SteerSession:
             mj.mj_id2name(self.model, mj.mjtObj.mjOBJ_ACTUATOR, i): i
             for i in range(self.model.nu)
         }
+        self._move_ctrl_idx = [
+            i
+            for name, i in self.act_idx.items()
+            if name.endswith(("knee_pos", "hip_pitch_pos", "ank_pitch_pos"))
+        ]
         self.bid_body = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_BODY, "body_link")
         self.bid_lf = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_BODY, "l_ank_roll_link")
         self.bid_rf = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_BODY, "r_ank_roll_link")
         self.gid_lfoot = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_GEOM, "l_foot_contact")
         self.gid_rfoot = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_GEOM, "r_foot_contact")
         self.gid_floor = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_GEOM, "floor")
+        self.gid_rug = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_GEOM, "col_mat_rug")
+        if self.gid_rug < 0:
+            self.gid_rug = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_GEOM, "mat_rug")
         self.foot_local = {
             "L": (
                 self.bid_lf,
@@ -932,6 +1348,7 @@ class SteerSession:
         }
         self.q_stand = wg.gait_targets(0.0, False, 0.0)
         self.gait_t = 0.0
+        self._arm_scale = LOOK_ARM_SCALE
         self._gait_live = False
         self._blend = 0.0
         self._q_live: dict[str, float] | None = None
@@ -954,14 +1371,29 @@ class SteerSession:
         self.cop_excursion = 0.0
         self.fault_announced = False
         self.sim_dt = float(self.model.opt.timestep)
-        self.steps_per_ctrl = max(1, int(round(CTRL_DT / self.sim_dt)))
+        # The command bus and the Bézier loop stay at 50 Hz. The OP3
+        # walking module is built for an 8 ms cycle (4 physics steps).
+        # 20 ms is not an integer multiple of 8 ms, so this path does not
+        # pretend a 50 Hz tick is that cycle.
+        self.ctrl_dt = CTRL_DT
+        if lipm is not None and lipm.schedule == "gait_manager":
+            self.ctrl_dt = op3_walk.OP3_CTRL_S
+        self.steps_per_ctrl = max(1, int(round(self.ctrl_dt / self.sim_dt)))
+        self.lipm_cfg = lipm
+        self.lipm = (
+            None
+            if lipm is None
+            else LipmWalker(self.model, self.data, self.act_idx, lipm, self.q_stand)
+        )
+        if self.lipm is not None and lipm is not None and lipm.schedule == "gait_manager":
+            self.q_stand = dict(self.lipm.q_stand)
         self._reset_stand()
         self.renderer: mj.Renderer | None = None
         self.cam = mj.MjvCamera()
         mj.mjv_defaultCamera(self.cam)
-        self.cam.distance = 1.25
-        self.cam.azimuth = 135.0
-        self.cam.elevation = -18.0
+        self.cam.distance = float(cam_distance)
+        self.cam.azimuth = float(cam_azimuth)
+        self.cam.elevation = float(cam_elevation)
         if video:
             self.renderer = mj.Renderer(self.model, height=480, width=640)
 
@@ -977,6 +1409,14 @@ class SteerSession:
                 self.data.qpos[self.model.jnt_qposadr[jid]] = val
         wg.set_ctrl(self.model, self.data, self.q_stand, self.act_idx)
         mj.mj_forward(self.model, self.data)
+        # The IK crouch is a different leg length than COM_Z's knee-0.40
+        # stand. Seat the soles on the floor. This is the spawn height, not
+        # a plant edit.
+        if self.lipm is not None and self.lipm.cfg.schedule == "gait_manager":
+            seat = min(self.lipm._sole("L"), self.lipm._sole("R"))
+            if abs(seat) > 1e-5:
+                self.data.qpos[2] -= seat
+                mj.mj_forward(self.model, self.data)
 
     def assert_plant_unchanged(self) -> None:
         now = float(np.sum(np.abs(self.model.actuator_forcerange)))
@@ -985,15 +1425,40 @@ class SteerSession:
 
     def step(self) -> TickReport:
         now = float(self.data.time)
-        report = self.bus.tick(now, CTRL_DT)
-        ceiling = self._safety_ceiling()
-        if ceiling < 0.999 and report.mode == "move":
-            report = self.bus.limit_applied(ceiling)
-        amp, direction = self._motion_after_stop(report)
-        qdes = self._targets(amp, direction, report.applied_yaw_rate)
-        wg.set_ctrl(self.model, self.data, qdes, self.act_idx)
-        self._servos(amp, direction)
-        self._substep(amp, direction)
+        report = self.bus.tick(now, self.ctrl_dt)
+        if self.lipm is None:
+            ceiling = self._safety_ceiling()
+            if ceiling < 0.999 and report.mode == "move":
+                report = self.bus.limit_applied(ceiling)
+            amp, direction = self._motion_after_stop(report)
+            qdes = self._targets(amp, direction, report.applied_yaw_rate)
+            wg.set_ctrl(self.model, self.data, qdes, self.act_idx)
+            self._servos(amp, direction)
+            self._substep(amp, direction)
+        else:
+            # LIPM does not use the CPG saturation throttle. A falling torso
+            # still cuts the velocity command the outer loop integrates.
+            vx = report.applied_vx
+            if report.mode == "move" and self._up_z() < 0.90:
+                vx *= 0.55
+            # The tick writes the gait target. Hip, knee, and ankle pitch
+            # approach it over HIP_KNEE_MOVE_S; this 20 ms tick only covers
+            # part of that move. Snapshot the command before the write.
+            ctrl_from = np.array(self.data.ctrl, dtype=np.float64, copy=True)
+            if self.bus.fault:
+                self.lipm.hold_stand()
+                holding = True
+            else:
+                walking = report.mode == "move"
+                self.lipm.yaw_target = self.bus.target_yaw
+                self.lipm.tick(vx, report.applied_yaw_rate, walking)
+                holding = not walking
+            # A hold is already the force-limited stand command. Slewing
+            # toward it from the walking ctrl is what rails the stop.
+            if holding:
+                ctrl_from = np.array(self.data.ctrl, dtype=np.float64, copy=True)
+            self._lipm_substep(ctrl_from)
+            self.lipm.observe(self._up_z())
         self._update_bias(now)
         margin = self._support_margin()
         up_z = self._up_z()
@@ -1051,7 +1516,9 @@ class SteerSession:
                 self.gait_t += CTRL_DT
             qdes = wg.gait_targets(self.gait_t, True, amp)
             step_asym = TURN_STEP_ASYM
-            if yaw_rate > 1e-3 and self.gait_t > ESTABLISHED_GAIT_S:
+            if yaw_rate < -1e-3:
+                step_asym = LOOK_RIGHT_STEP_ASYM
+            elif yaw_rate > 1e-3 and self.gait_t > ESTABLISHED_GAIT_S:
                 step_asym = TURN_STEP_ASYM_ESTABLISHED
             if direction < 0:
                 qdes = mirror_sagittal(qdes, self.q_stand)
@@ -1072,7 +1539,29 @@ class SteerSession:
         for side, name in (("L", "l_hip_yaw"), ("R", "r_hip_yaw")):
             scale = swing_hip_yaw_scale(yaw_rate, direction, wg.phase_leg(phi, side))
             qdes[name] = qdes.get(name, 0.0) + scale * yaw_cmd
+        if direction > 0 and amp > 0.02:
+            style_forward_step(qdes, self.gait_t, yaw_rate)
+            self._slew_arm_scale(qdes, yaw_rate)
+        else:
+            self._arm_scale = LOOK_ARM_SCALE
         return qdes
+
+    def _slew_arm_scale(self, qdes: dict[str, float], yaw_rate: float) -> None:
+        """Larger contralateral swing while going straight. Yaw keeps 3.4.
+
+        style_forward_step already applied LOOK_ARM_SCALE. Undo that, then
+        slew. A step from 11 to 3.4 at the yaw edge is what pushed the
+        post-straight right arc over. The slew is not a torque-limit change.
+        """
+        raw_l = qdes.get("l_sho_pitch", 0.0) / LOOK_ARM_SCALE
+        raw_r = qdes.get("r_sho_pitch", 0.0) / LOOK_ARM_SCALE
+        target = LOOK_ARM_SCALE_STRAIGHT if abs(yaw_rate) < 1e-3 else LOOK_ARM_SCALE
+        step = LOOK_ARM_SLEW * CTRL_DT
+        self._arm_scale += max(-step, min(step, target - self._arm_scale))
+        qdes["l_sho_pitch"] = raw_l * self._arm_scale
+        qdes["r_sho_pitch"] = raw_r * self._arm_scale
+        qdes["l_el_pitch"] = 0.32 + 0.10 * abs(qdes["l_sho_pitch"])
+        qdes["r_el_pitch"] = 0.32 + 0.10 * abs(qdes["r_sho_pitch"])
 
     def _reverse_phase_stands(self) -> bool:
         """Reverse phases where an immediate blend already ends in stand.
@@ -1173,6 +1662,60 @@ class SteerSession:
                 self.model, self.data, self.act_idx, phi, amp,
                 self.bid_lf, self.bid_rf, self.gid_floor,
             )
+        if amp > 0.05 and direction > 0 and (
+            USE_SWING_HOLD_RESIDUAL or USE_SWING_PRELOAD or USE_STANCE_PUSH
+        ):
+            self._apply_swing_residual(phi)
+
+    def _apply_swing_residual(self, phi: float) -> None:
+        """Contact preload, then a swing hold. Forward only. No forcerange edit.
+
+        Preload bends a still-planted foot that is about to swing. The hold
+        keeps a low sole from being pulled straight once the CPG command falls.
+        Both write ``data.ctrl`` after CP swing and stance VIK.
+        """
+        ds_frac = max(0.08, min(0.55, float(wg.DS_S) / max(float(wg.GAIT_T), 1e-3)))
+        ds_end = 0.50 + ds_frac
+        swing_len = max(0.18, 1.0 - ds_end)
+        for side, pref, flex_sign, gid, bid in (
+            ("L", "l_", 1.0, self.gid_lfoot, self.bid_lf),
+            ("R", "r_", -1.0, self.gid_rfoot, self.bid_rf),
+        ):
+            leg_phase = wg.phase_leg(phi, side)
+            knee = f"{pref}knee"
+            knee_act = wg.act_name(knee)
+            if knee_act not in self.act_idx:
+                continue
+            knee_i = self.act_idx[knee_act]
+            in_contact = wg.foot_floor_contact(
+                self.model, self.data, bid, self.gid_floor,
+            )
+            if leg_phase < ds_end:
+                delta = swing_preload_residual(leg_phase, ds_end, in_contact)
+                delta -= stance_push_residual(leg_phase, in_contact)
+            else:
+                jid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, knee)
+                if jid < 0:
+                    continue
+                flex_q = flex_sign * float(self.data.qpos[self.model.jnt_qposadr[jid]])
+                flex_cmd = flex_sign * float(self.data.ctrl[knee_i])
+                sole_m = float(
+                    self.data.geom_xpos[gid][2] - self.model.geom_size[gid][2]
+                )
+                swing_s = (leg_phase - ds_end) / swing_len
+                delta = swing_hold_residual(sole_m, swing_s, flex_q, flex_cmd)
+            if abs(delta) < 1e-6:
+                continue
+            self.data.ctrl[knee_i] = float(_clamp(
+                float(self.data.ctrl[knee_i]) + flex_sign * delta, -2.0, 2.0,
+            ))
+            ank = f"{pref}ank_pitch"
+            ank_act = wg.act_name(ank)
+            if ank_act in self.act_idx:
+                ank_i = self.act_idx[ank_act]
+                self.data.ctrl[ank_i] = float(_clamp(
+                    float(self.data.ctrl[ank_i]) + flex_sign * delta, -1.2, 1.2,
+                ))
 
     def _substep(self, amp: float, direction: int) -> None:
         # Stop already zeroed applied_vx. Hold the stance damper for
@@ -1203,6 +1746,59 @@ class SteerSession:
             self._substep_plant(plant_amp, phi)
         finally:
             wg.PLANT_KD = saved_kd
+
+    def _lipm_substep(self, ctrl_from: np.ndarray | None = None) -> None:
+        """Integrate the position servos. No root wrench and no foot xfrc.
+
+        ``data.ctrl`` on entry is the latest gait target. Hip, knee, and
+        ankle pitch approach that target over the move time, spread
+        across the physics steps, and not faster than the HX slew. The
+        Bézier loop uses ``HIP_KNEE_MOVE_S`` (150 ms). The OP3 path uses
+        ``gm_move_s`` (kit servo write, 20 ms) because the 8 ms planner
+        already sampled the trajectory. Other joints still finish this
+        tick. Plant kp, dampratio, forcerange, and armature are untouched.
+        """
+        n = self.steps_per_ctrl
+        ctrl_to = np.array(self.data.ctrl, dtype=np.float64, copy=True)
+        if ctrl_from is None:
+            ctrl_from = ctrl_to
+        dt = float(self.ctrl_dt)
+        if self.lipm is not None and self.lipm.cfg.schedule == "gait_manager":
+            move_s = max(float(self.lipm.cfg.gm_move_s), dt)
+        else:
+            move_s = max(float(lipm_gait.HIP_KNEE_MOVE_S), dt)
+        frac = min(1.0, dt / move_s)
+        slew = float(lipm_gait.HX35_SLEW_RAD_S) * dt
+        end = ctrl_to.copy()
+        for idx in self._move_ctrl_idx:
+            delta = float(ctrl_to[idx] - ctrl_from[idx])
+            step = delta * frac
+            if step > slew:
+                step = slew
+            elif step < -slew:
+                step = -slew
+            end[idx] = float(ctrl_from[idx]) + step
+        # A stand hold freezes the gait target, then this loop used to
+        # keep that ctrl for every physics step. Hip pitch on one stop
+        # phase then measured 2.309 Nm against a 2.28 Nm prediction.
+        # Re-limit the leg command from the live q and ω before each step.
+        hold = (
+            self.lipm is not None
+            and self.lipm.phase == "stand"
+            and self.lipm.cfg.schedule == "gait_manager"
+        )
+        for i in range(n):
+            alpha = (i + 1) / float(n)
+            self.data.ctrl[:] = ctrl_from + (end - ctrl_from) * alpha
+            if hold:
+                for jn, val in self.lipm.q_stand.items():
+                    if any(tok in jn for tok in ("hip_", "knee", "ank_")):
+                        self.lipm.write_force_limited(jn, val, lipm_gait.LEG_STOP_NM)
+                    else:
+                        self.lipm.write_force_limited(jn, val)
+            self.data.qfrc_applied[:] = 0.0
+            self.data.xfrc_applied[:] = 0.0
+            mj.mj_step(self.model, self.data)
 
     def _substep_plant(self, amp: float, phi: float) -> None:
         for _ in range(self.steps_per_ctrl):
@@ -1256,8 +1852,8 @@ class SteerSession:
         return np.stack(pts, axis=0)
 
     def _support_margin(self) -> float:
-        c_l = wg.foot_floor_contact(self.model, self.data, self.bid_lf, self.gid_floor)
-        c_r = wg.foot_floor_contact(self.model, self.data, self.bid_rf, self.gid_floor)
+        c_l = self._foot_on_ground(self.bid_lf)
+        c_r = self._foot_on_ground(self.bid_rf)
         chunks: list[np.ndarray] = []
         if c_l:
             chunks.append(self._foot_corners(self.bid_lf, self.gid_lfoot))
@@ -1266,7 +1862,8 @@ class SteerSession:
         if not chunks:
             return -1.0
         hull = convex_hull_xy(np.concatenate(chunks, axis=0))
-        com = np.asarray(self.data.subtree_com[0, :2], dtype=np.float64)
+        # Body subtree only. The world subtree includes the room masses.
+        com = np.asarray(self.data.subtree_com[self.bid_body, :2], dtype=np.float64)
         return support_margin(com, hull)
 
     def _track_cop_excursion(self) -> None:
@@ -1341,6 +1938,19 @@ class SteerSession:
             ceiling = min(ceiling, 0.55)
         return ceiling
 
+    def _foot_on_ground(self, bid: int) -> bool:
+        """Floor or the entrance rug. The rug is ground for the airborne flag.
+
+        ``foot_floor_contact`` on the floor geom treats a foot that is only
+        on ``col_mat_rug`` as air, because that foot is above the 0.025 m
+        ankle check. A real tip is still ``up_z`` and the support margin.
+        """
+        if wg.foot_floor_contact(self.model, self.data, bid, self.gid_floor):
+            return True
+        if self.gid_rug >= 0 and _geom_touch(self.model, self.data, bid, self.gid_rug):
+            return True
+        return False
+
     def _fault_reason(self, now: float, up_z: float, margin: float) -> str | None:
         if not np.isfinite(self.data.qpos).all():
             return "non-finite state"
@@ -1357,8 +1967,8 @@ class SteerSession:
             self.tip_hold = 0.0
         if self.tip_hold >= TIP_HOLD_S:
             return f"tip up_z={up_z:.2f}"
-        c_l = wg.foot_floor_contact(self.model, self.data, self.bid_lf, self.gid_floor)
-        c_r = wg.foot_floor_contact(self.model, self.data, self.bid_rf, self.gid_floor)
+        c_l = self._foot_on_ground(self.bid_lf)
+        c_r = self._foot_on_ground(self.bid_rf)
         if not c_l and not c_r:
             self.air_hold += CTRL_DT
         else:
@@ -1486,10 +2096,9 @@ def _multi_honesty(stats: tuple[SegmentStat, ...]) -> str:
         text += (
             f" Yaw holds stay at the claimed windows "
             f"(left {CLAIMED_LEFT_ARC_S:.1f} s, then right {CLAIMED_RIGHT_ARC_S:.1f} s). "
-            "Prefer FAIL, not this clip: a second right hold of 11 s tips; "
-            "a second left hold of 12.5 s does not yaw and then tips; "
-            "right-then-left stays upright but the left hold does not yaw left. "
-            "The 14 s left that starts at 15 s is not this path."
+            "Other orders (a second same-sign arc, right-then-left, and a 14 s "
+            "left that starts at 15 s) are not this clip and were not "
+            "re-qualified on this step-cycle basin."
         )
     return text
 
@@ -1594,14 +2203,17 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
         f"stick is amplitude {VX_FWD_CAP / GAIT_AMP_VX:.2f} and reverse "
         f"{-VX_BACK_CAP:.3f} m/s stays amplitude {VX_BACK_CAP / GAIT_AMP_VX:.2f} "
         f"with stance damper {REVERSE_PLANT_KD:.0f} N/(m/s). "
-        f"Yaw cap is ±{YAW_RATE_CAP:.2f} rad/s; hip-yaw clip {YAW_HIP_CLIP:.2f} rad "
-        f"plus outside-step scale {TURN_STEP_ASYM:.2f}. "
-        f"Right-turn swing hip yaw keeps {TURN_RIGHT_SWING_YAW_SCALE:.2f} of that "
-        "clip so the foot does not land toed against the turn; stance hip yaw "
-        "and the cold-start left turn are unchanged. "
-        f"After the gait has been walking for {ESTABLISHED_GAIT_S:.0f} s, a left "
-        f"yaw command drops the {TURN_LEFT_BIAS:.2f} rad bias and uses outside-step "
-        f"scale {TURN_STEP_ASYM_ESTABLISHED:.2f}. "
+        f"Yaw cap is ±{YAW_RATE_CAP:.2f} rad/s. Forward yaw is swing-phase only: "
+        f"stance hip yaw is 0, and the airborne foot toes {LOOK_TOE_LEFT:.2f} rad "
+        f"left or {LOOK_TOE_RIGHT:.2f} rad right at full stick (+joint toes right). "
+        f"Outside-step scale stays {TURN_STEP_ASYM:.2f} on a left command "
+        f"({TURN_STEP_ASYM_ESTABLISHED:.2f} after {ESTABLISHED_GAIT_S:.0f} s) "
+        f"and {LOOK_RIGHT_STEP_ASYM:.2f} on a right command. "
+        f"Forward swing adds {LOOK_KNEE_LIFT:.2f} rad of knee flexion at mid-swing "
+        f"and scales contralateral shoulder pitch by {LOOK_ARM_SCALE_STRAIGHT:.1f} "
+        f"while going straight, slewed back to {LOOK_ARM_SCALE:.1f} while yaw is commanded. "
+        f"Lateral COM shift is {LOOK_COM_SHIFT:.2f} rad. "
+        "Reverse does not take the knee lift or the arm scale. "
         f"Measured motion Δx={dx_fwd:+.3f} m, mean body vx={mean_vx:+.3f} m/s "
         f"(not the command). Straight-forward net yaw drift="
         f"{math.degrees(dyaw_fwd):+.2f} deg; yaw during that window "
@@ -1637,6 +2249,59 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
         honesty += _multi_honesty(stats)
     if session.bus.fault:
         honesty += f" FAULT: {session.bus.fault_reason}."
+    if session.lipm is not None:
+        sc = session.lipm.score()
+        if session.lipm.cfg.schedule == "gait_manager":
+            lead = (
+                "ROBOTIS OP3 walking module with AiNex leg lengths, "
+                "Hiwonder move presets, stepped at the OP3 8 ms cycle. "
+                "Not the joint-space preset copy. No root wrench. "
+                f"Row {session.lipm.cfg.name}, period {session.lipm.cfg.gm_period_s:.3f} s, "
+                f"dsp {session.lipm.cfg.gm_dsp:.2f}, x {session.lipm.cfg.gm_x_m:.3f} m, "
+                f"z {session.lipm.cfg.gm_z_m:.3f} m, y_swap {session.lipm.cfg.gm_y_swap_m:.3f} m, "
+                f"body drop {session.lipm.cfg.gm_crouch_m:.3f} m, "
+                f"servo move {session.lipm.cfg.gm_move_s:.3f} s, "
+                f"pelvis {session.lipm.cfg.gm_pelvis_deg:.0f} deg, "
+                f"hip pitch offset {session.lipm.cfg.gm_hip_pitch_deg:.0f} deg "
+                "on the stand and the walk, "
+                f"z_swap {session.lipm.cfg.gm_z_swap_m:.3f} m, "
+                "arms swing with gain 0.5. "
+                "Kit stance is +0.005 m outward on each foot. "
+                "The 0.018 m sole-vs-hip hack is not the live stance. "
+                "Plant file is the #43 foot-box shift, not edited here. "
+            )
+        else:
+            lead = (
+                "LIPM/ZMP schedule with a joint-space Bézier into the 50 Hz "
+                "position servos. Not the open-loop CPG. No root wrench. "
+                f"Row {session.lipm.cfg.name}, clear command {session.lipm.cfg.clear_m:.3f} m, "
+                f"arms={session.lipm.cfg.arms}. "
+            )
+        honesty = lead + (
+            f"Swing sole median {float(sc['sole_median_m']):.3f} m, "
+            f"p90 {float(sc['sole_p90_m']):.3f} m, "
+            f"swing contact {float(sc['swing_contact_frac']):.3f}, "
+            f"stance slip {float(sc['stance_slip_m_s']):.4f} m/s, "
+            f"sat_rate {float(sc['sat_rate']):.3f}, "
+            f"lifts {int(sc['n_lifts'])}, missed gates {int(sc['n_missed_gates'])}, "
+            f"rear_unload_frac {float(sc['rear_unload_frac']):.2f}, "
+            f"rear_share_min {float(sc['rear_share_min']):.2f}, "
+            f"CoP margin before lift {float(sc['cop_before_lift_median_m']):.3f} m, "
+            f"CoP x before lift {float(sc['cop_x_before_lift_m']):.3f} m. "
+            f"Measured Δx={dx_fwd:+.3f} m, mean body vx={mean_vx:+.3f} m/s "
+            f"(not the command). "
+            f"Turn-window Δyaw={math.degrees(dyaw):+.2f} deg "
+            f"(mean yaw rate {mean_yaw_rate:+.3f} rad/s). "
+            f"tip={tip}; min_up_z={session.min_up_z:.3f}; "
+            f"peak leg torque={session.max_leg_tau:.2f} Nm (limit {LEG_TAU}). "
+            "Plant is the #43 thaw only: legs ±2.45 Nm, foot box 135×76 mm, "
+            f"md5 {PLANT_MD5}. No further plant edit. "
+            "Vendor look is about 2 cm, a 300–600 ms step, forward progress, "
+            "no skate, upright, arms not frozen. "
+            "An upright march or a shuffle that misses that period is a Prefer FAIL."
+        )
+        if session.bus.fault:
+            honesty += f" FAULT: {session.bus.fault_reason}."
     return RunSummary(
         plant=str(PLANT_XML.relative_to(ROOT)),
         plant_md5=PLANT_MD5,
@@ -1700,9 +2365,19 @@ def run_demo(
     script: tuple[DemoSegment, ...] = DEMO_SCRIPT,
     overlay_title: str = "Day-1 steer",
     overlay_footer: str = "W/S vx  A/D yaw  space stop  |  voice uses the same bus",
+    cam_distance: float = 1.25,
+    cam_azimuth: float = 135.0,
+    cam_elevation: float = -18.0,
+    lipm: LipmConfig | None = None,
 ) -> RunSummary:
     video = out_mp4 is not None
-    session = SteerSession(video=video)
+    session = SteerSession(
+        video=video,
+        cam_distance=cam_distance,
+        cam_azimuth=cam_azimuth,
+        cam_elevation=cam_elevation,
+        lipm=lipm,
+    )
     segments = _clip_script(script, duration)
     driver = ScriptedDriver(segments)
     print(
@@ -1711,12 +2386,27 @@ def run_demo(
         f"slew vx={VX_SLEW:.2f} yaw={YAW_SLEW:.2f} "
         f"(TELEOP_RATE_LIMIT={TELEOP_RATE_LIMIT} deadband={TELEOP_DEADBAND})"
     )
-    print(
+    if lipm is not None:
+        print(
+            f"[steer] gait=lipm {lipm.name} clear={lipm.clear_m:.3f} "
+            f"arms={lipm.arms} t_swing={lipm.t_swing:.2f} "
+            "assist=OFF root_wrench=OFF"
+        )
+    else:
+        print(
         "[steer] gait=forward T=0.55 hip=0.24 ds=0.1375 plant_kd=25 "
+        f"com_shift={LOOK_COM_SHIFT:.2f} knee_lift={LOOK_KNEE_LIFT:.2f} "
+        f"arm_scale={LOOK_ARM_SCALE_STRAIGHT:.1f}/{LOOK_ARM_SCALE:.1f} "
+        f"toe_L={LOOK_TOE_LEFT:.2f} toe_R={LOOK_TOE_RIGHT:.2f} "
         f"amp=|vx|/{GAIT_AMP_VX:.3f} "
-        "assist=OFF ankle_cop=ON cp_swing=ON stance_vik=ON residual=OFF door=OFF"
+        "assist=OFF ankle_cop=ON cp_swing=ON stance_vik=ON "
+        f"swing_hold={'ON' if USE_SWING_HOLD_RESIDUAL else 'OFF'} "
+        f"preload={'ON' if USE_SWING_PRELOAD else 'OFF'} "
+        f"stance_push={'ON' if USE_STANCE_PUSH else 'OFF'} "
+        "stance_residual=OFF door=OFF"
     )
-    n_ctrl = int(duration * wg.CTRL_HZ)
+    n_ctrl = int(round(duration / session.ctrl_dt))
+    frame_stride = max(1, int(round(0.04 / session.ctrl_dt)))
     last_print = -1.0
     last_mode: ModeName | None = None
     frames: list[np.ndarray] = []
@@ -1736,9 +2426,10 @@ def run_demo(
             print(f"t={now:.2f} {seg.label} {report.line()}")
             last_print = now
             last_mode = report.mode
-        if session.renderer is not None and (len(session.samples) % 2 == 0):
+        if session.renderer is not None and (len(session.samples) % frame_stride == 0):
+            plant_tag = "plant thaw ±2.45" if lipm is not None else "M145 frozen"
             lines = [
-                f"{overlay_title}  {seg.label}  M145 frozen  no door",
+                f"{overlay_title}  {seg.label}  {plant_tag}  no door",
                 report.line(),
                 f"t={now:.2f}s  x={session.data.qpos[0]:+.3f}  yaw={math.degrees(session.yaw()):+.1f} deg",
                 overlay_footer,
@@ -1827,14 +2518,14 @@ def run_view(duration: float) -> None:
     except ImportError:
         print("refused: mujoco.viewer unavailable", file=sys.stderr)
         raise SystemExit(1)
-    session = SteerSession(video=False)
+    session = SteerSession(video=False, lipm=locked_kit_config())
     keys = KeyboardLatch()
 
     def on_key(keycode: int) -> None:
         keys.on_press(keycode)
 
     print("[steer] view  W/S=±vx  A/D=±yaw (left/right)  space=stop  latched until space")
-    print("[steer] voice later calls CommandBus.stand / stop / vel — same bus")
+    print("[steer] gait=locked kit500 through CommandBus (stand / stop / vel)")
     import time
     with viewer.launch_passive(session.model, session.data, key_callback=on_key) as handle:
         wall0 = time.time()
@@ -1899,9 +2590,12 @@ def test_bus() -> list[str]:
     _expect(report.mode == "stand" and report.applied_vx == 0.0, "deadband did not zero vx", failures)
     full = TickReport(VX_FWD_CAP, 0.0, "move")
     amp, direction = gait_amp_and_dir(full)
+    # The kit cap can sit above the CPG amplitude reference. The CPG
+    # saturates at 1 instead of taking a stick larger than GAIT_AMP_VX.
+    cpg_full = min(1.0, VX_FWD_CAP / GAIT_AMP_VX)
     _expect(
-        abs(amp - VX_FWD_CAP / GAIT_AMP_VX) < 1e-9 and direction == 1,
-        f"full-stick amp {amp} (divisor must stay {GAIT_AMP_VX})",
+        abs(amp - cpg_full) < 1e-9 and direction == 1,
+        f"full-stick amp {amp} (CPG saturates at {cpg_full})",
         failures,
     )
     back = TickReport(-VX_BACK_CAP, 0.0, "move")
@@ -1911,12 +2605,87 @@ def test_bus() -> list[str]:
         f"reverse amp {amp}",
         failures,
     )
-    _expect(GAIT_AMP_VX + 1e-12 >= VX_FWD_CAP, "amplitude reference below the forward clamp", failures)
+    _expect(cpg_full <= 1.0 + 1e-12, "CPG amplitude left the unit range", failures)
     bus2.declare_fault(0.1, "tip")
     refusal = bus2.vel(0.1, 0.0, 0.1)
     _expect(refusal is not None and refusal.startswith("refused: fault"), f"fault vel got {refusal}", failures)
     report = bus2.tick(0.12, CTRL_DT)
     _expect(report.mode == "fault" and report.applied_vx == 0.0, "fault tick not zero", failures)
+    apply_frozen_forward_gait()
+    _expect(wg.COM_SHIFT_AMP == LOOK_COM_SHIFT, "forward COM shift left the look basin", failures)
+    _expect(wg.DS_S == 0.1375 and wg.KNEE_SWING == 0.80, "reverse-safe knee/DS moved", failures)
+    _expect(
+        abs(VX_FWD_CAP - 0.150) < 1e-9 and VX_BACK_CAP == 0.032 and YAW_RATE_CAP == 0.25,
+        "caps moved",
+        failures,
+    )
+    gait_t = 0.85 * float(wg.GAIT_T)
+    q_plain = wg.gait_targets(gait_t, True, 0.70)
+    q_step = dict(q_plain)
+    style_forward_step(q_step, gait_t, YAW_RATE_CAP)
+    _expect(q_step["l_knee"] > q_plain["l_knee"] + 0.05, "left swing knee did not lift", failures)
+    _expect(abs(q_step["r_knee"] - q_plain["r_knee"]) < 1e-9, "stance knee was lifted", failures)
+    _expect(q_step["l_hip_yaw"] < -0.02, "left swing foot is not toed left", failures)
+    _expect(abs(q_step["r_hip_yaw"]) < 1e-9, "stance foot yawed during a left command", failures)
+    _expect(abs(q_step["l_sho_pitch"]) > abs(q_plain["l_sho_pitch"]) * 2.0, "arm swing stayed frozen", failures)
+    _expect(
+        LOOK_ARM_SCALE_STRAIGHT > LOOK_ARM_SCALE and LOOK_ARM_SLEW > 0.0,
+        "straight arm scale is not above the yaw scale",
+        failures,
+    )
+    q_right = dict(q_plain)
+    style_forward_step(q_right, gait_t, -YAW_RATE_CAP)
+    _expect(q_right["l_hip_yaw"] > 0.02, "left swing foot is not toed right", failures)
+    global USE_SWING_HOLD_RESIDUAL, USE_SWING_PRELOAD, USE_STANCE_PUSH
+    _expect(
+        not USE_SWING_HOLD_RESIDUAL and not USE_SWING_PRELOAD and not USE_STANCE_PUSH,
+        "swing residual shipped on; measured path stays off",
+        failures,
+    )
+    saved_flags = (USE_SWING_HOLD_RESIDUAL, USE_SWING_PRELOAD, USE_STANCE_PUSH)
+    USE_SWING_HOLD_RESIDUAL = True
+    USE_SWING_PRELOAD = True
+    USE_STANCE_PUSH = True
+    try:
+        _expect(
+            swing_hold_residual(0.06, 0.50, 1.0, 0.6) == 0.0,
+            "swing hold fired on a clear sole",
+            failures,
+        )
+        _expect(
+            swing_hold_residual(0.02, 0.50, 0.4, 1.0) == 0.0,
+            "swing hold fired while the CPG was still flexing",
+            failures,
+        )
+        _expect(
+            swing_hold_residual(0.02, 0.95, 1.0, 0.4) == 0.0,
+            "swing hold fired in the landing window",
+            failures,
+        )
+        held = swing_hold_residual(0.02, 0.50, 1.0, 0.55)
+        _expect(
+            abs(held - min(SWING_HOLD_CLIP, 1.0 + SWING_HOLD_MARGIN - 0.55)) < 1e-9,
+            f"swing hold did not cover the extension gap ({held})",
+            failures,
+        )
+        _expect(
+            swing_preload_residual(0.20, 0.75, True) == 0.0,
+            "preload fired in early stance",
+            failures,
+        )
+        _expect(
+            swing_preload_residual(0.60, 0.75, False) == 0.0,
+            "preload fired on an airborne foot",
+            failures,
+        )
+        pre = swing_preload_residual(0.70, 0.75, True)
+        _expect(0.0 < pre <= SWING_PRELOAD_RAD, f"preload ramp {pre}", failures)
+        _expect(stance_push_residual(0.10, True) == 0.0, "stance push fired in early stance", failures)
+        _expect(stance_push_residual(0.35, False) == 0.0, "stance push fired in the air", failures)
+        pushed = stance_push_residual(0.35, True)
+        _expect(0.0 < pushed <= STANCE_PUSH_RAD, f"stance push {pushed}", failures)
+    finally:
+        USE_SWING_HOLD_RESIDUAL, USE_SWING_PRELOAD, USE_STANCE_PUSH = saved_flags
     return failures
 
 
@@ -2211,7 +2980,7 @@ def test_nav() -> list[str]:
     CoP stays in the box and the tip check is the existing one.
     """
     failures: list[str] = []
-    _expect(VX_FWD_CAP == 0.056 and VX_BACK_CAP == 0.032, "velocity caps moved", failures)
+    _expect(abs(VX_FWD_CAP - 0.150) < 1e-9 and VX_BACK_CAP == 0.032, "velocity caps moved", failures)
     _expect(YAW_RATE_CAP == 0.25, "yaw cap moved", failures)
     _expect(TURN_RIGHT_SWING_YAW_SCALE == 0.60, "right swing scale moved", failures)
     _expect(_md5(PLANT_XML) == PLANT_MD5, "plant md5 changed", failures)
@@ -2269,7 +3038,7 @@ def test_nav_multi() -> list[str]:
     Prefer FAIL and are not run. The 14 s left that starts at 15 s is not run.
     """
     failures: list[str] = []
-    _expect(VX_FWD_CAP == 0.056 and VX_BACK_CAP == 0.032, "velocity caps moved", failures)
+    _expect(abs(VX_FWD_CAP - 0.150) < 1e-9 and VX_BACK_CAP == 0.032, "velocity caps moved", failures)
     _expect(YAW_RATE_CAP == 0.25, "yaw cap moved", failures)
     _expect(_md5(PLANT_XML) == PLANT_MD5, "plant md5 changed", failures)
     bounds = script_bounds(NAV_MULTI_SCRIPT)
@@ -2350,6 +3119,635 @@ def self_test() -> int:
     return 0
 
 
+@dataclass
+class _TauPeak:
+    force_nm: float
+    t_s: float
+
+
+def _note_leg_peaks(session: SteerSession, into: dict[str, _TauPeak]) -> None:
+    t = float(session.data.time)
+    for name, idx in session.act_idx.items():
+        if not any(tok in name for tok in ("hip_", "knee", "ank_")):
+            continue
+        force = float(session.data.actuator_force[idx])
+        prev = into.get(name)
+        if prev is None or abs(force) >= abs(prev.force_nm):
+            into[name] = _TauPeak(force, t)
+
+
+def _bus_kit_contract() -> tuple[list[str], list[str]]:
+    """Stand, stop, vel, no vy, latest wins, 10 Hz resend, 200 ms silence.
+
+    Clock is the kit session (8 ms), not the 50 Hz CPG tick.
+    """
+    failures: list[str] = []
+    lines: list[str] = []
+    session = SteerSession(video=False, lipm=locked_kit_config())
+    bus = session.bus
+    _expect(session.ctrl_dt == op3_walk.OP3_CTRL_S, f"kit ctrl_dt {session.ctrl_dt}", failures)
+    report = bus.tick(0.0, session.ctrl_dt)
+    _expect(
+        report.mode == "stand" and report.applied_vx == 0.0 and report.applied_yaw_rate == 0.0,
+        "kit power-on is not stand",
+        failures,
+    )
+    refusal = bus.vel(VX_FWD_CAP, 0.0, 0.0, vy=0.02)
+    _expect(
+        refusal == "refused: vel accepts vx and yaw_rate only (got vy)",
+        f"kit vy refusal got {refusal}",
+        failures,
+    )
+    _expect(bus.mode == "stand" and bus.target_vx == 0.0, "refused vy was applied", failures)
+    bus.vel(0.02, 0.10, 0.0)
+    bus.vel(3.0, -4.0, 0.0)
+    _expect(
+        bus.target_vx == VX_FWD_CAP and bus.target_yaw == -YAW_RATE_CAP,
+        f"latest command did not win the clamps ({bus.target_vx}, {bus.target_yaw})",
+        failures,
+    )
+    lines.append(
+        f"vy refused; latest vel(3.0, -4.0) clamped to "
+        f"vx {bus.target_vx:+.3f} m/s, yaw {bus.target_yaw:+.2f} rad/s"
+    )
+    bus.stop(0.0)
+    _expect(bus.mode == "stand" and bus.applied_vx == 0.0, "stop before the first tick left velocity", failures)
+    now = float(session.data.time)
+    bus.vel(VX_FWD_CAP, YAW_RATE_CAP, now)
+    report = session.step()
+    _expect(report.mode == "move", "yaw vel did not enter move", failures)
+    _expect(report.applied_vx > 0.0 and report.applied_vx <= VX_FWD_CAP, "vx left the clamp", failures)
+    _expect(
+        report.applied_yaw_rate > 0.0 and report.applied_yaw_rate <= YAW_RATE_CAP,
+        "yaw_rate was not returned",
+        failures,
+    )
+    walker = session.lipm.op3 if session.lipm is not None else None
+    period = session.lipm.cfg.gm_period_s if session.lipm is not None else 0.0
+    expect_angle = report.applied_yaw_rate * period * lipm_gait.KIT_YAW_GAIN
+    _expect(
+        walker is not None and abs(walker.angle_cmd - expect_angle) < 1e-9 and abs(walker.angle_cmd) > 1e-6,
+        "kit step angle did not follow yaw_rate",
+        failures,
+    )
+    lines.append(
+        f"yaw tick {report.line()}; kit step angle "
+        f"{0.0 if walker is None else walker.angle_cmd:.4f} rad"
+    )
+    now = float(session.data.time)
+    refusal = bus.stop(now)
+    report = session.step()
+    _expect(refusal is None, f"stop refused {refusal}", failures)
+    _expect(
+        report.mode == "stand" and report.applied_vx == 0.0 and report.applied_yaw_rate == 0.0,
+        f"stop was not the same tick ({report.line()})",
+        failures,
+    )
+    _expect(walker is not None and walker.angle_cmd == 0.0, "stop left a step angle", failures)
+    _expect(walker is not None and not walker.ctrl_running, "stop left the kit walker running", failures)
+    last_send = -1.0
+    while float(session.data.time) < 0.40 - 1e-9:
+        now = float(session.data.time)
+        if last_send < 0.0 or (now - last_send) >= (VEL_RESEND_S - 1e-9):
+            bus.vel(VX_FWD_CAP, 0.0, now)
+            last_send = now
+        report = session.step()
+        _expect(report.mode == "move", f"10 Hz resend dropped to {report.mode} at {now:.3f}", failures)
+        _expect(abs(report.applied_vx) <= VX_FWD_CAP + 1e-12, "resend vx exceeded the clamp", failures)
+        if failures:
+            break
+    stood_at: float | None = None
+    stood: TickReport | None = None
+    while float(session.data.time) < 0.90 and stood is None:
+        now = float(session.data.time)
+        report = session.step()
+        if report.mode == "stand":
+            stood_at = now
+            stood = report
+    _expect(stood is not None and stood_at is not None, "200 ms silence did not stand", failures)
+    if stood is not None and stood_at is not None:
+        silent = stood_at - last_send
+        _expect(silent > COMMAND_TIMEOUT_S, f"stood after only {silent:.3f} s", failures)
+        _expect(
+            silent <= COMMAND_TIMEOUT_S + session.ctrl_dt + 1e-9,
+            f"stood late at {silent:.3f} s",
+            failures,
+        )
+        _expect(
+            stood.applied_vx == 0.0 and stood.applied_yaw_rate == 0.0 and stood.mode == "stand",
+            f"silence tick {stood.line()}",
+            failures,
+        )
+        _expect(walker is not None and not walker.ctrl_running, "silence left the walker running", failures)
+        lines.append(
+            f"silence {silent * 1000:.1f} ms → {stood.line()} "
+            f"(watchdog {COMMAND_TIMEOUT_S * 1000:.0f} ms, ctrl {session.ctrl_dt * 1000:.0f} ms)"
+        )
+    session.assert_plant_unchanged()
+    return failures, lines
+
+
+def _window_stats(samples: list[PoseSample]) -> tuple[float, float, float, float]:
+    if not samples:
+        return 0.0, 0.0, 1.0, 0.0
+    dx = samples[-1].x - samples[0].x
+    mean_vx = float(np.mean([s.body_vx for s in samples]))
+    min_up = min(s.up_z for s in samples)
+    dyaw = math.degrees(samples[-1].yaw - samples[0].yaw)
+    return dx, mean_vx, min_up, dyaw
+
+
+def _bus_kit_forward_stop() -> tuple[list[str], list[str]]:
+    """vel forward, then stop, on a cold kit session. Physics-step leg torque."""
+    failures: list[str] = []
+    lines: list[str] = []
+    digest = hashlib.md5(PLANT_XML.read_bytes()).hexdigest()
+    _expect(digest == PLANT_MD5, f"plant md5 {digest}", failures)
+    session = SteerSession(video=False, lipm=locked_kit_config())
+    driver = ScriptedDriver(BUS_KIT_SCRIPT)
+    peaks: dict[str, dict[str, _TauPeak]] = {"stand": {}, "forward": {}, "stop": {}}
+    phase = {"name": "stand"}
+    real_step = mj.mj_step
+
+    def _step(model: mj.MjModel, data: mj.MjData) -> None:
+        real_step(model, data)
+        _note_leg_peaks(session, peaks[phase["name"]])
+
+    mj.mj_step = _step
+    stop_report: TickReport | None = None
+    try:
+        while float(session.data.time) < BUS_KIT_STOP_S - 1e-9:
+            now = float(session.data.time)
+            seg = driver.segment(now)
+            phase["name"] = seg.label if seg.label in peaks else "stand"
+            driver.publish(session.bus, now)
+            report = session.step()
+            if seg.kind == "stop" and stop_report is None:
+                stop_report = report
+            if seg.kind == "vel":
+                _expect(report.mode == "move", f"forward tick {now:.3f} mode {report.mode}", failures)
+                _expect(
+                    abs(report.applied_vx) <= VX_FWD_CAP + 1e-12,
+                    f"applied_vx {report.applied_vx} over cap",
+                    failures,
+                )
+                _expect(abs(report.applied_yaw_rate) < 1e-12, "forward yaw was not 0", failures)
+            if failures and len(failures) > 8:
+                break
+    finally:
+        mj.mj_step = real_step
+    session.assert_plant_unchanged()
+    digest_after = hashlib.md5(PLANT_XML.read_bytes()).hexdigest()
+    _expect(digest_after == PLANT_MD5, f"plant md5 changed to {digest_after}", failures)
+    _expect(not session.bus.fault, f"fault {session.bus.fault_reason}", failures)
+    _expect(
+        stop_report is not None
+        and stop_report.mode == "stand"
+        and stop_report.applied_vx == 0.0
+        and stop_report.applied_yaw_rate == 0.0,
+        "stop tick did not return stand at 0",
+        failures,
+    )
+    fwd = [s for s in session.samples if s.mode == "move"]
+    stop_rows: list[PoseSample] = []
+    seen_move = False
+    for sample in session.samples:
+        if sample.mode == "move":
+            seen_move = True
+        elif seen_move and sample.mode == "stand":
+            stop_rows.append(sample)
+    _expect(bool(fwd) and bool(stop_rows), "missing forward or stop samples", failures)
+    max_applied = max((s.applied_vx for s in fwd), default=0.0)
+    slew_step = VX_SLEW * session.ctrl_dt
+    _expect(max_applied <= VX_FWD_CAP + 1e-9, f"applied_vx {max_applied} over the clamp", failures)
+    _expect(
+        max_applied > VX_FWD_CAP - slew_step - 1e-9,
+        f"applied_vx reached {max_applied}, not the forward clamp",
+        failures,
+    )
+    settle_t = BUS_KIT_STAND_S + VX_FWD_CAP / VX_SLEW + 0.40
+    settled = [s for s in fwd if s.t >= settle_t - 1e-9]
+    steady_vx = float(np.mean([s.body_vx for s in settled])) if settled else 0.0
+    ratio = steady_vx / VX_FWD_CAP if VX_FWD_CAP else 0.0
+    _expect(abs(ratio - 1.0) < 0.08, f"settled body/command {ratio:.2f}", failures)
+    dx, mean_vx, min_up, dyaw = _window_stats(fwd)
+    sdx, _, smin_up, sdyaw = _window_stats(stop_rows)
+    lines.append(
+        f"plant md5 {digest_after}  ctrl {session.ctrl_dt * 1000:.0f} ms  "
+        f"resend {VEL_RESEND_S * 1000:.0f} ms  silence {COMMAND_TIMEOUT_S * 1000:.0f} ms"
+    )
+    lines.append(
+        f"clamps vx +{VX_FWD_CAP:.3f}/-{VX_BACK_CAP:.3f} m/s  yaw ±{YAW_RATE_CAP:.2f} rad/s  "
+        "on the bus, not the plant"
+    )
+    if stop_report is not None:
+        lines.append(f"stop tick {stop_report.line()}")
+    lines.append(
+        f"forward n={len(fwd)} applied_vx max {max_applied:+.4f}  "
+        f"Δx {dx * 100:+.1f} cm  mean body vx {mean_vx * 100:+.2f} cm/s  "
+        f"min up_z {min_up:.3f}  Δyaw {dyaw:+.1f} deg  "
+        f"settled vx {steady_vx:+.3f} m/s ratio {ratio:.2f}"
+    )
+    lines.append(
+        f"stop n={len(stop_rows)} Δx {sdx * 100:+.1f} cm  "
+        f"min up_z {smin_up:.3f}  Δyaw {sdyaw:+.1f} deg  "
+        f"tail mode {session.samples[-1].mode if session.samples else '-'}"
+    )
+    for label in ("stand", "forward", "stop"):
+        bucket = peaks[label]
+        worst_name = ""
+        worst = 0.0
+        for name, peak in bucket.items():
+            if abs(peak.force_nm) >= abs(worst):
+                worst = peak.force_nm
+                worst_name = name
+            if abs(peak.force_nm) > BUS_KIT_RAIL_NM:
+                failures.append(
+                    f"{label} {name} {peak.force_nm:+.4f} Nm at {peak.t_s:.3f} s"
+                )
+            if "knee" in name and abs(peak.force_nm) > lipm_gait.KNEE_SAG_NM + 1e-3:
+                failures.append(
+                    f"{label} {name} {peak.force_nm:+.3f} Nm crosses {lipm_gait.KNEE_SAG_NM:.2f}"
+                )
+            leg = any(tok in name for tok in ("hip_", "knee", "ank_"))
+            if (
+                label == "stop"
+                and leg
+                and abs(peak.force_nm) > lipm_gait.LEG_STOP_NM + 1e-3
+            ):
+                failures.append(
+                    f"{label} {name} {peak.force_nm:+.3f} Nm has no "
+                    f"{lipm_gait.LEG_STOP_HEADROOM_NM:.2f} Nm headroom under "
+                    f"{lipm_gait.KNEE_SAG_NM:.2f}"
+                )
+            # The 2.33 bar on hip roll is the walking turn. The stop hold
+            # is the all-leg 2.28 Nm check above.
+            if (
+                label == "forward"
+                and "hip_roll" in name
+                and abs(peak.force_nm) > lipm_gait.KNEE_SAG_NM + 1e-3
+            ):
+                failures.append(
+                    f"{label} {name} {peak.force_nm:+.3f} Nm crosses {lipm_gait.KNEE_SAG_NM:.2f}"
+                )
+        def _signed(joint: str) -> str:
+            peak = bucket.get(joint)
+            if peak is None:
+                return "—"
+            return f"{peak.force_nm:+.3f} @{peak.t_s:.3f}s"
+
+        lines.append(
+            f"{label} hip roll R {_signed('r_hip_roll_pos')} L {_signed('l_hip_roll_pos')}  "
+            f"knee R {_signed('r_knee_pos')} L {_signed('l_knee_pos')}  "
+            f"worst {worst_name} {worst:+.3f} Nm"
+        )
+    walker = session.lipm
+    if walker is not None:
+        soles_l: list[float] = []
+        soles_r: list[float] = []
+        tr = walker.trace
+        for i, phase_name in enumerate(tr.phase):
+            if phase_name != "swing" or not (BUS_KIT_STAND_S <= tr.t[i] < BUS_KIT_VEL_S):
+                continue
+            if tr.swing[i] == "L":
+                soles_l.append(tr.sole_l[i])
+            elif tr.swing[i] == "R":
+                soles_r.append(tr.sole_r[i])
+        p90_l = float(np.percentile(np.asarray(soles_l), 90)) if soles_l else 0.0
+        p90_r = float(np.percentile(np.asarray(soles_r), 90)) if soles_r else 0.0
+        lines.append(f"swing sole p90 L {p90_l * 100:.2f} cm  R {p90_r * 100:.2f} cm")
+    return failures, lines
+
+
+def _bus_kit_yaw() -> tuple[list[str], list[str]]:
+    """Full left and full right. Step angle leaves 0 and heading follows."""
+    failures: list[str] = []
+    lines: list[str] = []
+    for sign, vx, name in (
+        (1.0, VX_FWD_CAP, "left"),
+        (-1.0, VX_FWD_CAP, "right"),
+        (1.0, 0.0, "inplace"),
+    ):
+        session = SteerSession(video=False, lipm=locked_kit_config())
+        stand_s = 0.40
+        move_s = 8.00
+        stop_s = 9.00
+        peaks: dict[str, _TauPeak] = {}
+        move_peaks: dict[str, _TauPeak] = {}
+        stop_peaks: dict[str, _TauPeak] = {}
+        real_step = mj.mj_step
+
+        def _step(model: mj.MjModel, data: mj.MjData) -> None:
+            real_step(model, data)
+            _note_leg_peaks(session, peaks)
+            if session.bus.mode == "move":
+                _note_leg_peaks(session, move_peaks)
+            elif float(data.time) >= move_s - 1e-9:
+                _note_leg_peaks(session, stop_peaks)
+
+        mj.mj_step = _step
+        last_send = -1.0
+        angle_peak = 0.0
+        try:
+            while float(session.data.time) < stop_s - 1e-9:
+                now = float(session.data.time)
+                if now < stand_s - 1e-9:
+                    if last_send < 0.0:
+                        session.bus.stand(now)
+                        last_send = now
+                elif now < move_s - 1e-9:
+                    if last_send < stand_s or (now - last_send) >= (VEL_RESEND_S - 1e-9):
+                        session.bus.vel(vx, sign * YAW_RATE_CAP, now)
+                        last_send = now
+                elif last_send < move_s:
+                    session.bus.stop(now)
+                    last_send = move_s + 10.0
+                session.step()
+                walker = session.lipm.op3 if session.lipm is not None else None
+                if walker is not None:
+                    angle_peak = max(angle_peak, abs(walker.angle_cmd))
+        finally:
+            mj.mj_step = real_step
+        move = [s for s in session.samples if s.mode == "move"]
+        # The slew is done by ~2.3 s. The next couple of steps still
+        # settle the heading. 4–8 s is the steady turn.
+        steady = [s for s in move if s.t >= 4.0 - 1e-9]
+        dyaw = 0.0
+        rate = 0.0
+        if len(steady) >= 2:
+            dyaw = math.degrees(steady[-1].yaw - steady[0].yaw)
+            dt = steady[-1].t - steady[0].t
+            rate = math.radians(dyaw) / dt if dt > 1e-6 else 0.0
+        _expect(angle_peak > 0.04, f"{name} step angle {angle_peak:.3f}", failures)
+        _expect(dyaw * sign > 15.0, f"{name} Δyaw {dyaw:+.1f} deg", failures)
+        _expect(session.samples[-1].mode == "stand", f"{name} tail {session.samples[-1].mode}", failures)
+        knee_peak = 0.0
+        worst_name = ""
+        worst = 0.0
+        for joint, peak in peaks.items():
+            if abs(peak.force_nm) >= abs(worst):
+                worst = peak.force_nm
+                worst_name = joint
+            if "knee" in joint:
+                knee_peak = max(knee_peak, abs(peak.force_nm))
+            if abs(peak.force_nm) > BUS_KIT_RAIL_NM:
+                failures.append(f"{name} {joint} {peak.force_nm:+.3f} Nm")
+            if "knee" in joint and abs(peak.force_nm) > lipm_gait.KNEE_SAG_NM + 1e-3:
+                failures.append(f"{name} knee {joint} {peak.force_nm:+.3f} Nm")
+        for joint, peak in stop_peaks.items():
+            if not any(tok in joint for tok in ("hip_", "knee", "ank_")):
+                continue
+            if abs(peak.force_nm) > lipm_gait.LEG_STOP_NM + 1e-3:
+                failures.append(
+                    f"{name} stop {joint} {peak.force_nm:+.3f} Nm "
+                    f"lacks {lipm_gait.LEG_STOP_HEADROOM_NM:.2f} Nm headroom"
+                )
+        for joint, peak in move_peaks.items():
+            if "hip_roll" in joint and abs(peak.force_nm) > lipm_gait.KNEE_SAG_NM + 1e-3:
+                failures.append(f"{name} hip roll {joint} {peak.force_nm:+.3f} Nm")
+        hip_move = max(
+            (abs(p.force_nm) for n, p in move_peaks.items() if "hip_roll" in n),
+            default=0.0,
+        )
+        lines.append(
+            f"{name} angle {angle_peak:.3f} rad  steady Δyaw {dyaw:+.1f} deg  "
+            f"yaw rate {rate:+.3f} rad/s  knee |τ| {knee_peak:.3f}  "
+            f"hip roll |τ| {hip_move:.3f}  "
+            f"worst {worst_name} {worst:+.3f} Nm"
+        )
+        session.assert_plant_unchanged()
+        if name in ("left", "right"):
+            lines.append(f"__rate_{name}={rate:+.6f}")
+    left_rate = right_rate = None
+    kept: list[str] = []
+    for line in lines:
+        if line.startswith("__rate_left="):
+            left_rate = float(line.split("=", 1)[1])
+        elif line.startswith("__rate_right="):
+            right_rate = float(line.split("=", 1)[1])
+        else:
+            kept.append(line)
+    if left_rate is not None and right_rate is not None and max(abs(left_rate), abs(right_rate)) > 1e-6:
+        mismatch = abs(abs(left_rate) - abs(right_rate)) / max(abs(left_rate), abs(right_rate))
+        _expect(mismatch < 0.05, f"left/right yaw rate mismatch {mismatch:.3f}", failures)
+        kept.append(
+            f"left/right |rate| {abs(left_rate):.3f}/{abs(right_rate):.3f} "
+            f"mismatch {mismatch * 100:.1f}%"
+        )
+    return failures, kept
+
+
+def _bus_kit_reverse() -> tuple[list[str], list[str]]:
+    """vel(−0.032) retreats at about that body speed."""
+    failures: list[str] = []
+    lines: list[str] = []
+    session = SteerSession(video=False, lipm=locked_kit_config())
+    peaks: dict[str, _TauPeak] = {}
+    real_step = mj.mj_step
+
+    def _step(model: mj.MjModel, data: mj.MjData) -> None:
+        real_step(model, data)
+        _note_leg_peaks(session, peaks)
+
+    mj.mj_step = _step
+    stand_s, move_s, stop_s = 0.40, 6.50, 7.40
+    last_send = -1.0
+    try:
+        while float(session.data.time) < stop_s - 1e-9:
+            now = float(session.data.time)
+            if now < stand_s - 1e-9:
+                if last_send < 0.0:
+                    session.bus.stand(now)
+                    last_send = now
+            elif now < move_s - 1e-9:
+                if last_send < stand_s or (now - last_send) >= (VEL_RESEND_S - 1e-9):
+                    session.bus.vel(-VX_BACK_CAP, 0.0, now)
+                    last_send = now
+            elif last_send < move_s:
+                session.bus.stop(now)
+                last_send = move_s + 10.0
+            session.step()
+    finally:
+        mj.mj_step = real_step
+    steady = [s for s in session.samples if s.mode == "move" and s.t >= 3.0]
+    body = float(np.mean([s.body_vx for s in steady])) if steady else 0.0
+    ratio = body / -VX_BACK_CAP if VX_BACK_CAP else 0.0
+    _expect(abs(ratio - 1.0) < 0.08, f"reverse body/command {ratio:.2f}", failures)
+    knee = max((abs(p.force_nm) for n, p in peaks.items() if "knee" in n), default=0.0)
+    hip_roll = max((abs(p.force_nm) for n, p in peaks.items() if "hip_roll" in n), default=0.0)
+    if knee > lipm_gait.KNEE_SAG_NM + 1e-3:
+        failures.append(f"reverse knee {knee:.3f} Nm")
+    if hip_roll > lipm_gait.KNEE_SAG_NM + 1e-3:
+        failures.append(f"reverse hip roll {hip_roll:.3f} Nm")
+    for name, peak in peaks.items():
+        if abs(peak.force_nm) > BUS_KIT_RAIL_NM:
+            failures.append(f"reverse {name} {peak.force_nm:+.3f} Nm")
+    lines.append(
+        f"reverse cmd {-VX_BACK_CAP:+.3f} m/s  settled body {body:+.3f} m/s  "
+        f"ratio {ratio:.2f}  knee |τ| {knee:.3f}  hip roll |τ| {hip_roll:.3f}"
+    )
+    session.assert_plant_unchanged()
+    return failures, lines
+
+
+def _bus_kit_first_step_knee() -> tuple[list[str], list[str]]:
+    """First swing after stand, left lead and right lead. Knee sag bar."""
+    failures: list[str] = []
+    lines: list[str] = []
+    for lead in ("L", "R"):
+        cfg = replace(locked_kit_config(), gm_start_lead=lead, gm_resume_lead="keep")
+        session = SteerSession(video=False, lipm=cfg)
+        peaks = {"l_knee_pos": 0.0, "r_knee_pos": 0.0}
+        seen = {"on": False, "done": False}
+        real_step = mj.mj_step
+
+        def _step(model: mj.MjModel, data: mj.MjData, _lead=lead) -> None:
+            real_step(model, data)
+            walker = session.lipm.op3 if session.lipm is not None else None
+            if walker is None or seen["done"]:
+                return
+            t = walker.time
+            in_ssp = (
+                walker.l_ssp_start < t <= walker.l_ssp_end
+                if _lead == "L"
+                else walker.r_ssp_start < t <= walker.r_ssp_end
+            )
+            if in_ssp:
+                seen["on"] = True
+                for name in peaks:
+                    force = abs(float(data.actuator_force[session.act_idx[name]]))
+                    peaks[name] = max(peaks[name], force)
+            elif seen["on"]:
+                seen["done"] = True
+
+        mj.mj_step = _step
+        last_send = -1.0
+        try:
+            while float(session.data.time) < 2.0 - 1e-9 and not seen["done"]:
+                now = float(session.data.time)
+                if now < 0.40 - 1e-9:
+                    if last_send < 0.0:
+                        session.bus.stand(now)
+                        last_send = now
+                elif (now - last_send) >= (VEL_RESEND_S - 1e-9):
+                    session.bus.vel(VX_FWD_CAP, 0.0, now)
+                    last_send = now
+                session.step()
+        finally:
+            mj.mj_step = real_step
+        session.assert_plant_unchanged()
+        _expect(seen["on"], f"{lead}-lead first swing did not start", failures)
+        for name, force in peaks.items():
+            if force > lipm_gait.KNEE_SAG_NM + 1e-3:
+                failures.append(f"{lead}-lead first step {name} {force:.3f} Nm")
+        lines.append(
+            f"first {lead}-lead step knee L {peaks['l_knee_pos']:.3f} Nm  "
+            f"R {peaks['r_knee_pos']:.3f} Nm"
+        )
+    return failures, lines
+
+
+def _bus_kit_resume_carry() -> tuple[list[str], list[str]]:
+    """Outside-lead resume: joint-target step, turn arc, resume leftover."""
+    failures: list[str] = []
+    lines: list[str] = []
+
+    def _yaw_at(samples: list[PoseSample], t: float) -> float:
+        best = samples[0]
+        for sample in samples:
+            if sample.t <= t + 1e-9:
+                best = sample
+            else:
+                break
+        return float(best.yaw)
+
+    def _one(label: str, script: tuple[DemoSegment, ...], t0: float, t1: float) -> None:
+        session = SteerSession(video=False, lipm=locked_kit_config())
+        walker = session.lipm.op3
+        if walker is None:
+            failures.append(f"{label} resume has no kit walker")
+            return
+        driver = ScriptedDriver(script)
+        normal: list[float] = []
+        chase: list[float] = []
+        prev: dict[str, float] | None = None
+        while float(session.data.time) < t1 + 0.05:
+            now = float(session.data.time)
+            driver.publish(session.bus, now)
+            report = session.step()
+            joints = walker._last_joints
+            if prev is not None and report.mode == "move" and joints:
+                delta = 0.0
+                for name, val in joints.items():
+                    delta = max(delta, abs(float(val) - float(prev.get(name, val))))
+                if walker.lead_blend_tick:
+                    chase.append(delta)
+                else:
+                    normal.append(delta)
+            if joints:
+                prev = {k: float(v) for k, v in joints.items()}
+        session.assert_plant_unchanged()
+        arc = math.degrees(_wrap_pi(_yaw_at(session.samples, t0) - _yaw_at(session.samples, 16.0)))
+        res = math.degrees(_wrap_pi(_yaw_at(session.samples, t1) - _yaw_at(session.samples, t0)))
+        dur = t0 - 16.0
+        rate = math.radians(arc) / dur if dur > 1e-6 else 0.0
+        hold = max(normal) if normal else 0.0
+        lines.append(
+            f"{label} arc 16→{t0:.1f}s Δyaw {arc:+.2f}°  mean {rate:+.3f} rad/s  "
+            f"resume Δyaw {res:+.2f}°"
+        )
+        if label == "left":
+            if not chase:
+                failures.append("left resume did not chase the outside-foot pose")
+            else:
+                peak = max(chase)
+                chase_s = len(chase) * float(session.ctrl_dt)
+                lines.append(
+                    f"left resume chase {chase_s:.3f}s  "
+                    f"max|Δq| {peak:.3f} rad  walk max {hold:.3f} rad"
+                )
+                if peak > hold + 0.005:
+                    failures.append(
+                        f"left resume chase tick {peak:.3f} rad exceeds walk max {hold:.3f}"
+                    )
+            if res > 8.0 or res < -8.0:
+                failures.append(f"left resume Δyaw {res:+.2f}° left the outside-foot window")
+        elif abs(res) > 4.0:
+            failures.append(f"right resume Δyaw {res:+.2f}°")
+
+    _one("left", NAV_LEFT_SCRIPT, 28.5, 34.5)
+    _one("right", NAV_RIGHT_SCRIPT, 27.0, 33.0)
+    return failures, lines
+
+
+def bus_kit_check() -> int:
+    """Day-1 bus on the locked kit row. Non-zero means the Prefer FAIL bar broke."""
+    contract_fail, lines = _bus_kit_contract()
+    torque_fail, torque_lines = _bus_kit_forward_stop()
+    yaw_fail, yaw_lines = _bus_kit_yaw()
+    rev_fail, rev_lines = _bus_kit_reverse()
+    lead_fail, lead_lines = _bus_kit_first_step_knee()
+    carry_fail, carry_lines = _bus_kit_resume_carry()
+    failures = contract_fail + torque_fail + yaw_fail + rev_fail + lead_fail + carry_fail
+    lines.extend(torque_lines)
+    lines.extend(yaw_lines)
+    lines.extend(rev_lines)
+    lines.extend(lead_lines)
+    lines.extend(carry_lines)
+    print("[bus-kit] Day-1 CommandBus on locked kit500")
+    for line in lines:
+        print(f"[bus-kit] {line}")
+    if failures:
+        for msg in failures:
+            print(f"FAIL {msg}")
+        return 1
+    print(
+        "[bus-kit] Prefer FAIL bar holds: settled vx matches the clamp, "
+        "yaw step angle is non-zero, knees and walking hip roll stay at or under 2.33 Nm"
+    )
+    return 0
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Day-1 velocity steer on frozen M145 (no door)")
     ap.add_argument("--view", action="store_true", help="Interactive viewer + keyboard")
@@ -2358,11 +3756,18 @@ def main() -> None:
     ap.add_argument("--out", type=str, default=None)
     ap.add_argument("--no-video", action="store_true", help="Headless sim without mp4")
     ap.add_argument("--self-test", action="store_true", help="Command bus, freeze checks, short sim")
+    ap.add_argument(
+        "--bus-kit",
+        action="store_true",
+        help="Day-1 bus on the locked kit walk: forward then stop, plant cold",
+    )
     ap.add_argument("--log", type=str, default=None)
     ap.add_argument("--summary", type=str, default=None)
     args = ap.parse_args()
     if args.self_test:
         raise SystemExit(self_test())
+    if args.bus_kit:
+        raise SystemExit(bus_kit_check())
     if args.view:
         run_view(120.0 if args.duration is None else float(args.duration))
         return
