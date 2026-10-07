@@ -323,10 +323,15 @@ def _sorted_quantile(values: tuple[float, ...], q: float) -> float:
 # It is not fitted on a new stop, and it is not applied to wall_hall_w_2.
 EAST_L_Q75_M = _sorted_quantile(EAST_L_ERR_M, 0.75)
 # "online": median of prior close left errors on wall_hall_e_1 in this
-# bout. The sample that crosses the gate is left out. "quantile": the
-# 75th percentile above. Empty priors do not fall back to the median
-# or to median+MAD.
-EAST_L_LIVE = "online"
+# bout. The sample that crosses the gate is left out. That rule was
+# run live on kitchen −90°: 22 priors, pad 0.05613 m, residual
+# −0.0284 m. It is not the latch. "quantile" is the 75th percentile
+# of the 45. Empty priors do not fall back to the median or to
+# median+MAD.
+EAST_L_ONLINE_PAD_M = 0.05612963080175057
+EAST_L_ONLINE_N = 22
+EAST_L_ONLINE_RESIDUAL_M = -0.028436946196605833
+EAST_L_LIVE = "quantile"
 # Close left-toe errors on wall_hall_w_2 only. Committing stops are
 # out. Right-toe samples are not in this list. East samples are not
 # in this list. N=19, so this pad can CLEAR. The 0.105 m outlier stays.
@@ -742,11 +747,13 @@ def _definition() -> DefinitionJson:
             f"{EAST_WALL} left samples median {EAST_L_LATCH_M:.5f} m "
             f"(n={len(EAST_L_ERR_M)}). Median plus MAD "
             f"{EAST_L_APPLIED_M:.5f} m is recorded and is not the live "
-            "latch. The live left latch is the median of prior close "
-            "left errors on that wall in this bout, and the sample that "
-            f"crosses the gate is left out. The 75th percentile "
-            f"{EAST_L_Q75_M:.5f} m is the fallback and is not applied "
-            f"while the rule is {EAST_L_LIVE}. Right-toe samples median "
+            "latch. A same-bout online median of "
+            f"{EAST_L_ONLINE_N} prior close left errors, pad "
+            f"{EAST_L_ONLINE_PAD_M:.5f} m, stopped at residual "
+            f"{EAST_L_ONLINE_RESIDUAL_M:+.4f} m and is not the latch. "
+            f"The live left latch is the 75th percentile of those "
+            f"{len(EAST_L_ERR_M)} samples, {EAST_L_Q75_M:.5f} m. "
+            "Right-toe samples median "
             f"{EAST_R_LATCH_M:.5f} m (n={len(EAST_R_ERR_M)}). An unknown "
             "toe gets pad 0. Contact "
             f"boxes sit {TOE_OUTBOARD_M:.3f} m outboard of each ankle "
@@ -3240,8 +3247,14 @@ def main() -> int:
         raise SystemExit(f"FAIL: east left applied pad moved to {EAST_L_APPLIED_M}")
     if EAST_L_MAD_APPLIED:
         raise SystemExit("FAIL: east left median+MAD is on the live latch")
-    if EAST_L_LIVE not in ("online", "quantile"):
+    if EAST_L_LIVE != "quantile":
         raise SystemExit(f"FAIL: east left live rule {EAST_L_LIVE}")
+    if abs(EAST_L_ONLINE_RESIDUAL_M) <= RANGE_ERR_MAX_M:
+        raise SystemExit("FAIL: the failed online residual was marked clear")
+    if EAST_L_ONLINE_N != 22:
+        raise SystemExit("FAIL: online prior count moved")
+    if abs(EAST_L_ONLINE_PAD_M - 0.05612963080175057) > 1e-12:
+        raise SystemExit("FAIL: online pad moved")
     if abs(EAST_L_Q75_M - 0.05944376400913556) > 1e-12:
         raise SystemExit(f"FAIL: east left q75 moved to {EAST_L_Q75_M}")
     if len(W2_L_ERR_M) != 19:
@@ -3406,6 +3419,10 @@ def main() -> int:
         "east_l_applied_m": EAST_L_APPLIED_M,
         "east_l_mad_applied": EAST_L_MAD_APPLIED,
         "east_l_q75_m": EAST_L_Q75_M,
+        "east_l_q75_applied": EAST_L_LIVE == "quantile",
+        "east_l_online_pad_m": EAST_L_ONLINE_PAD_M,
+        "east_l_online_n": EAST_L_ONLINE_N,
+        "east_l_online_residual_m": EAST_L_ONLINE_RESIDUAL_M,
         "east_l_pad_rule": EAST_L_LIVE,
         "east_l_sample_count": len(EAST_L_ERR_M),
         "w2_l_latch_m": W2_L_LATCH_M,
@@ -3431,7 +3448,7 @@ def main() -> int:
         "per_wall_pad_m": {
             "wall_hall_w_2×L": W2_L_LATCH_M,
             "wall_hall_w_2×R": LATCH_EXTRA_M,
-            "wall_hall_e_1×L": None,
+            "wall_hall_e_1×L": EAST_L_Q75_M,
             "wall_hall_e_1×R": EAST_R_LATCH_M,
         },
         "bob_pad_stacked": False,
