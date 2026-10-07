@@ -90,6 +90,12 @@ def summarize_trace(
     clears = [float(row["clear_m"]) for row in scored if row["clear_m"] is not None]
     airs = [float(row["airborne_dx_m"]) for row in scored]
     seps = [float(row["sep_m"]) for row in swings]
+    x_l = np.asarray(trace["x_l"], dtype=np.float64)
+    x_r = np.asarray(trace["x_r"], dtype=np.float64)
+    sep_series = np.abs(x_l - x_r)
+    move = np.asarray([str(item) == "move" for item in trace["mode"]])
+    sep_bout = float(np.max(sep_series)) if sep_series.size else None
+    sep_move = float(np.max(sep_series[move])) if np.any(move) else sep_bout
     worst_slip = max(slips) if slips else None
     min_clear = min(clears) if clears else None
     honest_clear = max(clears) if clears else None
@@ -160,6 +166,8 @@ def summarize_trace(
         "airborne_min_m": min(airs) if airs else None,
         "airborne_median_m": float(np.median(np.asarray(airs))) if airs else None,
         "sep_peak_m": max(seps) if seps else None,
+        "sep_bout_m": sep_bout,
+        "sep_move_m": sep_move,
         "mismatch_fraction": mismatch,
         "ss": ss,
         "stop": {k: v for k, v in stop.items() if k != "fail_reasons"},
@@ -184,6 +192,8 @@ def _empty(expect: dict[str, float]) -> dict[str, object]:
         "airborne_min_m": None,
         "airborne_median_m": None,
         "sep_peak_m": None,
+        "sep_bout_m": None,
+        "sep_move_m": None,
         "mismatch_fraction": 1.0,
         "ss": {"n": 0, "min_contacts": 0, "cop_min_m": None, "cop_p5_m": None,
                "cop_p50_m": None, "cop_p95_m": None, "edge_fraction": None,

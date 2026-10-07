@@ -2989,13 +2989,13 @@ def _compact_line(row: dict[str, object]) -> str:
         str(row.get("verdict")),
         _cell(step.get("step_fraction"), digits=3),
         _cell(step.get("worst_slip_m"), 1000.0, 2),
-        _cell(step.get("min_clear_m"), 1000.0, 2),
-        _cell(step.get("honest_max_clear_m"), 1000.0, 2),
+        _cell(step.get("min_clear_m"), 1000.0, 3),
+        _cell(step.get("honest_max_clear_m"), 1000.0, 3),
         _cell(step.get("airborne_min_m"), digits=3),
         _cell(_step_get(step, "expected", "per_swing_m"), digits=3),
         _cell(_step_get(step, "expected", "stance_to_stance_m"), digits=3),
-        _cell(step.get("sep_peak_m"), 1000.0, 1),
-        _cell(ss.get("min_contacts"), digits=0),
+        _cell(step.get("sep_move_m") if step.get("sep_move_m") is not None else step.get("sep_peak_m"), 1000.0, 1),
+        _cell(None if not ss.get("n") else ss.get("min_contacts"), digits=0),
         _cell(ss.get("cop_min_m"), 1000.0, 2, signed=True),
         _cell(ss.get("edge_fraction"), digits=3),
         _cell(ss.get("tilt_max_rad"), 180.0 / math.pi, 2),
@@ -3029,6 +3029,7 @@ def _worst_perturb(rows: list[dict[str, object]]) -> dict[str, object] | None:
             1.0 if fraction is None else fraction,
             0.0 if slip is None else -slip,
             1.0 if clear is None else clear,
+            0.0 if ask is None else -ask,
         )
 
     return min(cells, key=key)
@@ -3037,13 +3038,14 @@ def _worst_perturb(rows: list[dict[str, object]]) -> dict[str, object] | None:
 def render_stepping_md(payloads: list[dict[str, object]]) -> str:
     header = (
         "| Tip | Row | Cell | Verdict | Step frac | Slip mm | Clear min mm | Clear honest mm | "
-        "Air min m | vx·T m | vx·T/2 m | Sep mm | SS contacts | CoP min mm | Edge <5 mm | "
+        "Air min m | vx·T m | vx·T/2 m | Sep mm | SS min contacts | CoP min mm | Edge <5 mm | "
         "Tilt deg | Stop | Declared ZMP mm | Actual ZMP mm | Ask Nm | Mismatch | n |"
     )
     rule = (
         "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | "
         "---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |"
     )
+    header = header.replace("Sep mm", "Sep move mm")
     lines = [
         "# Walk stepping bars",
         "",
@@ -3117,12 +3119,59 @@ def render_stepping_md(payloads: list[dict[str, object]]) -> str:
                 f"`{worst.get('name')}` / `{worst.get('perturb_label')}` "
                 f"is {worst.get('verdict')}."
             )
-    lines.extend(["", *notes, ""])
+    lines.extend(["", *notes, "", "Nominal rows, from the sim state:", ""])
+    for payload in payloads:
+        rows = payload.get("rows")
+        if not isinstance(rows, list):
+            continue
+        tip = str(payload.get("tip"))
+        for row in rows:
+            if not isinstance(row, dict) or row.get("perturb_label") not in (None, "nominal"):
+                continue
+            step = row.get("stepping")
+            if not isinstance(step, dict):
+                continue
+            stop = step.get("stop")
+            if not isinstance(stop, dict):
+                stop = {}
+            pitch = _num(stop.get("pitch_off_rad"))
+            final_p = _num(stop.get("final_pitch_rad"))
+            stand_p = _num(stop.get("stand_pitch_rad"))
+            lines.append(
+                f"- `{tip}` `{row.get('name')}`: contact advance "
+                f"{_cell(step.get('contact_forward_m'), digits=3)} m, "
+                f"airborne advance {_cell(step.get('airborne_forward_m'), digits=3)} m, "
+                f"move separation {_cell(step.get('sep_move_m'), 1000.0, 1)} mm, "
+                f"declared/actual mismatch {_cell(step.get('mismatch_fraction'), digits=3)}, "
+                f"final 1 s pitch { _cell(final_p, 180.0 / math.pi, 2, signed=True) } deg "
+                f"against stand { _cell(stand_p, 180.0 / math.pi, 2, signed=True) } deg "
+                f"(off by {_cell(pitch, 180.0 / math.pi, 2)} deg), "
+                f"roll off {_cell(_num(stop.get('roll_off_rad')), 180.0 / math.pi, 2)} deg, "
+                f"up_z {_cell(stop.get('min_up_z'), digits=3)}, "
+                f"contacts L/R {stop.get('min_contacts_l')}/{stop.get('min_contacts_r')}, "
+                f"joint error {_cell(stop.get('q_stand_err_rad'), 180.0 / math.pi, 1)} deg. "
+                f"{stop.get('pose')}."
+            )
+    lines.append("")
     lines.extend([
+        "`Sep move mm` is the peak `|x_L − x_R|` while the bus is in `vel`.",
+        "With no swing, that peak is the fore/aft gap of the two feet as they move.",
+        "",
         "58ce1d8 has no vx 0.056 preview row. The slow row is the one that tip published.",
-        "ac81435's Controls scorer marked the 0.056 and slow rows CLEAR. Those CLEARs",
-        "are scored again on these bars. A step fraction under 90% with both feet in",
-        "contact is a skate, including when the older margin and torque numbers were inside.",
+        "",
+        "Controls marked the ac81435 voice rows and the slow row CLEAR, and marked",
+        "the d7b06e7 declared-stance cells CLEAR. A step fraction of 0, with both feet",
+        "keeping floor contact and the forward motion happening in contact, is a skate.",
+        "The #102 margin and torque bars already Prefer-FAIL'd ac81435 and 58ce1d8.",
+        "They did not say the feet were skating. On d7b06e7 those older bars pass:",
+        "declared contact CoP sits on the polygon edge, outside fraction is 0, unclamped",
+        "ask stays ≤ 2.33 Nm, and jerk is under the kit baseline. The stepping bars",
+        "are what fail that tip. The stop freezes pitched forward of the stand.",
+        "μ 1.2 is the only #103 cell with airborne ticks. Those runs last a few",
+        "control ticks, the lowest sole corner stays under 0.02 mm, and the airborne",
+        "advance is a few millimetres against `vx·T` of about 0.20 m. Mass −5% and",
+        "latency −1 stay at step fraction 0. Latency here is the #102 command clock,",
+        "one tick early on the bus phrase. It does not create a step.",
         "",
     ])
     return "\n".join(lines) + "\n"
