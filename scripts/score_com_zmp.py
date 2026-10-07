@@ -260,6 +260,91 @@ def _note_margin(stats: dict[str, SideFrac], kind: str, mm: float) -> None:
             row.min_mm = mm
 
 
+def _note_declared(stats: dict[str, SideFrac], label: str, mm: float | None, outside: bool) -> None:
+    """Declared-phase polygon. A missing distance still counts as outside."""
+    for key in ("all", label):
+        row = stats.get(key)
+        if row is None:
+            continue
+        row.n += 1
+        if outside:
+            row.n_out += 1
+        if mm is not None and math.isfinite(mm) and mm < row.min_mm:
+            row.min_mm = mm
+
+
+def _declared_polygon(
+    session: sw.SteerSession,
+) -> tuple[str, float | None, float | None, bool, bool]:
+    """Contact CoP and CoM against the walker's declared stance box.
+
+    Single support is that foot only. A loaded swing foot is not added.
+    Double support and stand use both boxes. Margin is millimetres,
+    positive inside. Outside is a negative margin, no floor contact, or a
+    declared stance foot under 5 N.
+    """
+    lipm = session.lipm
+    if lipm is None:
+        return "unknown", None, None, True, True
+    phase = str(lipm.phase)
+    stance = str(lipm.stance)
+    if phase == "swing" and stance == "L":
+        label, sides = "ss_L", ("L",)
+    elif phase == "swing" and stance == "R":
+        label, sides = "ss_R", ("R",)
+    elif phase == "shift":
+        label, sides = "ds", ("L", "R")
+    elif phase == "stand":
+        label, sides = "stand", ("L", "R")
+    else:
+        return "unknown", None, None, True, True
+    num = np.zeros(3, dtype=np.float64)
+    den = 0.0
+    for side in ("L", "R"):
+        gid = int(lipm.gid[side])
+        for i in range(session.data.ncon):
+            con = session.data.contact[i]
+            g1 = int(con.geom1)
+            g2 = int(con.geom2)
+            if not lipm._on_ground(g1, g2, gid):
+                continue
+            force = np.zeros(6, dtype=np.float64)
+            mj.mj_contactForce(session.model, session.data, i, force)
+            fn = float(force[0])
+            if fn <= 1e-6:
+                continue
+            num += fn * np.asarray(con.pos, dtype=np.float64)
+            den += fn
+    chunks = [session._foot_corners(lipm.bid[side], lipm.gid[side]) for side in sides]
+    hull = sw.convex_hull_xy(np.concatenate(chunks, axis=0))
+    com = np.asarray(session.data.subtree_com[lipm.bid_body, :2], dtype=np.float64)
+    com_mm = 1000.0 * sw.support_margin(com, hull)
+    cop_mm: float | None = None
+    margins: list[float] = []
+    if den > 1e-6:
+        cop_mm = 1000.0 * sw.support_margin((num / den)[:2], hull)
+        margins.append(cop_mm)
+    unload = float(lipm.cfg.unload_n)
+    stance_unloaded = False
+    box_missing = False
+    for side in ("L", "R"):
+        fn = float(lipm.foot_normal(side))
+        if fn < unload:
+            if side in sides and label.startswith("ss"):
+                stance_unloaded = True
+            continue
+        slack = float(lipm.cop_margin(side))
+        if slack <= -0.5:
+            box_missing = True
+        else:
+            margins.append(1000.0 * slack)
+    if margins:
+        cop_mm = min(margins)
+    cop_out = den <= 1e-6 or stance_unloaded or box_missing or cop_mm is None or cop_mm < 0.0
+    com_out = com_mm < 0.0
+    return label, cop_mm, com_mm, cop_out, com_out
+
+
 def _empty_fracs() -> dict[str, SideFrac]:
     return {key: SideFrac() for key in ("all", "ss_L", "ss_R", "ds", "air")}
 
@@ -573,6 +658,8 @@ def run_attempt(
     com_stats = _empty_fracs()
     zmp_stats = _empty_fracs()
     zmp_pos_stats = _empty_fracs()
+    decl_cop_stats = _empty_fracs()
+    decl_com_stats = _empty_fracs()
     tau_peak = 0.0
     tau_joint = ""
     tau_t = 0.0
@@ -664,6 +751,10 @@ def run_attempt(
         _note_margin(com_stats, kind, com_mm)
         _note_margin(zmp_stats, kind, zmp_mm)
         _note_margin(zmp_pos_stats, kind, zmp_pos_mm)
+        if not kit_baseline:
+            d_label, d_cop_mm, d_com_mm, d_cop_out, d_com_out = _declared_polygon(session)
+            _note_declared(decl_cop_stats, d_label, d_cop_mm, d_cop_out)
+            _note_declared(decl_com_stats, d_label, d_com_mm, d_com_out)
         for jn in LEG_JOINTS:
             hist = q_hist[jn]
             hist.append(float(lipm.q(jn)))
@@ -780,14 +871,28 @@ def run_attempt(
     com_min_m = -1.0 if com_all is None else float(com_all.com_mm) / 1000.0
     zmp_min_m = -1.0 if zmp_all is None else float(zmp_all.zmp_mm) / 1000.0
     up_z = float(session.min_up_z)
-    margins_ok = (
-        com_stats["all"].n > 0
-        and com_stats["all"].n_out == 0
-        and com_min_m >= 0.0
-        and zmp_stats["all"].n > 0
-        and zmp_stats["all"].n_out == 0
-        and zmp_min_m >= 0.0
-    )
+    if not kit_baseline and decl_cop_stats["all"].n > 0:
+        cop_row = decl_cop_stats["all"]
+        com_row = decl_com_stats["all"]
+        com_min_m = float(com_row.min_mm) / 1000.0 if math.isfinite(com_row.min_mm) else -1.0
+        zmp_min_m = float(cop_row.min_mm) / 1000.0 if math.isfinite(cop_row.min_mm) else -1.0
+        com_frac = _frac_of(com_row)
+        zmp_frac = _frac_of(cop_row)
+        margins_ok = (
+            cop_row.n_out == 0
+            and com_row.n_out == 0
+            and zmp_min_m >= 0.0
+            and com_min_m >= 0.0
+        )
+    else:
+        margins_ok = (
+            com_stats["all"].n > 0
+            and com_stats["all"].n_out == 0
+            and com_min_m >= 0.0
+            and zmp_stats["all"].n > 0
+            and zmp_stats["all"].n_out == 0
+            and zmp_min_m >= 0.0
+        )
     ask_ok = ask_nm <= ASK_NM + 1e-9 and hard_cap == 0 and not over
     jerk_ok = (
         torso_jerk_peak < BASE_COM_JERK_PEAK - 1e-3
@@ -834,16 +939,16 @@ def run_attempt(
         "ik_fail": int(lipm.preview_ik_fail),
         "gate_holds": int(lipm.preview_gate_holds),
         "n_ticks": len(margins),
-        "com_out": len(com_out),
-        "cop_out": len(cop_out),
-        "zmp_out": len(zmp_out),
+        "com_out": int(decl_com_stats["all"].n_out) if not kit_baseline else len(com_out),
+        "cop_out": int(decl_cop_stats["all"].n_out) if not kit_baseline else len(cop_out),
+        "zmp_out": int(decl_cop_stats["all"].n_out) if not kit_baseline else len(zmp_out),
         "ask_over": len(over),
         "com_min_m": com_min_m,
         "zmp_min_m": zmp_min_m,
         "com_out_frac": com_frac,
         "zmp_out_frac": zmp_frac,
-        "com_frac": _frac_dict(com_stats),
-        "zmp_frac": _frac_dict(zmp_stats),
+        "com_frac": _frac_dict(decl_com_stats if not kit_baseline else com_stats),
+        "zmp_frac": _frac_dict(decl_cop_stats if not kit_baseline else zmp_stats),
         "zmp_pos_frac": _frac_dict(zmp_pos_stats),
         "com_worst": _fmt_margin(com_all, "com_mm"),
         "cop_worst": _fmt_margin(cop_all, "cop_mm"),

@@ -2180,3 +2180,44 @@ The worst cell is the 3.60 s entrance rug. Right ankle pitch 8.0479 Nm at 13.144
 
 The same gait on a 20.00 s bus bout, stand 3.00 s, walk 11.00 s, stop 6.00 s, 2500 ticks, keeps the walk phase at the stop. applied_vx is +0.0560 / +0.0560 m/s. Unclamped peak is the same right knee 2.0695 Nm, now at 11.848 s. CoM/ZMP minimum is the same +17.93 mm, now at 14.384 s. CoM jerk stays 88.853. The clip is `docs/media/voice_vx_056_side_front.mp4`, side and front, 30 fps. Not kit-safe. Not go-anywhere. Kit vx 0.150 m/s is still left hip pitch 4.4462 Nm.
 
+The #102 rescore of tip ac81435 scores contact CoP on the declared phase polygon. Single support is the stance foot box alone. The loaded-foot hull is not that bar. On the shape-1 rows the miss was the stop, still in left swing: contact CoP −46.58 mm at 12.672 s (3.60 s), −49.05 mm at 12.944 s (3.70 s), −48.83 mm at 13.800 s (slow). At 12.672 s the clock said the right foot was swinging and the left foot was stance. The right foot had 15.46 N and 4 floor contacts. The left foot had 7.75 N and 4 contacts. The swing foot was the loaded one. The stop kept that swing because the stance foot was under an 8 N gate, and it steered the ZMP onto the heavy foot.
+
+The stop now treats two feet at or above 5 N as double support and walks the clock back to the double-support boundary one tick at a time. After the physics step, a declared swing whose swing foot is still above 1 N is double support. The return stays in that shift. It does not enter the kit stand hold. That hold was rewriting every leg toward the flat-floor pose, and on the entrance lip it was the right ankle pitch at 8.36 Nm.
+
+A measured stabilizer sits on the same `write_clipped` path. The capture point is subtree CoM plus subtree linvel over ω, ω from the measured preview height. Outside a 20 mm deadzone it adds a rate-limited shift to `preview_y`, which the IK writes as hip roll, and a matching hip-roll offset. Ankle roll and ankle pitch follow the foot-local contact CoP and the trunk up-vector, outside 12 mm, slewed, tanh-shaped. There is no solve that pins the signed ask at ±2.33 Nm. On the flat 3.57 s bout the capture-point error peaks at 12.4 mm, inside the deadzone, so the hip term stays quiet. y_swap stays 0.
+
+Scored against the declared box, whole bout, soft-pass off. Contact CoP is the ZMP column. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` is unchanged. Friction is the sliding coefficient of floor, l_foot_contact, and r_foot_contact together. Mass ±5% scales body mass and inertia at load. Latency is ±1 planner tick. Ten seeds. The rug is the entrance mat, near edge 15 mm ahead of the toes, top at 20 mm. Start/stop is five bus cycles of the 11 s vel and the 3 s stop, 8800 ticks. Numbers are in `previews/com_zmp_declared.json`.
+
+| Period | Cell | Ask Nm | Joint | t | CoM mm | CoP mm | out | hard_cap | up_z | Result |
+| ---: | --- | ---: | --- | ---: | ---: | ---: | --- | ---: | ---: | --- |
+| 3.57 | nominal, shape 0 | 2.0535 | r_knee | 9.248 | +20.29 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.57 | seeds 0–9 | 2.0532–2.0540 | r_knee | 9.248 | +20.29 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.57 | mass −5% | 2.0465 | r_knee | 9.248 | +20.21 | +0.00 | 0 | 0 | 0.961 | CLEAR |
+| 3.57 | mass +5% | 2.0664 | r_knee | 9.248 | +20.37 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.57 | friction 1.2 | 2.0697 | r_knee | 9.248 | +20.04 | +0.00 | 0 | 0 | 0.963 | CLEAR |
+| 3.57 | friction 1.4 | 2.0174 | r_knee | 9.248 | +20.12 | +0.00 | 0 | 0 | 0.961 | CLEAR |
+| 3.57 | friction 1.6 | 2.0535 | r_knee | 9.248 | +20.29 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.57 | latency +1 | 2.2306 | l_hip_roll | 11.736 | +20.01 | +0.00 | 0 | 0 | 0.961 | CLEAR |
+| 3.57 | latency −1 | 1.9873 | l_knee | 0.416 | +20.50 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.57 | entrance rug | 2.0510 | l_knee | 7.456 | +20.29 | +0.00 | 0 | 0 | 0.961 | CLEAR |
+| 3.57 | start/stop ×5 | 2.0535 | r_knee | 9.248 | +20.29 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | nominal, shape 0 | 2.0415 | r_knee | 9.256 | +20.20 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | seeds 0–9 | 2.0412–2.0420 | r_knee | 9.256 | +20.20 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | mass −5% | 2.0652 | r_knee | 9.248 | +20.12 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | mass +5% | 2.0547 | r_knee | 9.256 | +20.28 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | friction 1.2 | 2.0511 | r_knee | 9.256 | +19.95 | +0.00 | 0 | 0 | 0.963 | CLEAR |
+| 3.60 | friction 1.4 | 2.0067 | r_knee | 9.256 | +20.04 | +0.00 | 0 | 0 | 0.961 | CLEAR |
+| 3.60 | friction 1.6 | 2.0415 | r_knee | 9.256 | +20.20 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | latency +1 | 2.1869 | l_knee | 7.464 | +19.92 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | latency −1 | 1.9524 | l_knee | 0.416 | +20.41 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | entrance rug | 2.0398 | r_knee | 9.256 | +20.20 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | start/stop ×5 | 2.0415 | r_knee | 9.256 | +20.20 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | shape 1 nominal | 2.3106 | r_hip_roll | 8.176 | +20.76 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | shape 1 mass −5% | 2.2995 | r_hip_roll | 8.184 | +20.95 | +0.00 | 0 | 0 | 0.961 | CLEAR |
+| 3.60 | shape 1 friction 1.2 | 2.2953 | r_hip_roll | 8.184 | +21.24 | +0.00 | 0 | 0 | 0.963 | CLEAR |
+| 3.60 | shape 1 latency −1 | 2.1205 | r_hip_roll | 8.176 | +20.74 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.70 | shape 1 nominal | 2.2584 | r_hip_roll | 8.352 | +20.76 | +0.00 | 0 | 0 | 0.961 | CLEAR |
+| 6.40 | slow, shape 1 | 2.0007 | r_hip_roll | 2.816 | +20.76 | +0.00 | 0 | 0 | 0.965 | CLEAR |
+
+46 cells, 0 fails. The worst cell is the shape-1 3.60 s nominal walk. Right hip roll 2.3106 Nm at 8.176 s, q −0.00839 rad, q_des +0.02372 rad, omega +0.6026 rad/s, headroom to 2.33 Nm +0.0194 Nm, 0 ticks over, hard_cap 0. Contact CoP minimum is +0.002 mm, outside 0. CoM minimum is +20.76 mm. min up_z is 0.960. The shape-0 worst ask is the 3.57 s +1 tick delay, left hip roll 2.2306 Nm at 11.736 s, under 2.33 Nm and 0.0306 Nm over the 2.20 Nm headroom. The flat 3.57 s bout is right knee 2.0535 Nm at 9.248 s, headroom to 2.20 Nm +0.1465 Nm, contact CoP on the polygon edge (+0.00 mm) with outside fraction 0, CoM +20.29 mm. The old mass −5% hip-roll 4.06 Nm, friction-1.2 ankle 8.08 Nm, and latency −1 ankle 3.56 Nm do not recur. The clip `docs/media/voice_vx_056_side_front.mp4` was rendered again on this gait: stand 3.00 s, vel(0.056, 0) for 11.00 s, stop 6.00 s, side and front, 30 fps, 600 frames, 20.00 s, fault none. Not kit-safe. Not go-anywhere.
+

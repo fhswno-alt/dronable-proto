@@ -411,6 +411,11 @@ class LipmWalker:
         # A later vel, after the soft stop has planted, arms again at the
         # kit pitch. The spawn is the only place sole_level starts at 1.
         self._restart = False
+        # Rate-limited CoP / DCM offsets. Not a torque cap.
+        self._stab_preview_m = 0.0
+        self._stab_hip = 0.0
+        self._stab_roll = {"L": 0.0, "R": 0.0}
+        self._stab_pitch = {"L": 0.0, "R": 0.0}
 
     def other(self, side: Side) -> Side:
         return "R" if side == "L" else "L"
@@ -600,6 +605,76 @@ class LipmWalker:
             out[i] = self._zmp_at(t0_s + i * dt)
         return out
 
+    def _slew(self, current: float, target: float, rate: float) -> float:
+        dt = op3_walk.OP3_CTRL_S
+        step = max(-rate * dt, min(rate * dt, target - current))
+        return current + step
+
+    def _dcm_error_y(self) -> float:
+        """Measured capture point minus the preview's planned CoM, metres."""
+        zc = float(self._preview_zc) if self._preview_zc > 0.05 else 0.18
+        omega = math.sqrt(G / max(zc, 1e-3))
+        com = float(self.data.subtree_com[self.bid_body, 1])
+        vy = float(self.data.subtree_linvel[self.bid_body, 1])
+        return (com + vy / omega) - float(self.preview_com_y)
+
+    def _preview_y_with_stab(self, com: float) -> float:
+        """Foot-target y. The added term is a rate-limited DCM shift.
+
+        Positive preview_y moves both foot targets toward +y, and the
+        hip-roll IK moves the pelvis toward −y. A capture point left of
+        the plan therefore adds a positive shift.
+        """
+        err = self._dcm_error_y()
+        self.stab_err_peak = max(getattr(self, "stab_err_peak", 0.0), abs(err))
+        # Quiet inside 2 cm. A larger capture-point miss, the kind a mass
+        # or friction change leaves, shifts preview_y and therefore hip roll.
+        dead = max(0.0, abs(err) - 0.020)
+        target = 0.0 if self.preview_stage == "stop" else math.copysign(0.005 * math.tanh(dead / 0.025), err)
+        self._stab_preview_m = self._slew(self._stab_preview_m, target, 0.020)
+        return -float(com) + self._stab_preview_m
+
+    def _stabilize_contacts(self) -> None:
+        """Ankle roll/pitch and hip roll from measured CoP, DCM, and trunk lean.
+
+        The offset is a tanh of the error, then a fixed-rate slew. The
+        write is write_clipped, the same path as the gait target. This
+        does not solve q_des so the signed ask equals ±2.33 Nm.
+        """
+        err = self._dcm_error_y()
+        up = self.data.xmat[self.bid_body].reshape(3, 3)[:, 2]
+        dead = max(0.0, abs(err) - 0.020)
+        hip_t = 0.0 if self.preview_stage == "stop" else math.copysign(0.005 * math.tanh(dead / 0.025), err)
+        self._stab_hip = self._slew(self._stab_hip, hip_t, 0.15)
+        for name in ("l_hip_roll", "r_hip_roll"):
+            idx = self.act_idx.get(name + "_pos")
+            if idx is None:
+                continue
+            if abs(self._stab_hip) > 1e-6:
+                self.write_clipped(name, float(self.data.ctrl[idx]) + self._stab_hip)
+        for side in ("L", "R"):
+            loaded = self.foot_normal(side) >= float(self.cfg.unload_n)
+            local = self._cop_local(side) if loaded else None
+            if local is None:
+                roll_t = 0.0
+                pitch_t = 0.0
+            else:
+                center = np.asarray(self.model.geom_pos[self.gid[side], :2], dtype=np.float64)
+                err_y = float(local[1] - center[1]) + 0.012 * float(up[1])
+                err_x = float(local[0] - center[0]) + 0.012 * float(up[0])
+                roll_t = 0.008 * math.copysign(math.tanh(max(0.0, abs(err_y) - 0.012) / 0.010), err_y)
+                sign = 1.0 if side == "L" else -1.0
+                pitch_raw = math.copysign(math.tanh(max(0.0, abs(err_x) - 0.012) / 0.010), err_x)
+                pitch_t = COP_PITCH_SIGN * sign * 0.008 * pitch_raw
+            self._stab_roll[side] = self._slew(self._stab_roll[side], roll_t, 0.35)
+            self._stab_pitch[side] = self._slew(self._stab_pitch[side], pitch_t, 0.35)
+            for kind, store in (("ank_roll", self._stab_roll), ("ank_pitch", self._stab_pitch)):
+                jn = self.pref(side) + kind
+                idx = self.act_idx.get(jn + "_pos")
+                if idx is None:
+                    continue
+                self.write_clipped(jn, float(self.data.ctrl[idx]) + store[side])
+
     def _write_preview_joints(self, joints: dict[str, float] | None) -> None:
         for jn in (
             "l_sho_roll", "r_sho_roll", "l_el_pitch", "r_el_pitch",
@@ -615,6 +690,7 @@ class LipmWalker:
             # write_clipped still keeps non-sagittal joints inside the
             # existing 0.98·τ/kp band. It does not edit forcerange.
             self.write_clipped(name, float(val))
+        self._stabilize_contacts()
         self._write_unused()
 
     def _preview_pose(self, walker: op3_walk.Op3Walker) -> dict[str, float] | None:
@@ -686,7 +762,7 @@ class LipmWalker:
             walker.time = 0.0
             walker.ctrl_running = False
             walker.update_movement()
-            walker.preview_y = -com
+            walker.preview_y = self._preview_y_with_stab(com)
             joints = self._preview_pose(walker)
             self.phase = "shift"
             self.stance = "R" if self.start_lead == "L" else "L"
@@ -708,7 +784,7 @@ class LipmWalker:
         future = self._zmp_future(float(walker.time))
         com = preview.step(future)
         self.preview_com_y = com
-        walker.preview_y = -com
+        walker.preview_y = self._preview_y_with_stab(com)
         joints, info = walker.step(op3_walk.OP3_CTRL_S)
         self._note_preview_phase(info)
         self._write_preview_joints(joints)
@@ -744,6 +820,26 @@ class LipmWalker:
         if walker.r_ssp_start < t <= walker.r_ssp_end:
             return "L"
         return None
+
+    def _ds_boundary(self, walker: op3_walk.Op3Walker) -> float | None:
+        """Clock time of the double-support edge that opened this swing.
+
+        ``t == r_ssp_start`` is still double support. Holding there puts
+        both feet on the ground instead of commanding the swing up.
+        """
+        period = float(walker.period)
+        if period <= 1e-6:
+            return None
+        t = float(walker.time)
+        t_mod = t % period
+        if walker.l_ssp_start < t_mod <= walker.l_ssp_end:
+            edge = float(walker.l_ssp_start)
+        elif walker.r_ssp_start < t_mod <= walker.r_ssp_end:
+            edge = float(walker.r_ssp_start)
+        else:
+            return None
+        cycles = math.floor(t / period)
+        return cycles * period + edge
 
     def _on_stance_side(self, stance: str) -> bool:
         """True when CoM y is past the inner edge, onto ``stance``."""
@@ -786,15 +882,30 @@ class LipmWalker:
         future = np.full(preview.horizon, target, dtype=np.float64)
         com = preview.step(future)
         self.preview_com_y = com
-        walker.preview_y = -com
+        walker.preview_y = self._preview_y_with_stab(com)
         joints = self._preview_pose(walker)
         self.phase = "shift"
         self.stance = stance_next  # type: ignore[assignment]
         self._write_preview_joints(joints)
         return True
 
+    def _feet_loaded(self) -> tuple[bool, bool]:
+        """A foot at or above the 5 N unload is on the ground.
+
+        The stop used to require 8 N. A stance foot at 7.8 N then kept
+        the clock in swing while the swing foot still held about 15 N,
+        and the contact CoP left the declared stance box.
+        """
+        unload = float(self.cfg.unload_n)
+        return self.foot_normal("L") >= unload, self.foot_normal("R") >= unload
+
     def _loaded_box_zmp(self) -> float | None:
-        """Box-centre ZMP when only one foot is carrying the weight."""
+        """Box-centre ZMP when only one foot is carrying the weight.
+
+        8 N, not the 5 N unload. A softer foot during the return is still
+        double support. Treating 6 N as single support restarts the return
+        and the contact CoP leaves the stance box.
+        """
         fn_l = self.foot_normal("L")
         fn_r = self.foot_normal("R")
         if fn_l > 8.0 and fn_r <= 8.0:
@@ -832,34 +943,55 @@ class LipmWalker:
             # Leave the step length alone. Zeroing it snaps hip pitch.
             # While one foot is up, the ZMP stays at that stance box centre
             # (±0.043 m). It does not follow the clock onto the airborne foot.
-            fn_l = self.foot_normal("L")
-            fn_r = self.foot_normal("R")
-            both_down = fn_l > 8.0 and fn_r > 8.0
+            left_down, right_down = self._feet_loaded()
+            both_down = left_down and right_down
             loaded = self._loaded_box_zmp()
-            if both_down:
-                # Pose is frozen. Do not follow the walk cycle off this hull.
+            clock_stance = self._ssp_stance(float(walker.time))
+            # Measured contact wins over the clock. Two feet at or above
+            # 5 N are double support, even if the clock has already
+            # entered swing. Stepping that swing left the swing foot
+            # loaded and the CoP outside the declared stance box.
+            if both_down or clock_stance is None:
                 future = np.full(preview.horizon, float(self.preview_com_y), dtype=np.float64)
-            elif loaded is None:
+                com = preview.step(future)
+                self.preview_com_y = com
+                walker.preview_y = self._preview_y_with_stab(com)
+                if clock_stance is not None and both_down:
+                    # The pose is still the swing sample. Pull the clock
+                    # back to the double-support boundary one tick at a
+                    # time so the swing foot is not commanded up.
+                    boundary = self._ds_boundary(walker)
+                    if boundary is not None and float(walker.time) > boundary + 1e-9:
+                        walker.time = max(boundary, float(walker.time) - op3_walk.OP3_CTRL_S)
+                joints = self._preview_pose(walker)
+                self.phase = "shift"
+                self._write_preview_joints(joints)
+                self._stop_hold_s += op3_walk.OP3_CTRL_S
+                if both_down and self._stop_hold_s >= 0.20:
+                    self._plant_preview_return(walker)
+                return
+            self._stop_hold_s = 0.0
+            # One foot is up. Finish this step on the declared stance
+            # box. Do not steer the ZMP onto the foot the clock calls
+            # the swing.
+            if loaded is None:
                 future = self._zmp_future(float(walker.time))
             else:
                 future = np.full(preview.horizon, loaded, dtype=np.float64)
             com = preview.step(future)
             self.preview_com_y = com
-            walker.preview_y = -com
-            # Any double support ends the walk. Waiting for the next
-            # single-support edge walked another step and left the ZMP
-            # on the midline while one sole was already light.
-            if both_down:
-                joints = self._preview_pose(walker)
-                self.phase = "shift"
-                self._write_preview_joints(joints)
-                self._stop_hold_s += op3_walk.OP3_CTRL_S
-                if self._stop_hold_s >= 0.20:
-                    self._plant_preview_return(walker)
-                return
-            self._stop_hold_s = 0.0
+            walker.preview_y = self._preview_y_with_stab(com)
             joints, info = walker.step(op3_walk.OP3_CTRL_S)
             self._note_preview_phase(info)
+            # Contact still names the support. A clock swing whose swing
+            # foot is the only loaded foot is that foot's stance, not the
+            # clock's.
+            if loaded is not None and info.phase in ("L", "R"):
+                heavy: Side = "L" if loaded > 0.0 else "R"
+                if self.stance != heavy:
+                    self.phase = "swing"
+                    self.stance = heavy
+                    self._gm_swing = self.other(heavy)
             self._write_preview_joints(joints)
             return
         dt = op3_walk.OP3_CTRL_S
@@ -886,9 +1018,12 @@ class LipmWalker:
         com = preview.step(future)
         self.preview_com_y = com
         walker.time = self._freeze_time
-        walker.preview_y = -com
+        walker.preview_y = self._preview_y_with_stab(com)
         joints = self._preview_pose(walker)
-        self.phase = "stand" if self._return_done else "shift"
+        # Stay in double support. Phase "stand" arms the kit stand hold,
+        # which rewrites every leg toward the flat-floor pose. On the
+        # entrance lip that yank is the ankle spike.
+        self.phase = "shift"
         self._write_preview_joints(joints)
 
     def _tick_gait_manager(self, walking: bool) -> None:
@@ -1693,7 +1828,23 @@ class LipmWalker:
                 return True
         return False
 
+    def _declare_stop_contact(self) -> None:
+        """A swing label with both feet loaded is double support.
+
+        The sample is taken after the physics step. A foot that was light
+        when the clock advanced can be back on the floor, above 5 N, before
+        the score reads the phase. The polygon follows that contact.
+        """
+        if self.preview_stage != "stop" or self.phase != "swing":
+            return
+        swing = self.other(self.stance)
+        # 1 N is contact, not the 5 N weight gate. A swing foot at 4.9 N
+        # is still on the floor. The score reads this phase after physics.
+        if self.foot_normal(swing) > 1.0 and self.foot_normal(self.stance) >= float(self.cfg.unload_n):
+            self.phase = "shift"
+
     def observe(self, up_z: float) -> None:
+        self._declare_stop_contact()
         swing = ""
         if self.phase == "swing":
             swing = self.other(self.stance)
