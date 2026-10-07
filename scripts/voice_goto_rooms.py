@@ -193,6 +193,12 @@ HOLD_DIAG_ENTRANCE_RAY_M = 0.6661160747244295
 # the existing hold. A ray past 0.90 m may still re-point. The
 # 0.90 m edge is not a second hold and is not raised after a score.
 NEAR_MISS_HI_M = 0.90
+# Tip 743b79a. Both holds arm, and neither bout has a wall ray at or
+# under 0.30 m before 53 s. Prefer FAIL-parked as approach after the
+# hold. Yaw stays 0. Do not unpark yaw to buy the 0.30 m band.
+HOLD_ARM_KITCHEN_RAY_M = 0.5160705792257819
+HOLD_ARM_ENTRANCE_RAY_M = 0.510409782578699
+APPROACH_AFTER_HOLD_PARKED = True
 # Kitchen −90° wall_hall_e_1 on tip aac2baa. Same rule as the living
 # set: same wall id, sim ray at or under 0.40 m. Forty-three samples,
 # each with heading, cam_z, camera pitch, and leading-toe offset.
@@ -424,6 +430,28 @@ E0_R_NEAR_MIN_N = EAST_L_NEAR_K
 E0_R_CLOSE_N = 3
 E0_R_CLOSE4_N = 4
 E0_R_LIVE = "e0_r_close4"
+# Other walls use that same last-5 median on their own leading toe.
+# The commit is left out. The pad stays undefined until the window
+# holds 5 samples, so a right toe cannot CLEAR under that bar.
+# Tip 743b79a latched at N=1. Entrance wall_hall_w_1 right pad
+# 0.07996 m, residual +0.1254 m. Bathroom wall_hall_e_2 right pad
+# 0.08679 m, residual +0.1440 m. Those short pads are not the latch.
+# The prior entrance CLEAR is the full window: pad 0.05422 m, N=5,
+# residual +0.0062 m. Left samples are not in the right pad.
+OTHER_NEAR_MIN_N = EAST_L_NEAR_K
+W1_WALL = "wall_hall_w_1"
+E2_WALL = "wall_hall_e_2"
+W1_R_CLEAR_PAD_M = 0.054215170511599214
+W1_R_CLEAR_N = 5
+W1_R_CLEAR_RESIDUAL_M = 0.00615142790924067
+W1_R_SHORT_PAD_M = 0.0799581674168642
+W1_R_SHORT_N = 1
+W1_R_SHORT_RESIDUAL_M = 0.12535886624808446
+W1_R_SHORT_ERR_M = 0.20531703366494866
+E2_R_SHORT_PAD_M = 0.08678758682306875
+E2_R_SHORT_N = 1
+E2_R_SHORT_RESIDUAL_M = 0.14397170330757295
+E2_R_SHORT_ERR_M = 0.2307592901306417
 EAST_L_Q75_RESIDUAL_M = -0.03175107940399083
 EAST_L_Q75_RAY_M = 0.23443045430153236
 EAST_L_Q75_ERR_M = 0.02769268460514473
@@ -938,8 +966,19 @@ def _definition() -> DefinitionJson:
             "Any other wall uses that same median on its own leading "
             "toe once that ray is at or under "
             f"{EAST_L_NEAR_GATE_M:.2f} m. The commit sample is left "
-            "out. An empty window keeps pad 0 and does not borrow an "
-            "east or living pad. "
+            "out. The pad stays undefined until "
+            f"{OTHER_NEAR_MIN_N} samples are in that wall×toe window. "
+            "A shorter window does not latch and does not CLEAR. "
+            "Left samples are not in the right pad. An empty window "
+            "keeps pad 0 and does not borrow an east or living pad. "
+            f"On tip 743b79a {W1_WALL} right latched at N="
+            f"{W1_R_SHORT_N}, pad {W1_R_SHORT_PAD_M:.5f} m, residual "
+            f"{W1_R_SHORT_RESIDUAL_M:+.4f} m, and {E2_WALL} right "
+            f"latched at N={E2_R_SHORT_N}, pad {E2_R_SHORT_PAD_M:.5f} m, "
+            f"residual {E2_R_SHORT_RESIDUAL_M:+.4f} m. Those short pads "
+            "are not the latch. The prior entrance CLEAR is pad "
+            f"{W1_R_CLEAR_PAD_M:.5f} m (N={W1_R_CLEAR_N}), residual "
+            f"{W1_R_CLEAR_RESIDUAL_M:+.4f} m, on this full window. "
             f"{E0_WALL} right toe fills that same last-{E0_R_NEAR_K} "
             f"window once its own ray is at or under "
             f"{E0_R_NEAR_GATE_M:.2f} m. The pad stays undefined until "
@@ -992,7 +1031,11 @@ def _definition() -> DefinitionJson:
             f"{NEAR_MISS_HI_M:.2f} m, the in-place door-pixel re-point "
             "is also dropped. Look, settle, capture, and commit still "
             "run. The hold itself stays at "
-            f"{EAST_L_HOLD_M:.2f} m. No pitch, camera "
+            f"{EAST_L_HOLD_M:.2f} m. Kitchen +90° and entrance +90° "
+            "arm that hold and stay Prefer FAIL-parked as approach "
+            "until a wall ray is at or under "
+            f"{EAST_L_NEAR_GATE_M:.2f} m. Yaw is not unparked to buy "
+            "that band. No pitch, camera "
             "height, or toe bias is fit across pooled samples. "
             "Room reach is a "
             "separate bar. In-place body "
@@ -1457,11 +1500,17 @@ def _median_pad(prior: list[float]) -> tuple[float, int, bool]:
 def _other_near_pad(seen: list[tuple[float, float]]) -> tuple[float, int, bool]:
     """Same last-K near median for a wall that is not east or living.
 
-    The commit sample is not in seen. An empty window does not invent
-    a pad and does not copy another wall. wall_hall_e_0 right toe
-    does not use this window.
+    The commit sample is not in seen. The pad stays undefined until
+    the window holds OTHER_NEAR_MIN_N samples, so a short right-toe
+    window cannot CLEAR. An empty or short window does not invent a
+    pad and does not copy another wall or the other toe.
+    wall_hall_e_0 right toe does not use this window.
     """
-    return _median_pad(_near_k_errs(seen))
+    prior = _near_k_errs(seen)
+    if len(prior) < OTHER_NEAR_MIN_N:
+        return 0.0, len(prior), False
+    pad, n, defined = _median_pad(prior)
+    return pad, n, defined
 
 
 def _e0_r_window(seen: list[tuple[float, float]]) -> list[tuple[float, float]]:
@@ -2822,6 +2871,7 @@ def _run_room(
                         bout_pad, _bout_n, bout_defined = _other_near_pad(
                             other_near.get((true_name, side), []),
                         )
+                        e0_open = bout_defined
                         if bout_defined:
                             pad = bout_pad
                     residual = _residual_m(err, pad) if same and e0_open else None
@@ -2979,9 +3029,9 @@ def _run_room(
                                 )
                                 other_near_n = bout_n
                                 near_rule = EAST_L_LIVE
+                                pad_defined = bout_defined
                                 if bout_defined:
                                     pad = bout_pad
-                                    pad_defined = True
                             residual = _residual_m(err, pad) if same and pad_defined else None
                         heading = _yaw(session.data, session.bid_body)
                         approach.append(ApproachJson(
@@ -3772,6 +3822,51 @@ def main() -> int:
     ])
     if near_demo != [0.02, 0.03, 0.04, 0.05, 0.06]:
         raise SystemExit(f"FAIL: near-k set moved to {near_demo}")
+    if OTHER_NEAR_MIN_N != 5 or OTHER_NEAR_MIN_N != EAST_L_NEAR_K:
+        raise SystemExit(f"FAIL: other-wall near min N moved to {OTHER_NEAR_MIN_N}")
+    if W1_R_CLEAR_N != OTHER_NEAR_MIN_N or W1_R_SHORT_N >= OTHER_NEAR_MIN_N:
+        raise SystemExit("FAIL: the entrance short latch was marked full")
+    if abs(W1_R_CLEAR_PAD_M - 0.054215170511599214) > 1e-12:
+        raise SystemExit("FAIL: the entrance full-window CLEAR moved")
+    if abs(W1_R_CLEAR_RESIDUAL_M) > RANGE_ERR_MAX_M:
+        raise SystemExit("FAIL: the recorded entrance CLEAR would miss")
+    if abs(W1_R_SHORT_PAD_M - 0.0799581674168642) > 1e-12:
+        raise SystemExit("FAIL: the entrance N=1 pad moved")
+    if abs(W1_R_SHORT_RESIDUAL_M) <= RANGE_ERR_MAX_M:
+        raise SystemExit("FAIL: the entrance N=1 residual was marked clear")
+    if abs(W1_R_SHORT_ERR_M - (W1_R_SHORT_PAD_M + W1_R_SHORT_RESIDUAL_M)) > 1e-12:
+        raise SystemExit("FAIL: entrance N=1 error does not match the residual")
+    if abs(E2_R_SHORT_PAD_M - 0.08678758682306875) > 1e-12:
+        raise SystemExit("FAIL: the bathroom N=1 pad moved")
+    if abs(E2_R_SHORT_RESIDUAL_M) <= RANGE_ERR_MAX_M:
+        raise SystemExit("FAIL: the bathroom N=1 residual was marked clear")
+    if abs(E2_R_SHORT_ERR_M - (E2_R_SHORT_PAD_M + E2_R_SHORT_RESIDUAL_M)) > 1e-12:
+        raise SystemExit("FAIL: bathroom N=1 error does not match the residual")
+    short_pad, short_n, short_defined = _other_near_pad([
+        (0.28, W1_R_SHORT_PAD_M),
+    ])
+    if short_defined or short_n != 1 or short_pad != 0.0:
+        raise SystemExit("FAIL: an N=1 other-wall window can latch")
+    four_pad, four_n, four_defined = _other_near_pad([
+        (0.29, 0.01), (0.28, 0.02), (0.27, 0.03), (0.26, 0.04),
+    ])
+    if four_defined or four_n != 4 or four_pad != 0.0:
+        raise SystemExit("FAIL: an N=4 other-wall window can latch")
+    full_pad, full_n, full_defined = _other_near_pad([
+        (0.29, 0.05), (0.28, 0.04), (0.27, 0.06), (0.26, 0.02), (0.25, 0.03),
+    ])
+    if not full_defined or full_n != 5 or abs(full_pad - 0.04) > 1e-12:
+        raise SystemExit(f"FAIL: a full other-wall window pad is {full_pad}")
+    right_only = _other_near_pad([(0.22, 0.01), (0.23, 0.02), (0.24, 0.03), (0.25, 0.04), (0.26, 0.09)])
+    left_only = _other_near_pad([(0.22, 0.08), (0.23, 0.07), (0.24, 0.06), (0.25, 0.05), (0.26, 0.04)])
+    if abs(right_only[0] - left_only[0]) < 1e-12:
+        raise SystemExit("FAIL: other-wall right pad copied the left window")
+    if not APPROACH_AFTER_HOLD_PARKED:
+        raise SystemExit("FAIL: kitchen and entrance +90 were unparked")
+    if HOLD_ARM_KITCHEN_RAY_M <= EAST_L_NEAR_GATE_M or HOLD_ARM_ENTRANCE_RAY_M <= EAST_L_NEAR_GATE_M:
+        raise SystemExit("FAIL: a parked approach bout was marked inside 0.30 m")
+    if HOLD_ARM_KITCHEN_RAY_M > EAST_L_HOLD_M or HOLD_ARM_ENTRANCE_RAY_M > EAST_L_HOLD_M:
+        raise SystemExit("FAIL: a parked hold-arm ray is outside the hold")
     if abs(E0_R_NEAR_GATE_M - EAST_L_NEAR_GATE_M) > 1e-12:
         raise SystemExit(f"FAIL: e0 right near gate moved to {E0_R_NEAR_GATE_M}")
     if E0_R_NEAR_K != EAST_L_NEAR_K or E0_R_NEAR_K != 5:
@@ -4030,14 +4125,38 @@ def main() -> int:
         (0.28, 0.03),
         (0.22, 0.05),
     ])
-    if not other_defined or other_n != 3 or abs(other_pad - 0.03) > 1e-12:
-        raise SystemExit(f"FAIL: other-wall near pad moved to {other_pad} n={other_n}")
+    if other_defined or other_n != 3 or other_pad != 0.0:
+        raise SystemExit(f"FAIL: a short other-wall window latched {other_pad} n={other_n}")
+    full_other_pad, full_other_n, full_other_defined = _other_near_pad([
+        (0.35, 0.09),
+        (0.29, 0.01),
+        (0.28, 0.03),
+        (0.22, 0.05),
+        (0.21, 0.04),
+        (0.20, 0.02),
+    ])
+    if (
+        not full_other_defined
+        or full_other_n != 5
+        or abs(full_other_pad - 0.03) > 1e-12
+    ):
+        raise SystemExit(
+            f"FAIL: full other-wall near pad moved to {full_other_pad} n={full_other_n}"
+        )
     if _other_near_pad([]) != (0.0, 0, False):
         raise SystemExit("FAIL: empty other-wall window invented a pad")
     if _other_near_pad([(0.31, 0.04)]) != (0.0, 0, False):
         raise SystemExit("FAIL: a ray past the near gate entered the other-wall pad")
-    if abs(_other_near_pad([(0.29, EAST_L_LATCH_M), (0.28, W2_R_LATCH_M)])[0] - statistics.median([EAST_L_LATCH_M, W2_R_LATCH_M])) > 1e-12:
+    if _other_near_pad([(0.29, EAST_L_LATCH_M), (0.28, W2_R_LATCH_M)]) != (0.0, 2, False):
+        raise SystemExit("FAIL: a two-sample other-wall window latched")
+    own_errs = [0.011, 0.012, 0.013, 0.014, 0.015]
+    own_pad, own_n, own_defined = _other_near_pad([
+        (0.20 + 0.01 * i, err) for i, err in enumerate(own_errs)
+    ])
+    if not own_defined or own_n != 5 or abs(own_pad - statistics.median(own_errs)) > 1e-12:
         raise SystemExit("FAIL: other-wall near pad is not its own median")
+    if abs(own_pad - EAST_L_LATCH_M) < 1e-3 or abs(own_pad - W2_R_LATCH_M) < 1e-3:
+        raise SystemExit("FAIL: other-wall near pad copied a frozen pad")
     if _pad_for(LIVING_WALL, 0.20, "L") != W2_L_LATCH_M:
         raise SystemExit("FAIL: living left pad is not the left median")
     if len(W2_R_ERR_M) != 49:
@@ -4203,6 +4322,19 @@ def main() -> int:
         "other_wall_pad_rule": EAST_L_LIVE,
         "other_wall_near_gate_m": EAST_L_NEAR_GATE_M,
         "other_wall_near_k": EAST_L_NEAR_K,
+        "other_wall_near_min_n": OTHER_NEAR_MIN_N,
+        "w1_r_clear_pad_m": W1_R_CLEAR_PAD_M,
+        "w1_r_clear_n": W1_R_CLEAR_N,
+        "w1_r_clear_residual_m": W1_R_CLEAR_RESIDUAL_M,
+        "w1_r_short_pad_m": W1_R_SHORT_PAD_M,
+        "w1_r_short_n": W1_R_SHORT_N,
+        "w1_r_short_residual_m": W1_R_SHORT_RESIDUAL_M,
+        "e2_r_short_pad_m": E2_R_SHORT_PAD_M,
+        "e2_r_short_n": E2_R_SHORT_N,
+        "e2_r_short_residual_m": E2_R_SHORT_RESIDUAL_M,
+        "approach_after_hold_parked": APPROACH_AFTER_HOLD_PARKED,
+        "hold_arm_kitchen_ray_m": HOLD_ARM_KITCHEN_RAY_M,
+        "hold_arm_entrance_ray_m": HOLD_ARM_ENTRANCE_RAY_M,
         "e0_r_fail_pad_m": E0_R_FAIL_PAD_M,
         "e0_r_fail_n": E0_R_FAIL_N,
         "e0_r_fail_residual_m": E0_R_FAIL_RESIDUAL_M,
