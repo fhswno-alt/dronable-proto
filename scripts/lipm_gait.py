@@ -404,6 +404,10 @@ class LipmWalker:
         self._return_hold = False
         self._return_done = False
         self._freeze_time = 0.0
+        self._stand_q0: dict[str, float] | None = None
+        self._stand_q1: dict[str, float] | None = None
+        self._stand_u = 0.0
+        self._stop_swing_end: float | None = None
         self.preview_ik_fail = 0
         self._gate_wait_s = 0.0
         self._gate_open = False
@@ -635,35 +639,28 @@ class LipmWalker:
         return -float(com) + self._stab_preview_m
 
     def _swing_toe_bias(self, side: Side) -> float:
-        """Joint radians that raise the swing toe. Zero on the stance foot.
+        """No toe-up through the swing.
 
-        Full by a quarter of the swing and held 0.28 s into the landing,
-        so the heel shares load before the normal crosses 5 N. +pitch
-        raises the left toe. The right ankle is the opposite sign.
-        The walk uses 0.040 rad. The stop uses 0.010 rad: 0.008 rad is
-        enough to keep the flat stop off the toe face, and 0.020 rad
-        drives the delayed hip roll through 2.33 Nm.
+        A clocked 0.040 rad toe-up held the lowest sole corner on the
+        floor, so the foot slid instead of stepping. The swing ankle
+        stays on the IK target. During the stop blend the sole is raked
+        and the light foot's CoP sits on the toe face, so both ankles
+        take a toe-up that fades out as the upright stand arrives.
+        +pitch raises the left toe. The right ankle is the opposite sign.
         """
-        walker = self.op3
-        if walker is None or walker.period <= 1e-6:
+        if self._stand_q1 is None or self._stand_u <= 0.0 or self._stand_u >= 2.0:
             return 0.0
-        if side == "L":
-            t0 = float(walker.l_ssp_start)
-            t1 = float(walker.l_ssp_end)
+        u = min(1.0, self._stand_u / 2.0)
+        # Hold the toe up through the rake, then fade as the stand arrives.
+        # A smootherstep from the first tick lets the light foot's CoP
+        # fall back onto the toe face while the knees are still moving.
+        if u < 0.80:
+            fade = 1.0
         else:
-            t0 = float(walker.r_ssp_start)
-            t1 = float(walker.r_ssp_end)
-        t = float(walker.time) % float(walker.period)
+            v = (u - 0.80) / 0.20
+            fade = 1.0 - v * v * v * (v * (v * 6.0 - 15.0) + 10.0)
         sign = 1.0 if side == "L" else -1.0
-        amp = 0.010 if self.preview_stage == "stop" else 0.040
-        if t0 < t <= t1:
-            u = (t - t0) / max(t1 - t0, 1e-6)
-            s = min(1.0, u / 0.25)
-            s = s * s * (3.0 - 2.0 * s)
-            return sign * amp * s
-        if t1 < t <= t1 + 0.28:
-            return sign * amp
-        return 0.0
+        return sign * 0.070 * fade
 
     def _stabilize_contacts(self) -> None:
         """Hip roll from the capture point.
@@ -707,9 +704,13 @@ class LipmWalker:
             q = self.q(jn)
             self._stab_pitch[side] = self._slew(self._stab_pitch[side], self._swing_toe_bias(side), 0.35)
             want = gait + self._stab_pitch[side]
-            gap = want - q
-            if abs(gap) > 0.016:
-                want = q + math.copysign(0.016, gap)
+            # The 16 mrad band keeps a late swing gap off the ankle.
+            # The stop blend's toe-up is already slewed; clamping it
+            # leaves the light foot on the toe face.
+            if self._stand_u <= 0.0:
+                gap = want - q
+                if abs(gap) > 0.016:
+                    want = q + math.copysign(0.016, gap)
             if abs(want - gait) > 1e-6:
                 joints[jn] = want
         for name, val in joints.items():
@@ -772,6 +773,10 @@ class LipmWalker:
             self._return_t = 0.0
             self._return_hold = False
             self._return_done = False
+            self._stand_q0 = None
+            self._stand_q1 = None
+            self._stand_u = 0.0
+            self._stop_swing_end = None
             self._gate_open = False
             self._gate_wait_s = 0.0
             self._restart = True
@@ -781,6 +786,9 @@ class LipmWalker:
             self._preview_clock = -float(self.cfg.preview_arm_s)
         if self.preview_stage == "start":
             walker.sole_level = self._sole_level_now()
+            # The foot height grows with the arm. Dropping the full
+            # swing in on the first tick is a knee step of several Nm.
+            walker.z_move_cmd = float(self.cfg.gm_z_m) * (1.0 - self._sole_level_now())
             future = self._zmp_future(self._preview_clock)
             com = preview.step(future)
             self.preview_com_y = com
@@ -797,6 +805,7 @@ class LipmWalker:
             self._preview_clock += op3_walk.OP3_CTRL_S
             if self._preview_clock >= -1e-9:
                 self.preview_stage = "walk"
+                walker.z_move_cmd = float(self.cfg.gm_z_m)
                 walker.time = 0.0
                 walker.previous_x = 0.0
                 walker.ctrl_running = True
@@ -804,6 +813,10 @@ class LipmWalker:
             return
         walker.sole_level = 0.0
         x_amp, angle = kit_bus_step(self.cmd_vx, self.cmd_yaw, self.cfg.gm_period_s)
+        # vx/7.50 was fit on a skate and under-steps a real lift. The voice
+        # row's gm_x_m is the amplitude the 2.33 Nm bar can still raise.
+        if self.cfg.name == "voice056" and abs(self.cmd_vx) > 1e-4:
+            x_amp = math.copysign(float(self.cfg.gm_x_m), self.cmd_vx)
         walker.set_command(x_amp, 0.0, angle)
         if self._hold_until_stance(walker, preview):
             return
@@ -963,6 +976,38 @@ class LipmWalker:
         self._return_zmp0 = float(self.preview_com_y)
         self._return_hold = False
         self._return_done = False
+        self._stand_q0 = None
+        self._stand_q1 = None
+        self._stand_u = 0.0
+        self._stop_swing_end = None
+
+    def _stand_blend_joints(self, walker: op3_walk.Op3Walker) -> dict[str, float] | None:
+        """Smootherstep from the frozen walk pose to the upright stand.
+
+        Joint space, two seconds, zero slope at both ends. Phase stays
+        shift so this does not arm the kit stand hold.
+        """
+        if self._stand_q0 is None:
+            frozen = self._preview_pose(walker)
+            if frozen is None:
+                return None
+            self._stand_q0 = {k: float(v) for k, v in frozen.items()}
+            # q_stand is the spawn pose, sole_level 1, trunk upright.
+            # stand_joints() during the walk uses sole_level 0 and keeps
+            # the hip-pitch lean.
+            self._stand_q1 = {
+                k: float(v) for k, v in self.q_stand.items() if k in self._stand_q0
+            }
+            self._stand_u = 0.0
+        span = 2.0
+        u = min(1.0, self._stand_u / span)
+        s = u * u * u * (u * (u * 6.0 - 15.0) + 10.0)
+        self._stand_u += op3_walk.OP3_CTRL_S
+        out: dict[str, float] = {}
+        for key, dest in self._stand_q1.items():
+            src = float(self._stand_q0.get(key, dest))
+            out[key] = (1.0 - s) * src + s * float(dest)
+        return out
 
     def _tick_preview_stop(self, walker: op3_walk.Op3Walker) -> None:
         preview = self._ensure_preview(walker)
@@ -970,32 +1015,42 @@ class LipmWalker:
             # Leave the step length alone. Zeroing it snaps hip pitch.
             # While one foot is up, the ZMP stays at that stance box centre
             # (±0.043 m). It does not follow the clock onto the airborne foot.
-            left_down, right_down = self._feet_loaded()
-            both_down = left_down and right_down
+            # Finish the swing that is already in the air. Rewinding on
+            # the first graze pulls the foot back up and the clock stalls.
+            # Sole height, not the 5 N unload: a landed foot can sit near 1 N.
+            if self._stop_swing_end is None:
+                clock = self._ssp_stance(float(walker.time))
+                if clock == "R":
+                    self._stop_swing_end = float(walker.l_ssp_end)
+                elif clock == "L":
+                    self._stop_swing_end = float(walker.r_ssp_end)
+                else:
+                    self._stop_swing_end = float(walker.time)
+            sole_l = sole_clearance(self.model, self.data, self.bid["L"], int(self.gid["L"]))
+            sole_r = sole_clearance(self.model, self.data, self.bid["R"], int(self.gid["R"]))
+            both_contact = sole_l < 0.003 and sole_r < 0.003
             loaded = self._loaded_box_zmp()
             clock_stance = self._ssp_stance(float(walker.time))
-            # Measured contact wins over the clock. Two feet at or above
-            # 5 N are double support, even if the clock has already
-            # entered swing. Stepping that swing left the swing foot
-            # loaded and the CoP outside the declared stance box.
-            if both_down or clock_stance is None:
+            period = float(walker.period)
+            t_mod = float(walker.time) % period if period > 1e-6 else 0.0
+            end = float(self._stop_swing_end) % period if period > 1e-6 else 0.0
+            finishing = t_mod + 1e-9 < end
+            if not finishing:
                 future = np.full(preview.horizon, float(self.preview_com_y), dtype=np.float64)
                 com = preview.step(future)
                 self.preview_com_y = com
                 walker.preview_y = self._preview_y_with_stab(com)
-                if clock_stance is not None and both_down:
-                    # The pose is still the swing sample. Pull the clock
-                    # back to the double-support boundary one tick at a
-                    # time so the swing foot is not commanded up.
-                    boundary = self._ds_boundary(walker)
-                    if boundary is not None and float(walker.time) > boundary + 1e-9:
-                        walker.time = max(boundary, float(walker.time) - op3_walk.OP3_CTRL_S)
                 joints = self._preview_pose(walker)
                 self.phase = "shift"
                 self._write_preview_joints(joints)
-                self._stop_hold_s += op3_walk.OP3_CTRL_S
-                if both_down and self._stop_hold_s >= 0.20:
-                    self._plant_preview_return(walker)
+                # Plant only after the clock is back in double support.
+                # Freezing a mid-swing target pops the foot up again.
+                if both_contact and clock_stance is None:
+                    self._stop_hold_s += op3_walk.OP3_CTRL_S
+                    if self._stop_hold_s >= 0.20:
+                        self._plant_preview_return(walker)
+                else:
+                    self._stop_hold_s = 0.0
                 return
             self._stop_hold_s = 0.0
             # One foot is up. Finish this step on the declared stance
@@ -1024,16 +1079,26 @@ class LipmWalker:
         dt = op3_walk.OP3_CTRL_S
         span = 1.50
         # Zero is only a double-support target. One light foot sends the
-        # ZMP back to that sole's box centre, ±0.043 m.
+        # ZMP back to that sole's box centre, ±0.043 m. Once the return
+        # has finished, a light foot does not rewind it: the joints are
+        # blending to the stand.
+        # The 8 N split stays the in-swing abort. Once both soles are
+        # down, a 5 N share is still double support: aborting on it
+        # holds the walk lean and the light foot never reaches 8 N.
+        airborne = self.foot_normal("L") < 1.0 or self.foot_normal("R") < 1.0
         loaded = self._loaded_box_zmp()
         future = np.zeros(preview.horizon, dtype=np.float64)
-        if loaded is not None:
+        if self._return_done:
+            pass
+        elif airborne and loaded is not None:
             future[:] = loaded
             self._return_t = 0.0
             self._return_done = False
             self._return_hold = True
             self._return_zmp0 = float(self.preview_com_y)
-        elif not self._return_done:
+            self._stand_q0 = None
+            self._stand_u = 0.0
+        else:
             self._return_hold = False
             for i in range(preview.horizon):
                 u = min(1.0, max(0.0, (self._return_t + i * dt) / span))
@@ -1046,7 +1111,10 @@ class LipmWalker:
         self.preview_com_y = com
         walker.time = self._freeze_time
         walker.preview_y = self._preview_y_with_stab(com)
-        joints = self._preview_pose(walker)
+        # Blend as soon as both soles are down. Waiting for the ZMP
+        # return leaves the trunk in the walk lean, and the light foot
+        # never picks up enough load to finish that return.
+        joints = self._stand_blend_joints(walker)
         # Stay in double support. Phase "stand" arms the kit stand hold,
         # which rewrites every leg toward the flat-floor pose. On the
         # entrance lip that yank is the ankle spike.

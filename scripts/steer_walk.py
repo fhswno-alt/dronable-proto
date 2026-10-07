@@ -787,13 +787,17 @@ BUS_KIT_SCRIPT: tuple[DemoSegment, ...] = (
     DemoSegment(BUS_KIT_STOP_S, "stop", 0.0, 0.0, "stop"),
 )
 
-# Cleared voice row. vel at or under this speed selects it. The kit row
+# vel at or under this bus speed selects the voice row. The kit row
 # stays the config for anything faster. Do not retune the kit to match.
+# The body does not reach 0.056 m/s. A real step under 2.33 Nm is a
+# 11 mm amplitude on a 7 s period, and the measured speed is reported
+# from the sim, not from KIT_BODY_PER_X.
 VOICE_VX_M_S = 0.056
-VOICE_PERIOD_S = 3.57
-VOICE_DSP = 0.70
+VOICE_PERIOD_S = 7.00
+VOICE_DSP = 0.35
 VOICE_AMP_M = 0.043
-VOICE_Z_M = 0.004
+VOICE_Z_M = 0.018
+VOICE_STEP_M = 0.011
 VOICE_ARM_S = 2.40
 VOICE_PREVIEW_R = 1.0e-4
 # 0 is the straight double-support ramp. 1 is the raised cosine, whose
@@ -802,11 +806,11 @@ VOICE_PREVIEW_SHAPE = 0.0
 
 
 def voice_preview_config() -> LipmConfig:
-    """Lateral preview that holds the voice-speed bout under 2.20 Nm.
+    """Lateral preview for the voice command.
 
-    y_swap stays 0. The sway is preview_y. Stand before the first step
-    is the level sole. Stop after the walk is the preview soft stop,
-    not the kit stand solve.
+    y_swap stays 0. The sway is preview_y. gm_x_m is the step amplitude
+    the 2.33 Nm bar can lift, not vx/7.50. Stand before the first step
+    is the level sole. The stop blends back to that stand.
     """
     return LipmConfig(
         name="voice056",
@@ -816,7 +820,7 @@ def voice_preview_config() -> LipmConfig:
         gm_period_s=VOICE_PERIOD_S,
         gm_dsp=VOICE_DSP,
         gm_y_swap_m=0.0,
-        gm_x_m=0.020,
+        gm_x_m=VOICE_STEP_M,
         gm_z_m=VOICE_Z_M,
         gm_z_swap_m=0.0,
         gm_pelvis_deg=0.0,
@@ -1504,8 +1508,41 @@ class SteerSession:
         # mj_step already forwarded. A second mj_forward here changes the
         # contact warm-start and tips this gait before the stop.
         self.renderer.update_scene(self.data, self.cam)
+        self._draw_foot_trace()
         raw = np.ascontiguousarray(self.renderer.render().copy(), dtype=np.uint8)
         return wg._burn_overlay(raw, lines)
+
+    def _draw_foot_trace(self) -> None:
+        """World-frame foot spheres. Empty unless this clip asked for them.
+
+        Drawn after update_scene and before the pixels. No mj_forward.
+        """
+        trace = getattr(self, "foot_trace", None)
+        if not trace or self.renderer is None:
+            return
+        scene = self.renderer.scene
+        colors = (
+            np.array([0.15, 0.85, 0.95, 1.0], dtype=np.float32),
+            np.array([0.95, 0.45, 0.10, 1.0], dtype=np.float32),
+        )
+        size = np.array([0.007, 0.0, 0.0], dtype=np.float64)
+        mat = np.eye(3, dtype=np.float64).reshape(-1)
+        stride = max(1, len(trace) // 160)
+        for i, pts in enumerate(trace):
+            if i % stride:
+                continue
+            for k, pos in enumerate(pts):
+                if int(scene.ngeom) >= int(scene.maxgeom):
+                    return
+                mj.mjv_initGeom(
+                    scene.geoms[int(scene.ngeom)],
+                    int(mj.mjtGeom.mjGEOM_SPHERE),
+                    size,
+                    np.asarray(pos, dtype=np.float64),
+                    mat,
+                    colors[k],
+                )
+                scene.ngeom += 1
 
     def _targets(self, amp: float, direction: int, yaw_rate: float) -> dict[str, float]:
         if amp > 0.02:

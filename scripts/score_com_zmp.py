@@ -34,6 +34,13 @@ LOAD_N = 5.0
 ASK_NM = 2.33
 # Tighter voice-speed target. CLEAR stays at ASK_NM. This is the headroom bar.
 HEADROOM_NM = 2.20
+# A step is a foot that leaves the floor, moves forward in the air, and lands.
+STEP_CLEAR_M = 0.008
+STEP_SLIP_M = 0.002
+STEP_FRAC_MIN = 0.90
+STEP_PITCH_DEG = 3.0
+COP_P5_MM = 5.0
+AIR_N = 1.0
 LEG_JOINTS: tuple[str, ...] = (
     "l_hip_yaw", "l_hip_roll", "l_hip_pitch", "l_knee", "l_ank_pitch", "l_ank_roll",
     "r_hip_yaw", "r_hip_roll", "r_hip_pitch", "r_knee", "r_ank_pitch", "r_ank_roll",
@@ -552,6 +559,128 @@ def _apply_perturb(session: sw.SteerSession, perturb: Perturb) -> dict[str, obje
     return info
 
 
+def _n_ground(session: sw.SteerSession, side: str) -> int:
+    lipm = session.lipm
+    if lipm is None:
+        return 0
+    gid = int(lipm.gid[side])
+    grounds = {int(lipm.gid_floor)}
+    for g in lipm.ground_extra:
+        if int(g) >= 0:
+            grounds.add(int(g))
+    n = 0
+    for i in range(session.data.ncon):
+        c = session.data.contact[i]
+        g1, g2 = int(c.geom1), int(c.geom2)
+        if g1 != gid and g2 != gid:
+            continue
+        other = g2 if g1 == gid else g1
+        if other in grounds:
+            n += 1
+    return n
+
+
+def _trunk_pitch(session: sw.SteerSession) -> float:
+    lipm = session.lipm
+    if lipm is None:
+        return 0.0
+    R = np.asarray(session.data.xmat[int(lipm.bid_body)], dtype=np.float64).reshape(3, 3)
+    return math.atan2(-float(R[2, 0]), math.hypot(float(R[0, 0]), float(R[1, 0])))
+
+
+def _step_honesty(rows: list[dict[str, float | str]], x_amp: float) -> dict[str, float]:
+    """Per completed step: clearance, slip, airborne separation, step fraction.
+
+    A completed step is a swing that leaves the floor by at least 8 mm and
+    is back in contact at the end. A truncated swing at the log boundary
+    is not a step. Zero completed steps fails the bars.
+    """
+
+    def intervals(side: str) -> list[list[dict[str, float | str]]]:
+        out: list[list[dict[str, float | str]]] = []
+        cur: list[dict[str, float | str]] = []
+        for row in rows:
+            swinging = row["phase"] == "swing" and row["stance"] != side and row["stage"] in ("walk", "stop")
+            if swinging:
+                cur.append(row)
+            elif cur:
+                out.append(cur)
+                cur = []
+        if cur:
+            out.append(cur)
+        return out
+
+    mids: list[float] = []
+    peaks: list[float] = []
+    slips: list[float] = []
+    fracs: list[float] = []
+    advs: list[float] = []
+    windows: list[tuple[float, float, float, float]] = []
+    sep_air = 0.0
+    for side in ("L", "R"):
+        other = "R" if side == "L" else "L"
+        for iv in intervals(side):
+            if len(iv) < 20:
+                continue
+            zs = [float(r[side + "z"]) for r in iv]
+            mid = zs[len(iv) // 2]
+            mx = max(zs)
+            air = 0.0
+            con = 0.0
+            n_air = 0
+            for a, b in zip(iv, iv[1:]):
+                d = float(b[side + "x"]) - float(a[side + "x"])
+                airborne = float(b[side + "fn"]) < AIR_N and int(b[side + "n"]) == 0
+                if airborne:
+                    n_air += 1
+                    sep_air = max(sep_air, abs(float(b["lx"]) - float(b["rx"])))
+                if d > 0.0:
+                    if airborne:
+                        air += d
+                    else:
+                        con += d
+            landed = int(iv[-1][side + "n"]) > 0 or float(iv[-1][side + "fn"]) >= AIR_N
+            if not (landed and n_air > 10 and mx >= STEP_CLEAR_M):
+                continue
+            slip = math.hypot(
+                float(iv[-1][other + "x"]) - float(iv[0][other + "x"]),
+                float(iv[-1][other + "y"]) - float(iv[0][other + "y"]),
+            )
+            frac = air / (air + con) if (air + con) > 1e-6 else 0.0
+            mids.append(mid)
+            peaks.append(mx)
+            slips.append(slip)
+            fracs.append(frac)
+            advs.append(float(iv[-1][side + "x"]) - float(iv[0][side + "x"]))
+            windows.append((
+                float(iv[0]["t"]), float(iv[-1]["t"]),
+                float(iv[0]["bx"]), float(iv[-1]["bx"]),
+            ))
+    stand = [float(r["pitch"]) for r in rows if r["stage"] == "stand" and float(r["t"]) > 0.20]
+    pitch0 = float(np.median(stand)) if stand else (float(rows[0]["pitch"]) if rows else 0.0)
+    pitch1 = float(rows[-1]["pitch"]) if rows else pitch0
+    v = 0.0
+    if windows:
+        windows.sort()
+        dt = windows[-1][1] - windows[0][0]
+        if dt > 1e-6:
+            v = (windows[-1][3] - windows[0][2]) / dt
+    n = len(mids)
+    return {
+        "n_steps": float(n),
+        "clear_mm": (min(mids) * 1000.0) if mids else float("nan"),
+        "clear_max_mm": (max(peaks) * 1000.0) if peaks else float("nan"),
+        "slip_mm": (max(slips) * 1000.0) if slips else float("nan"),
+        "slip_sum_mm": (sum(slips) * 1000.0) if slips else float("nan"),
+        "sep_mm": sep_air * 1000.0,
+        "step_frac": min(fracs) if fracs else float("nan"),
+        "adv_mm": (min(advs) * 1000.0) if advs else float("nan"),
+        "x_amp_mm": abs(x_amp) * 1000.0,
+        "pitch_deg": math.degrees(pitch1 - pitch0),
+        "v_m_s": v,
+    }
+
+
 def run_attempt(
     *,
     period_s: float,
@@ -684,6 +813,8 @@ def run_attempt(
     worst_diag = ""
     worst_com = float("inf")
     rug_peak = 0.0
+    foot_rows: list[dict[str, float | str]] = []
+    x_amp_seen = 0.0
     while float(session.data.time) < t_end - 1e-12:
         now = float(session.data.time)
         if driver is not None:
@@ -799,6 +930,31 @@ def run_attempt(
             tau_joint = tau_name
             tau_t = now
         preview_peak = max(preview_peak, abs(float(lipm.preview_com_y)))
+        if not kit_baseline and lipm.op3 is not None:
+            if stage == "walk":
+                x_amp_seen = max(x_amp_seen, abs(float(lipm.op3.x_cmd)))
+            rec: dict[str, float | str] = {
+                "t": now,
+                "stage": stage,
+                "phase": str(lipm.phase),
+                "stance": str(lipm.stance),
+                "bx": float(session.data.qpos[0]),
+                "pitch": _trunk_pitch(session),
+                "lx": 0.0,
+                "rx": 0.0,
+            }
+            for side in ("L", "R"):
+                gid = int(lipm.gid[side])
+                key = side.lower()
+                rec[side + "x"] = float(session.data.geom_xpos[gid][0])
+                rec[side + "y"] = float(session.data.geom_xpos[gid][1])
+                rec[key + "x"] = rec[side + "x"]
+                rec[side + "z"] = lipm_gait.sole_clearance(
+                    session.model, session.data, lipm.bid[side], gid,
+                )
+                rec[side + "fn"] = float(lipm.foot_normal(side))
+                rec[side + "n"] = float(_n_ground(session, side))
+            foot_rows.append(rec)
         if kind in ("L", "R") and com_mm < worst_com:
             worst_com = com_mm
             foot_y = float(session.data.geom_xpos[session.lipm.gid[kind], 1])
@@ -909,11 +1065,28 @@ def run_attempt(
         and knee_rms < BASE_JOINT_JERK_RMS - 0.5
     )
     tip_ok = up_z >= 0.90
+    honesty = _step_honesty(foot_rows, x_amp_seen)
+    cop_p5 = float(np.percentile(decl_cop_mm, 5)) if decl_cop_mm else float("nan")
+    if kit_baseline:
+        step_ok = True
+        cop_p5_ok = True
+    else:
+        step_ok = (
+            honesty["n_steps"] >= 1.0
+            and honesty["clear_mm"] >= STEP_CLEAR_M * 1000.0
+            and honesty["slip_mm"] <= STEP_SLIP_M * 1000.0
+            and honesty["step_frac"] >= STEP_FRAC_MIN
+            and honesty["sep_mm"] + 1e-6 >= honesty["x_amp_mm"]
+            and abs(honesty["pitch_deg"]) <= STEP_PITCH_DEG
+        )
+        cop_p5_ok = math.isfinite(cop_p5) and cop_p5 >= COP_P5_MM
     cleared = (
         margins_ok
         and ask_ok
         and jerk_ok
         and tip_ok
+        and step_ok
+        and cop_p5_ok
         and fault == ""
         and md5_after == md5_before
         and int(lipm.preview_ik_fail) == 0
@@ -924,6 +1097,19 @@ def run_attempt(
         "ask_ok": ask_ok,
         "jerk_ok": jerk_ok,
         "tip_ok": tip_ok,
+        "step_ok": step_ok,
+        "cop_p5_ok": cop_p5_ok,
+        "n_steps": honesty["n_steps"],
+        "clear_mm": honesty["clear_mm"],
+        "clear_max_mm": honesty["clear_max_mm"],
+        "slip_mm": honesty["slip_mm"],
+        "slip_sum_mm": honesty["slip_sum_mm"],
+        "sep_mm": honesty["sep_mm"],
+        "step_frac": honesty["step_frac"],
+        "adv_mm": honesty["adv_mm"],
+        "x_amp_mm": honesty["x_amp_mm"],
+        "pitch_deg": honesty["pitch_deg"],
+        "v_step_m_s": honesty["v_m_s"],
         "period_s": period_s,
         "dsp": dsp,
         "amp_m": amp_m,
@@ -1041,7 +1227,21 @@ def _print_result(result: dict[str, object]) -> None:
     )
     print(
         f"  bars margins {result['margins_ok']} ask {result['ask_ok']} "
-        f"jerk {result['jerk_ok']} tip {result['tip_ok']}"
+        f"jerk {result['jerk_ok']} tip {result['tip_ok']} "
+        f"step {result['step_ok']} cop_p5 {result['cop_p5_ok']}"
+    )
+    print(
+        f"  step n {int(result['n_steps'])} "
+        f"clear {float(result['clear_mm']):.2f} mm "
+        f"(max {float(result['clear_max_mm']):.2f}, bar {STEP_CLEAR_M * 1000.0:.0f}) "
+        f"slip {float(result['slip_mm']):.2f} mm "
+        f"(sum {float(result['slip_sum_mm']):.2f}, bar {STEP_SLIP_M * 1000.0:.0f}) "
+        f"sep {float(result['sep_mm']):.2f} mm "
+        f"(x {float(result['x_amp_mm']):.2f}) "
+        f"frac {float(result['step_frac']):.3f} "
+        f"adv {float(result['adv_mm']):.1f} mm "
+        f"pitch {float(result['pitch_deg']):+.2f} deg "
+        f"v {float(result['v_step_m_s']):.4f} m/s"
     )
     print(
         f"  CoM out {result['com_out']} frac {float(result['com_out_frac']):.3f} "
@@ -1146,6 +1346,7 @@ def render_side_front(
         cam_elevation=-8.0,
         cam_azimuth=90.0,
     )
+    session.foot_trace = []
     if session.lipm is None or session.lipm.op3 is None or session.lipm.op3.y_swap_cmd != 0.0:
         raise SystemExit("preview walker is not the voice gait")
     script = sw.voice_bus_script(stand_s, walk_s, stop_s, 0.0)
@@ -1165,6 +1366,11 @@ def render_side_front(
                 raise SystemExit("y_swap_cmd changed")
             if now + 1e-9 < next_frame:
                 continue
+            if session.lipm is not None:
+                session.foot_trace.append((
+                    np.array(session.data.geom_xpos[int(session.lipm.gid["L"])], dtype=np.float64).copy(),
+                    np.array(session.data.geom_xpos[int(session.lipm.gid["R"])], dtype=np.float64).copy(),
+                ))
             session.cam.distance = 1.70
             session.cam.elevation = -8.0
             session.cam.azimuth = 90.0
