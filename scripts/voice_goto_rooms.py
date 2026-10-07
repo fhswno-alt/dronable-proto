@@ -356,11 +356,21 @@ E0_R_FAIL_PAD_M = 0.0439108831389442
 E0_R_FAIL_N = 5
 E0_R_FAIL_RESIDUAL_M = -0.018717300570202544
 E0_R_FAIL_ERR_M = 0.025193582568741657
-# One step near that stop spans about 0.03 m of ray. 0.25 m is
-# inside that last step and above the scored stop ray 0.223 m.
-# K=3 stays in the cap instead of reaching the previous step.
-E0_R_NEAR_GATE_M = 0.25
-E0_R_NEAR_K = 3
+# Tip 2f21a39. Same wall, right toe, last 3 of ray ≤ 0.25 m.
+# The window had 2 samples when the gate crossed. Pad 0.02934 m,
+# error 0.05315 m, residual +0.0238 m. Undersampled. Not the latch.
+E0_R_THIN_PAD_M = 0.029336655418528076
+E0_R_THIN_N = 2
+E0_R_THIN_RESIDUAL_M = 0.023811270186193986
+E0_R_THIN_ERR_M = 0.05314792560472206
+# Live rule on this wall×toe only: the kitchen near_k window.
+# Last 5 right samples with ray ≤ 0.30 m. The commit is left out.
+# The pad stays undefined until that window holds 5 samples, so a
+# 2-sample median cannot latch. Left samples are not in the pad.
+E0_R_NEAR_GATE_M = EAST_L_NEAR_GATE_M
+E0_R_NEAR_K = EAST_L_NEAR_K
+E0_R_NEAR_MIN_N = EAST_L_NEAR_K
+E0_R_LIVE = "e0_r_dense"
 EAST_L_Q75_RESIDUAL_M = -0.03175107940399083
 EAST_L_Q75_RAY_M = 0.23443045430153236
 EAST_L_Q75_ERR_M = 0.02769268460514473
@@ -872,11 +882,16 @@ def _definition() -> DefinitionJson:
             f"{EAST_L_NEAR_GATE_M:.2f} m. The commit sample is left "
             "out. An empty window keeps pad 0 and does not borrow an "
             "east or living pad. "
-            f"{E0_WALL} right toe does not use that 0.30 m window. "
-            f"The scored miss there is pad {E0_R_FAIL_PAD_M:.5f} m "
-            f"(N={E0_R_FAIL_N}), residual {E0_R_FAIL_RESIDUAL_M:+.4f} m. "
-            f"Its live latch is the last {E0_R_NEAR_K} of its own "
-            f"samples with ray at or under {E0_R_NEAR_GATE_M:.2f} m. "
+            f"{E0_WALL} right toe uses that same last-{E0_R_NEAR_K} "
+            f"median once its own ray is at or under "
+            f"{E0_R_NEAR_GATE_M:.2f} m. The pad stays undefined until "
+            f"{E0_R_NEAR_MIN_N} samples are in the window. "
+            f"The scored 0.30 m miss is pad {E0_R_FAIL_PAD_M:.5f} m "
+            f"(N={E0_R_FAIL_N}), residual {E0_R_FAIL_RESIDUAL_M:+.4f} m, "
+            "and is not a frozen pad. "
+            f"The scored 0.25 m miss is pad {E0_R_THIN_PAD_M:.5f} m "
+            f"(N={E0_R_THIN_N}), residual {E0_R_THIN_RESIDUAL_M:+.4f} m, "
+            "and is not the latch. "
             "Left samples on that wall are not in the pad. "
             "East right-toe samples median "
             f"{EAST_R_LATCH_M:.5f} m (n={len(EAST_R_ERR_M)}). An unknown "
@@ -1363,8 +1378,15 @@ def _other_near_pad(seen: list[tuple[float, float]]) -> tuple[float, int, bool]:
 
 
 def _e0_r_near_pad(seen: list[tuple[float, float]]) -> tuple[float, int, bool]:
-    """wall_hall_e_0 right toe only. Tighter than the 0.30 m window."""
-    return _median_pad(_band_errs(seen, E0_R_NEAR_GATE_M, E0_R_NEAR_K))
+    """wall_hall_e_0 right toe only. Kitchen near window, full K required.
+
+    A shorter window stays undefined so a 2-sample median cannot latch.
+    Left samples are not in seen. The commit sample is not in seen.
+    """
+    prior = _band_errs(seen, E0_R_NEAR_GATE_M, E0_R_NEAR_K)
+    if len(prior) < E0_R_NEAR_MIN_N:
+        return 0.0, len(prior), False
+    return _median_pad(prior)
 
 
 def _residual_m(err: float | None, pad: float) -> float | None:
@@ -2602,8 +2624,10 @@ def _run_room(
                     residual = _residual_m(err, pad) if defined else None
                 else:
                     pad = _pad_for(true_name, true_gap, side) if same else 0.0
+                    e0_open = True
                     if same and true_name == E0_WALL and side == "R":
                         bout_pad, _bout_n, bout_defined = _e0_r_near_pad(e0_r_seen)
+                        e0_open = bout_defined
                         if bout_defined:
                             pad = bout_pad
                     elif same and base == "other_wall_close" and side in ("L", "R"):
@@ -2612,7 +2636,7 @@ def _run_room(
                         )
                         if bout_defined:
                             pad = bout_pad
-                    residual = _residual_m(err, pad) if same else None
+                    residual = _residual_m(err, pad) if same and e0_open else None
                 wall_contacts.append(_wall_hit(
                     float(session.data.time),
                     kind,
@@ -2757,10 +2781,10 @@ def _run_room(
                             if same and true_name == E0_WALL and side == "R":
                                 bout_pad, bout_n, bout_defined = _e0_r_near_pad(e0_r_seen)
                                 other_near_n = bout_n
-                                near_rule = "e0_r_near"
+                                near_rule = E0_R_LIVE
+                                pad_defined = bout_defined
                                 if bout_defined:
                                     pad = bout_pad
-                                    pad_defined = True
                             elif same and base == "other_wall_close" and side in ("L", "R"):
                                 bout_pad, bout_n, bout_defined = _other_near_pad(
                                     other_near.get((true_name, side), []),
@@ -3526,16 +3550,34 @@ def main() -> int:
     ])
     if near_demo != [0.02, 0.03, 0.04, 0.05, 0.06]:
         raise SystemExit(f"FAIL: near-k set moved to {near_demo}")
-    if abs(E0_R_NEAR_GATE_M - 0.25) > 1e-12 or E0_R_NEAR_GATE_M >= EAST_L_NEAR_GATE_M:
+    if abs(E0_R_NEAR_GATE_M - EAST_L_NEAR_GATE_M) > 1e-12:
         raise SystemExit(f"FAIL: e0 right near gate moved to {E0_R_NEAR_GATE_M}")
-    if E0_R_NEAR_K != 3:
+    if E0_R_NEAR_K != EAST_L_NEAR_K or E0_R_NEAR_K != 5:
         raise SystemExit(f"FAIL: e0 right near K moved to {E0_R_NEAR_K}")
+    if E0_R_NEAR_MIN_N != 5:
+        raise SystemExit(f"FAIL: e0 right min N moved to {E0_R_NEAR_MIN_N}")
+    if E0_R_LIVE != "e0_r_dense":
+        raise SystemExit(f"FAIL: e0 right live rule {E0_R_LIVE}")
     if E0_R_FAIL_N != 5 or abs(E0_R_FAIL_PAD_M - 0.0439108831389442) > 1e-12:
         raise SystemExit("FAIL: the e0 right 0.30 m miss moved")
     if abs(E0_R_FAIL_RESIDUAL_M) <= RANGE_ERR_MAX_M:
         raise SystemExit("FAIL: the e0 right overshoot was marked clear")
     if abs(E0_R_FAIL_ERR_M - (E0_R_FAIL_PAD_M + E0_R_FAIL_RESIDUAL_M)) > 1e-12:
         raise SystemExit("FAIL: e0 right error does not match the residual")
+    if E0_R_THIN_N != 2 or abs(E0_R_THIN_PAD_M - 0.029336655418528076) > 1e-12:
+        raise SystemExit("FAIL: the e0 right thin miss moved")
+    if abs(E0_R_THIN_RESIDUAL_M) <= RANGE_ERR_MAX_M:
+        raise SystemExit("FAIL: the e0 right thin residual was marked clear")
+    if abs(E0_R_THIN_ERR_M - (E0_R_THIN_PAD_M + E0_R_THIN_RESIDUAL_M)) > 1e-12:
+        raise SystemExit("FAIL: e0 right thin error does not match the residual")
+    e0_short_pad, e0_short_n, e0_short_on = _e0_r_near_pad([
+        (0.28, 0.054),
+        (0.26, 0.044),
+    ])
+    if e0_short_on or e0_short_n != 2 or e0_short_pad != 0.0:
+        raise SystemExit(
+            f"FAIL: short e0 window latched {e0_short_pad} n={e0_short_n}"
+        )
     e0_demo_pad, e0_demo_n, e0_demo_on = _e0_r_near_pad([
         (0.28, 0.054),
         (0.26, 0.044),
@@ -3543,10 +3585,31 @@ def main() -> int:
         (0.23, 0.026),
         (0.22, 0.025),
     ])
-    if not e0_demo_on or e0_demo_n != 3 or abs(e0_demo_pad - 0.026) > 1e-12:
+    if not e0_demo_on or e0_demo_n != 5 or abs(e0_demo_pad - 0.033) > 1e-12:
         raise SystemExit(f"FAIL: e0 right near pad moved to {e0_demo_pad} n={e0_demo_n}")
     if abs(e0_demo_pad - E0_R_FAIL_PAD_M) < 1e-3:
-        raise SystemExit("FAIL: e0 right near pad copied the 0.30 m miss")
+        raise SystemExit("FAIL: e0 right near pad copied the 0.04391 miss")
+    if abs(e0_demo_pad - E0_R_THIN_PAD_M) < 1e-3:
+        raise SystemExit("FAIL: e0 right near pad copied the thin miss")
+    e0_cap_pad, e0_cap_n, e0_cap_on = _e0_r_near_pad([
+        (0.30, 0.090),
+        (0.28, 0.054),
+        (0.26, 0.044),
+        (0.24, 0.033),
+        (0.23, 0.026),
+        (0.22, 0.025),
+    ])
+    if not e0_cap_on or e0_cap_n != 5 or abs(e0_cap_pad - e0_demo_pad) > 1e-12:
+        raise SystemExit(f"FAIL: e0 right cap moved to {e0_cap_pad} n={e0_cap_n}")
+    e0_far_pad, e0_far_n, e0_far_on = _e0_r_near_pad([
+        (0.31, 0.090),
+        (0.29, 0.050),
+        (0.28, 0.048),
+        (0.27, 0.046),
+        (0.26, 0.044),
+    ])
+    if e0_far_on or e0_far_n != 4:
+        raise SystemExit(f"FAIL: ray past 0.30 filled the e0 window n={e0_far_n}")
     if abs(EAST_L_ONLINE_RESIDUAL_M) <= RANGE_ERR_MAX_M:
         raise SystemExit("FAIL: the failed online residual was marked clear")
     if EAST_L_ONLINE_N != 22:
@@ -3772,8 +3835,12 @@ def main() -> int:
         "e0_r_fail_pad_m": E0_R_FAIL_PAD_M,
         "e0_r_fail_n": E0_R_FAIL_N,
         "e0_r_fail_residual_m": E0_R_FAIL_RESIDUAL_M,
+        "e0_r_thin_pad_m": E0_R_THIN_PAD_M,
+        "e0_r_thin_n": E0_R_THIN_N,
+        "e0_r_thin_residual_m": E0_R_THIN_RESIDUAL_M,
         "e0_r_near_gate_m": E0_R_NEAR_GATE_M,
         "e0_r_near_k": E0_R_NEAR_K,
+        "e0_r_near_min_n": E0_R_NEAR_MIN_N,
         "east_l_sample_count": len(EAST_L_ERR_M),
         "w2_l_latch_m": W2_L_LATCH_M,
         "w2_l_sample_count": len(W2_L_ERR_M),
