@@ -161,9 +161,9 @@ SAME_WALL_ERR_M: tuple[float, ...] = (
     0.05433211195858684,
 )
 LATCH_EXTRA_M = float(statistics.median(SAME_WALL_ERR_M))
-# That median stays the right-toe pad on wall_hall_w_2. It cleared the
-# right-toe living stop. It is not the left-toe pad, and it does not
-# travel to wall_hall_e_1.
+# Recorded 17-sample median. On tip f9d059d the right-toe living stop
+# missed it by +0.0133 m. It is not the live right-toe pad, it is not
+# the left-toe pad, and it does not travel to wall_hall_e_1.
 LIVING_WALL = "wall_hall_w_2"
 # Walk-up band the living 17 were collected in. The living latch
 # distance is d_min 0.1263 m + 0.04087 m = 0.1672 m. 0.40 m is 2.39
@@ -331,10 +331,15 @@ EAST_L_Q75_M = _sorted_quantile(EAST_L_ERR_M, 0.75)
 EAST_L_ONLINE_PAD_M = 0.05612963080175057
 EAST_L_ONLINE_N = 22
 EAST_L_ONLINE_RESIDUAL_M = -0.028436946196605833
-EAST_L_LIVE = "quantile"
 # Live kitchen −90° on the 75th percentile. Same pose as the online
 # stop: ray 0.234 m, left toe, error 0.02769 m, residual −0.0318 m.
-# Not a clear. Not applied to wall_hall_w_2.
+# Not a clear. Not applied to wall_hall_w_2. The approach-wide median
+# and this percentile both sit near 0.056–0.059 m, above that error.
+# "near" keeps only a left ray that is as close as any earlier left
+# ray on wall_hall_e_1 in this bout (band 0). The commit is left out.
+# That is the ~0.028 m class. It is not applied to wall_hall_w_2.
+EAST_L_NEAR_BAND_M = 0.0
+EAST_L_LIVE = "near"
 EAST_L_Q75_RESIDUAL_M = -0.03175107940399083
 EAST_L_Q75_RAY_M = 0.23443045430153236
 EAST_L_Q75_ERR_M = 0.02769268460514473
@@ -363,6 +368,66 @@ W2_L_ERR_M: tuple[float, ...] = (
     0.10549564179736243,
 )
 W2_L_LATCH_M = float(statistics.median(W2_L_ERR_M))
+# Close right-toe errors on wall_hall_w_2 only. The two committing
+# stops are out: the old clear at 0.04006 m and tip f9d059d at
+# 0.05421 m. Left samples are not in this list. East samples are not
+# in this list. The median is fuller than the recorded 0.04087 m.
+W2_R_ERR_M: tuple[float, ...] = (
+    0.004219883565836802,
+    0.005822787015680897,
+    0.0068525014782475635,
+    0.0077340341254527045,
+    0.010055902446165055,
+    0.010319170004230827,
+    0.011862733775805379,
+    0.026452013695535348,
+    0.02829813952413429,
+    0.029279842985892757,
+    0.030317832469307193,
+    0.03646035483638643,
+    0.0367884720606339,
+    0.03710310449407078,
+    0.037616906496476366,
+    0.03813136897919778,
+    0.038381535901046204,
+    0.03871125022303812,
+    0.038878755780254404,
+    0.0393584045427984,
+    0.03965475705095642,
+    0.04638235624866521,
+    0.048008362228520285,
+    0.04936476497984843,
+    0.04936891275435906,
+    0.04943881206199996,
+    0.04969792075599555,
+    0.049729465533891015,
+    0.04973527061689914,
+    0.049795950246224074,
+    0.04994283523521065,
+    0.05000671234013854,
+    0.05039772349096583,
+    0.05052197274527637,
+    0.05078093565394698,
+    0.051110526369427256,
+    0.0513451339470794,
+    0.05340614014471562,
+    0.05353726916577645,
+    0.05414385561253576,
+    0.05433211195858684,
+    0.055055802662696524,
+    0.0578047110505272,
+    0.05842412481441661,
+    0.061524229425781674,
+    0.06245805249739411,
+    0.09010144240375012,
+    0.09107983338619013,
+    0.18437060817683054,
+)
+W2_R_LATCH_M = float(statistics.median(W2_R_ERR_M))
+W2_R_HELD_ERR_M = (
+    0.04006368156714865,
+    0.05420673512207522,
+)
 # Left-only additive correction, fitted on the 45 samples above.
 # predicted = c0 + c_z*cam_z + c_pitch*cam_pitch + c_lead*lead_off.
 # The kitchen stop on tip 80bf2ea is not in the fit. The prediction
@@ -745,24 +810,24 @@ def _definition() -> DefinitionJson:
             "a different wall is logged and is not added to the latch. "
             f"latch_extra {LATCH_EXTRA_M:.5f} m is the median of "
             f"{len(SAME_WALL_ERR_M)} errors on {LIVING_WALL} with the "
-            f"sim gap under {CLOSE_GAP_M:.2f} m. That median is the "
-            f"right-toe pad on {LIVING_WALL} only. The left-toe pad on "
+            f"sim gap under {CLOSE_GAP_M:.2f} m. That median is recorded. "
+            f"The live right-toe pad on {LIVING_WALL} is the median of "
+            f"{len(W2_R_ERR_M)} close right samples, {W2_R_LATCH_M:.5f} m, "
+            "with both committing stops left out. The left-toe pad on "
             f"that wall is the median of {len(W2_L_ERR_M)} close left "
-            f"samples, {W2_L_LATCH_M:.5f} m, with committing stops left "
-            "out. An east pad is not applied to that wall. "
-            f"{EAST_WALL} left samples median {EAST_L_LATCH_M:.5f} m "
-            f"(n={len(EAST_L_ERR_M)}). Median plus MAD "
-            f"{EAST_L_APPLIED_M:.5f} m is recorded and is not the live "
-            "latch. A same-bout online median of "
-            f"{EAST_L_ONLINE_N} prior close left errors, pad "
-            f"{EAST_L_ONLINE_PAD_M:.5f} m, stopped at residual "
-            f"{EAST_L_ONLINE_RESIDUAL_M:+.4f} m and is not the latch. "
-            f"The live left latch is the 75th percentile of those "
-            f"{len(EAST_L_ERR_M)} samples, {EAST_L_Q75_M:.5f} m. "
-            f"A live stop on that pad left residual "
-            f"{EAST_L_Q75_RESIDUAL_M:+.4f} m at ray {EAST_L_Q75_RAY_M:.3f} m "
-            "on the left toe. It does not clear. "
-            "Right-toe samples median "
+            f"samples, {W2_L_LATCH_M:.5f} m. An east pad is not applied "
+            f"to that wall. {EAST_WALL} left samples median "
+            f"{EAST_L_LATCH_M:.5f} m (n={len(EAST_L_ERR_M)}). Median plus "
+            f"MAD {EAST_L_APPLIED_M:.5f} m is recorded and is not the "
+            "live latch. A same-bout median of every close left error, "
+            f"pad {EAST_L_ONLINE_PAD_M:.5f} m, stopped at residual "
+            f"{EAST_L_ONLINE_RESIDUAL_M:+.4f} m. The 75th percentile "
+            f"{EAST_L_Q75_M:.5f} m stopped at residual "
+            f"{EAST_L_Q75_RESIDUAL_M:+.4f} m. Neither is the latch. "
+            "The live left latch is the median of prior left rays that "
+            "are as close as any earlier left ray on that wall in this "
+            "bout. The sample that crosses the gate is left out. "
+            "East right-toe samples median "
             f"{EAST_R_LATCH_M:.5f} m (n={len(EAST_R_ERR_M)}). An unknown "
             "toe gets pad 0. Contact "
             f"boxes sit {TOE_OUTBOARD_M:.3f} m outboard of each ankle "
@@ -1187,7 +1252,7 @@ def _toe_ready(klass: str) -> bool:
     if klass == "living_close_L":
         return len(W2_L_ERR_M) >= len(SAME_WALL_ERR_M)
     if klass == "living_close_R":
-        return len(SAME_WALL_ERR_M) >= 17
+        return len(W2_R_ERR_M) >= len(SAME_WALL_ERR_M)
     if klass == "other_wall_close":
         return True
     return False
@@ -1199,10 +1264,17 @@ def _pad_for(wall: str, true_gap: float | None, lead_side: str = "") -> float:
     if klass == "living_close" and lead_side == "L":
         return W2_L_LATCH_M
     if klass == "living_close" and lead_side == "R":
-        return LATCH_EXTRA_M
+        return W2_R_LATCH_M
     if klass == "east_close" and lead_side == "R":
         return EAST_R_LATCH_M
     return 0.0
+
+
+def _in_near_band(ray: float, near_ray: float | None) -> bool:
+    """True when this ray is as close as the closest left ray so far."""
+    if near_ray is None:
+        return True
+    return ray <= near_ray + EAST_L_NEAR_BAND_M
 
 
 def _east_l_bout_pad(prior: list[float]) -> tuple[float, bool]:
@@ -2151,6 +2223,7 @@ def _run_room(
     wall_stop_pad: float | None = None
     east_l_hold = False
     east_l_prior: list[float] = []
+    east_l_near_ray: float | None = None
     east_l_min_ray: float | None = None
     east_l_min_t: float | None = None
     east_l_min_heading: float | None = None
@@ -2712,14 +2785,18 @@ def _run_room(
                                 repoint = False
                                 break
                             if (
-                                EAST_L_LIVE == "online"
+                                EAST_L_LIVE == "near"
                                 and true_name == EAST_WALL
                                 and side == "L"
                                 and err is not None
                                 and true_gap is not None
                                 and float(true_gap) <= CLOSE_GAP_M
                             ):
-                                east_l_prior.append(float(err))
+                                ray_f = float(true_gap)
+                                if _in_near_band(ray_f, east_l_near_ray):
+                                    east_l_prior.append(float(err))
+                                if east_l_near_ray is None or ray_f < east_l_near_ray:
+                                    east_l_near_ray = ray_f
                         elif same:
                             class_reject_count += 1
                             if (
@@ -3256,8 +3333,14 @@ def main() -> int:
         raise SystemExit(f"FAIL: east left applied pad moved to {EAST_L_APPLIED_M}")
     if EAST_L_MAD_APPLIED:
         raise SystemExit("FAIL: east left median+MAD is on the live latch")
-    if EAST_L_LIVE != "quantile":
+    if EAST_L_LIVE != "near":
         raise SystemExit(f"FAIL: east left live rule {EAST_L_LIVE}")
+    if abs(EAST_L_NEAR_BAND_M) > 1e-12:
+        raise SystemExit(f"FAIL: east left near band moved to {EAST_L_NEAR_BAND_M}")
+    if _in_near_band(0.30, 0.26) or not _in_near_band(0.25, 0.26):
+        raise SystemExit("FAIL: near band kept a farther ray")
+    if not _in_near_band(0.40, None):
+        raise SystemExit("FAIL: the first near ray was rejected")
     if abs(EAST_L_ONLINE_RESIDUAL_M) <= RANGE_ERR_MAX_M:
         raise SystemExit("FAIL: the failed online residual was marked clear")
     if EAST_L_ONLINE_N != 22:
@@ -3303,12 +3386,12 @@ def main() -> int:
         raise SystemExit("FAIL: east left frozen pad is on the live path")
     if _pad_for(EAST_WALL, 0.20, "R") != EAST_R_LATCH_M:
         raise SystemExit("FAIL: east right pad is not the right median")
-    if EAST_L_LIVE == "online" and _east_l_bout_pad([]) != (0.0, False):
+    if _east_l_bout_pad([]) != (0.0, False):
         raise SystemExit("FAIL: empty east left bout took a frozen pad")
-    if EAST_L_LIVE == "online" and _east_l_bout_pad([0.02, 0.04]) != (0.03, True):
-        raise SystemExit("FAIL: east left bout median moved")
-    if EAST_L_LIVE == "quantile" and _east_l_bout_pad([]) != (EAST_L_Q75_M, True):
-        raise SystemExit("FAIL: east left quantile is not the live pad")
+    if _east_l_bout_pad([0.0265, 0.0294, 0.0309]) != (0.0294, True):
+        raise SystemExit("FAIL: east left near median moved")
+    if _east_l_bout_pad([0.05613]) == (EAST_L_Q75_M, True):
+        raise SystemExit("FAIL: east left near pad fell back to the 75th percentile")
     if abs(EAST_L_LATCH_M - LATCH_EXTRA_M) < 1e-3 or abs(EAST_R_LATCH_M - LATCH_EXTRA_M) < 1e-3:
         raise SystemExit("FAIL: a toe median copied the living pad")
     if _pad_for(EAST_WALL, 1.0, "L") != 0.0:
@@ -3317,8 +3400,20 @@ def main() -> int:
         raise SystemExit("FAIL: an unmeasured close wall took a pad")
     if _pad_for(LIVING_WALL, 0.20, "L") != W2_L_LATCH_M:
         raise SystemExit("FAIL: living left pad is not the left median")
-    if _pad_for(LIVING_WALL, 0.20, "R") != LATCH_EXTRA_M:
-        raise SystemExit("FAIL: living right pad moved")
+    if len(W2_R_ERR_M) != 49:
+        raise SystemExit(f"FAIL: living right set has {len(W2_R_ERR_M)} samples")
+    if abs(W2_R_LATCH_M - 0.04936891275435906) > 1e-12:
+        raise SystemExit(f"FAIL: living right median moved to {W2_R_LATCH_M}")
+    if W2_R_LATCH_M <= LATCH_EXTRA_M:
+        raise SystemExit("FAIL: living right rebuild is not fuller than 0.04087 m")
+    if any(abs(err - held) < 1e-6 for err in W2_R_ERR_M for held in W2_R_HELD_ERR_M):
+        raise SystemExit("FAIL: a living right commit is in the pad")
+    if abs(W2_R_LATCH_M - EAST_L_LATCH_M) < 1e-3 or abs(W2_R_LATCH_M - EAST_L_Q75_M) < 1e-3:
+        raise SystemExit("FAIL: living right pad copied an east pad")
+    if abs(W2_R_LATCH_M - W2_L_LATCH_M) < 1e-3:
+        raise SystemExit("FAIL: living right pad copied the left pad")
+    if _pad_for(LIVING_WALL, 0.20, "R") != W2_R_LATCH_M:
+        raise SystemExit("FAIL: living right pad is not the rebuilt median")
     if _pad_for(LIVING_WALL, 0.20) != 0.0:
         raise SystemExit("FAIL: living unknown toe borrowed a pad")
     if _pad_for(LIVING_WALL, 0.20, "L") == EAST_L_APPLIED_M:
@@ -3434,7 +3529,8 @@ def main() -> int:
         "east_l_applied_m": EAST_L_APPLIED_M,
         "east_l_mad_applied": EAST_L_MAD_APPLIED,
         "east_l_q75_m": EAST_L_Q75_M,
-        "east_l_q75_applied": EAST_L_LIVE == "quantile",
+        "east_l_q75_applied": False,
+        "east_l_near_band_m": EAST_L_NEAR_BAND_M,
         "east_l_online_pad_m": EAST_L_ONLINE_PAD_M,
         "east_l_online_n": EAST_L_ONLINE_N,
         "east_l_online_residual_m": EAST_L_ONLINE_RESIDUAL_M,
@@ -3445,7 +3541,9 @@ def main() -> int:
         "east_l_sample_count": len(EAST_L_ERR_M),
         "w2_l_latch_m": W2_L_LATCH_M,
         "w2_l_sample_count": len(W2_L_ERR_M),
-        "w2_r_latch_m": LATCH_EXTRA_M,
+        "w2_r_latch_m": W2_R_LATCH_M,
+        "w2_r_sample_count": len(W2_R_ERR_M),
+        "w2_r_recorded_m": LATCH_EXTRA_M,
         "clear_rule": "abs(measured_error-pad)<=0.01",
         "east_l_fit_applied": EAST_L_FIT_APPLIED,
         "east_l_held_err_m": EAST_L_HELD_ERR_M,
@@ -3465,8 +3563,8 @@ def main() -> int:
         ),
         "per_wall_pad_m": {
             "wall_hall_w_2×L": W2_L_LATCH_M,
-            "wall_hall_w_2×R": LATCH_EXTRA_M,
-            "wall_hall_e_1×L": EAST_L_Q75_M,
+            "wall_hall_w_2×R": W2_R_LATCH_M,
+            "wall_hall_e_1×L": None,
             "wall_hall_e_1×R": EAST_R_LATCH_M,
         },
         "bob_pad_stacked": False,
