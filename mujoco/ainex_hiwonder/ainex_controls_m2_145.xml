@@ -7,6 +7,7 @@
   Path A spend frozen — sim only. Do not claim manufacturer PASS.
 -->
 <!-- Foot contact: mesh AABB 135x76 mm (half-size 0.0675 0.0380 0.008 m; mesh-derived / not OEM). Centre y is the STL AABB centre, 14 mm outboard of the ankle axis: l local +0.014 (xmat I, world +Y), r local -0.014 (world -Y). x/z stay 0.030 / -0.018. -->
+<!-- Medial thaw Prefer FAIL: kit sole medial edge is already the contact box. l_ank_roll_link AABB Y [-24.037, +52.000] mm, r_ank_roll_link AABB Y [-52.000, +24.051] mm (STL in the ankle frame; URDF collision origin 0 0 0). Unused medial mesh 0.037 mm (L) and 0.051 mm (R). Zero-pose inner gap +9.900 mm; mesh-to-mesh gap +9.812 mm. A midline point is still ~4.9 mm past the sole. Reaching it leaves the mesh and closes the gap. Half-size and centre y are unchanged. -->
 <mujoco model="ainex_controls">
   <visual>
     <global offwidth="960" offheight="720" />
