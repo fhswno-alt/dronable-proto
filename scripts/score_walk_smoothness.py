@@ -57,9 +57,16 @@ import numpy.typing as npt
 _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
+# A tip worktree's scripts/ wins for the gait modules. step_bars stays on this branch.
+_GAIT_SCRIPTS = os.environ.get("WALK_GAIT_SCRIPTS", "").strip()
+if _GAIT_SCRIPTS:
+    if _GAIT_SCRIPTS in sys.path:
+        sys.path.remove(_GAIT_SCRIPTS)
+    sys.path.insert(0, _GAIT_SCRIPTS)
 
 import lipm_gait  # noqa: E402
 import steer_walk  # noqa: E402
+import step_bars  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 PLANT_XML = steer_walk.PLANT_XML
@@ -345,20 +352,33 @@ def actuated_q(model: mj.MjModel, data: mj.MjData) -> tuple[list[str], Vec]:
     return names, np.asarray(vals, dtype=np.float64)
 
 
+def _ground_gids(session: steer_walk.SteerSession, walker: lipm_gait.LipmWalker) -> tuple[int, ...]:
+    """Floor geom, plus any runtime ground the walker already treats as floor."""
+    gids = [int(walker.gid_floor)]
+    for gid in getattr(walker, "ground_extra", ()):
+        gi = int(gid)
+        if gi >= 0 and gi not in gids:
+            gids.append(gi)
+    return tuple(gids)
+
+
 def foot_floor_cop(
     model: mj.MjModel,
     data: mj.MjData,
     gid: int,
     floor_gid: int,
+    grounds: tuple[int, ...] | None = None,
 ) -> tuple[Vec, float] | None:
     """World CoP and normal load. Same contact sum as ``LipmWalker._cop_local``."""
+    allowed = {int(floor_gid)} if grounds is None else {int(g) for g in grounds if int(g) >= 0}
     num = np.zeros(3, dtype=np.float64)
     den = 0.0
     for i in range(data.ncon):
         con = data.contact[i]
         g1 = int(con.geom1)
         g2 = int(con.geom2)
-        if not ((g1 == gid and g2 == floor_gid) or (g2 == gid and g1 == floor_gid)):
+        pair = (g1 == gid and g2 in allowed) or (g2 == gid and g1 in allowed)
+        if not pair:
             continue
         force = np.zeros(6, dtype=np.float64)
         mj.mj_contactForce(model, data, i, force)
@@ -399,10 +419,13 @@ def sample_zmp(
     """
     label = phase_label(walker.phase, walker.stance)
     sides = stance_sides(label, walker.stance)
+    grounds = _ground_gids(session, walker)
     num = np.zeros(3, dtype=np.float64)
     den = 0.0
     for side in ("L", "R"):
-        got = foot_floor_cop(session.model, session.data, walker.gid[side], walker.gid_floor)
+        got = foot_floor_cop(
+            session.model, session.data, walker.gid[side], walker.gid_floor, grounds,
+        )
         if got is None:
             continue
         world, fn = got
@@ -836,6 +859,8 @@ def write_outputs(score: SmoothnessScore, json_path: Path, md_path: Path) -> Non
 
 
 def self_test() -> int:
+    if step_bars.self_test() != 0:
+        return 1
     failures: list[str] = []
 
     def expect(cond: bool, msg: str) -> None:
@@ -949,6 +974,7 @@ class PreviewRowSpec:
     walk_s: float
     stop_s: float
     source: str
+    preview_shape: float = 1.0
 
 
 # No vx 0.056 preview row is on this tip. ``voice_caller.py`` still publishes
@@ -1183,6 +1209,8 @@ class Perturb:
     mass_scale: float = 1.0
     friction: float | None = None
     latency_ticks: int = 0
+    rug: bool = False
+    cycles: int = 0
 
 
 @dataclass
@@ -1268,25 +1296,31 @@ def _install_ask_log(walker: lipm_gait.LipmWalker, bucket: list[AskSample]) -> N
 
 
 def _preview_config(spec: PreviewRowSpec) -> lipm_gait.LipmConfig:
-    return lipm_gait.LipmConfig(
-        name="preview",
-        clear_m=spec.z_m,
-        arms=True,
-        schedule="gait_manager",
-        gm_period_s=spec.period_s,
-        gm_dsp=spec.dsp,
-        gm_y_swap_m=0.0,
-        gm_x_m=0.020,
-        gm_z_m=spec.z_m,
-        gm_z_swap_m=0.0,
-        gm_pelvis_deg=0.0,
-        gm_hip_pitch_deg=15.0,
-        gm_start_lead="L",
-        gm_crouch_m=0.025,
-        gm_move_s=0.020,
-        preview_amp_m=spec.amp_m,
-        preview_arm_s=spec.arm_s,
-    )
+    kwargs: dict[str, object] = {
+        "name": "preview",
+        "clear_m": spec.z_m,
+        "arms": True,
+        "schedule": "gait_manager",
+        "gm_period_s": spec.period_s,
+        "gm_dsp": spec.dsp,
+        "gm_y_swap_m": 0.0,
+        "gm_x_m": 0.020,
+        "gm_z_m": spec.z_m,
+        "gm_z_swap_m": 0.0,
+        "gm_pelvis_deg": 0.0,
+        "gm_hip_pitch_deg": 15.0,
+        "gm_start_lead": "L",
+        "gm_crouch_m": 0.025,
+        "gm_move_s": 0.020,
+        "preview_amp_m": spec.amp_m,
+        "preview_arm_s": spec.arm_s,
+    }
+    fields = getattr(lipm_gait.LipmConfig, "__dataclass_fields__", {})
+    if "preview_shape" in fields:
+        kwargs["preview_shape"] = float(spec.preview_shape)
+    if "preview_r" in fields:
+        kwargs["preview_r"] = 1.0e-4
+    return lipm_gait.LipmConfig(**kwargs)  # type: ignore[arg-type]
 
 
 def command_time(now: float, latency_ticks: int, dt: float) -> float:
@@ -1448,6 +1482,193 @@ def _stage_blob(score: PhaseScore, asks: list[AskSample]) -> dict[str, object]:
     }
 
 
+RUG_EDGE_AHEAD_M = 0.015
+STEP_MD = ROOT / "docs" / "WALK_STEPPING_BARS.md"
+TIP_SHA_D7 = "d7b06e79757a6394784ab3582e9c34c1b8c2ab2b"
+
+
+def _contact_count(
+    data: mj.MjData,
+    foot_gid: int,
+    grounds: tuple[int, ...],
+) -> int:
+    allowed = {int(g) for g in grounds}
+    n = 0
+    for i in range(data.ncon):
+        con = data.contact[i]
+        g1 = int(con.geom1)
+        g2 = int(con.geom2)
+        if (g1 == foot_gid and g2 in allowed) or (g2 == foot_gid and g1 in allowed):
+            n += 1
+    return n
+
+
+def _foot_box_sample(
+    model: mj.MjModel,
+    data: mj.MjData,
+    gid: int,
+    rug: tuple[float, float, float, float, float] | None,
+) -> tuple[float, float, float, float, float]:
+    """Box-centre x/y, lowest-corner clearance, and sole roll/pitch."""
+    half = np.asarray(model.geom_size[gid], dtype=np.float64)
+    if hasattr(data, "geom_xmat"):
+        rot = np.asarray(data.geom_xmat[gid], dtype=np.float64).reshape(3, 3)
+        origin = np.asarray(data.geom_xpos[gid], dtype=np.float64)
+    else:
+        bid = int(model.geom_bodyid[gid])
+        rot = np.asarray(data.xmat[bid], dtype=np.float64).reshape(3, 3)
+        origin = np.asarray(data.xpos[bid], dtype=np.float64) + rot @ np.asarray(
+            model.geom_pos[gid], dtype=np.float64,
+        )
+    clear = 1.0e9
+    for sx in (-1.0, 1.0):
+        for sy in (-1.0, 1.0):
+            for sz in (-1.0, 1.0):
+                local = np.array([sx * half[0], sy * half[1], sz * half[2]], dtype=np.float64)
+                world = origin + rot @ local
+                ground = 0.0
+                if rug is not None:
+                    x0, x1, y0, y1, top = rug
+                    if x0 <= float(world[0]) <= x1 and y0 <= float(world[1]) <= y1:
+                        ground = top
+                clear = min(clear, float(world[2]) - ground)
+    normal = rot[:, 2]
+    roll = math.atan2(float(normal[1]), float(normal[2]))
+    pitch = math.atan2(-float(normal[0]), math.hypot(float(normal[1]), float(normal[2])))
+    return float(origin[0]), float(origin[1]), float(clear), roll, pitch
+
+
+def _foot_cop_margin(
+    session: steer_walk.SteerSession,
+    walker: lipm_gait.LipmWalker,
+    side: str,
+    grounds: tuple[int, ...],
+) -> float:
+    got = foot_floor_cop(session.model, session.data, walker.gid[side], walker.gid_floor, grounds)
+    if got is None:
+        return float("nan")
+    world, _fn = got
+    corners = session._foot_corners(walker.bid[side], walker.gid[side])
+    hull = steer_walk.convex_hull_xy(corners)
+    return float(steer_walk.support_margin(world[:2], hull))
+
+
+def _actual_margins(
+    session: steer_walk.SteerSession,
+    walker: lipm_gait.LipmWalker,
+    grounds: tuple[int, ...],
+    n_l: int,
+    n_r: int,
+) -> tuple[float, float]:
+    """Contact CoP and CoM against the boxes of feet that have a floor contact."""
+    sides = [side for side, n in (("L", n_l), ("R", n_r)) if n > 0]
+    if not sides:
+        return float("nan"), float("nan")
+    num = np.zeros(3, dtype=np.float64)
+    den = 0.0
+    for side in sides:
+        got = foot_floor_cop(
+            session.model, session.data, walker.gid[side], walker.gid_floor, grounds,
+        )
+        if got is None:
+            continue
+        world, fn = got
+        num += fn * world
+        den += fn
+    chunks = [
+        session._foot_corners(walker.bid[side], walker.gid[side])
+        for side in sides
+    ]
+    hull = steer_walk.convex_hull_xy(np.concatenate(chunks, axis=0))
+    com = np.asarray(session.data.subtree_com[walker.bid_body, :2], dtype=np.float64)
+    com_m = float(steer_walk.support_margin(com, hull))
+    if den <= 1e-6:
+        return float("nan"), com_m
+    zmp = (num / den)[:2]
+    return float(steer_walk.support_margin(zmp, hull)), com_m
+
+
+def _trunk_angles(data: mj.MjData, bid: int) -> tuple[float, float, float]:
+    up = np.asarray(data.xmat[bid], dtype=np.float64).reshape(3, 3)[:, 2]
+    roll = math.atan2(float(up[1]), float(up[2]))
+    pitch = math.atan2(-float(up[0]), math.hypot(float(up[1]), float(up[2])))
+    return roll, pitch, float(up[2])
+
+
+def _leg_q(model: mj.MjModel, data: mj.MjData) -> list[float]:
+    out: list[float] = []
+    for name in LEG_JOINTS:
+        jid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, name)
+        if jid < 0:
+            raise RuntimeError(f"missing joint {name}")
+        out.append(float(data.qpos[int(model.jnt_qposadr[jid])]))
+    return out
+
+
+def _place_entrance_rug(session: steer_walk.SteerSession) -> tuple[float, float, float, float, float]:
+    """Slide the entrance mat so its near edge is 15 mm ahead of the toes.
+
+    Body position only. The plant file is not written. The geom stays ground
+    for contact once the walker is told about it.
+    """
+    gid = int(getattr(session, "gid_rug", -1))
+    if gid < 0:
+        gid = mj.mj_name2id(session.model, mj.mjtObj.mjOBJ_GEOM, "mat_rug")
+    if gid < 0:
+        raise RuntimeError("entrance rug geom is not in this scene")
+    session.gid_rug = gid
+    bid = int(session.model.geom_bodyid[gid])
+    half_x = float(session.model.geom_size[gid, 0])
+    half_y = float(session.model.geom_size[gid, 1])
+    half_z = float(session.model.geom_size[gid, 2])
+    front = -1.0e9
+    for body, geom in (
+        (session.bid_lf, session.gid_lfoot),
+        (session.bid_rf, session.gid_rfoot),
+    ):
+        corners = session._foot_corners(body, geom)
+        front = max(front, float(np.max(corners[:, 0])))
+    near = front + RUG_EDGE_AHEAD_M
+    session.model.body_pos[bid, 0] = near + half_x
+    mj.mj_forward(session.model, session.data)
+    walker = session.lipm
+    if walker is not None and hasattr(walker, "ground_extra"):
+        walker.ground_extra = (gid,)
+    center = np.asarray(session.data.geom_xpos[gid], dtype=np.float64)
+    top = float(center[2]) + half_z
+    return (
+        float(center[0]) - half_x,
+        float(center[0]) + half_x,
+        float(center[1]) - half_y,
+        float(center[1]) + half_y,
+        top,
+    )
+
+
+def _cycle_script(spec: PreviewRowSpec, n_cycles: int) -> tuple[steer_walk.DemoSegment, ...]:
+    """Repeat the row's vel window. Each cycle is the same walk and the same stop."""
+    t = float(spec.stand_s)
+    segments = [steer_walk.DemoSegment(t, "stand", 0.0, 0.0, "stand")]
+    vx = float(spec.vx_m_s)
+    for i in range(int(n_cycles)):
+        t += float(spec.walk_s)
+        segments.append(steer_walk.DemoSegment(t, "vel", vx, 0.0, f"forward{i}"))
+        t += float(spec.stop_s)
+        segments.append(steer_walk.DemoSegment(t, "stop", 0.0, 0.0, f"stop{i}"))
+    return tuple(segments)
+
+
+def _command_mode(now: float, spec: PreviewRowSpec, driver: steer_walk.ScriptedDriver | None) -> str:
+    if driver is not None:
+        kind = driver.segment(now).kind
+        return "move" if kind == "vel" else str(kind)
+    if now + 1e-12 < spec.stand_s:
+        return "stand"
+    if now + 1e-12 < spec.stand_s + spec.walk_s:
+        return "move"
+    return "stop"
+
+
 def run_preview_row(
     spec: PreviewRowSpec,
     perturb: Perturb | None = None,
@@ -1456,7 +1677,12 @@ def run_preview_row(
     digest_before = _plant_md5()
     if digest_before != FROZEN_MD5:
         raise SystemExit(f"plant md5 {digest_before} != {FROZEN_MD5}")
-    session = steer_walk.SteerSession(video=False, lipm=_preview_config(spec))
+    scene = None
+    if perturb is not None and perturb.rug:
+        scene = steer_walk.ROOT / "mujoco" / "room_entrance.xml"
+        if not scene.is_file():
+            raise RuntimeError(f"{spec.name}: entrance rug scene is not on this tip")
+    session = steer_walk.SteerSession(video=False, lipm=_preview_config(spec), scene_xml=scene)
     walker = session.lipm
     if walker is None or walker.op3 is None:
         raise RuntimeError(f"{spec.name}: walker did not build")
@@ -1467,6 +1693,7 @@ def run_preview_row(
     _install_ask_log(walker, asks)
     if perturb is not None:
         _apply_perturb(session, perturb)
+    rug_box = _place_entrance_rug(session) if perturb is not None and perturb.rug else None
     if _plant_md5() != FROZEN_MD5:
         raise SystemExit("plant XML md5 changed while applying a runtime perturb")
     phases: dict[str, PhaseScore] = {
@@ -1481,8 +1708,18 @@ def run_preview_row(
     q_rows: list[Vec] = []
     joint_names: list[str] = []
     reasons: list[str] = []
+    step_cols: dict[str, list[object]] = {key: [] for key in (
+        "t", "x_l", "x_r", "y_l", "y_r", "n_l", "n_r", "z_l", "z_r",
+        "declared", "mode", "roll", "pitch", "roll_l", "pitch_l", "roll_r", "pitch_r",
+        "up_z", "zmp_act", "com_act", "cop_l", "cop_r",
+    )}
+    q_stand_rows: list[list[float]] = []
     t_stop = spec.stand_s + spec.walk_s
     t_end = t_stop + spec.stop_s
+    driver: steer_walk.ScriptedDriver | None = None
+    if perturb is not None and int(perturb.cycles) > 0:
+        driver = steer_walk.ScriptedDriver(_cycle_script(spec, int(perturb.cycles)))
+        t_end = float(driver.segments[-1].t_end)
     vx_cmd = spec.vx_m_s if spec.vx_m_s > 0.0 else float(steer_walk.VX_FWD_CAP)
     latency_ticks = 0 if perturb is None else int(perturb.latency_ticks)
     ctrl_dt = float(session.ctrl_dt)
@@ -1494,7 +1731,10 @@ def run_preview_row(
         # latency delivers it one tick early. The bus timeout still sees the
         # real clock.
         cmd_t = command_time(now, latency_ticks, ctrl_dt)
-        if cmd_t + 1e-12 < spec.stand_s:
+        mode = _command_mode(now, spec, driver)
+        if driver is not None:
+            driver.publish(session.bus, now)
+        elif cmd_t + 1e-12 < spec.stand_s:
             pass
         elif cmd_t + 1e-12 < t_stop:
             if last_send < 0.0 or (now - last_send) >= (steer_walk.VEL_RESEND_S - 1e-12):
@@ -1524,6 +1764,40 @@ def run_preview_row(
         q_rows.append(q)
         times.append(t_post)
         pre_times.append(now)
+        grounds = _ground_gids(session, walker)
+        n_l = _contact_count(session.data, int(walker.gid["L"]), grounds)
+        n_r = _contact_count(session.data, int(walker.gid["R"]), grounds)
+        x_l, y_l, z_l, roll_l, pitch_l = _foot_box_sample(
+            session.model, session.data, int(walker.gid["L"]), rug_box,
+        )
+        x_r, y_r, z_r, roll_r, pitch_r = _foot_box_sample(
+            session.model, session.data, int(walker.gid["R"]), rug_box,
+        )
+        roll, pitch, up_z = _trunk_angles(session.data, int(walker.bid_body))
+        zmp_act, com_act = _actual_margins(session, walker, grounds, n_l, n_r)
+        step_cols["t"].append(t_post)
+        step_cols["x_l"].append(x_l)
+        step_cols["x_r"].append(x_r)
+        step_cols["y_l"].append(y_l)
+        step_cols["y_r"].append(y_r)
+        step_cols["n_l"].append(n_l)
+        step_cols["n_r"].append(n_r)
+        step_cols["z_l"].append(z_l)
+        step_cols["z_r"].append(z_r)
+        step_cols["declared"].append(tick.phase)
+        step_cols["mode"].append(mode)
+        step_cols["roll"].append(roll)
+        step_cols["pitch"].append(pitch)
+        step_cols["roll_l"].append(roll_l)
+        step_cols["pitch_l"].append(pitch_l)
+        step_cols["roll_r"].append(roll_r)
+        step_cols["pitch_r"].append(pitch_r)
+        step_cols["up_z"].append(up_z)
+        step_cols["zmp_act"].append(zmp_act)
+        step_cols["com_act"].append(com_act)
+        step_cols["cop_l"].append(_foot_cop_margin(session, walker, "L", grounds))
+        step_cols["cop_r"].append(_foot_cop_margin(session, walker, "R", grounds))
+        q_stand_rows.append(_leg_q(session.model, session.data))
         if session.bus.fault:
             break
     session.assert_plant_unchanged()
@@ -1570,6 +1844,29 @@ def run_preview_row(
         and digest_after == FROZEN_MD5
         and not any("!=" in note and note.startswith("plant md5") for note in notes)
     )
+    q_mat = np.asarray(q_stand_rows, dtype=np.float64) if q_stand_rows else np.zeros((0, 12))
+    q_err = np.zeros(q_mat.shape[0], dtype=np.float64)
+    if q_mat.shape[0] > 0:
+        t_arr = np.asarray(step_cols["t"], dtype=np.float64)
+        stand_mask = t_arr <= spec.stand_s + 1e-12
+        if not np.any(stand_mask):
+            stand_mask = np.zeros(q_mat.shape[0], dtype=bool)
+            stand_mask[0] = True
+        q_ref = np.median(q_mat[stand_mask], axis=0)
+        q_err = np.max(np.abs(q_mat - q_ref), axis=1)
+    stepping = step_bars.summarize_trace(
+        step_bars.as_arrays(step_cols),
+        vx_m_s=vx_cmd,
+        period_s=spec.period_s,
+        q_stand_err=q_err,
+    )
+    half_x = float(session.model.geom_size[int(walker.gid["L"]), 0])
+    stepping["box_half_x_m"] = half_x
+    if abs(half_x - 0.0675) > 1e-6:
+        stepping["fail_reasons"].append(
+            f"contact box half-length {half_x * 1000.0:.2f} mm is not 67.5 mm"
+        )
+        stepping["passes"] = False
     fail_reasons = _mfg_reasons(
         measured=measured,
         zmp_min_m=zmp_min,
@@ -1584,6 +1881,9 @@ def run_preview_row(
         joint_peak=None if joint_jerk is None else joint_jerk.peak_l2,
         joint_rms=None if joint_jerk is None else joint_jerk.rms_l2,
     )
+    step_reasons = stepping.get("fail_reasons")
+    if isinstance(step_reasons, list):
+        fail_reasons.extend(str(reason) for reason in step_reasons)
     verdict: Literal["CLEAR", "Prefer FAIL"] = "CLEAR" if not fail_reasons else "Prefer FAIL"
     knee_peak = None if joint_jerk is None else joint_jerk.axis_peak.get("r_knee")
     knee_rms = None if joint_jerk is None else joint_jerk.axis_rms.get("r_knee")
@@ -1601,6 +1901,7 @@ def run_preview_row(
         "latency_ticks": latency_ticks,
         "friction_sliding": floor_mu,
         "runtime_mass_kg": float(np.sum(session.model.body_mass)),
+        "plant_md5_before": digest_before,
         "plant_md5": digest_after,
         "soft_pass": SOFT_PASS,
         "verdict": verdict,
@@ -1662,6 +1963,8 @@ def run_preview_row(
         "preview_stages": stage_rows,
         "max_leg_actuator_nm": float(session.max_leg_tau),
         "sag_bar_nm": SAG_BAR_NM,
+        "preview_shape": float(spec.preview_shape),
+        "stepping": stepping,
     }
 
 
@@ -2520,8 +2823,357 @@ def run_ac81435() -> dict[str, object]:
     }
 
 
+def _voice_spec(name: str, period_s: float, shape: float, source: str, vx_m_s: float = 0.056) -> PreviewRowSpec:
+    return PreviewRowSpec(
+        name=name,
+        period_s=period_s,
+        dsp=0.70,
+        amp_m=0.043,
+        z_m=0.004,
+        arm_s=2.40,
+        vx_m_s=vx_m_s,
+        stand_s=0.40,
+        walk_s=11.00,
+        stop_s=3.00,
+        source=source,
+        preview_shape=shape,
+    )
+
+
+def _d7_nominals() -> tuple[PreviewRowSpec, ...]:
+    return (
+        _voice_spec(
+            "shape0-3.57", 3.57, 0.0,
+            "previews/com_zmp_declared.json voice-3.57 nominal, preview_shape 0, 1800 ticks",
+        ),
+        _voice_spec(
+            "shape0-3.60", 3.60, 0.0,
+            "previews/com_zmp_declared.json voice-3.60 nominal, preview_shape 0, 1800 ticks",
+        ),
+        _voice_spec(
+            "shape1-3.60", 3.60, 1.0,
+            "previews/com_zmp_declared.json s1-3.60 nominal, preview_shape 1, 1800 ticks",
+        ),
+        _voice_spec(
+            "slow-6.40", 6.40, 1.0,
+            "previews/com_zmp_declared.json slow-6.40-s1, preview_shape 1, vx 0.040",
+            vx_m_s=0.040,
+        ),
+    )
+
+
+def _assert_gait(tip: str) -> None:
+    gait = Path(lipm_gait.__file__).resolve()
+    op3 = Path(__import__("op3_walk").__file__).resolve()
+    text = op3.read_text(encoding="utf-8")
+    fields = getattr(lipm_gait.LipmConfig, "__dataclass_fields__", {})
+    if tip == "d7b06e7":
+        if "preview_shape" not in fields:
+            raise SystemExit(f"d7b06e7 gait is missing preview_shape ({gait})")
+        if _GAIT_SCRIPTS and not str(gait).startswith(str(Path(_GAIT_SCRIPTS).resolve())):
+            raise SystemExit(f"d7b06e7 loaded {gait}, not {_GAIT_SCRIPTS}")
+    elif tip == "58ce1d8":
+        if "sole_level" in text:
+            raise SystemExit(f"58ce1d8 loaded a sole_level walker from {op3}")
+        if "preview_shape" in fields:
+            raise SystemExit(f"58ce1d8 loaded a preview_shape config from {gait}")
+    elif tip == "ac81435":
+        if "sole_level" not in text:
+            raise SystemExit(f"ac81435 walker has no sole_level ({op3})")
+        if "preview_shape" in fields:
+            raise SystemExit(f"ac81435 loaded preview_shape from {gait}")
+    else:
+        raise SystemExit(f"unknown tip {tip}")
+
+
+def _step_jobs(tip: str) -> list[tuple[PreviewRowSpec, Perturb | None]]:
+    if tip == "58ce1d8":
+        slow = next(spec for spec in PREVIEW_ROWS if spec.name == "slow")
+        return [(slow, None)]
+    if tip == "ac81435":
+        return [(spec, None) for spec in AC81435_ROWS]
+    if tip != "d7b06e7":
+        raise SystemExit(f"unknown tip {tip}")
+    jobs: list[tuple[PreviewRowSpec, Perturb | None]] = [(spec, None) for spec in _d7_nominals()]
+    shape0 = [spec for spec in _d7_nominals() if spec.preview_shape == 0.0]
+    for spec in shape0:
+        jobs.append((spec, Perturb(label="rug", rug=True)))
+        jobs.append((spec, Perturb(label="cycles-5", cycles=5)))
+    voice = [spec for spec in _d7_nominals() if spec.vx_m_s == 0.056]
+    for spec in voice:
+        jobs.append((spec, Perturb(label="mass-0.95", mass_scale=0.95)))
+        jobs.append((spec, Perturb(label="friction-1.2", friction=1.2)))
+        jobs.append((spec, Perturb(label="latency--1", latency_ticks=-1)))
+    return jobs
+
+
+def _tip_sha(tip: str) -> str:
+    if tip == "d7b06e7":
+        return TIP_SHA_D7
+    if tip == "ac81435":
+        return TIP_SHA_AC81435
+    if tip == "58ce1d8":
+        return TIP_SHA
+    raise SystemExit(f"unknown tip {tip}")
+
+
+def run_stepping(tip: str) -> dict[str, object]:
+    _assert_gait(tip)
+    sha = _tip_sha(tip)
+    rows: list[dict[str, object]] = []
+    for spec, perturb in _step_jobs(tip):
+        label = "nominal" if perturb is None else perturb.label
+        print(f"[stepping] {tip} {spec.name} {label}", flush=True)
+        rows.append(run_preview_row(spec, perturb, sha))
+        row = rows[-1]
+        print(
+            f"[stepping] {row['verdict']} plant {row['plant_md5_before']} -> {row['plant_md5']} "
+            f"n {row['n_samples']}",
+            flush=True,
+        )
+    return {
+        "tip": tip,
+        "tip_sha": sha,
+        "gait_file": str(Path(lipm_gait.__file__).resolve()),
+        "plant_md5": _plant_md5(),
+        "soft_pass": SOFT_PASS,
+        "period_definition": (
+            "op3_walk.update_time puts both single-support windows inside one period, "
+            "so period is one left-plus-right cycle. Each foot swings once per period. "
+            "The no-slip per-swing foot travel is vx·T. vx·T/2 is the stance-to-stance spacing."
+        ),
+        "rows": rows,
+    }
+
+
+def _step_get(row: dict[str, object], *path: str) -> object:
+    cur: object = row
+    for key in path:
+        if not isinstance(cur, dict) or key not in cur:
+            return None
+        cur = cur[key]
+    return cur
+
+
+def _num(value: object) -> float | None:
+    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+        return float(value)
+    return None
+
+
+def _cell(value: object, scale: float = 1.0, digits: int = 3, signed: bool = False) -> str:
+    got = _num(value)
+    if got is None:
+        return "—"
+    shown = got * scale
+    if signed:
+        return f"{shown:+.{digits}f}"
+    return f"{shown:.{digits}f}"
+
+
+def _compact_line(row: dict[str, object]) -> str:
+    step = row.get("stepping")
+    if not isinstance(step, dict):
+        step = {}
+    ss = step.get("ss")
+    if not isinstance(ss, dict):
+        ss = {}
+    stop = step.get("stop")
+    if not isinstance(stop, dict):
+        stop = {}
+    label = str(row.get("perturb_label") or "nominal")
+    pose = str(stop.get("pose") or "—")
+    return " | ".join([
+        str(row.get("name")),
+        label,
+        str(row.get("verdict")),
+        _cell(step.get("step_fraction"), digits=3),
+        _cell(step.get("worst_slip_m"), 1000.0, 2),
+        _cell(step.get("min_clear_m"), 1000.0, 2),
+        _cell(step.get("honest_max_clear_m"), 1000.0, 2),
+        _cell(step.get("airborne_min_m"), digits=3),
+        _cell(_step_get(step, "expected", "per_swing_m"), digits=3),
+        _cell(_step_get(step, "expected", "stance_to_stance_m"), digits=3),
+        _cell(step.get("sep_peak_m"), 1000.0, 1),
+        _cell(ss.get("min_contacts"), digits=0),
+        _cell(ss.get("cop_min_m"), 1000.0, 2, signed=True),
+        _cell(ss.get("edge_fraction"), digits=3),
+        _cell(ss.get("tilt_max_rad"), 180.0 / math.pi, 2),
+        pose,
+        _cell(row.get("zmp_min_margin_m"), 1000.0, 2, signed=True),
+        _cell(step.get("actual",) if False else _step_get(step, "actual", "zmp_min_m"), 1000.0, 2, signed=True),
+        _cell(row.get("ask_nm"), digits=3),
+        _cell(step.get("mismatch_fraction"), digits=3),
+        str(row.get("n_samples")),
+    ])
+
+
+def _worst_perturb(rows: list[dict[str, object]]) -> dict[str, object] | None:
+    cells = [
+        row for row in rows
+        if str(row.get("perturb_label") or "") in ("mass-0.95", "friction-1.2", "latency--1")
+    ]
+    if not cells:
+        return None
+
+    def key(row: dict[str, object]) -> tuple[float, float, float, float]:
+        step = row.get("stepping")
+        if not isinstance(step, dict):
+            step = {}
+        fraction = _num(step.get("step_fraction"))
+        slip = _num(step.get("worst_slip_m"))
+        clear = _num(step.get("min_clear_m"))
+        ask = _num(row.get("ask_nm"))
+        return (
+            0.0 if row.get("tipped") else 1.0,
+            1.0 if fraction is None else fraction,
+            0.0 if slip is None else -slip,
+            1.0 if clear is None else clear,
+        )
+
+    return min(cells, key=key)
+
+
+def render_stepping_md(payloads: list[dict[str, object]]) -> str:
+    header = (
+        "| Tip | Row | Cell | Verdict | Step frac | Slip mm | Clear min mm | Clear honest mm | "
+        "Air min m | vx·T m | vx·T/2 m | Sep mm | SS contacts | CoP min mm | Edge <5 mm | "
+        "Tilt deg | Stop | Declared ZMP mm | Actual ZMP mm | Ask Nm | Mismatch | n |"
+    )
+    rule = (
+        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | "
+        "---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |"
+    )
+    lines = [
+        "# Walk stepping bars",
+        "",
+        "Soft-pass is off. A row is CLEAR only when the existing jerk, declared-stance",
+        "ZMP/CoM, and unclamped-torque bars pass and the stepping bars pass.",
+        "Plant file md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` is checked before and after every bout.",
+        "Mass, friction, latency, and the entrance mat are applied on the loaded model.",
+        "The plant file is not written.",
+        "",
+        "## Period",
+        "",
+        "`op3_walk.update_time` places the left single-support window and the right",
+        "single-support window inside one `period`. `gait_manager_traj` uses the same",
+        "split. Period is one left-plus-right cycle, not one step. Each foot swings",
+        "once per period.",
+        "",
+        "A no-slip walk at speed `vx` puts the next plant of that same foot `vx·T`",
+        "further along x. That is the per-swing foot travel, and it is the stride bar",
+        "(±20% on the airborne x change of each swing that starts while the bus is in",
+        "`vel`). `vx·T/2` is the spacing between consecutive opposite footfalls, the",
+        "stance-to-stance step. At 0.056 m/s and 3.60 s that spacing is 0.1008 m.",
+        "The ~0.10 m figure is that stance-to-stance step. It is not the distance one",
+        "swing foot travels.",
+        "",
+        "`kit_bus_step` does not command either distance. `x_amp = min(0.020, vx/7.50)`",
+        "and the swing sine runs about ±`x_amp` in the hip frame, so the commanded",
+        "foot travel is about `2·x_amp` (14.9 mm at 0.056 m/s). The bar stays on `vx·T`.",
+        "",
+        "## Bars",
+        "",
+        "Swing events are runs of ticks where that foot has zero contacts with the",
+        "floor (or the entrance mat, when that geom is ground). The walker's declared",
+        "phase is not the detector. Declared-versus-actual mismatch is reported.",
+        "",
+        "- Step fraction: forward x travelled with zero floor contacts, divided by the",
+        "  forward x of both feet. Bar ≥ 90%.",
+        "- Stance slip: path length of the loaded stance foot while the other foot is",
+        "  airborne. Bar ≤ 2 mm on the worst move-window step.",
+        "- Sole clearance: lowest of the eight contact-box corners (half-length 67.5 mm)",
+        "  over 20–80% of each actual swing. Bar ≥ 8 mm. A miss reports the honest max",
+        "  of those per-step minima.",
+        "- Airborne advance of each move-window swing within ±20% of `vx·T`.",
+        "- Single support, from contact: stance contact count ≥ 3 on every tick.",
+        "- Declared-stance and actual-stance contact CoP and CoM margins ≥ 0, outside",
+        "  fraction 0. Jerk strictly below the kit baseline. Unclamped ask ≤ 2.33 Nm.",
+        "- Final 1 s: both feet have at least 3 contacts on every tick, trunk pitch and",
+        "  roll stay within 5° of the stand median, and `up_z` stays at least 0.90.",
+        "  The pose line says whether that window returns to the stand joints or",
+        "  freezes in a lean.",
+        "",
+        "Fore/aft separation, CoP percentiles, edge dwell, and sole tilt are reported.",
+        "They do not add a second cutoff.",
+        "",
+        header,
+        rule,
+    ]
+    notes: list[str] = []
+    for payload in payloads:
+        tip = str(payload.get("tip"))
+        sha = str(payload.get("tip_sha"))
+        rows = payload.get("rows")
+        if not isinstance(rows, list):
+            continue
+        typed = [row for row in rows if isinstance(row, dict)]
+        for row in typed:
+            lines.append("| " + tip + " | " + _compact_line(row) + " |")
+        worst = _worst_perturb(typed)
+        if worst is not None:
+            notes.append(
+                f"Worst perturbation cell on `{tip}` `{sha}`: "
+                f"`{worst.get('name')}` / `{worst.get('perturb_label')}` "
+                f"is {worst.get('verdict')}."
+            )
+    lines.extend(["", *notes, ""])
+    lines.extend([
+        "58ce1d8 has no vx 0.056 preview row. The slow row is the one that tip published.",
+        "ac81435's Controls scorer marked the 0.056 and slow rows CLEAR. Those CLEARs",
+        "are scored again on these bars. A step fraction under 90% with both feet in",
+        "contact is a skate, including when the older margin and torque numbers were inside.",
+        "",
+    ])
+    return "\n".join(lines) + "\n"
+
+
+def stepping_json_path(tip: str) -> Path:
+    return ROOT / "previews" / f"walk_stepping_{tip}.json"
+
+
 def run_preview_rows() -> list[dict[str, object]]:
     return [run_preview_row(spec) for spec in PREVIEW_ROWS]
+
+
+def _json_ready(value: object) -> object:
+    if isinstance(value, dict):
+        return {str(key): _json_ready(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_ready(item) for item in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, np.generic):
+        return _json_ready(value.item())
+    return value
+
+
+def _write_stepping(tip: str) -> int:
+    payload = run_stepping(tip)
+    path = stepping_json_path(tip)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(_json_ready(payload), indent=2) + "\n", encoding="utf-8")
+    print(f"[stepping] wrote {path}")
+    rows = payload.get("rows")
+    if isinstance(rows, list) and any(isinstance(row, dict) and row.get("verdict") != "CLEAR" for row in rows):
+        return 1
+    return 0
+
+
+def _write_stepping_doc() -> int:
+    payloads: list[dict[str, object]] = []
+    for tip in ("d7b06e7", "ac81435", "58ce1d8"):
+        path = stepping_json_path(tip)
+        if not path.is_file():
+            raise SystemExit(f"missing {path}")
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(loaded, dict):
+            raise SystemExit(f"{path} is not an object")
+        payloads.append(loaded)
+    STEP_MD.parent.mkdir(parents=True, exist_ok=True)
+    STEP_MD.write_text(render_stepping_md(payloads), encoding="utf-8")
+    print(f"[stepping] wrote {STEP_MD}")
+    return 0
 
 
 def main() -> None:
@@ -2529,9 +3181,19 @@ def main() -> None:
     parser.add_argument("--self-test", action="store_true", help="Finite-difference and fail-rule checks")
     parser.add_argument("--rows", action="store_true", help="Score the 58ce1d8 preview rows")
     parser.add_argument("--ac81435", action="store_true", help="Score the ac81435 preview rows and perturbations")
+    parser.add_argument(
+        "--stepping",
+        choices=("d7b06e7", "ac81435", "58ce1d8"),
+        help="Score stepping bars for one tip. Set WALK_GAIT_SCRIPTS to that tip's scripts/.",
+    )
+    parser.add_argument("--stepping-doc", action="store_true", help="Write docs/WALK_STEPPING_BARS.md")
     parser.add_argument("--json", type=Path, default=OUT_JSON)
     parser.add_argument("--md", type=Path, default=OUT_MD)
     args = parser.parse_args()
+    if args.stepping_doc:
+        raise SystemExit(_write_stepping_doc())
+    if args.stepping:
+        raise SystemExit(_write_stepping(args.stepping))
     if args.self_test:
         raise SystemExit(self_test())
     if args.ac81435:
