@@ -35,10 +35,12 @@ ASK_NM = 2.33
 # Tighter voice-speed target. CLEAR stays at ASK_NM. This is the headroom bar.
 HEADROOM_NM = 2.20
 # A step is a foot that leaves the floor, moves forward in the air, and lands.
-# Clearance is the lowest corner of the 135×76 mm contact box, not the
-# box centre and not a toe sphere. Half-length 67.5 mm: 1° of sole pitch
-# drops a toe or heel by about 1.2 mm. The bar is the minimum of that
-# corner over 20–80% of the swing.
+# Clearance is the lowest of the eight corners of the 135×76 mm contact
+# box, in the geom frame. Not the box centre, not a toe sphere, and not
+# the declared phase. Half-length 67.5 mm: 1° of sole pitch drops a toe
+# or heel by about 1.2 mm. The bar is the minimum of that corner over
+# 20–80% of the swing. Airborne is zero floor contacts and every corner
+# above the floor plane.
 STEP_CLEAR_M = 0.008
 STEP_SLIP_M = 0.002
 STEP_FRAC_MIN = 0.90
@@ -634,6 +636,15 @@ def _within(value: float, target: float) -> bool:
     return abs(value - target) <= STEP_LEN_TOL * abs(target)
 
 
+def _airborne(row: dict[str, float | str], side: str) -> bool:
+    """Zero floor contacts and every contact-box corner above z=0.
+
+    The declared phase is not an input. A foot the clock calls swinging
+    stays down when this is false.
+    """
+    return int(row[side + "n"]) == 0 and float(row[side + "z"]) > 0.0
+
+
 def _swing_window_z(iv: list[dict[str, float | str]], side: str) -> tuple[float, float]:
     """Min and max of the lowest sole corner over 20–80% of the swing."""
     t0 = float(iv[0]["t"])
@@ -669,11 +680,13 @@ def _step_honesty(
     and the bar is the stride vx·T. At double support the two feet sit
     at ±vx·T/4 from the pelvis. All three are ±20%.
 
-    Clearance is the lowest of the four bottom corners of the 135×76 mm
+    Clearance is the lowest of the eight corners of the 135×76 mm
     contact box, minimum over 20–80% of the swing. A completed step
     lands, is airborne for more than 10 ticks, and keeps that corner at
-    least 8 mm up through the window. A truncated swing that never lands
-    is not scored. Zero completed steps fails.
+    least 8 mm up through the window. Airborne is zero floor contacts
+    and every corner above the plane. The declared phase is not an
+    input. A truncated swing that never lands is not scored. Zero
+    completed steps fails.
     """
     step_cmd = abs(float(vx)) * float(period_s) / 2.0
     stride_cmd = abs(float(vx)) * float(period_s)
@@ -708,7 +721,7 @@ def _step_honesty(
             air_x1 = 0.0
             for a, b in zip(iv, iv[1:]):
                 d = float(b[side + "x"]) - float(a[side + "x"])
-                airborne = float(b[side + "fn"]) < AIR_N and int(b[side + "n"]) == 0
+                airborne = _airborne(b, side)
                 if airborne:
                     if n_air == 0:
                         air_x0 = float(b[side + "x"])
@@ -742,16 +755,42 @@ def _step_honesty(
             stance_n_min = 99.0
             for r in window:
                 n_win += 1
-                swing_up = float(r[side + "fn"]) < AIR_N and int(r[side + "n"]) == 0
+                swing_up = _airborne(r, side)
                 stance_n = float(r[other + "n"])
                 stance_n_min = min(stance_n_min, stance_n)
                 stance_down = float(r[other + "fn"]) >= LOAD_N and stance_n + 1e-9 >= STANCE_CONTACT_N
                 if not swing_up or not stance_down:
                     n_mis += 1
+            bouts: list[list[dict[str, float | str]]] = []
+            cur_air: list[dict[str, float | str]] = []
+            for r in iv:
+                if _airborne(r, side):
+                    cur_air.append(r)
+                elif cur_air:
+                    bouts.append(cur_air)
+                    cur_air = []
+            if cur_air:
+                bouts.append(cur_air)
+            bout = max(bouts, key=len) if bouts else []
+            t_lift = float(bout[0]["t"]) if bout else float("nan")
+            t_down = float("nan")
+            if bout:
+                after = [r for r in iv if float(r["t"]) > float(bout[-1]["t"]) + 1e-12]
+                touched = [r for r in after if int(r[side + "n"]) > 0 or float(r[side + "fn"]) >= AIR_N]
+                t_down = float(touched[0]["t"]) if touched else float(bout[-1]["t"])
+            air_peak = max((float(r[side + "z"]) for r in bout), default=float("nan"))
+            air_dx = (
+                float(bout[-1][side + "x"]) - float(bout[0][side + "x"])
+                if len(bout) >= 2 else 0.0
+            )
             swings.append({
                 "side": side,
                 "t0": float(iv[0]["t"]),
                 "t1": float(iv[-1]["t"]),
+                "t_lift": t_lift,
+                "t_down": t_down,
+                "air_peak_mm": air_peak * 1000.0 if math.isfinite(air_peak) else float("nan"),
+                "air_dx_mm": air_dx * 1000.0,
                 "done": done,
                 "n_air": float(n_air),
                 "clear_mm": clear_z * 1000.0,
@@ -1513,7 +1552,11 @@ def _print_result(result: dict[str, object]) -> None:
                 f"(peak {float(step['peak_mm']):.2f}) "
                 f"slip {float(step['slip_mm']):.2f} mm "
                 f"frac {float(step['frac']):.3f} "
-                f"n_air {int(step['n_air'])}"
+                f"n_air {int(step['n_air'])} "
+                f"lift {float(step['t_lift']):.3f} "
+                f"down {float(step['t_down']):.3f} "
+                f"air_peak {float(step['air_peak_mm']):.2f} mm "
+                f"air_dx {float(step['air_dx_mm']):+.1f} mm"
             )
     print(
         f"  CoM out {result['com_out']} frac {float(result['com_out_frac']):.3f} "
@@ -1595,13 +1638,62 @@ def _print_result(result: dict[str, object]) -> None:
             print(f"  [{name}] ask {row['ask']}")
 
 
+# Close-up is 0.15 m off the sole, side on. A 45° vertical fov puts an
+# 8 mm gap on about 30 pixels. The wide camera at 1.7 m puts that same
+# gap on about 3 pixels, which is why a review of the wide shot calls
+# an 8 mm lift a slide.
+#
+# Elevation 0 sits the camera in the sole plane, so the sole and the
+# horizon are the same row and the gap has no pixels. A slight look
+# down keeps the camera low (about 6 cm) and opens the gap. The plant's
+# default stereo separation is 68 mm. At 0.15 m that offset walks the
+# foot out of the frame, so the render draws with ipd 0. Both are
+# visual. Neither touches mjData.
+FOOT_CAM_M = 0.15
+FOOT_CAM_ELEV_DEG = -18.0
+# Look just above the contact-box centre so the sole and the floor are
+# both in the 480-row frame. The box centre alone, at this distance,
+# clips the ankle off the top.
+FOOT_CAM_LOOK_ABOVE_M = 0.010
+
+
+def _foot_readout(session: sw.SteerSession) -> tuple[list[str], np.ndarray]:
+    """Clearance, contact count, and normal from this mjData. No mj_forward."""
+    lipm = session.lipm
+    if lipm is None:
+        raise SystemExit("walker did not build")
+    lines = [f"t {float(session.data.time):5.2f}s"]
+    look = np.zeros(3, dtype=np.float64)
+    best = -1.0
+    for side, name in (("L", "L"), ("R", "R")):
+        gid = int(lipm.gid[side])
+        clear = lipm_gait.sole_clearance(session.model, session.data, lipm.bid[side], gid)
+        n_con = _n_ground(session, side)
+        fn = float(lipm.foot_normal(side))
+        lines.append(f"{name} {clear * 1000.0:7.2f} mm  n {n_con:d}  {fn:5.1f} N")
+        if clear >= best:
+            best = clear
+            pos = np.asarray(session.data.geom_xpos[gid], dtype=np.float64)
+            look[:] = (
+                float(pos[0]),
+                float(pos[1]),
+                float(pos[2]) + FOOT_CAM_LOOK_ABOVE_M,
+            )
+    return lines, look
+
+
 def render_side_front(
     out_mp4: Path,
     stand_s: float = 3.0,
     walk_s: float = 11.0,
     stop_s: float = 6.0,
 ) -> None:
-    """Side and front of the voice bout. 30 fps. No second mj_forward."""
+    """Side, front, and a sole-height close-up of the voice bout.
+
+    30 fps. Each frame is the mjData just stepped, the same objects the
+    scorer reads. The render does not call mj_forward and does not
+    interpolate a pose.
+    """
     import tempfile
 
     import imageio.v2 as imageio
@@ -1629,31 +1721,7 @@ def render_side_front(
     out_mp4.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="voice_frames_") as tmp:
         folder = Path(tmp)
-        n = 0
-        while float(session.data.time) < t_end - 1e-12:
-            now = float(session.data.time)
-            driver.publish(session.bus, now)
-            session.step()
-            if session.lipm.op3.y_swap_cmd != 0.0:
-                raise SystemExit("y_swap_cmd changed")
-            if now + 1e-9 < next_frame:
-                continue
-            if session.lipm is not None:
-                session.foot_trace.append((
-                    np.array(session.data.geom_xpos[int(session.lipm.gid["L"])], dtype=np.float64).copy(),
-                    np.array(session.data.geom_xpos[int(session.lipm.gid["R"])], dtype=np.float64).copy(),
-                ))
-            session.cam.distance = 1.70
-            session.cam.elevation = -8.0
-            session.cam.azimuth = 90.0
-            side = session.render([f"side  t {now:5.2f}s"])
-            session.cam.azimuth = 0.0
-            front = session.render([
-                f"front  t {now:5.2f}s  vx {session.bus.applied_vx:+.3f}",
-            ])
-            imageio.imwrite(folder / f"frame_{n:05d}.png", np.concatenate([side, front], axis=1))
-            n += 1
-            next_frame += frame_dt
+        n = _write_frames(session, driver, t_end, folder, next_frame, frame_dt, imageio)
         if n < 2:
             raise SystemExit("render produced no frames")
         wg._encode_mp4_ffmpeg(folder, out_mp4, fps=30)
@@ -1661,6 +1729,61 @@ def render_side_front(
         f"  wrote {out_mp4}  frames {n}  video {n / 30.0:.2f} s  "
         f"sim {t_end:.2f} s  fault {session.bus.fault_reason or 'none'}"
     )
+
+
+def _write_frames(session, driver, t_end, folder, next_frame, frame_dt, imageio) -> int:
+    # Visual only. Restored before return. mj_step is the only physics call.
+    vis = session.model.vis
+    saved_ipd = float(vis.global_.ipd)
+    saved_znear = float(vis.map.znear)
+    vis.global_.ipd = 0.0
+    vis.map.znear = 0.0002
+    n = 0
+    try:
+        n = _write_frames_body(session, driver, t_end, folder, next_frame, frame_dt, imageio)
+    finally:
+        vis.global_.ipd = saved_ipd
+        vis.map.znear = saved_znear
+    return n
+
+
+def _write_frames_body(session, driver, t_end, folder, next_frame, frame_dt, imageio) -> int:
+    n = 0
+    while float(session.data.time) < t_end - 1e-12:
+        now = float(session.data.time)
+        driver.publish(session.bus, now)
+        session.step()
+        if session.lipm is None or session.lipm.op3 is None:
+            raise SystemExit("walker dropped")
+        if session.lipm.op3.y_swap_cmd != 0.0:
+            raise SystemExit("y_swap_cmd changed")
+        if now + 1e-9 < next_frame:
+            continue
+        session.foot_trace.append((
+            np.array(session.data.geom_xpos[int(session.lipm.gid["L"])], dtype=np.float64).copy(),
+            np.array(session.data.geom_xpos[int(session.lipm.gid["R"])], dtype=np.float64).copy(),
+        ))
+        q_before = np.array(session.data.qpos, dtype=np.float64).copy()
+        t_before = float(session.data.time)
+        lines, look = _foot_readout(session)
+        side = session.render(
+            ["side  " + lines[0], lines[1], lines[2]],
+            distance=1.70, azimuth=90.0, elevation=-8.0,
+        )
+        front = session.render(
+            [f"front  {lines[0]}  vx {session.bus.applied_vx:+.3f}", lines[1], lines[2]],
+            distance=1.70, azimuth=0.0, elevation=-8.0,
+        )
+        close = session.render(
+            ["sole  " + lines[0], lines[1], lines[2]],
+            lookat=look, distance=FOOT_CAM_M, azimuth=90.0, elevation=FOOT_CAM_ELEV_DEG,
+        )
+        if float(session.data.time) != t_before or not np.allclose(session.data.qpos, q_before):
+            raise SystemExit("render changed mjData")
+        imageio.imwrite(folder / f"frame_{n:05d}.png", np.concatenate([side, front, close], axis=1))
+        n += 1
+        next_frame += frame_dt
+    return n
 
 
 def main() -> None:

@@ -2009,21 +2009,35 @@ class LipmWalker:
         return score_lipm(self)
 
 
-def sole_clearance(model: mj.MjModel, data: mj.MjData, bid: int, gid: int) -> float:
-    """Lowest sole corner above the floor plane z=0."""
-    pos = np.asarray(model.geom_pos[gid], dtype=np.float64)
+def sole_corners(model: mj.MjModel, data: mj.MjData, gid: int) -> np.ndarray:
+    """Eight corners of the contact box, in the geom frame the collision uses.
+
+    World z is measured from the floor plane at 0. ``bid`` is not used:
+    a body-frame bottom face misses a geom whose quat is not the body's.
+    """
     half = np.asarray(model.geom_size[gid], dtype=np.float64)
-    rot = data.xmat[bid].reshape(3, 3)
-    origin = np.asarray(data.xpos[bid], dtype=np.float64)
-    zs: list[float] = []
+    pos = np.asarray(data.geom_xpos[gid], dtype=np.float64)
+    rot = np.asarray(data.geom_xmat[gid], dtype=np.float64).reshape(3, 3)
+    pts: list[np.ndarray] = []
     for sx in (-1.0, 1.0):
         for sy in (-1.0, 1.0):
-            local = np.array(
-                [pos[0] + sx * half[0], pos[1] + sy * half[1], pos[2] - half[2]],
-                dtype=np.float64,
-            )
-            zs.append(float((origin + rot @ local)[2]))
-    return min(zs)
+            for sz in (-1.0, 1.0):
+                local = np.array(
+                    [sx * half[0], sy * half[1], sz * half[2]],
+                    dtype=np.float64,
+                )
+                pts.append(pos + rot @ local)
+    return np.stack(pts, axis=0)
+
+
+def sole_clearance(model: mj.MjModel, data: mj.MjData, bid: int, gid: int) -> float:
+    """Lowest of the eight contact-box corners above the floor plane z=0.
+
+    ``bid`` stays in the signature so older callers compile. The corners
+    come from ``geom_xpos`` and ``geom_xmat`` on this ``data``.
+    """
+    del bid
+    return float(np.min(sole_corners(model, data, gid)[:, 2]))
 
 
 def kit_bus_step(vx: float, yaw_rate: float, period_s: float) -> tuple[float, float]:

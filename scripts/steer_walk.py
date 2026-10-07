@@ -1507,10 +1507,28 @@ class SteerSession:
         w, x, y, z = (float(v) for v in self.data.qpos[3:7])
         return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
-    def render(self, lines: list[str]) -> np.ndarray:
+    def render(
+        self,
+        lines: list[str],
+        *,
+        lookat: np.ndarray | None = None,
+        distance: float | None = None,
+        azimuth: float | None = None,
+        elevation: float | None = None,
+    ) -> np.ndarray:
+        """Pixels of the current mjData. Does not step and does not mj_forward."""
         if self.renderer is None:
             raise RuntimeError("renderer not created")
-        self.cam.lookat[:] = self.data.xpos[self.bid_body]
+        if lookat is None:
+            self.cam.lookat[:] = self.data.xpos[self.bid_body]
+        else:
+            self.cam.lookat[:] = np.asarray(lookat, dtype=np.float64)
+        if distance is not None:
+            self.cam.distance = float(distance)
+        if azimuth is not None:
+            self.cam.azimuth = float(azimuth)
+        if elevation is not None:
+            self.cam.elevation = float(elevation)
         # mj_step already forwarded. A second mj_forward here changes the
         # contact warm-start and tips this gait before the stop.
         self.renderer.update_scene(self.data, self.cam)

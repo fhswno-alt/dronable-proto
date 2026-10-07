@@ -9,6 +9,7 @@ __pycache__/
 *.mp4
 !docs/previews/assembly/assembly.mp4
 !docs/media/voice_vx_056_side_front.mp4
+!docs/media/voice_d6e8b5e_feet.mp4
 *.webm
 !previews/steer_walk_day1.mp4
 !previews/steer_walk_forward.mp4
