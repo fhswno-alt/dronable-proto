@@ -2313,3 +2313,99 @@ Scored stand 0.40 s, walk 22.00 s, stop 8.00 s, 3801 ticks, plant md5 `207f3d5e9
 Unclamped ask 2.2567 Nm, right hip roll, t 2.832 s, stage walk, q −0.11738 rad, q_des −0.08599 rad, kp 40, kv 1.703, omega +0.588 rad/s. Headroom to 2.33 Nm is +0.0733 Nm. It is 0.0567 Nm over the old 2.20 Nm headroom. The start ask is right hip roll 2.113 Nm at 2.784 s. The stop ask is right ankle pitch 1.503 Nm at 24.448 s. hard_cap 0. ik_fail 0. fault none. Declared-box CoM minimum +15.11 mm, single-support +19.64 mm and +19.28 mm, outside 0. Contact CoP whole-bout minimum +0.002 mm, p5 +6.36 mm, single-support p5 +8.82 mm, single-support minimum +6.34 mm. min up_z 0.949. Joint jerk peaks at 617 rad/s³ on the right ankle pitch, rms 24.4, against the #102 baseline 39843 / 4111. CoM jerk peaks at 88.9 m/s³, rms 3.00, against 1049 / 132. The support-hull CoM prints −10.38 mm at 23.736 s, when the right foot is at 4.98 N and the hull collapses onto the left foot. That is not the declared-box gate. The declared margin on that bout stays +15.11 mm and the outside count stays 0. Crouch minimum is 150.0 mm. On the ask tick it is 165.3 mm. Reach at ±50 mm on the 186.0 mm chain is 179.1 mm. Not kit-safe. Not go-anywhere.
 
 The clip `docs/media/voice_vx_056_side_front.mp4` was rendered on this gait from the same live session, with a cyan trace on the left foot and an orange trace on the right. Stand 2.00 s, vel(0.056, 0) for 22.00 s, stop 6.00 s, side and front, 30 fps, 901 frames, 30.03 s, fault none. The overlay speed is the bus command. The body speed of the step is 0.0042 m/s.
+
+## Kit cadence, kinematic step
+
+The voice step is `x_amp = vx·T/4`. `kit_bus_step` still returns `|vx|/7.50` and ignores the period. The voice path does not use that cap. `gait_for_command` for `vel(vx ≤ 0.056, yaw)` is now period 0.50 s, dsp 0.25, swing sole 8 mm, ZMP reference 43 mm, crouch 25 mm, arm 1.00 s. At the bus speed the amplitude is 7.0 mm. y_swap stays 0. Soft-pass is off. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` is unchanged. There is no ±2.33 solve.
+
+The sway is the cart-table orbit, not the 43 mm box centre as a CoM target. `sway_zmp_amp` picks the ZMP amplitude whose steady CoM peak is 16 mm, and it stops at the box centre when the orbit cannot get there. At T 0.50 s a 43.00 mm reference peaks at 10.83 mm of CoM. At T 0.60 s the same cap is 42.94 mm and the orbit just reaches 16.00 mm. Longer cycles need less reference: 28.31 mm at 0.80 s, 22.85 mm at 1.00 s, 20.23 mm at 1.20 s, 17.93 mm at 1.60 s, 16.98 mm at 2.00 s.
+
+The swing rise is a raised cosine that starts in the double support before the swing and holds the sine peak from the start of single support through 90%. The score window is still 20–80% of the swing. A completed step needs more than 10 airborne ticks and a lowest corner at or above 8 mm through that window. `n_steps` is that count. The fraction below is the airborne share of forward travel on landed swings, including swings that never clear 8 mm. A dash is a period with no landed swing long enough to score. Phase 1.000 with stance-contact 0 is that empty window.
+
+Stand 0.25 s, arm 1.00 s, walk `1.00 + 2.05·T`, stop 2.40 s. Forty-two cells. Zero pass. Zero completed steps. The lowest unclamped ask on the 8 mm sole is 7.61 Nm.
+
+| T s | vx | x_amp mm | Ask Nm | Joint | Clear mm | Peak mm | Frac | Slip mm | Phase | Stance n | CoM mm | CoP p5 | Result |
+| ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 0.50 | 0.016 | 2.00 | 9.13 | l_knee | — | — | — | — | 1.000 | 0 | 0.1 | 0.0 | FAIL |
+| 0.50 | 0.024 | 3.00 | 8.57 | l_knee | — | — | — | — | 1.000 | 0 | 0.1 | 0.0 | FAIL |
+| 0.50 | 0.032 | 4.00 | 8.60 | l_knee | -0.07 | 1.52 | 0.908 | 0.17 | 0.429 | 4 | 0.1 | 0.0 | FAIL |
+| 0.50 | 0.040 | 5.00 | 8.62 | l_knee | -0.02 | 1.64 | 0.786 | 0.16 | 0.357 | 4 | 0.1 | 0.0 | FAIL |
+| 0.50 | 0.048 | 6.00 | 8.37 | l_knee | -0.01 | 1.56 | 0.751 | 0.14 | 0.286 | 4 | 0.1 | 0.0 | FAIL |
+| 0.50 | 0.056 | 7.00 | 8.40 | l_knee | -0.04 | 1.69 | 0.680 | 0.11 | 0.357 | 4 | 0.2 | 0.0 | FAIL |
+| 0.60 | 0.016 | 2.40 | 7.61 | r_knee | -0.27 | 1.19 | 0.845 | 0.11 | 0.588 | 4 | -0.1 | 0.0 | FAIL |
+| 0.60 | 0.024 | 3.60 | 7.71 | r_knee | -0.19 | 1.33 | 0.825 | 0.09 | 0.529 | 4 | -0.1 | 0.0 | FAIL |
+| 0.60 | 0.032 | 4.80 | 7.81 | r_knee | -0.09 | 1.19 | 0.675 | 0.08 | 0.471 | 4 | -0.1 | 0.0 | FAIL |
+| 0.60 | 0.040 | 6.00 | 7.89 | r_knee | -0.22 | 1.14 | 0.543 | 0.09 | 0.529 | 4 | -0.0 | 0.0 | FAIL |
+| 0.60 | 0.048 | 7.20 | 8.03 | l_knee | -0.22 | 1.11 | 0.555 | 0.09 | 0.529 | 4 | 0.1 | 0.0 | FAIL |
+| 0.60 | 0.056 | 8.40 | 8.16 | l_knee | -0.33 | 1.15 | 0.393 | 0.11 | 0.588 | 4 | 0.3 | 0.0 | FAIL |
+| 0.80 | 0.016 | 3.20 | 8.55 | l_knee | -0.53 | -0.22 | 0.000 | 0.46 | 1.000 | 3 | -5.4 | 0.0 | FAIL |
+| 0.80 | 0.024 | 4.80 | 11.26 | r_knee | -0.53 | -0.10 | 0.000 | 0.56 | 1.000 | 3 | -5.1 | -0.3 | FAIL |
+| 0.80 | 0.032 | 6.40 | 11.64 | r_knee | -0.54 | 0.02 | 0.120 | 0.65 | 0.952 | 3 | -4.8 | 0.0 | FAIL |
+| 0.80 | 0.040 | 8.00 | 12.07 | r_knee | -0.67 | 1.31 | 0.201 | 0.72 | 0.690 | 3 | -4.5 | -2.2 | FAIL |
+| 0.80 | 0.048 | 9.60 | 12.57 | r_knee | -0.63 | 1.10 | 0.142 | 0.78 | 0.667 | 3 | -4.2 | -1.8 | FAIL |
+| 0.80 | 0.056 | 11.20 | 12.97 | r_knee | -0.53 | 1.43 | 0.142 | 0.81 | 0.595 | 3 | -3.9 | 0.0 | FAIL |
+| 1.00 | 0.016 | 4.00 | 11.57 | r_knee | -1.48 | 0.45 | 0.000 | 0.59 | 0.944 | 2 | -6.9 | -9.6 | FAIL |
+| 1.00 | 0.024 | 6.00 | 11.68 | r_knee | -1.34 | 9.65 | 0.093 | 1.99 | 0.815 | 2 | -7.7 | -10.1 | FAIL |
+| 1.00 | 0.032 | 8.00 | 12.19 | r_knee | -1.25 | 8.05 | 0.094 | 1.56 | 0.778 | 2 | -9.3 | -16.6 | FAIL |
+| 1.00 | 0.040 | 10.00 | 14.00 | r_knee | -0.74 | 6.83 | 0.084 | 1.18 | 0.611 | 2 | -10.1 | -6.6 | FAIL |
+| 1.00 | 0.048 | 12.00 | 11.77 | r_knee | -1.38 | 7.41 | 0.000 | 2.17 | 0.585 | 2 | -10.1 | -7.3 | FAIL |
+| 1.00 | 0.056 | 14.00 | 12.63 | r_knee | -0.75 | 7.42 | 0.155 | 1.49 | 0.556 | 2 | -10.4 | -7.5 | FAIL |
+| 1.20 | 0.016 | 4.80 | 10.79 | r_knee | -1.91 | 13.14 | 0.000 | 2.32 | 0.892 | 2 | -21.4 | -16.1 | FAIL |
+| 1.20 | 0.024 | 7.20 | 11.48 | r_knee | -1.81 | 10.74 | 0.075 | 1.85 | 0.794 | 2 | -20.6 | -23.3 | FAIL |
+| 1.20 | 0.032 | 9.60 | 14.00 | r_knee | -1.48 | 13.02 | 0.000 | 2.88 | 0.797 | 2 | -21.2 | -19.6 | FAIL |
+| 1.20 | 0.040 | 12.00 | 11.86 | r_knee | -1.45 | 11.81 | 0.264 | 2.87 | 0.676 | 2 | -20.2 | -16.1 | FAIL |
+| 1.20 | 0.048 | 14.40 | 11.36 | r_knee | -1.56 | 10.31 | 0.214 | 2.78 | 0.667 | 2 | -19.0 | -11.4 | FAIL |
+| 1.20 | 0.056 | 16.80 | 9.93 | r_knee | -1.64 | 9.21 | 0.231 | 2.02 | 0.833 | 2 | -19.9 | -22.9 | FAIL |
+| 1.60 | 0.016 | 6.40 | 8.83 | l_knee | -2.67 | 13.35 | 0.082 | 5.11 | 0.874 | 0 | -24.9 | -58.1 | FAIL |
+| 1.60 | 0.024 | 9.60 | 9.00 | l_knee | -2.36 | 11.72 | 0.056 | 5.45 | 0.889 | 2 | -25.0 | -46.7 | FAIL |
+| 1.60 | 0.032 | 12.80 | 9.27 | l_knee | -2.39 | 10.27 | 0.218 | 4.13 | 0.837 | 2 | -25.5 | -47.7 | FAIL |
+| 1.60 | 0.040 | 16.00 | 9.58 | l_knee | -1.96 | 7.85 | 0.140 | 3.48 | 0.837 | 2 | -24.8 | -40.0 | FAIL |
+| 1.60 | 0.048 | 19.20 | 9.91 | r_knee | -1.67 | 6.84 | 0.171 | 4.73 | 0.830 | 2 | -26.7 | -34.0 | FAIL |
+| 1.60 | 0.056 | 22.40 | 10.18 | l_knee | -1.70 | 8.88 | 0.194 | 5.19 | 0.815 | 2 | -28.7 | -31.8 | FAIL |
+| 2.00 | 0.016 | 8.00 | 10.46 | r_knee | -2.75 | 13.29 | 0.761 | 8.01 | 0.855 | 0 | -24.6 | -67.3 | FAIL |
+| 2.00 | 0.024 | 12.00 | 9.78 | r_knee | -2.55 | 11.39 | 0.531 | 7.31 | 0.806 | 0 | -24.2 | -49.5 | FAIL |
+| 2.00 | 0.032 | 16.00 | 8.41 | l_knee | -2.28 | 10.59 | 0.130 | 6.12 | 0.909 | 1 | -30.6 | -43.4 | FAIL |
+| 2.00 | 0.040 | 20.00 | 8.83 | r_knee | -2.09 | 10.10 | 0.164 | 6.73 | 0.866 | 1 | -25.3 | -40.8 | FAIL |
+| 2.00 | 0.048 | 24.00 | 10.04 | r_knee | -1.96 | 10.61 | 0.165 | 7.24 | 0.911 | 1 | -26.5 | -37.6 | FAIL |
+| 2.00 | 0.056 | 28.00 | 10.84 | r_knee | -1.87 | 9.36 | 0.221 | 10.81 | 0.896 | 1 | -27.3 | -36.3 | FAIL |
+
+The design point is T 0.50 s, vx 0.056 m/s, x_amp 7.00 mm. Unclamped ask 8.4046 Nm, left knee, t 2.312 s, stage stop, q +1.08404 rad, q_des +0.98456 rad, kp 45, kv 1.4573, omega −2.6954 rad/s. The velocity term is 3.93 Nm and the 0.099 rad position error is 4.48 Nm. Lowest corner over 20–80% is −0.04 mm, peak 1.69 mm. Airborne share 0.680. Stance slip 0.11 mm. Phase mismatch 0.357. Stance contacts in the window stay at 4. Placement +5.7 mm against 14.0 mm. Airborne advance +10.0 mm against 28.0 mm. One landed swing, `n_steps` 0. Declared CoM minimum +0.23 mm, outside count 0. The support-hull print is −17.49 mm at 2.488 s, stop, right foot 4.90 N, and that hull is not the declared gate. Contact CoP minimum −9.70 mm, 6 ticks outside, whole-bout p5 +0.01 mm, single-support p5 −6.03 mm, single-support minimum −9.70 mm. The +5 mm CoP bar misses. Joint jerk is left knee 19339 / 1412 rad/s³, under the #102 baseline 39843 / 4111. CoM jerk is 349.4 / 35.0 m/s³, under 1048.991 / 132.473. Stop is flat: corner spread 0.97 mm, sole pitch 0.36°, min up_z 0.958. hard_cap 0. ik_fail 0. fault none.
+
+The cell with airborne share at or above 0.90 is T 0.50 s, vx 0.032 m/s, x_amp 4.00 mm. Fraction 0.908. Lowest corner −0.07 mm, peak 1.52 mm, `n_steps` 0. Ask 8.5966 Nm, left knee, t 2.320 s, stop, omega −2.7254 rad/s. CoP p5 0.0 mm. Phase mismatch 0.429. It is the same miss as the design point, on a shorter step.
+
+Commanding a taller sole does not buy the 8 mm corner. On the design point, sole command 3 mm asks 5.9463 Nm on the left hip roll (q −0.01562, q_des −0.10834, omega −1.3141) and the corner peaks at +0.61 mm with airborne share 0. Command 4 mm asks 6.2874 Nm on that hip roll, peak 0.00 mm, fraction 0.050. Command 6 mm asks 6.6962 Nm on the hip roll, peak +0.54 mm, fraction 0.295, window −0.31 mm. Command 10 mm asks 11.6861 Nm on the left knee, peak +2.90 mm, window −0.01 mm, fraction 0.931, declared CoM −0.2 mm. The highest lowest-corner in that slice is still under the floor through 20–80%. The 8 mm bar is not met at any sole command that was run, and every one of them asks more than 2.33 Nm.
+
+A shallower crouch raises the ask. On the design point, crouch 8 mm asks 23.7770 Nm on the left knee, omega −7.5324 rad/s, and no swing is scored. Crouch 12 mm asks 14.7140 Nm, fraction 0.802, window −0.28 mm. Crouch 18 mm asks 10.4878 Nm, fraction 0.708, window −0.08 mm. Crouch 25 mm is the 8.4046 Nm row above. The knee rate during the lift is the term that grows as the leg straightens.
+
+Double support from 0.10 to 0.30, same design point, stays on the knee:
+
+| dsp | Ask Nm | Joint | Clear mm | Frac | CoM mm |
+| ---: | ---: | --- | ---: | ---: | ---: |
+| 0.10 | 9.07 | l_knee | −0.24 | 0.730 | −2.7 |
+| 0.15 | 8.68 | r_knee | −0.05 | 0.647 | −1.6 |
+| 0.20 | 8.59 | r_knee | −0.17 | 0.667 | −0.7 |
+| 0.25 | 8.40 | l_knee | −0.04 | 0.680 | +0.2 |
+| 0.30 | 8.53 | l_knee | −0.06 | 0.697 | +1.0 |
+
+0.25 is the lowest ask in that slice. Declared CoM is negative at dsp 0.20 and below.
+
+There is no passing row to perturb. The spot-check is the design point, and the same five cells on the 0.032 m/s row. Mass ±5%, sliding friction 1.2, latency ±1 tick. The plant file is not written.
+
+| Row | Cell | Ask Nm | Joint | Clear mm | Frac | CoM mm |
+| --- | --- | ---: | --- | ---: | ---: | ---: |
+| 0.056 | nominal | 8.40 | l_knee | −0.04 | 0.680 | +0.2 |
+| 0.056 | mass −5% | 8.41 | l_knee | −0.04 | 0.743 | +0.3 |
+| 0.056 | mass +5% | 8.61 | l_knee | −0.18 | 0.621 | +0.2 |
+| 0.056 | friction 1.2 | 8.14 | r_knee | −0.01 | 0.798 | +1.4 |
+| 0.056 | latency +1 | 9.71 | l_knee | −0.06 | 0.723 | +1.4 |
+| 0.056 | latency −1 | 9.12 | l_knee | −0.02 | 0.704 | −0.9 |
+| 0.032 | nominal | 8.60 | l_knee | −0.07 | 0.908 | +0.1 |
+| 0.032 | mass −5% | 8.39 | l_knee | — | — | +0.2 |
+| 0.032 | mass +5% | 8.84 | l_knee | −0.25 | 0.736 | +0.0 |
+| 0.032 | friction 1.2 | 7.97 | l_knee | — | — | +1.2 |
+| 0.032 | latency +1 | 9.69 | l_knee | −0.14 | 0.893 | +1.2 |
+| 0.032 | latency −1 | 9.59 | l_knee | — | — | −0.9 |
+
+Every perturbed cell fails the ask, the CoP p5 bar, and the step. Friction 1.2 on the design point is the lowest of those asks, 8.1375 Nm, and the window corner is −0.01 mm.
+
+The clip `docs/media/voice_vx_056_side_front.mp4` is this design point, from the same live session, cyan on the left foot and orange on the right. Stand 1.00 s, vel(0.056, 0) for 4.00 s, stop 2.50 s, side and front, 30 fps, 225 frames, 7.50 s, fault none. The file previously held the 20 s / 21 mm render described above. The overlay speed is the bus command. The body stays near the spawn. The stop is upright with both soles down. Not kit-safe. Not go-anywhere.
