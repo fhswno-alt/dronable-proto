@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -3174,7 +3175,19 @@ def render_stepping_md(payloads: list[dict[str, object]]) -> str:
         "one tick early on the bus phrase. It does not create a step.",
         "",
     ])
-    return "\n".join(lines) + "\n"
+    text = "\n".join(lines) + "\n"
+    retro_path = Path(__file__).resolve().parent / "score_retro_voice.py"
+    if retro_path.is_file():
+        spec = importlib.util.spec_from_file_location("score_retro_voice_doc", retro_path)
+        if spec is not None and spec.loader is not None:
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            section = mod.retro_markdown()
+            if section:
+                text = text.rstrip() + "\n\n" + section
+                if not text.endswith("\n"):
+                    text += "\n"
+    return text
 
 
 def stepping_json_path(tip: str) -> Path:
