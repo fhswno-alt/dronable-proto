@@ -60,6 +60,12 @@ _STOP_APPROACH_Z_RATE = 1.55
 # loaded transition only. It is not the continuous-walk seed and it does
 # not read the walk ladder.
 _STOP_ENTRANCE_S = 1.0
+# Loaded left ankle on the stop bout, from the steady mark until the
+# stop command. A step that would put the ask over 2.33 Nm is not
+# taken; the command stays on the nearer side of the live joint.
+# Under-limit steps are unchanged. Not a swing stretch. The walk
+# ladder is not read.
+_STOP_STEADY_ANK_END = 8.20
 # Loaded-leg stance rates on the continuous walk. Ankle pitch stays at
 # the 1.90 rad/s rate that already cleared it. The knee is slower on
 # its own when that rate still leaves mid-SS over 2.33 Nm. Hip pitch
@@ -73,6 +79,15 @@ _WALK_HIP_PITCH_RATE = 1.90
 _WALK_EARLY_KNEE_RATE = 1.55
 _WALK_EARLY_FRAC = 0.13
 _WALK_EARLY_LOG_FRAC = 0.115
+# Stop-bout early-knee pull ends at the stop command. The descent stays
+# on the 1.90 rad/s slew.
+_STOP_KNEE_LOCAL_END = 8.20
+# Loaded ankle pull covers the pre-steady tick and the steady reopen.
+# Later stance ankles stay on the slew that already cleared them.
+_STOP_ANK_LOCAL_END = 2.60
+# Continuous loaded ankle, after the stand-to-walk catch. The 2 s
+# gate stays the steady clear.
+_WALK_ANK_PRE_S = 1.05
 # Locked 1.55 copy, no hip slew, CoM tick 2.200 s: stance corner −2.564 mm.
 # A mid-stance tick more than 1 mm past that is a new dig.
 _STANCE_DIG_M = -0.003564
@@ -5498,14 +5513,12 @@ def _install_inflight_stop(
         if state.get("land_freeze_tick") and t > float(state.get("land_t", -1.0)) + 1e-6:
             session._land_freeze = False  # type: ignore[attr-defined]
             state["land_freeze_tick"] = False
-        # The catch is the first landing double support only. The next
-        # swing stays on the approach slew.
-        if (
-            state.get("land_seen")
-            and getattr(session, "_land_armed", False)
-            and float(walker.time) > float(walker.r_ssp_start) + 1e-9
-        ):
-            session._land_armed = False  # type: ignore[attr-defined]
+        # Knee and hip pitch clear at the end of this double support.
+        # The latch clears once. Time wraps after that. Ankle pitch is
+        # not this catch.
+        if state.get("land_seen") and getattr(session, "_land_knee_on", False):
+            if float(walker.time) > float(walker.r_ssp_start) + 1e-9:
+                session._land_knee_on = False  # type: ignore[attr-defined]
         if (
             label != "stop"
             and walking
@@ -5533,16 +5546,18 @@ def _install_inflight_stop(
                     float(sy0),
                 )
                 session._land_freeze = True  # type: ignore[attr-defined]
-                session._land_armed = True  # type: ignore[attr-defined]
+                session._land_knee_on = True  # type: ignore[attr-defined]
                 state["land_seen"] = True
                 state["land_freeze_tick"] = True
                 state["land_t"] = t
                 print(
                     "PRED stop_land freeze planar+attitude at the last swing "
                     f"pose t {t:.3f}. The landing tick holds the live joint. "
-                    "Loaded hip pitch, knee, and ankle pitch on the landing "
-                    "leg then step at the stop-bout stance rate. "
-                    "z stays live. This is not a swing stretch."
+                    "The landing knee and hip pitch stay within one step of "
+                    "the live joint through this double support. Ankle "
+                    "pitch stays on its slew. Hip pitch then continues on "
+                    "the engage catch from that command. z stays live. "
+                    "This is not a swing stretch."
                 )
         if label != "stop" and walking and not state.get("entrance_seen"):
             er0, el0, pr0, pl0, sy0 = orig_endpoints()
@@ -12037,6 +12052,34 @@ def _install_sagittal_slew(
             return False
         return frac <= _WALK_EARLY_FRAC + 1e-9
 
+    def _stop_knee_local(jn: str) -> bool:
+        """Loaded early stance on the stop bout, through the stop command.
+
+        The over sits in the first quarter of that stance and in the
+        double support that enters it. The write is pulled onto 2.33 Nm.
+        The slew memory stays on the 1.90 rad/s path. The descent after
+        the stop command stays on that slew.
+        """
+        if not jn.endswith("knee"):
+            return False
+        if float(lipm.data.time) > _STOP_KNEE_LOCAL_END + 1e-9:
+            return False
+        t_cmd = _cmd_time(walker)
+        l0 = float(walker.l_ssp_start)
+        l1 = float(walker.l_ssp_end)
+        r0 = float(walker.r_ssp_start)
+        r1 = float(walker.r_ssp_end)
+        if jn.startswith("r_") and l0 < t_cmd <= l1:
+            span = l1 - l0
+            frac = 0.0 if span <= 1e-9 else (t_cmd - l0) / span
+            return frac <= 0.25 + 1e-9
+        if jn.startswith("l_") and r0 < t_cmd <= r1:
+            span = r1 - r0
+            frac = 0.0 if span <= 1e-9 else (t_cmd - r0) / span
+            return frac <= 0.25 + 1e-9
+        in_ssp = (l0 < t_cmd <= l1) or (r0 < t_cmd <= r1)
+        return not in_ssp
+
     def _hold_inside(jn: str, proposed: float) -> tuple[float, float, float, int]:
         """Pull q_des onto |kp*err| + |kv*omega| <= 2.33. Direction stays put."""
         q = float(lipm.q(jn))
@@ -12237,11 +12280,89 @@ def _install_sagittal_slew(
     entrance_cmd: dict[str, float] = {}
     entrance_at: dict[str, float] = {}
     entrance_done: set[str] = set()
+    hip_hold_cmd: dict[str, float] = {}
+    hip_hold_at: dict[str, float] = {}
+    hip_written: dict[str, float] = {}
     land_cmd: dict[str, float] = {}
     land_at: dict[str, float] = {}
     land_done: set[str] = set()
     session._land_freeze = False  # type: ignore[attr-defined]
-    session._land_armed = False  # type: ignore[attr-defined]
+    session._land_knee_on = False  # type: ignore[attr-defined]
+    session._land_ank_on = False  # type: ignore[attr-defined]
+    session._land_ank_until = -1.0  # type: ignore[attr-defined]
+
+    def _side_loaded(jn: str) -> bool:
+        side = "L" if jn.startswith("l_") else "R"
+        return _sole_load_n(session, side) > _SOLE_FLAT_LOAD_N + 1e-9
+
+    def _ask_at(jn: str, q_cmd: float) -> tuple[float, float]:
+        q_now = float(lipm.q(jn))
+        jid = mj.mj_name2id(lipm.model, mj.mjtObj.mjOBJ_JOINT, jn)
+        omega = float(lipm.data.qvel[int(lipm.model.jnt_dofadr[jid])])
+        idx = lipm.act_idx[jn + "_pos"]
+        kp = float(lipm.model.actuator_gainprm[idx, 0])
+        kv = -float(lipm.model.actuator_biasprm[idx, 2])
+        return kp * (float(q_cmd) - q_now) - kv * omega, q_now
+
+    def _loaded_nearer(jn: str, proposed: float, old: float | None, step: float) -> float:
+        """Loaded chain only. A step past 2.33 Nm is not taken.
+
+        A raw gait jump is cut to one stance step first. The command
+        then stays nearer the live joint. z is not rewritten.
+        """
+        ask, q_now = _ask_at(jn, float(proposed))
+        if abs(ask) <= KNEE_NM + 1e-9:
+            return float(proposed)
+        held = float(old) if old is not None else q_now
+        dq = float(proposed) - held
+        if dq > step:
+            stepped = held + step
+        elif dq < -step:
+            stepped = held - step
+        else:
+            stepped = float(proposed)
+        ask_s, _q_now = _ask_at(jn, stepped)
+        if abs(ask_s) <= KNEE_NM + 1e-9:
+            return float(stepped)
+        if abs(held - q_now) + 1e-9 < abs(stepped - q_now):
+            return float(held)
+        if held > q_now:
+            return float(held - step)
+        return float(held + step)
+
+    def _hold_loaded_hip(jn: str, q_des: float) -> float:
+        """After the engage catch, a loaded hip does not take a raw jump.
+
+        The previous command is the last one written. A step past 2.33 Nm
+        is not taken. An airborne hip stays on the gait command.
+        """
+        if not jn.endswith("hip_pitch"):
+            return float(q_des)
+        if not getattr(session, "_sag_stop_installed", False):
+            return float(q_des)
+        if getattr(session, "_sag_torque_cap", False):
+            return float(q_des)
+        if float(lipm.data.time) + 1e-9 < _STOP_ENTRANCE_S:
+            return float(q_des)
+        if not _side_loaded(jn):
+            return float(q_des)
+        t_now = float(lipm.data.time)
+        held_tick = hip_hold_at.get(jn)
+        if held_tick is not None and t_now - held_tick < ctrl_period - 1e-4:
+            return float(hip_hold_cmd[jn])
+        old_hip = hip_written.get(jn)
+        nearer = _loaded_nearer(
+            jn,
+            float(q_des),
+            None if old_hip is None else float(old_hip),
+            cap,
+        )
+        if abs(nearer - float(q_des)) > 1e-12:
+            hip_hold_cmd[jn] = float(nearer)
+            hip_hold_at[jn] = t_now
+            q_des = float(nearer)
+        hip_written[jn] = float(q_des)
+        return float(q_des)
 
     def _entrance_live(jn: str) -> bool:
         """Stop-bout engage only. Not the continuous-walk seed.
@@ -12300,7 +12421,17 @@ def _install_sagittal_slew(
                 else:
                     stepped = float(target)
                     entrance_done.add(jn)
+            if jn.endswith("hip_pitch") and _side_loaded(jn):
+                # The engage catch is already one stance step. If that
+                # step would put the loaded hip over 2.33 Nm, keep the
+                # nearer command. An airborne hip is not this hold.
+                nearer = _loaded_nearer(jn, float(stepped), float(old), cap)
+                if abs(nearer - float(target)) > 1e-9:
+                    entrance_done.discard(jn)
+                stepped = nearer
             entrance_cmd[jn] = float(stepped)
+            if jn.endswith("hip_pitch"):
+                hip_written[jn] = float(stepped)
             entrance_at[jn] = t_now
             if jn.endswith(("knee", "ank_pitch")):
                 prev[jn] = float(stepped)
@@ -12310,8 +12441,9 @@ def _install_sagittal_slew(
         """First landing double support. Not a swing stretch.
 
         The leg that just finished the first swing starts from the live
-        joint. The other leg stays on its slew. The walk ladder is not
-        read. Ankle roll stays on its own freeze.
+        joint. Hip pitch stays on the engage catch until that command
+        meets the gait. The other leg stays on its slew. The walk ladder
+        is not read. Ankle roll stays on its own freeze.
         """
         if not getattr(session, "_sag_stop_installed", False):
             return False
@@ -12319,13 +12451,13 @@ def _install_sagittal_slew(
             return False
         if getattr(session, "_sag_torque_cap", False):
             return False
-        if not getattr(session, "_land_armed", False):
-            return False
         if jn in land_done:
             return False
         if not jn.startswith("l_"):
             return False
-        return jn.endswith(("hip_pitch", "knee", "ank_pitch"))
+        if jn.endswith(("hip_pitch", "knee")):
+            return bool(getattr(session, "_land_knee_on", False))
+        return False
 
     def _toward_land(jn: str, target: float) -> float:
         """One stop-bout stance step from the live joint. No torque hold.
@@ -12336,6 +12468,10 @@ def _install_sagittal_slew(
         """
         t_now = float(lipm.data.time)
         last = land_at.get(jn)
+        # Knee and ankle pitch must not resume the engage command. Hip
+        # pitch hands this step back to that catch.
+        if not jn.endswith("hip_pitch"):
+            entrance_done.add(jn)
         if last is None or t_now - last >= ctrl_period - 1e-4:
             old = land_cmd.get(jn)
             if old is None:
@@ -12363,7 +12499,11 @@ def _install_sagittal_slew(
                     land_done.add(jn)
             land_cmd[jn] = float(stepped)
             land_at[jn] = t_now
-            if jn.endswith(("knee", "ank_pitch")):
+            if jn.endswith("hip_pitch"):
+                entrance_cmd[jn] = float(stepped)
+                entrance_at[jn] = t_now
+                hip_written[jn] = float(stepped)
+            else:
                 prev[jn] = float(stepped)
         return float(land_cmd[jn])
 
@@ -12588,7 +12728,143 @@ def _install_sagittal_slew(
                             slew_stats["early_clip"] = float(slew_stats["early_clip"]) + 1.0
                         elif walk_stance and jn.endswith("knee"):
                             slew_stats["knee_clip"] = float(slew_stats["knee_clip"]) + 1.0
-                prev[jn] = float(q_des)
+                knee_slew = None
+                if (
+                    not walk_stance
+                    and getattr(session, "_sag_stop_installed", False)
+                    and not getattr(session, "_sag_torque_cap", False)
+                    and _stop_knee_local(jn)
+                    and _side_loaded(jn)
+                ):
+                    # First quarter of stance, and the double support that
+                    # enters it. This solves q_des so the signed ask is
+                    # ±2.33 Nm. That is a hard cap. The absolute sum is
+                    # logged and is not this solve. The slew memory stays
+                    # on the 1.90 path.
+                    ask_k, q_now_k = _ask_at(jn, float(q_des))
+                    if abs(ask_k) > KNEE_NM + 1e-9:
+                        jid_k = mj.mj_name2id(lipm.model, mj.mjtObj.mjOBJ_JOINT, jn)
+                        omega_k = float(lipm.data.qvel[int(lipm.model.jnt_dofadr[jid_k])])
+                        idx_k = lipm.act_idx[jn + "_pos"]
+                        kp_k = float(lipm.model.actuator_gainprm[idx_k, 0])
+                        kv_k = -float(lipm.model.actuator_biasprm[idx_k, 2])
+                        if kp_k > 1e-6 and abs(kv_k * omega_k) < KNEE_NM:
+                            sign_k = 1.0 if ask_k > 0.0 else -1.0
+                            solved = q_now_k + (sign_k * KNEE_NM + kv_k * omega_k) / kp_k
+                            if abs(solved - q_now_k) + 1e-9 < abs(float(q_des) - q_now_k):
+                                knee_slew = float(q_des)
+                                q_des = float(solved)
+                if (
+                    jn == "l_ank_pitch"
+                    and not walk_stance
+                    and getattr(session, "_sag_stop_installed", False)
+                    and not getattr(session, "_sag_torque_cap", False)
+                ):
+                    t_now = float(lipm.data.time)
+                    if _WALK_STEADY_S - 1e-9 <= t_now < _STOP_STEADY_ANK_END:
+                        # The gait step is already rate-limited. If that
+                        # step would put the loaded ask over 2.33 Nm,
+                        # keep the nearer command. One stance cap toward
+                        # the joint when the previous command is farther.
+                        # No torque hold, and z is not rewritten.
+                        q_now = float(lipm.q(jn))
+                        jid = mj.mj_name2id(lipm.model, mj.mjtObj.mjOBJ_JOINT, jn)
+                        omega = float(lipm.data.qvel[int(lipm.model.jnt_dofadr[jid])])
+                        idx = lipm.act_idx[jn + "_pos"]
+                        kp = float(lipm.model.actuator_gainprm[idx, 0])
+                        kv = -float(lipm.model.actuator_biasprm[idx, 2])
+                        ask = kp * (float(q_des) - q_now) - kv * omega
+                        if abs(ask) > KNEE_NM + 1e-9:
+                            held_cmd = float(old) if old is not None else q_now
+                            if abs(held_cmd - q_now) + 1e-9 < abs(float(q_des) - q_now):
+                                q_des = held_cmd
+                            elif held_cmd > q_now:
+                                q_des = held_cmd - step
+                            else:
+                                q_des = held_cmd + step
+                if (
+                    not walk_stance
+                    and jn.endswith("ank_pitch")
+                    and getattr(session, "_sag_stop_installed", False)
+                    and not getattr(session, "_sag_torque_cap", False)
+                    and 1.40 - 1e-9 <= float(lipm.data.time) <= _STOP_ANK_LOCAL_END + 1e-9
+                    and _side_loaded(jn)
+                ):
+                    # Loaded stance ankle after the landing catch. If the
+                    # nearer step is still over 2.33 Nm, pull only until
+                    # the ask sits on that line. Airborne ankles stay on
+                    # their slew.
+                    ask_a, q_now_a = _ask_at(jn, float(q_des))
+                    if abs(ask_a) > KNEE_NM + 1e-9:
+                        jid_a = mj.mj_name2id(lipm.model, mj.mjtObj.mjOBJ_JOINT, jn)
+                        omega_a = float(lipm.data.qvel[int(lipm.model.jnt_dofadr[jid_a])])
+                        idx_a = lipm.act_idx[jn + "_pos"]
+                        kp_a = float(lipm.model.actuator_gainprm[idx_a, 0])
+                        kv_a = -float(lipm.model.actuator_biasprm[idx_a, 2])
+                        if kp_a > 1e-6 and abs(kv_a * omega_a) < KNEE_NM:
+                            sign_a = 1.0 if ask_a > 0.0 else -1.0
+                            solved_a = q_now_a + (sign_a * KNEE_NM + kv_a * omega_a) / kp_a
+                            if abs(solved_a - q_now_a) + 1e-9 < abs(float(q_des) - q_now_a):
+                                q_des = float(solved_a)
+                ank_slew = None
+                if walk_stance and jn.endswith("ank_pitch"):
+                    t_now = float(lipm.data.time)
+                    if (
+                        _WALK_ANK_PRE_S - 1e-9 <= t_now < _WALK_STEADY_S - 1e-9
+                        and _side_loaded(jn)
+                    ):
+                        # Loaded stance ankle before 2 s. This solves q_des
+                        # so the signed ask is ±2.33 Nm. That is a hard
+                        # cap. The slew memory stays on the 1.90 path.
+                        ask_w, q_now_w = _ask_at(jn, float(q_des))
+                        if abs(ask_w) > KNEE_NM + 1e-9:
+                            jid_w = mj.mj_name2id(
+                                lipm.model, mj.mjtObj.mjOBJ_JOINT, jn
+                            )
+                            omega_w = float(
+                                lipm.data.qvel[int(lipm.model.jnt_dofadr[jid_w])]
+                            )
+                            idx_w = lipm.act_idx[jn + "_pos"]
+                            kp_w = float(lipm.model.actuator_gainprm[idx_w, 0])
+                            kv_w = -float(lipm.model.actuator_biasprm[idx_w, 2])
+                            if kp_w > 1e-6 and abs(kv_w * omega_w) < KNEE_NM:
+                                sign_w = 1.0 if ask_w > 0.0 else -1.0
+                                solved_w = q_now_w + (
+                                    sign_w * KNEE_NM + kv_w * omega_w
+                                ) / kp_w
+                                if abs(solved_w - q_now_w) + 1e-9 < abs(
+                                    float(q_des) - q_now_w
+                                ):
+                                    ank_slew = float(q_des)
+                                    q_des = float(solved_w)
+                    elif t_now >= _WALK_STEADY_S - 1e-9:
+                        # Same loaded pattern as the stop-bout left ankle.
+                        # The gait step is already rate-limited. If that
+                        # step would put the loaded ask over 2.33 Nm,
+                        # keep the nearer command. One stance cap toward
+                        # the joint when the previous command is farther.
+                        # No torque hold, and z is not rewritten.
+                        q_now = float(lipm.q(jn))
+                        jid = mj.mj_name2id(lipm.model, mj.mjtObj.mjOBJ_JOINT, jn)
+                        omega = float(lipm.data.qvel[int(lipm.model.jnt_dofadr[jid])])
+                        idx = lipm.act_idx[jn + "_pos"]
+                        kp = float(lipm.model.actuator_gainprm[idx, 0])
+                        kv = -float(lipm.model.actuator_biasprm[idx, 2])
+                        ask = kp * (float(q_des) - q_now) - kv * omega
+                        if abs(ask) > KNEE_NM + 1e-9:
+                            held_cmd = float(old) if old is not None else q_now
+                            if abs(held_cmd - q_now) + 1e-9 < abs(float(q_des) - q_now):
+                                q_des = held_cmd
+                            elif held_cmd > q_now:
+                                q_des = held_cmd - step
+                            else:
+                                q_des = held_cmd + step
+                if knee_slew is not None:
+                    prev[jn] = float(knee_slew)
+                elif ank_slew is not None:
+                    prev[jn] = float(ank_slew)
+                else:
+                    prev[jn] = float(q_des)
             elif (
                 getattr(session, "_walk_z_stretch", False)
                 and not getattr(session, "_sag_stop_installed", False)
@@ -12620,6 +12896,7 @@ def _install_sagittal_slew(
             last_cmd[jn] = float(q_des)
         else:
             q_des = _apply_stop_hip(jn, float(q_des))
+            q_des = _hold_loaded_hip(jn, float(q_des))
         orig(jn, float(q_des))
 
     def write_limited(jn: str, q_des: float, limit_nm: float | None = None) -> None:
@@ -12640,6 +12917,7 @@ def _install_sagittal_slew(
                 q_des = _hold_pin(jn, float(q_des))
         else:
             q_des = _apply_stop_hip(jn, float(q_des))
+            q_des = _hold_loaded_hip(jn, float(q_des))
         orig_fl(jn, float(q_des), limit_nm)
 
     lipm.write_clipped = write  # type: ignore[method-assign]
@@ -12691,11 +12969,33 @@ def _install_sagittal_slew(
         )
         print(
             "PRED sag_slew stop_land from the live joint at "
-            f"{float(rad_s):.3f} rad/s on the landing leg's hip pitch, "
-            "knee, and ankle pitch. The first landing tick holds that "
-            "joint. Planar x/y and sole roll/pitch/yaw hold the last "
-            "swing pose on that tick. z stays live. The walk ladder "
-            "stays off this bout."
+            f"{float(rad_s):.3f} rad/s on the landing knee and ankle pitch. "
+            "The first landing tick holds that joint. Planar x/y and sole "
+            "roll/pitch/yaw hold the last swing pose on that tick. "
+            "The knee and hip pitch stay within one step of the live "
+            "joint through that double support. Ankle pitch stays on its "
+            "slew. Hip pitch then continues on the engage catch from that "
+            "command. z stays live. The walk ladder stays off this bout."
+        )
+        print(
+            "PRED sag_slew stop_steady_ank from the live joint at "
+            f"{float(rad_s):.3f} rad/s on the loaded left ankle pitch. "
+            "A step that would put that ask over 2.33 Nm is not taken. "
+            "Planar x/y and sole attitude stay on the live step. "
+            "z stays live. This is not a swing stretch. "
+            "The walk ladder stays off this bout."
+        )
+    if (
+        getattr(session, "_walk_z_stretch", False)
+        and not getattr(session, "_sag_stop_installed", False)
+    ):
+        print(
+            "PRED sag_slew walk_steady_ank from the live joint at "
+            f"{_WALK_STANCE_RATE:.3f} rad/s on the loaded ankle pitch. "
+            "A step that would put that ask over 2.33 Nm is not taken. "
+            "The command stays nearer the live joint. "
+            "z stays live. This is not a swing stretch. "
+            "The stop bout does not take this seed."
         )
     if "hip_pitch" in suffixes:
         print(
@@ -14312,9 +14612,23 @@ def score_sag_stop() -> None:
         "is not the continuous-walk seed. "
         "At the first landing double support the last swing foot's planar "
         "and attitude hold for one tick. That tick holds the live joint. "
-        "The landing leg's hip pitch, knee, and ankle pitch then step from "
-        "there at the stop-bout stance rate. z stays live. That catch is "
-        "not a swing stretch. "
+        "The landing knee and hip pitch then stay within one step of "
+        "the live joint through that double support. Ankle pitch stays "
+        "on its slew. Hip pitch then continues on the engage catch from "
+        "that command. z stays live. That catch is not a swing stretch. "
+            "On the loaded left ankle, a step that would put the ask over "
+            "2.33 Nm is not taken. Planar x/y and sole attitude stay on "
+            "the live step. "
+            "On a loaded hip, a step that would put the ask over 2.33 Nm "
+            "is not taken. A raw gait jump is cut to one stance step. "
+            "An airborne hip is not that hold. "
+            "On a loaded knee, through the stop command, q_des is solved "
+            "so the signed ask sits on ±2.33 Nm in the first quarter of "
+            "stance and the double support that enters it. That solve is "
+            "a hard cap. The absolute sum is logged and is not this pass. "
+            "The slew memory stays on the 1.90 rad/s path. The descent after "
+            "the stop command stays on that slew. "
+        "z stays live. That catch is not a swing stretch. "
         "Before the stop, the approach swing-z is time-stretched on its own "
         "rate so the airborne knee can track. That delta is off from the "
         "stop command. The leftover swing-z is time-stretched so the knee "
@@ -14702,10 +15016,24 @@ def score_sag_stop() -> None:
             "is at or after the tip and is not the torque bar"
         )
     _print_gait_peaks(name, held, summary)
+    _print_named_ticks(
+        name,
+        held,
+        (
+            ("l_hip_pitch", 1.512),
+            ("r_knee", 1.552),
+            ("l_ank_pitch", 1.456),
+            ("r_hip_pitch", 2.112),
+            ("l_knee", 2.336),
+            ("r_knee", 2.592),
+            ("l_hip_pitch", 2.880),
+        ),
+    )
     _print_air_ank_land(name, held)
     _print_approach_knee(name, held)
     _print_entrance(name, held)
     _print_landing(name, held)
+    _print_steady_ank(name, held)
     if held.get("fault"):
         fails.append(f"fault {held.get('fault')} t {float(held.get('fault_t', float('nan'))):.3f}")
     if air_zero:
@@ -14773,6 +15101,25 @@ def _keep_ask(best: tuple | None, item: tuple) -> tuple:
     return best
 
 
+def _unclamped_nm(item: tuple) -> float:
+    """|kp*(q_des-q)| + |kv*omega| on the command that was written."""
+    return abs(float(item[8])) + abs(float(item[9]))
+
+
+def _solved_onto_bar(item: tuple) -> int:
+    """1 when q_des is the signed-ask solve that lands on ±2.33 Nm."""
+    kp = float(item[11])
+    if kp < 1e-6:
+        return 0
+    ask = float(item[3])
+    if abs(abs(ask) - KNEE_NM) > 1e-4:
+        return 0
+    qdes = float(item[2])
+    q = qdes - float(item[8]) / kp
+    solved = q + (math.copysign(KNEE_NM, ask) + float(item[12]) * float(item[10])) / kp
+    return int(abs(qdes - solved) <= 1e-5)
+
+
 def _print_gait_peaks(name: str, held: dict[str, object], summary: dict[str, object]) -> bool:
     """Max |unclamped ask| on every leg joint before the tip.
 
@@ -14794,6 +15141,7 @@ def _print_gait_peaks(name: str, held: dict[str, object], summary: dict[str, obj
     pre: dict[str, tuple] = {}
     steady: dict[str, tuple] = {}
     post: dict[str, tuple] = {}
+    pre_raw: dict[str, tuple] = {}
     for item in asks:
         jn = str(item[1])
         if jn not in _WALK_LEG:
@@ -14804,6 +15152,9 @@ def _print_gait_peaks(name: str, held: dict[str, object], summary: dict[str, obj
             post[jn] = _keep_ask(post.get(jn), item)
             continue
         pre[jn] = _keep_ask(pre.get(jn), item)
+        prev_raw = pre_raw.get(jn)
+        if prev_raw is None or _unclamped_nm(item) > _unclamped_nm(prev_raw):
+            pre_raw[jn] = item
         if t_item >= _WALK_STEADY_S - 1e-9:
             steady[jn] = _keep_ask(steady.get(jn), item)
 
@@ -14831,14 +15182,23 @@ def _print_gait_peaks(name: str, held: dict[str, object], summary: dict[str, obj
                 continue
             phase, frac, fn_l, fn_r = _phase_frac(item)
             ask = float(item[3])
-            over = abs(ask) > KNEE_NM + 1e-9
+            raw = _unclamped_nm(item)
+            hard = _solved_onto_bar(item)
+            # A write solved onto ±2.33 Nm is a hard cap. The absolute
+            # sum is logged. It is not the bout fail when |kv*ω| alone
+            # is already over 2.33 Nm.
+            signed_over = abs(ask) > KNEE_NM + 1e-9 or bool(hard)
+            over = signed_over if tag != "gait_unclamped" else raw > KNEE_NM + 1e-9
             frac_txt = "dsp" if phase == "D" else f"{frac:.3f}"
             print(
                 f"PRED {name} {tag} {jn} {ask:+.4f} "
                 f"t {float(item[0]):.3f} phase {phase} frac {frac_txt} "
                 f"fn_l {fn_l:.2f} fn_r {fn_r:.2f} "
-                f"ge_2.33 {int(over)}"
+                f"unclamped {raw:.4f} hard_cap {hard} "
+                f"ge_2.33 {int(signed_over)}"
             )
+            if tag == "gait_unclamped":
+                continue
             if over:
                 bit = (
                     f"{jn} {ask:+.4f} t {float(item[0]):.3f} "
@@ -14851,6 +15211,7 @@ def _print_gait_peaks(name: str, held: dict[str, object], summary: dict[str, obj
         return found, worst_bit
 
     overs, worst_over = _emit("gait_pre", pre)
+    _emit("gait_unclamped", pre_raw)
     steady_overs, steady_worst = _emit("gait_steady", steady)
     if not post:
         print(f"PRED {name} gait_post none")
@@ -15490,6 +15851,306 @@ def _print_landing(name: str, held: dict[str, object]) -> None:
     )
 
 
+def _print_steady_ank(name: str, held: dict[str, object]) -> None:
+    """Loaded left ankle after 2 s. Load and four corners at that peak.
+
+    The named tick is 7.968 s. Engage corners stay on this copy. A lift
+    that hides that penetration is a Prefer FAIL of this lever.
+    """
+    asks = held.get("asks")
+    lateral = held.get("lateral")
+    surface = held.get("surface")
+    if not isinstance(asks, list) or not isinstance(lateral, list):
+        print(f"PRED {name} steady_ank missing")
+        return
+    by_lat: dict[float, dict[str, float | str]] = {}
+    for row in lateral:
+        if isinstance(row, dict):
+            by_lat[round(float(row["t_ask"]), 5)] = row
+    by_surf: dict[float, dict[str, object]] = {}
+    if isinstance(surface, list):
+        for row in surface:
+            if isinstance(row, dict):
+                by_surf[round(float(row["t"]), 5)] = row
+
+    def _corner_line(tag: str, t_key: float) -> float:
+        surf = by_surf.get(t_key)
+        lat = by_lat.get(t_key)
+        fn_l = float(lat["fn_l"]) if lat is not None else float("nan")
+        fn_r = float(lat["fn_r"]) if lat is not None else float("nan")
+        print(
+            f"PRED {name} steady_ank_load {tag} t {t_key:.3f} "
+            f"fn_l {fn_l:.2f} fn_r {fn_r:.2f}"
+        )
+        low_mm = float("inf")
+        for side in ("L", "R"):
+            plane = surf.get(side) if isinstance(surf, dict) else None
+            plane_d = plane if isinstance(plane, dict) else None
+            corners = plane_d.get("corners") if isinstance(plane_d, dict) else None
+            if not isinstance(corners, tuple) or not corners:
+                print(f"PRED {name} steady_ank_corners side {side} {tag} missing")
+                low_mm = float("nan")
+                continue
+            parts = " ".join(
+                f"{label} {float(z) * 1000.0:+.3f}" for label, z in corners
+            )
+            low = min(corners, key=lambda packed: float(packed[1]))
+            low_side = float(low[1]) * 1000.0
+            low_mm = min(low_mm, low_side)
+            print(
+                f"PRED {name} steady_ank_corners side {side} {tag} "
+                f"t {t_key:.3f} {parts} "
+                f"low {low[0]} {low_side:+.3f} mm"
+            )
+        return low_mm
+
+    worst: tuple | None = None
+    named: tuple | None = None
+    for item in asks:
+        if str(item[1]) != "l_ank_pitch":
+            continue
+        t_item = float(item[0])
+        if t_item < _WALK_STEADY_S - 1e-9 or t_item >= _STOP_STEADY_ANK_END - 1e-9:
+            continue
+        if worst is None or abs(float(item[3])) > abs(float(worst[3])):
+            worst = item
+        if named is None or abs(t_item - 7.968) < abs(float(named[0]) - 7.968):
+            named = item
+    if worst is None or named is None:
+        print(f"PRED {name} steady_ank missing")
+        return
+    named_t = round(float(named[0]), 5)
+    worst_t = round(float(worst[0]), 5)
+    named_low = _corner_line("tick", named_t)
+    if worst_t != named_t:
+        _corner_line("worst", worst_t)
+    engage_key = round(_STOP_ENTRANCE_S, 5)
+    if engage_key not in by_surf:
+        nearest = min(by_surf, key=lambda key: abs(key - _STOP_ENTRANCE_S), default=None)
+        engage_key = float(nearest) if nearest is not None else engage_key
+    engage_low = _corner_line("engage", engage_key)
+    hidden = (not math.isfinite(engage_low)) or engage_low > -0.55
+    ask = float(worst[3])
+    over = abs(ask) > KNEE_NM + 1e-9
+    row = by_lat.get(worst_t)
+    phase = str(row["phase"]) if row is not None else "?"
+    frac = _swing_frac(phase, float(row["pose"])) if row is not None else float("nan")
+    frac_txt = "dsp" if phase == "D" else f"{frac:.3f}"
+    fn_l = float(row["fn_l"]) if row is not None else float("nan")
+    fn_r = float(row["fn_r"]) if row is not None else float("nan")
+    print(
+        f"PRED {name} steady_ank l_ank_pitch {ask:+.4f} "
+        f"t {float(worst[0]):.3f} phase {phase} frac {frac_txt} "
+        f"q {_ask_q(worst):+.5f} q_des {float(worst[2]):+.5f} "
+        f"kp_term {float(worst[8]):+.4f} kv_term {float(worst[9]):+.4f} "
+        f"fn_l {fn_l:.2f} fn_r {fn_r:.2f} ge_2.33 {int(over)}"
+    )
+    fails: list[str] = []
+    if hidden:
+        fails.append(f"engage penetration hidden low {engage_low:+.3f} mm")
+    if not math.isfinite(named_low):
+        fails.append("steady tick corners missing")
+    if over:
+        fails.append(f"l_ank_pitch {ask:+.4f} t {float(worst[0]):.3f}")
+    if fails:
+        print(
+            f"PRED {name} steady_ank Prefer FAIL. "
+            + " | ".join(fails)
+            + ". z stayed live. The walk ladder stays off."
+        )
+        return
+    print(
+        f"PRED {name} steady_ank CLEAR. "
+        "The loaded left ankle pitch from 2 s through the pre-stop "
+        "descent stays at or under 2.33 Nm. Engage sole penetration "
+        "stays on this copy. z stayed live."
+    )
+
+
+def _print_walk_steady_ank(name: str, held: dict[str, object]) -> None:
+    """Loaded right ankle after 2 s on the continuous walk.
+
+    The named tick is 2.224 s. Load and four corners at that peak.
+    """
+    asks = held.get("asks")
+    lateral = held.get("lateral")
+    surface = held.get("surface")
+    if not isinstance(asks, list) or not isinstance(lateral, list):
+        print(f"PRED {name} walk_steady_ank missing")
+        return
+    by_lat: dict[float, dict[str, float | str]] = {}
+    for row in lateral:
+        if isinstance(row, dict):
+            by_lat[round(float(row["t_ask"]), 5)] = row
+    by_surf: dict[float, dict[str, object]] = {}
+    if isinstance(surface, list):
+        for row in surface:
+            if isinstance(row, dict):
+                by_surf[round(float(row["t"]), 5)] = row
+
+    def _corner_line(tag: str, t_key: float) -> None:
+        surf = by_surf.get(t_key)
+        lat = by_lat.get(t_key)
+        fn_l = float(lat["fn_l"]) if lat is not None else float("nan")
+        fn_r = float(lat["fn_r"]) if lat is not None else float("nan")
+        print(
+            f"PRED {name} walk_steady_ank_load {tag} t {t_key:.3f} "
+            f"fn_l {fn_l:.2f} fn_r {fn_r:.2f}"
+        )
+        for side in ("L", "R"):
+            plane = surf.get(side) if isinstance(surf, dict) else None
+            plane_d = plane if isinstance(plane, dict) else None
+            corners = plane_d.get("corners") if isinstance(plane_d, dict) else None
+            if not isinstance(corners, tuple) or not corners:
+                print(f"PRED {name} walk_steady_ank_corners side {side} {tag} missing")
+                continue
+            parts = " ".join(
+                f"{label} {float(z) * 1000.0:+.3f}" for label, z in corners
+            )
+            low = min(corners, key=lambda packed: float(packed[1]))
+            print(
+                f"PRED {name} walk_steady_ank_corners side {side} {tag} "
+                f"t {t_key:.3f} {parts} "
+                f"low {low[0]} {float(low[1]) * 1000.0:+.3f} mm"
+            )
+
+    worst: tuple | None = None
+    named: tuple | None = None
+    for item in asks:
+        if str(item[1]) != "r_ank_pitch":
+            continue
+        t_item = float(item[0])
+        if t_item < _WALK_STEADY_S - 1e-9:
+            continue
+        if worst is None or abs(float(item[3])) > abs(float(worst[3])):
+            worst = item
+        if named is None or abs(t_item - 2.224) < abs(float(named[0]) - 2.224):
+            named = item
+    if worst is None or named is None:
+        print(f"PRED {name} walk_steady_ank missing")
+        return
+    named_t = round(float(named[0]), 5)
+    worst_t = round(float(worst[0]), 5)
+    _corner_line("tick", named_t)
+    if worst_t != named_t:
+        _corner_line("worst", worst_t)
+    named_ask = float(named[3])
+    named_row = by_lat.get(named_t)
+    named_phase = str(named_row["phase"]) if named_row is not None else "?"
+    named_frac = (
+        _swing_frac(named_phase, float(named_row["pose"]))
+        if named_row is not None
+        else float("nan")
+    )
+    named_frac_txt = "dsp" if named_phase == "D" else f"{named_frac:.3f}"
+    print(
+        f"PRED {name} walk_steady_ank tick r_ank_pitch {named_ask:+.4f} "
+        f"t {float(named[0]):.3f} phase {named_phase} frac {named_frac_txt} "
+        f"q {_ask_q(named):+.5f} q_des {float(named[2]):+.5f} "
+        f"kp_term {float(named[8]):+.4f} kv_term {float(named[9]):+.4f} "
+        f"ge_2.33 {int(abs(named_ask) > KNEE_NM + 1e-9)}"
+    )
+    ask = float(worst[3])
+    over = abs(ask) > KNEE_NM + 1e-9
+    row = by_lat.get(worst_t)
+    phase = str(row["phase"]) if row is not None else "?"
+    frac = _swing_frac(phase, float(row["pose"])) if row is not None else float("nan")
+    frac_txt = "dsp" if phase == "D" else f"{frac:.3f}"
+    fn_l = float(row["fn_l"]) if row is not None else float("nan")
+    fn_r = float(row["fn_r"]) if row is not None else float("nan")
+    print(
+        f"PRED {name} walk_steady_ank r_ank_pitch {ask:+.4f} "
+        f"t {float(worst[0]):.3f} phase {phase} frac {frac_txt} "
+        f"q {_ask_q(worst):+.5f} q_des {float(worst[2]):+.5f} "
+        f"kp_term {float(worst[8]):+.4f} kv_term {float(worst[9]):+.4f} "
+        f"fn_l {fn_l:.2f} fn_r {fn_r:.2f} ge_2.33 {int(over)}"
+    )
+    if over:
+        print(
+            f"PRED {name} walk_steady_ank Prefer FAIL. "
+            f"r_ank_pitch {ask:+.4f} t {float(worst[0]):.3f}. "
+            "z stayed live. This is not a swing stretch."
+        )
+    else:
+        print(
+            f"PRED {name} walk_steady_ank CLEAR. "
+            f"r_ank_pitch {ask:+.4f} t {float(worst[0]):.3f} "
+            "stays at or under 2.33 Nm. z stayed live."
+        )
+
+
+def _print_named_ticks(
+    name: str,
+    held: dict[str, object],
+    ticks: tuple[tuple[str, float], ...],
+) -> None:
+    """Load and four corners at a Prefer FAIL tick. The ask is the nearest sample."""
+    asks = held.get("asks")
+    lateral = held.get("lateral")
+    surface = held.get("surface")
+    if not isinstance(asks, list) or not isinstance(lateral, list):
+        print(f"PRED {name} named_tick missing")
+        return
+    by_lat: dict[float, dict[str, float | str]] = {}
+    for row in lateral:
+        if isinstance(row, dict):
+            by_lat[round(float(row["t_ask"]), 5)] = row
+    by_surf: dict[float, dict[str, object]] = {}
+    if isinstance(surface, list):
+        for row in surface:
+            if isinstance(row, dict):
+                by_surf[round(float(row["t"]), 5)] = row
+    for jn, t_want in ticks:
+        named: tuple | None = None
+        for item in asks:
+            if str(item[1]) != jn:
+                continue
+            if named is None or abs(float(item[0]) - t_want) < abs(float(named[0]) - t_want):
+                named = item
+        if named is None:
+            print(f"PRED {name} named_tick {jn} t {t_want:.3f} missing")
+            continue
+        t_key = round(float(named[0]), 5)
+        ask = float(named[3])
+        row = by_lat.get(t_key)
+        phase = str(row["phase"]) if row is not None else "?"
+        frac = _swing_frac(phase, float(row["pose"])) if row is not None else float("nan")
+        frac_txt = "dsp" if phase == "D" else f"{frac:.3f}"
+        fn_l = float(row["fn_l"]) if row is not None else float("nan")
+        fn_r = float(row["fn_r"]) if row is not None else float("nan")
+        loaded_l = fn_l > _SOLE_FLAT_LOAD_N
+        loaded_r = fn_r > _SOLE_FLAT_LOAD_N
+        raw = _unclamped_nm(named)
+        hard = _solved_onto_bar(named)
+        over = abs(ask) > KNEE_NM + 1e-9 or bool(hard) or raw > KNEE_NM + 1e-9
+        print(
+            f"PRED {name} named_tick {jn} {ask:+.4f} t {float(named[0]):.3f} "
+            f"phase {phase} frac {frac_txt} "
+            f"q {_ask_q(named):+.5f} q_des {float(named[2]):+.5f} "
+            f"fn_l {fn_l:.2f} fn_r {fn_r:.2f} "
+            f"loaded_l {int(loaded_l)} loaded_r {int(loaded_r)} "
+            f"kp_term {float(named[8]):+.4f} kv_term {float(named[9]):+.4f} "
+            f"unclamped {raw:.4f} hard_cap {hard} "
+            f"ge_2.33 {int(over)}"
+        )
+        surf = by_surf.get(t_key)
+        for side in ("L", "R"):
+            plane = surf.get(side) if isinstance(surf, dict) else None
+            plane_d = plane if isinstance(plane, dict) else None
+            corners = plane_d.get("corners") if isinstance(plane_d, dict) else None
+            if not isinstance(corners, tuple) or not corners:
+                print(f"PRED {name} named_corners {jn} side {side} missing")
+                continue
+            parts = " ".join(
+                f"{label} {float(z) * 1000.0:+.3f}" for label, z in corners
+            )
+            low = min(corners, key=lambda packed: float(packed[1]))
+            print(
+                f"PRED {name} named_corners {jn} side {side} "
+                f"t {t_key:.3f} {parts} low {low[0]} {float(low[1]) * 1000.0:+.3f} mm"
+            )
+
+
 def score_mid_swing() -> None:
     """Continuous straight walk on the locked sagittal copy. No stop.
 
@@ -15507,6 +16168,10 @@ def score_mid_swing() -> None:
         f"{_WALK_EARLY_FRAC:.2f}. "
         f"Through that fraction the loaded knee is {_WALK_EARLY_KNEE_RATE:.2f} rad/s. "
         f"Loaded ankle pitch stays on the {_WALK_STANCE_RATE:.2f} rad/s slew. "
+        "Before 2 s a loaded ankle write is solved so the signed ask sits "
+        "on ±2.33 Nm. That solve is a hard cap. The absolute sum is logged "
+        "and is not this pass. The slew memory stays on the 1.90 rad/s path. "
+        "From 2 s a stance step that would put that ask over 2.33 Nm is not taken. "
         f"Loaded hip pitch is on its own {_WALK_HIP_PITCH_RATE:.2f} rad/s slew. "
         "Walk swing-z stays at "
         f"{_WALK_Z_RATE:.2f} rad/s. The stop stretch stays off at "
@@ -15987,6 +16652,15 @@ def score_mid_swing() -> None:
             f"ge_2.33 {int(abs(float(knee_worst[3])) > KNEE_NM + 1e-9)}"
         )
     _print_gait_peaks(name, held, summary)
+    _print_named_ticks(
+        name,
+        held,
+        (
+            ("r_ank_pitch", 1.720),
+            ("l_ank_pitch", 1.336),
+        ),
+    )
+    _print_walk_steady_ank(name, held)
     if (
         swing_ok and toe_bar and rug_ok and corners_ok
         and support_ok and mid_plant_ok and early_ok

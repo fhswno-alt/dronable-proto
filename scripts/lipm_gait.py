@@ -32,6 +32,7 @@ import numpy as np
 
 import gait_manager_traj as gm
 import op3_walk
+import zmp_preview
 
 CTRL_DT = 0.02
 G = 9.81
@@ -207,6 +208,14 @@ class LipmConfig:
     gm_move_s: float = 0.020
     # Unused by the IK path. Kept so older call sites still construct.
     gm_sway_max: float = 0.15
+    # Lateral ZMP preview, metres. 0 leaves the OP3 path unchanged.
+    # This is not y_swap. y_swap_cmd stays at gm_y_swap_m.
+    preview_amp_m: float = 0.0
+    # 0 measures CoM height above the sole on the first preview tick.
+    preview_zc_m: float = 0.0
+    # Seconds of double support used to shift onto the first stance foot
+    # before the clock starts. Not a torque cap.
+    preview_arm_s: float = 0.60
 
 
 @dataclass
@@ -371,6 +380,22 @@ class LipmWalker:
             if abs(self._kp.get(name, -1.0) - kp) > 1e-6:
                 raise RuntimeError(f"frozen kp changed for {name}")
         self._gm_swing: Side | None = None
+        self.preview_stage = "stand"
+        self.preview_com_y = 0.0
+        self._preview: zmp_preview.ZmpPreview | None = None
+        self._preview_clock = 0.0
+        self._preview_zc = 0.0
+        self._stop_planted = False
+        self._stop_hold_s = 0.0
+        self._return_t = 0.0
+        self._return_zmp0 = 0.0
+        self._return_hold = False
+        self._return_done = False
+        self._freeze_time = 0.0
+        self.preview_ik_fail = 0
+        self._gate_wait_s = 0.0
+        self._gate_open = False
+        self.preview_gate_holds = 0
 
     def other(self, side: Side) -> Side:
         return "R" if side == "L" else "L"
@@ -513,6 +538,304 @@ class LipmWalker:
             return
         self._pending_lead = lead
 
+    def _ensure_preview(self, walker: op3_walk.Op3Walker) -> zmp_preview.ZmpPreview:
+        if self._preview is not None:
+            return self._preview
+        sole = min(self._sole("L"), self._sole("R"))
+        com_z = float(self.data.subtree_com[self.bid_body, 2])
+        measured = com_z - sole
+        zc = float(self.cfg.preview_zc_m) if self.cfg.preview_zc_m > 0.05 else measured
+        if zc < 0.08:
+            zc = 0.22
+        self._preview_zc = zc
+        horizon = max(8, int(round(1.6 / op3_walk.OP3_CTRL_S)))
+        self._preview = zmp_preview.ZmpPreview(zc, op3_walk.OP3_CTRL_S, horizon)
+        self._preview_clock = -float(self.cfg.preview_arm_s)
+        return self._preview
+
+    def _cycle_zmp(self, t_s: float) -> float:
+        walker = self.op3
+        if walker is None:
+            return 0.0
+        return zmp_preview.cycle_zmp(
+            t_s,
+            walker.period,
+            walker.l_ssp_start,
+            walker.l_ssp_end,
+            walker.r_ssp_start,
+            walker.r_ssp_end,
+            self.cfg.preview_amp_m,
+        )
+
+    def _zmp_at(self, t_s: float) -> float:
+        if t_s < 0.0:
+            return zmp_preview.arm_zmp(t_s, self.cfg.preview_arm_s, self.cfg.preview_amp_m)
+        return self._cycle_zmp(t_s)
+
+    def _zmp_future(self, t0_s: float) -> np.ndarray:
+        preview = self._preview
+        if preview is None:
+            raise RuntimeError("preview controller is not built")
+        dt = op3_walk.OP3_CTRL_S
+        out = np.zeros(preview.horizon, dtype=np.float64)
+        for i in range(preview.horizon):
+            out[i] = self._zmp_at(t0_s + i * dt)
+        return out
+
+    def _write_preview_joints(self, joints: dict[str, float] | None) -> None:
+        for jn in (
+            "l_sho_roll", "r_sho_roll", "l_el_pitch", "r_el_pitch",
+            "l_el_yaw", "r_el_yaw", "l_gripper", "r_gripper",
+        ):
+            self.write_clipped(jn, self.q_stand.get(jn, 0.0))
+        if joints is None:
+            self.preview_ik_fail += 1
+            self._write_unused()
+            return
+        for name, val in joints.items():
+            # Straight preview walk. No yaw budget, no ±2.33 solve.
+            # write_clipped still keeps non-sagittal joints inside the
+            # existing 0.98·τ/kp band. It does not edit forcerange.
+            self.write_clipped(name, float(val))
+        self._write_unused()
+
+    def _preview_pose(self, walker: op3_walk.Op3Walker) -> dict[str, float] | None:
+        """Joint targets at the current clock. Does not advance time."""
+        joints, info = walker.joints_now()
+        if info.phase == "L":
+            self.phase = "swing"
+            self.stance = "R"
+        elif info.phase == "R":
+            self.phase = "swing"
+            self.stance = "L"
+        else:
+            self.phase = "shift"
+        return joints
+
+    def _tick_preview_gait(self, walker: op3_walk.Op3Walker, walking: bool) -> None:
+        """Shift CoM over the stance foot, then walk, then return in double support.
+
+        y_swap_cmd is not written. The lateral channel is ``preview_y``.
+        Stop does not call the ±2.33 stand solve.
+        """
+        if walker.y_swap_cmd != 0.0:
+            raise RuntimeError("preview path refuses a non-zero y_swap")
+        if not walking and self.preview_stage == "stand":
+            walker.stop()
+            self.phase = "stand"
+            self.preview_stage = "stand"
+            for jn, val in self.q_stand.items():
+                self.write_clipped(jn, val)
+            return
+        if not walking and self.preview_stage == "start":
+            # The lift has not started. Drop the shift back through the
+            # same preview instead of snapping to the stand solve.
+            self.preview_stage = "stop"
+            self._stop_planted = True
+            self._return_t = 0.0
+            self._freeze_time = 0.0
+            self._return_zmp0 = float(self.preview_com_y)
+        if not walking:
+            self.preview_stage = "stop"
+            self._tick_preview_stop(walker)
+            return
+        preview = self._ensure_preview(walker)
+        if self.preview_stage == "stand":
+            self.preview_stage = "start"
+            self._preview_clock = -float(self.cfg.preview_arm_s)
+        if self.preview_stage == "start":
+            future = self._zmp_future(self._preview_clock)
+            com = preview.step(future)
+            self.preview_com_y = com
+            walker.set_command(0.0, 0.0, 0.0)
+            walker.previous_x = 0.0
+            walker.time = 0.0
+            walker.ctrl_running = False
+            walker.update_movement()
+            walker.preview_y = -com
+            joints = self._preview_pose(walker)
+            self.phase = "shift"
+            self.stance = "R" if self.start_lead == "L" else "L"
+            self._write_preview_joints(joints)
+            self._preview_clock += op3_walk.OP3_CTRL_S
+            if self._preview_clock >= -1e-9:
+                self.preview_stage = "walk"
+                walker.time = 0.0
+                walker.previous_x = 0.0
+                walker.ctrl_running = True
+                walker.update_movement()
+            return
+        x_amp, angle = kit_bus_step(self.cmd_vx, self.cmd_yaw, self.cfg.gm_period_s)
+        walker.set_command(x_amp, 0.0, angle)
+        if self._hold_until_stance(walker, preview):
+            return
+        self._gate_wait_s = 0.0
+        future = self._zmp_future(float(walker.time))
+        com = preview.step(future)
+        self.preview_com_y = com
+        walker.preview_y = -com
+        joints, info = walker.step(op3_walk.OP3_CTRL_S)
+        self._note_preview_phase(info)
+        self._write_preview_joints(joints)
+
+    def _ssp_stance(self, t_s: float) -> str | None:
+        """Stance foot during single support. None in double support."""
+        walker = self.op3
+        if walker is None or walker.period <= 1e-6:
+            return None
+        t = float(t_s) % walker.period
+        if walker.l_ssp_start < t <= walker.l_ssp_end:
+            return "R"
+        if walker.r_ssp_start < t <= walker.r_ssp_end:
+            return "L"
+        return None
+
+    def _on_stance_side(self, stance: str) -> bool:
+        """True when CoM y is past the inner edge, onto ``stance``."""
+        y = float(self.data.subtree_com[self.bid_body, 1])
+        if stance == "L":
+            return y >= zmp_preview.ENTRY_Y_M
+        return y <= -zmp_preview.ENTRY_Y_M
+
+    def _hold_until_stance(
+        self, walker: op3_walk.Op3Walker, preview: zmp_preview.ZmpPreview,
+    ) -> bool:
+        """Keep both feet down until CoM is 8 mm onto the upcoming stance foot.
+
+        The ZMP target on that hold is the box centre, ±0.043 m. The clock
+        does not enter single support while the mass is still in the gap.
+        After 1.5 s the clock is released and the miss is scored.
+        """
+        dt = op3_walk.OP3_CTRL_S
+        t_now = float(walker.time)
+        t_next = t_now + dt
+        if t_next >= walker.period - 1e-12:
+            t_next = 0.0
+        stance_now = self._ssp_stance(t_now)
+        stance_next = self._ssp_stance(t_next)
+        if self._gate_open:
+            if stance_now is not None:
+                self._gate_open = False
+                self._gate_wait_s = 0.0
+            return False
+        if stance_next is None or stance_next == stance_now:
+            return False
+        if self._on_stance_side(stance_next):
+            return False
+        self._gate_wait_s += dt
+        if self._gate_wait_s >= 1.50:
+            self._gate_open = True
+            return False
+        self.preview_gate_holds += 1
+        target = zmp_preview.BOX_CENTER_Y_M if stance_next == "L" else -zmp_preview.BOX_CENTER_Y_M
+        future = np.full(preview.horizon, target, dtype=np.float64)
+        com = preview.step(future)
+        self.preview_com_y = com
+        walker.preview_y = -com
+        joints = self._preview_pose(walker)
+        self.phase = "shift"
+        self.stance = stance_next  # type: ignore[assignment]
+        self._write_preview_joints(joints)
+        return True
+
+    def _loaded_box_zmp(self) -> float | None:
+        """Box-centre ZMP when only one foot is carrying the weight."""
+        fn_l = self.foot_normal("L")
+        fn_r = self.foot_normal("R")
+        if fn_l > 8.0 and fn_r <= 8.0:
+            return zmp_preview.BOX_CENTER_Y_M
+        if fn_r > 8.0 and fn_l <= 8.0:
+            return -zmp_preview.BOX_CENTER_Y_M
+        return None
+
+    def _note_preview_phase(self, info: op3_walk.StepInfo) -> None:
+        if info.phase == "L":
+            self.phase = "swing"
+            self.stance = "R"
+            self._gm_swing = "L"
+        elif info.phase == "R":
+            self.phase = "swing"
+            self.stance = "L"
+            self._gm_swing = "R"
+        else:
+            self.phase = "shift"
+            self._gm_swing = None
+        self.lat = float(info.swap_y_m)
+
+    def _plant_preview_return(self, walker: op3_walk.Op3Walker) -> None:
+        """Both feet are down. Return starts from the shift we are holding."""
+        self._stop_planted = True
+        self._return_t = 0.0
+        self._freeze_time = float(walker.time)
+        self._return_zmp0 = float(self.preview_com_y)
+        self._return_hold = False
+        self._return_done = False
+
+    def _tick_preview_stop(self, walker: op3_walk.Op3Walker) -> None:
+        preview = self._ensure_preview(walker)
+        if not self._stop_planted:
+            # Leave the step length alone. Zeroing it snaps hip pitch.
+            # While one foot is up, the ZMP stays at that stance box centre
+            # (±0.043 m). It does not follow the clock onto the airborne foot.
+            fn_l = self.foot_normal("L")
+            fn_r = self.foot_normal("R")
+            both_down = fn_l > 8.0 and fn_r > 8.0
+            loaded = self._loaded_box_zmp()
+            if both_down:
+                # Pose is frozen. Do not follow the walk cycle off this hull.
+                future = np.full(preview.horizon, float(self.preview_com_y), dtype=np.float64)
+            elif loaded is None:
+                future = self._zmp_future(float(walker.time))
+            else:
+                future = np.full(preview.horizon, loaded, dtype=np.float64)
+            com = preview.step(future)
+            self.preview_com_y = com
+            walker.preview_y = -com
+            # Any double support ends the walk. Waiting for the next
+            # single-support edge walked another step and left the ZMP
+            # on the midline while one sole was already light.
+            if both_down:
+                joints = self._preview_pose(walker)
+                self.phase = "shift"
+                self._write_preview_joints(joints)
+                self._stop_hold_s += op3_walk.OP3_CTRL_S
+                if self._stop_hold_s >= 0.20:
+                    self._plant_preview_return(walker)
+                return
+            self._stop_hold_s = 0.0
+            joints, info = walker.step(op3_walk.OP3_CTRL_S)
+            self._note_preview_phase(info)
+            self._write_preview_joints(joints)
+            return
+        dt = op3_walk.OP3_CTRL_S
+        span = 1.50
+        # Zero is only a double-support target. One light foot sends the
+        # ZMP back to that sole's box centre, ±0.043 m.
+        loaded = self._loaded_box_zmp()
+        future = np.zeros(preview.horizon, dtype=np.float64)
+        if loaded is not None:
+            future[:] = loaded
+            self._return_t = 0.0
+            self._return_done = False
+            self._return_hold = True
+            self._return_zmp0 = float(self.preview_com_y)
+        elif not self._return_done:
+            self._return_hold = False
+            for i in range(preview.horizon):
+                u = min(1.0, max(0.0, (self._return_t + i * dt) / span))
+                s = u * u * u * (u * (u * 6.0 - 15.0) + 10.0)
+                future[i] = self._return_zmp0 * (1.0 - s)
+            self._return_t += dt
+            if self._return_t >= span:
+                self._return_done = True
+        com = preview.step(future)
+        self.preview_com_y = com
+        walker.time = self._freeze_time
+        walker.preview_y = -com
+        joints = self._preview_pose(walker)
+        self.phase = "stand" if self._return_done else "shift"
+        self._write_preview_joints(joints)
+
     def _tick_gait_manager(self, walking: bool) -> None:
         """OP3 cartesian foot targets through the plant-length IK.
 
@@ -524,6 +847,9 @@ class LipmWalker:
         walker = self.op3
         if walker is None:
             self.hold_stand()
+            return
+        if self.cfg.preview_amp_m > 1e-6:
+            self._tick_preview_gait(walker, walking)
             return
         if not walking:
             walker.stop()
