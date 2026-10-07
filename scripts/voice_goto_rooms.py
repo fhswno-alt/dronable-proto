@@ -335,11 +335,18 @@ EAST_L_ONLINE_RESIDUAL_M = -0.028436946196605833
 # stop: ray 0.234 m, left toe, error 0.02769 m, residual −0.0318 m.
 # Not a clear. Not applied to wall_hall_w_2. The approach-wide median
 # and this percentile both sit near 0.056–0.059 m, above that error.
-# "near" keeps only a left ray that is as close as any earlier left
-# ray on wall_hall_e_1 in this bout (band 0). The commit is left out.
-# That is the ~0.028 m class. It is not applied to wall_hall_w_2.
-EAST_L_NEAR_BAND_M = 0.0
-EAST_L_LIVE = "near"
+# "near" kept only a new closest left ray. On tip 05858b7 that was
+# N=6, pad 0.02857 m, and the stop error was 0.06308 m, residual
+# +0.0345 m. That rule is off. "near_k" is the median of the last
+# K left samples whose ray is at or under the near gate. The gate
+# is tighter than the 0.40 m close class. The commit is left out.
+# It is not applied to wall_hall_w_2.
+EAST_L_NEWMIN_PAD_M = 0.02856695273723686
+EAST_L_NEWMIN_N = 6
+EAST_L_NEWMIN_RESIDUAL_M = 0.03450859273365606
+EAST_L_NEAR_GATE_M = 0.30
+EAST_L_NEAR_K = 5
+EAST_L_LIVE = "near_k"
 EAST_L_Q75_RESIDUAL_M = -0.03175107940399083
 EAST_L_Q75_RAY_M = 0.23443045430153236
 EAST_L_Q75_ERR_M = 0.02769268460514473
@@ -824,9 +831,13 @@ def _definition() -> DefinitionJson:
             f"{EAST_L_ONLINE_RESIDUAL_M:+.4f} m. The 75th percentile "
             f"{EAST_L_Q75_M:.5f} m stopped at residual "
             f"{EAST_L_Q75_RESIDUAL_M:+.4f} m. Neither is the latch. "
-            "The live left latch is the median of prior left rays that "
-            "are as close as any earlier left ray on that wall in this "
-            "bout. The sample that crosses the gate is left out. "
+            "A new-closest median, N="
+            f"{EAST_L_NEWMIN_N}, pad {EAST_L_NEWMIN_PAD_M:.5f} m, "
+            f"stopped at residual {EAST_L_NEWMIN_RESIDUAL_M:+.4f} m "
+            "and is not the latch. The live left latch is the median "
+            f"of the last {EAST_L_NEAR_K} left samples whose ray is "
+            f"at or under {EAST_L_NEAR_GATE_M:.2f} m. The sample that "
+            "crosses the gate is left out. "
             "East right-toe samples median "
             f"{EAST_R_LATCH_M:.5f} m (n={len(EAST_R_ERR_M)}). An unknown "
             "toe gets pad 0. Contact "
@@ -1270,11 +1281,12 @@ def _pad_for(wall: str, true_gap: float | None, lead_side: str = "") -> float:
     return 0.0
 
 
-def _in_near_band(ray: float, near_ray: float | None) -> bool:
-    """True when this ray is as close as the closest left ray so far."""
-    if near_ray is None:
-        return True
-    return ray <= near_ray + EAST_L_NEAR_BAND_M
+def _near_k_errs(seen: list[tuple[float, float]]) -> list[float]:
+    """Last K left errors whose ray is inside the near-stop gate."""
+    chosen = [err for ray, err in seen if ray <= EAST_L_NEAR_GATE_M]
+    if len(chosen) > EAST_L_NEAR_K:
+        return chosen[-EAST_L_NEAR_K:]
+    return chosen
 
 
 def _east_l_bout_pad(prior: list[float]) -> tuple[float, bool]:
@@ -2222,8 +2234,8 @@ def _run_room(
     wall_stop_lead_side = ""
     wall_stop_pad: float | None = None
     east_l_hold = False
-    east_l_prior: list[float] = []
-    east_l_near_ray: float | None = None
+    east_l_seen: list[tuple[float, float]] = []
+    east_l_pad_n = 0
     east_l_min_ray: float | None = None
     east_l_min_t: float | None = None
     east_l_min_heading: float | None = None
@@ -2507,7 +2519,7 @@ def _run_room(
                 base = _geom_class(true_name, true_gap) if same else "reject"
                 klass = _toe_class(base, side) if same else "reject"
                 if same and base == "east_close" and side == "L":
-                    pad, defined = _east_l_bout_pad(east_l_prior)
+                    pad, defined = _east_l_bout_pad(_near_k_errs(east_l_seen))
                     residual = _residual_m(err, pad) if defined else None
                 else:
                     pad = _pad_for(true_name, true_gap, side) if same else 0.0
@@ -2646,7 +2658,9 @@ def _run_room(
                         klass = _toe_class(base, side) if same else "reject"
                         pad_defined = True
                         if same and base == "east_close" and side == "L":
-                            pad, pad_defined = _east_l_bout_pad(east_l_prior)
+                            near_errs = _near_k_errs(east_l_seen)
+                            east_l_pad_n = len(near_errs)
+                            pad, pad_defined = _east_l_bout_pad(near_errs)
                             residual = _residual_m(err, pad) if pad_defined else None
                         else:
                             pad = _pad_for(true_name, true_gap, side) if same else 0.0
@@ -2767,7 +2781,7 @@ def _run_room(
                                         f"toe_gap={float(gap):.3f} "
                                         f"ray={true_gap} "
                                         f"pad={pad:.5f} gate={gate:.3f} "
-                                        f"online_n={len(east_l_prior)} "
+                                        f"online_n={east_l_pad_n} "
                                         f"rule={EAST_L_LIVE} "
                                         f"residual={residual} "
                                         f"heading={heading:+.3f} "
@@ -2785,18 +2799,14 @@ def _run_room(
                                 repoint = False
                                 break
                             if (
-                                EAST_L_LIVE == "near"
+                                EAST_L_LIVE == "near_k"
                                 and true_name == EAST_WALL
                                 and side == "L"
                                 and err is not None
                                 and true_gap is not None
-                                and float(true_gap) <= CLOSE_GAP_M
+                                and float(true_gap) <= EAST_L_NEAR_GATE_M
                             ):
-                                ray_f = float(true_gap)
-                                if _in_near_band(ray_f, east_l_near_ray):
-                                    east_l_prior.append(float(err))
-                                if east_l_near_ray is None or ray_f < east_l_near_ray:
-                                    east_l_near_ray = ray_f
+                                east_l_seen.append((float(true_gap), float(err)))
                         elif same:
                             class_reject_count += 1
                             if (
@@ -3115,7 +3125,7 @@ def _run_room(
                 cam_pitch_rad=east_l_min_pitch,
                 lead_off_m=east_l_min_lead,
                 lead_side="L" if east_l_min_ray is not None else "",
-                online_n=len(east_l_prior),
+                online_n=east_l_pad_n,
                 pad_rule=EAST_L_LIVE,
             ),
             wall_residual_max_m=wall_residual_max,
@@ -3333,14 +3343,29 @@ def main() -> int:
         raise SystemExit(f"FAIL: east left applied pad moved to {EAST_L_APPLIED_M}")
     if EAST_L_MAD_APPLIED:
         raise SystemExit("FAIL: east left median+MAD is on the live latch")
-    if EAST_L_LIVE != "near":
+    if EAST_L_LIVE != "near_k":
         raise SystemExit(f"FAIL: east left live rule {EAST_L_LIVE}")
-    if abs(EAST_L_NEAR_BAND_M) > 1e-12:
-        raise SystemExit(f"FAIL: east left near band moved to {EAST_L_NEAR_BAND_M}")
-    if _in_near_band(0.30, 0.26) or not _in_near_band(0.25, 0.26):
-        raise SystemExit("FAIL: near band kept a farther ray")
-    if not _in_near_band(0.40, None):
-        raise SystemExit("FAIL: the first near ray was rejected")
+    if abs(EAST_L_NEAR_GATE_M - 0.30) > 1e-12:
+        raise SystemExit(f"FAIL: east left near gate moved to {EAST_L_NEAR_GATE_M}")
+    if EAST_L_NEAR_GATE_M >= CLOSE_GAP_M:
+        raise SystemExit("FAIL: east left near gate is the fat close class")
+    if EAST_L_NEAR_K != 5:
+        raise SystemExit(f"FAIL: east left near K moved to {EAST_L_NEAR_K}")
+    if EAST_L_NEWMIN_N != 6 or abs(EAST_L_NEWMIN_PAD_M - 0.02856695273723686) > 1e-12:
+        raise SystemExit("FAIL: the new-closest failure moved")
+    if abs(EAST_L_NEWMIN_RESIDUAL_M) <= RANGE_ERR_MAX_M:
+        raise SystemExit("FAIL: the new-closest residual was marked clear")
+    near_demo = _near_k_errs([
+        (0.35, 0.09),
+        (0.29, 0.01),
+        (0.28, 0.02),
+        (0.27, 0.03),
+        (0.26, 0.04),
+        (0.25, 0.05),
+        (0.24, 0.06),
+    ])
+    if near_demo != [0.02, 0.03, 0.04, 0.05, 0.06]:
+        raise SystemExit(f"FAIL: near-k set moved to {near_demo}")
     if abs(EAST_L_ONLINE_RESIDUAL_M) <= RANGE_ERR_MAX_M:
         raise SystemExit("FAIL: the failed online residual was marked clear")
     if EAST_L_ONLINE_N != 22:
@@ -3530,7 +3555,11 @@ def main() -> int:
         "east_l_mad_applied": EAST_L_MAD_APPLIED,
         "east_l_q75_m": EAST_L_Q75_M,
         "east_l_q75_applied": False,
-        "east_l_near_band_m": EAST_L_NEAR_BAND_M,
+        "east_l_newmin_pad_m": EAST_L_NEWMIN_PAD_M,
+        "east_l_newmin_n": EAST_L_NEWMIN_N,
+        "east_l_newmin_residual_m": EAST_L_NEWMIN_RESIDUAL_M,
+        "east_l_near_gate_m": EAST_L_NEAR_GATE_M,
+        "east_l_near_k": EAST_L_NEAR_K,
         "east_l_online_pad_m": EAST_L_ONLINE_PAD_M,
         "east_l_online_n": EAST_L_ONLINE_N,
         "east_l_online_residual_m": EAST_L_ONLINE_RESIDUAL_M,
