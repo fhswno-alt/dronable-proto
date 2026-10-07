@@ -161,8 +161,9 @@ SAME_WALL_ERR_M: tuple[float, ...] = (
     0.05433211195858684,
 )
 LATCH_EXTRA_M = float(statistics.median(SAME_WALL_ERR_M))
-# That median was measured on one wall, close in. It does not travel
-# to wall_hall_e_1 or to wall_hall_w_2 seen from several metres.
+# That median stays the right-toe pad on wall_hall_w_2. It cleared the
+# right-toe living stop. It is not the left-toe pad, and it does not
+# travel to wall_hall_e_1.
 LIVING_WALL = "wall_hall_w_2"
 # Walk-up band the living 17 were collected in. The living latch
 # distance is d_min 0.1263 m + 0.04087 m = 0.1672 m. 0.40 m is 2.39
@@ -299,10 +300,69 @@ EAST_R_ERR_M: tuple[float, ...] = (
 )
 EAST_L_LATCH_M = float(statistics.median(EAST_L_ERR_M))
 EAST_R_LATCH_M = float(statistics.median(EAST_R_ERR_M))
-# The live left latch is median + MAD of the same 45. The median
-# stays 0.04542 m. The pitch/cam_z/lead fit stays unused.
+# Recorded median + MAD of the same 45. A live median stop left
+# +0.0222 m. A live median+MAD stop left −0.0034 m on the kitchen
+# and −0.0403 m on a left-toe living stop. That sum is not the live
+# latch, and it is not applied to wall_hall_w_2.
 EAST_L_MAD_M = float(statistics.median(abs(x - EAST_L_LATCH_M) for x in EAST_L_ERR_M))
 EAST_L_APPLIED_M = EAST_L_LATCH_M + EAST_L_MAD_M
+EAST_L_MAD_APPLIED = False
+
+
+def _sorted_quantile(values: tuple[float, ...], q: float) -> float:
+    ordered = sorted(values)
+    pos = q * (len(ordered) - 1)
+    lo = int(pos)
+    hi = min(lo + 1, len(ordered) - 1)
+    frac = pos - lo
+    return ordered[lo] * (1.0 - frac) + ordered[hi] * frac
+
+
+# 75th percentile of the 45. Both old committing stops are already
+# out. This is the one precommitted fallback if the bout median misses.
+# It is not fitted on a new stop, and it is not applied to wall_hall_w_2.
+EAST_L_Q75_M = _sorted_quantile(EAST_L_ERR_M, 0.75)
+# "online": median of prior close left errors on wall_hall_e_1 in this
+# bout. The sample that crosses the gate is left out. That rule was
+# run live on kitchen −90°: 22 priors, pad 0.05613 m, residual
+# −0.0284 m. It is not the latch. "quantile" is the 75th percentile
+# of the 45. Empty priors do not fall back to the median or to
+# median+MAD.
+EAST_L_ONLINE_PAD_M = 0.05612963080175057
+EAST_L_ONLINE_N = 22
+EAST_L_ONLINE_RESIDUAL_M = -0.028436946196605833
+EAST_L_LIVE = "quantile"
+# Live kitchen −90° on the 75th percentile. Same pose as the online
+# stop: ray 0.234 m, left toe, error 0.02769 m, residual −0.0318 m.
+# Not a clear. Not applied to wall_hall_w_2.
+EAST_L_Q75_RESIDUAL_M = -0.03175107940399083
+EAST_L_Q75_RAY_M = 0.23443045430153236
+EAST_L_Q75_ERR_M = 0.02769268460514473
+# Close left-toe errors on wall_hall_w_2 only. Committing stops are
+# out. Right-toe samples are not in this list. East samples are not
+# in this list. N=19, so this pad can CLEAR. The 0.105 m outlier stays.
+W2_L_ERR_M: tuple[float, ...] = (
+    0.020614517081358474,
+    0.025147450046003716,
+    0.02513908648854296,
+    0.02716756771739376,
+    0.024734052969513476,
+    0.006153987390156268,
+    0.0014678681927092763,
+    0.007872611718017952,
+    0.0014164081123713423,
+    0.011606085373040753,
+    0.0015006221262908181,
+    0.015028955252604836,
+    0.010625936072531067,
+    0.008685153028399645,
+    0.0018331231952742333,
+    0.021709915958411347,
+    0.00766451714241273,
+    0.0006299854612947797,
+    0.10549564179736243,
+)
+W2_L_LATCH_M = float(statistics.median(W2_L_ERR_M))
 # Left-only additive correction, fitted on the 45 samples above.
 # predicted = c0 + c_z*cam_z + c_pitch*cam_pitch + c_lead*lead_off.
 # The kitchen stop on tip 80bf2ea is not in the fit. The prediction
@@ -480,6 +540,8 @@ class EastLeftFact(TypedDict):
     cam_pitch_rad: float | None
     lead_off_m: float | None
     lead_side: str
+    online_n: int
+    pad_rule: str
 
 
 class RoomJson(TypedDict):
@@ -537,6 +599,7 @@ class RoomJson(TypedDict):
     wall_stop_pitch_rad: float | None
     wall_stop_lead_m: float | None
     wall_stop_lead_side: str
+    wall_stop_pad_m: float | None
     east_left: EastLeftFact
     wall_residual_max_m: float | None
     same_wall_count: int
@@ -682,28 +745,41 @@ def _definition() -> DefinitionJson:
             "a different wall is logged and is not added to the latch. "
             f"latch_extra {LATCH_EXTRA_M:.5f} m is the median of "
             f"{len(SAME_WALL_ERR_M)} errors on {LIVING_WALL} with the "
-            f"sim gap under {CLOSE_GAP_M:.2f} m. {EAST_WALL} has its "
-            f"own pooled median, {EAST_LATCH_M:.5f} m, from {len(EAST_CLOSE)} "
-            "close samples on tip aac2baa. The left-toe median of "
-            f"{len(EAST_L_ERR_M)} close left samples is "
-            f"{EAST_L_LATCH_M:.5f} m. The live left latch is that "
-            f"median plus the MAD {EAST_L_MAD_M:.5f} m, so "
-            f"{EAST_L_APPLIED_M:.5f} m. Right-toe samples median "
-            f"{EAST_R_LATCH_M:.5f} m (n={len(EAST_R_ERR_M)}). The "
-            "living median is not copied onto either toe. Contact "
+            f"sim gap under {CLOSE_GAP_M:.2f} m. That median is the "
+            f"right-toe pad on {LIVING_WALL} only. The left-toe pad on "
+            f"that wall is the median of {len(W2_L_ERR_M)} close left "
+            f"samples, {W2_L_LATCH_M:.5f} m, with committing stops left "
+            "out. An east pad is not applied to that wall. "
+            f"{EAST_WALL} left samples median {EAST_L_LATCH_M:.5f} m "
+            f"(n={len(EAST_L_ERR_M)}). Median plus MAD "
+            f"{EAST_L_APPLIED_M:.5f} m is recorded and is not the live "
+            "latch. A same-bout online median of "
+            f"{EAST_L_ONLINE_N} prior close left errors, pad "
+            f"{EAST_L_ONLINE_PAD_M:.5f} m, stopped at residual "
+            f"{EAST_L_ONLINE_RESIDUAL_M:+.4f} m and is not the latch. "
+            f"The live left latch is the 75th percentile of those "
+            f"{len(EAST_L_ERR_M)} samples, {EAST_L_Q75_M:.5f} m. "
+            f"A live stop on that pad left residual "
+            f"{EAST_L_Q75_RESIDUAL_M:+.4f} m at ray {EAST_L_Q75_RAY_M:.3f} m "
+            "on the left toe. It does not clear. "
+            "Right-toe samples median "
+            f"{EAST_R_LATCH_M:.5f} m (n={len(EAST_R_ERR_M)}). An unknown "
+            "toe gets pad 0. Contact "
             f"boxes sit {TOE_OUTBOARD_M:.3f} m outboard of each ankle "
             "roll. The 0.40 m bound is 2.39 times the living "
-            "latch distance 0.1672 m (d_min 0.1263 plus that median). "
+            "right-toe latch distance 0.1672 m (d_min 0.1263 plus "
+            "0.04087 m). "
             "A ray past 0.40 m stays a far reject. The bob pad is not "
-            "stacked on either median. A stop clears only when the "
-            "held-out hit uses the same leading toe and lands within "
-            f"{RANGE_ERR_MAX_M:.2f} m of that toe's median. Right toe "
+            "stacked on any median. A stop clears only when the absolute "
+            "gap between the measured error and that wall×toe pad is "
+            f"at most {RANGE_ERR_MAX_M:.2f} m. A large negative residual "
+            "does not clear. Right toe "
             f"has {len(EAST_R_ERR_M)} samples, under {len(SAME_WALL_ERR_M)}, "
             "so it cannot clear and it does not stop the walk. Once the "
             f"left toe's ray on {EAST_WALL} is at or under "
             f"{EAST_L_HOLD_M:.2f} m, further in-place re-points are "
             "dropped and the walk stays at yaw 0. No pitch, camera "
-            "height, or toe bias is fit across the pooled samples. "
+            "height, or toe bias is fit across pooled samples. "
             "Room reach is a "
             "separate bar. In-place body "
             f"yaw that asks a hip roll over {HIP_BAR_NM:.2f} Nm "
@@ -1097,8 +1173,8 @@ def _geom_class(wall: str, true_gap: float | None) -> str:
 
 
 def _toe_class(klass: str, lead_side: str) -> str:
-    if klass == "east_close" and lead_side in ("L", "R"):
-        return f"east_close_{lead_side}"
+    if klass in ("east_close", "living_close") and lead_side in ("L", "R"):
+        return f"{klass}_{lead_side}"
     return klass
 
 
@@ -1108,28 +1184,44 @@ def _toe_ready(klass: str) -> bool:
         return len(EAST_L_ERR_M) >= len(SAME_WALL_ERR_M)
     if klass == "east_close_R":
         return len(EAST_R_ERR_M) >= len(SAME_WALL_ERR_M)
-    if klass in ("living_close", "other_wall_close"):
+    if klass == "living_close_L":
+        return len(W2_L_ERR_M) >= len(SAME_WALL_ERR_M)
+    if klass == "living_close_R":
+        return len(SAME_WALL_ERR_M) >= 17
+    if klass == "other_wall_close":
         return True
     return False
 
 
 def _pad_for(wall: str, true_gap: float | None, lead_side: str = "") -> float:
+    """Frozen wall×toe pad. East left is supplied by the bout, not here."""
     klass = _geom_class(wall, true_gap)
-    if klass == "living_close":
+    if klass == "living_close" and lead_side == "L":
+        return W2_L_LATCH_M
+    if klass == "living_close" and lead_side == "R":
         return LATCH_EXTRA_M
-    if klass == "east_close" and lead_side == "L":
-        return EAST_L_APPLIED_M
     if klass == "east_close" and lead_side == "R":
         return EAST_R_LATCH_M
-    if klass == "east_close":
-        return EAST_LATCH_M
     return 0.0
+
+
+def _east_l_bout_pad(prior: list[float]) -> tuple[float, bool]:
+    """East-left pad for this sample. The commit sample is not in prior."""
+    if EAST_L_LIVE == "quantile":
+        return EAST_L_Q75_M, True
+    if prior:
+        return float(statistics.median(prior)), True
+    return 0.0, False
 
 
 def _residual_m(err: float | None, pad: float) -> float | None:
     if err is None:
         return None
     return float(err) - pad
+
+
+def _within_cm(residual: float | None) -> bool:
+    return residual is not None and abs(residual) <= RANGE_ERR_MAX_M
 
 
 def _wall_hit(
@@ -2056,7 +2148,9 @@ def _run_room(
     wall_stop_pitch: float | None = None
     wall_stop_lead: float | None = None
     wall_stop_lead_side = ""
+    wall_stop_pad: float | None = None
     east_l_hold = False
+    east_l_prior: list[float] = []
     east_l_min_ray: float | None = None
     east_l_min_t: float | None = None
     east_l_min_heading: float | None = None
@@ -2339,8 +2433,12 @@ def _run_room(
                 side = str(reading.get("lead_side") or "")
                 base = _geom_class(true_name, true_gap) if same else "reject"
                 klass = _toe_class(base, side) if same else "reject"
-                pad = _pad_for(true_name, true_gap, side) if same else 0.0
-                residual = _residual_m(err, pad) if same else None
+                if same and base == "east_close" and side == "L":
+                    pad, defined = _east_l_bout_pad(east_l_prior)
+                    residual = _residual_m(err, pad) if defined else None
+                else:
+                    pad = _pad_for(true_name, true_gap, side) if same else 0.0
+                    residual = _residual_m(err, pad) if same else None
                 wall_contacts.append(_wall_hit(
                     float(session.data.time),
                     kind,
@@ -2473,8 +2571,13 @@ def _run_room(
                         side = str(reading.get("lead_side") or "")
                         base = _geom_class(true_name, true_gap) if same else "reject"
                         klass = _toe_class(base, side) if same else "reject"
-                        pad = _pad_for(true_name, true_gap, side) if same else 0.0
-                        residual = _residual_m(err, pad) if same else None
+                        pad_defined = True
+                        if same and base == "east_close" and side == "L":
+                            pad, pad_defined = _east_l_bout_pad(east_l_prior)
+                            residual = _residual_m(err, pad) if pad_defined else None
+                        else:
+                            pad = _pad_for(true_name, true_gap, side) if same else 0.0
+                            residual = _residual_m(err, pad) if same else None
                         heading = _yaw(session.data, session.bid_body)
                         approach.append(ApproachJson(
                             t=now,
@@ -2543,15 +2646,16 @@ def _run_room(
                             # Right toe on wall_hall_e_1 has 9 samples.
                             # It cannot CLEAR, and it must not consume
                             # the walk before a left-toe close hit.
-                            if (
+                            # East left with no prior close sample has
+                            # no pad yet, so it does not latch.
+                            crossed = (
                                 gap is not None
                                 and float(gap) <= gate
                                 and klass != "east_close_R"
-                            ):
-                                within = (
-                                    residual is not None
-                                    and residual <= RANGE_ERR_MAX_M
-                                )
+                                and pad_defined
+                            )
+                            if crossed:
+                                within = _within_cm(residual)
                                 ready = _toe_ready(klass)
                                 clear = within and ready
                                 wall_stop_clear = clear
@@ -2566,6 +2670,7 @@ def _run_room(
                                 wall_stop_pitch = float(reading["cam_pitch_rad"])
                                 wall_stop_lead = float(reading["lead_off_m"])
                                 wall_stop_lead_side = str(reading["lead_side"])
+                                wall_stop_pad = pad
                                 if residual is not None and (
                                     wall_residual_max is None
                                     or residual > wall_residual_max
@@ -2588,7 +2693,9 @@ def _run_room(
                                         f"class={klass} "
                                         f"toe_gap={float(gap):.3f} "
                                         f"ray={true_gap} "
-                                        f"pad={pad:.4f} gate={gate:.3f} "
+                                        f"pad={pad:.5f} gate={gate:.3f} "
+                                        f"online_n={len(east_l_prior)} "
+                                        f"rule={EAST_L_LIVE} "
                                         f"residual={residual} "
                                         f"heading={heading:+.3f} "
                                         f"cam_z={float(reading['cam_z_m']):.3f} "
@@ -2604,6 +2711,15 @@ def _run_room(
                                 )
                                 repoint = False
                                 break
+                            if (
+                                EAST_L_LIVE == "online"
+                                and true_name == EAST_WALL
+                                and side == "L"
+                                and err is not None
+                                and true_gap is not None
+                                and float(true_gap) <= CLOSE_GAP_M
+                            ):
+                                east_l_prior.append(float(err))
                         elif same:
                             class_reject_count += 1
                             if (
@@ -2908,6 +3024,7 @@ def _run_room(
             wall_stop_pitch_rad=wall_stop_pitch,
             wall_stop_lead_m=wall_stop_lead,
             wall_stop_lead_side=wall_stop_lead_side,
+            wall_stop_pad_m=wall_stop_pad,
             east_left=EastLeftFact(
                 hold=east_l_hold,
                 presented=(
@@ -2921,6 +3038,8 @@ def _run_room(
                 cam_pitch_rad=east_l_min_pitch,
                 lead_off_m=east_l_min_lead,
                 lead_side="L" if east_l_min_ray is not None else "",
+                online_n=len(east_l_prior),
+                pad_rule=EAST_L_LIVE,
             ),
             wall_residual_max_m=wall_residual_max,
             same_wall_count=same_wall_count,
@@ -3135,6 +3254,32 @@ def main() -> int:
         raise SystemExit(f"FAIL: east left MAD moved to {EAST_L_MAD_M}")
     if abs(EAST_L_APPLIED_M - 0.06506832389495176) > 1e-12:
         raise SystemExit(f"FAIL: east left applied pad moved to {EAST_L_APPLIED_M}")
+    if EAST_L_MAD_APPLIED:
+        raise SystemExit("FAIL: east left median+MAD is on the live latch")
+    if EAST_L_LIVE != "quantile":
+        raise SystemExit(f"FAIL: east left live rule {EAST_L_LIVE}")
+    if abs(EAST_L_ONLINE_RESIDUAL_M) <= RANGE_ERR_MAX_M:
+        raise SystemExit("FAIL: the failed online residual was marked clear")
+    if EAST_L_ONLINE_N != 22:
+        raise SystemExit("FAIL: online prior count moved")
+    if abs(EAST_L_ONLINE_PAD_M - 0.05612963080175057) > 1e-12:
+        raise SystemExit("FAIL: online pad moved")
+    if abs(EAST_L_Q75_RESIDUAL_M - -0.03175107940399083) > 1e-12:
+        raise SystemExit("FAIL: east left q75 residual moved")
+    if abs(EAST_L_Q75_ERR_M - (EAST_L_Q75_M + EAST_L_Q75_RESIDUAL_M)) > 1e-12:
+        raise SystemExit("FAIL: east left q75 error does not match the residual")
+    if abs(EAST_L_Q75_RESIDUAL_M) <= RANGE_ERR_MAX_M:
+        raise SystemExit("FAIL: the q75 residual was marked clear")
+    if abs(EAST_L_Q75_M - 0.05944376400913556) > 1e-12:
+        raise SystemExit(f"FAIL: east left q75 moved to {EAST_L_Q75_M}")
+    if len(W2_L_ERR_M) != 19:
+        raise SystemExit(f"FAIL: living left set has {len(W2_L_ERR_M)} samples")
+    if abs(W2_L_LATCH_M - 0.010625936072531067) > 1e-12:
+        raise SystemExit(f"FAIL: living left median moved to {W2_L_LATCH_M}")
+    if abs(W2_L_LATCH_M - EAST_L_APPLIED_M) < 1e-3 or abs(W2_L_LATCH_M - EAST_L_LATCH_M) < 1e-3:
+        raise SystemExit("FAIL: living left pad copied an east pad")
+    if abs(W2_L_LATCH_M - LATCH_EXTRA_M) < 1e-3:
+        raise SystemExit("FAIL: living left pad copied the right-toe pad")
     if EAST_L_FIT_APPLIED:
         raise SystemExit("FAIL: east left additive correction was applied")
     fit_pred = (
@@ -3152,26 +3297,48 @@ def main() -> int:
         raise SystemExit(f"FAIL: east right median moved to {EAST_R_LATCH_M}")
     if len(EAST_R_ERR_M) != 9:
         raise SystemExit("FAIL: east right set changed size")
-    if _pad_for(EAST_WALL, 0.20) != EAST_LATCH_M:
-        raise SystemExit("FAIL: east pooled pad moved")
-    if _pad_for(EAST_WALL, 0.20, "L") != EAST_L_APPLIED_M:
-        raise SystemExit("FAIL: east left pad is not median plus MAD")
+    if _pad_for(EAST_WALL, 0.20) != 0.0:
+        raise SystemExit("FAIL: east unknown toe took the pooled pad")
+    if _pad_for(EAST_WALL, 0.20, "L") != 0.0:
+        raise SystemExit("FAIL: east left frozen pad is on the live path")
     if _pad_for(EAST_WALL, 0.20, "R") != EAST_R_LATCH_M:
         raise SystemExit("FAIL: east right pad is not the right median")
+    if EAST_L_LIVE == "online" and _east_l_bout_pad([]) != (0.0, False):
+        raise SystemExit("FAIL: empty east left bout took a frozen pad")
+    if EAST_L_LIVE == "online" and _east_l_bout_pad([0.02, 0.04]) != (0.03, True):
+        raise SystemExit("FAIL: east left bout median moved")
+    if EAST_L_LIVE == "quantile" and _east_l_bout_pad([]) != (EAST_L_Q75_M, True):
+        raise SystemExit("FAIL: east left quantile is not the live pad")
     if abs(EAST_L_LATCH_M - LATCH_EXTRA_M) < 1e-3 or abs(EAST_R_LATCH_M - LATCH_EXTRA_M) < 1e-3:
         raise SystemExit("FAIL: a toe median copied the living pad")
     if _pad_for(EAST_WALL, 1.0, "L") != 0.0:
         raise SystemExit("FAIL: far east ray took a pad")
     if _pad_for("wall_hall_e_0", 0.20, "L") != 0.0:
         raise SystemExit("FAIL: an unmeasured close wall took a pad")
-    if _pad_for(LIVING_WALL, 0.20, "L") != LATCH_EXTRA_M:
-        raise SystemExit("FAIL: living close pad moved onto a toe split")
+    if _pad_for(LIVING_WALL, 0.20, "L") != W2_L_LATCH_M:
+        raise SystemExit("FAIL: living left pad is not the left median")
     if _pad_for(LIVING_WALL, 0.20, "R") != LATCH_EXTRA_M:
-        raise SystemExit("FAIL: living close pad moved onto a toe split")
+        raise SystemExit("FAIL: living right pad moved")
+    if _pad_for(LIVING_WALL, 0.20) != 0.0:
+        raise SystemExit("FAIL: living unknown toe borrowed a pad")
+    if _pad_for(LIVING_WALL, 0.20, "L") == EAST_L_APPLIED_M:
+        raise SystemExit("FAIL: living left took the east MAD pad")
+    if _within_cm(-0.040270638405520004):
+        raise SystemExit("FAIL: a 4.0 cm living miss would clear")
+    if not _within_cm(-0.0008061141556545692):
+        raise SystemExit("FAIL: the living right residual would not clear")
+    if _within_cm(0.02218349902600958):
+        raise SystemExit("FAIL: the kitchen median residual would clear")
+    if not _within_cm(-0.0034440877109621904):
+        raise SystemExit("FAIL: a 0.34 cm miss would not clear")
     if _toe_ready("east_close_R"):
         raise SystemExit("FAIL: east right can clear under the living sample bar")
     if not _toe_ready("east_close_L"):
         raise SystemExit("FAIL: east left pad is not ready")
+    if not _toe_ready("living_close_L") or not _toe_ready("living_close_R"):
+        raise SystemExit("FAIL: a living toe pad is not ready")
+    if _toe_ready("living_close"):
+        raise SystemExit("FAIL: living close with no toe can clear")
     if abs(EAST_L_HOLD_M - 0.60) > 1e-12:
         raise SystemExit(f"FAIL: east left hold moved to {EAST_L_HOLD_M}")
     if _yaw_toward_u(100.0) != voice.YAW_RAD_S or _yaw_toward_u(540.0) != -voice.YAW_RAD_S:
@@ -3265,8 +3432,21 @@ def main() -> int:
         "east_l_latch_m": EAST_L_LATCH_M,
         "east_l_mad_m": EAST_L_MAD_M,
         "east_l_applied_m": EAST_L_APPLIED_M,
-        "east_l_pad_rule": "median+MAD",
+        "east_l_mad_applied": EAST_L_MAD_APPLIED,
+        "east_l_q75_m": EAST_L_Q75_M,
+        "east_l_q75_applied": EAST_L_LIVE == "quantile",
+        "east_l_online_pad_m": EAST_L_ONLINE_PAD_M,
+        "east_l_online_n": EAST_L_ONLINE_N,
+        "east_l_online_residual_m": EAST_L_ONLINE_RESIDUAL_M,
+        "east_l_q75_residual_m": EAST_L_Q75_RESIDUAL_M,
+        "east_l_q75_ray_m": EAST_L_Q75_RAY_M,
+        "east_l_q75_err_m": EAST_L_Q75_ERR_M,
+        "east_l_pad_rule": EAST_L_LIVE,
         "east_l_sample_count": len(EAST_L_ERR_M),
+        "w2_l_latch_m": W2_L_LATCH_M,
+        "w2_l_sample_count": len(W2_L_ERR_M),
+        "w2_r_latch_m": LATCH_EXTRA_M,
+        "clear_rule": "abs(measured_error-pad)<=0.01",
         "east_l_fit_applied": EAST_L_FIT_APPLIED,
         "east_l_held_err_m": EAST_L_HELD_ERR_M,
         "east_l_held_residual_m": EAST_L_HELD_ERR_M - EAST_L_LATCH_M,
@@ -3284,9 +3464,9 @@ def main() -> int:
             CLOSE_GAP_M / (float(definition["d_min_m"]) + LATCH_EXTRA_M)
         ),
         "per_wall_pad_m": {
-            LIVING_WALL: LATCH_EXTRA_M,
-            EAST_WALL: EAST_LATCH_M,
-            "wall_hall_e_1×L": EAST_L_LATCH_M,
+            "wall_hall_w_2×L": W2_L_LATCH_M,
+            "wall_hall_w_2×R": LATCH_EXTRA_M,
+            "wall_hall_e_1×L": EAST_L_Q75_M,
             "wall_hall_e_1×R": EAST_R_LATCH_M,
         },
         "bob_pad_stacked": False,
