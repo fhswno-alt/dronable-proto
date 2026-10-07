@@ -35,10 +35,18 @@ ASK_NM = 2.33
 # Tighter voice-speed target. CLEAR stays at ASK_NM. This is the headroom bar.
 HEADROOM_NM = 2.20
 # A step is a foot that leaves the floor, moves forward in the air, and lands.
+# Clearance is the lowest corner of the 135×76 mm contact box, not the
+# box centre and not a toe sphere. Half-length 67.5 mm: 1° of sole pitch
+# drops a toe or heel by about 1.2 mm. The bar is the minimum of that
+# corner over 20–80% of the swing.
 STEP_CLEAR_M = 0.008
 STEP_SLIP_M = 0.002
 STEP_FRAC_MIN = 0.90
 STEP_PITCH_DEG = 3.0
+STEP_LEN_TOL = 0.20
+STEP_SWING_LO = 0.20
+STEP_SWING_HI = 0.80
+FOOT_HALF_X_M = 0.0675
 COP_P5_MM = 5.0
 AIR_N = 1.0
 LEG_JOINTS: tuple[str, ...] = (
@@ -588,13 +596,41 @@ def _trunk_pitch(session: sw.SteerSession) -> float:
     return math.atan2(-float(R[2, 0]), math.hypot(float(R[0, 0]), float(R[1, 0])))
 
 
-def _step_honesty(rows: list[dict[str, float | str]], x_amp: float) -> dict[str, float]:
-    """Per completed step: clearance, slip, airborne separation, step fraction.
+def _swing_window_z(iv: list[dict[str, float | str]], side: str) -> tuple[float, float]:
+    """Min and max of the lowest sole corner over 20–80% of the swing."""
+    t0 = float(iv[0]["t"])
+    t1 = float(iv[-1]["t"])
+    span = t1 - t0
+    lo = t0 + STEP_SWING_LO * span
+    hi = t0 + STEP_SWING_HI * span
+    zs = [
+        float(r[side + "z"])
+        for r in iv
+        if lo - 1e-12 <= float(r["t"]) <= hi + 1e-12
+    ]
+    if not zs:
+        zs = [float(r[side + "z"]) for r in iv]
+    return min(zs), max(zs)
 
-    A completed step is a swing that leaves the floor by at least 8 mm and
-    is back in contact at the end. A truncated swing at the log boundary
-    is not a step. Zero completed steps fails the bars.
+
+def _step_honesty(
+    rows: list[dict[str, float | str]],
+    x_amp: float,
+    vx: float,
+    period_s: float,
+) -> dict[str, object]:
+    """Per swing: lowest-corner clearance, slip, step fraction, airborne advance.
+
+    Clearance is the lowest of the four bottom corners of the 135×76 mm
+    contact box, and the bar uses the minimum of that height over 20–80%
+    of the swing. Airborne advance is the swing foot's world-x change
+    from the first airborne tick to the last. Commanded step length is
+    ``vx·T/2``. A completed step lands, is airborne for more than 10
+    ticks, and keeps that corner at least 8 mm up through the window.
+    A truncated swing that never lands is not a step. Zero completed
+    steps fails. Every completed step must land within ±20% of vx·T/2.
     """
+    cmd = abs(float(vx)) * float(period_s) / 2.0
 
     def intervals(side: str) -> list[list[dict[str, float | str]]]:
         out: list[list[dict[str, float | str]]] = []
@@ -610,29 +646,27 @@ def _step_honesty(rows: list[dict[str, float | str]], x_amp: float) -> dict[str,
             out.append(cur)
         return out
 
-    mids: list[float] = []
-    peaks: list[float] = []
-    slips: list[float] = []
-    fracs: list[float] = []
-    advs: list[float] = []
-    windows: list[tuple[float, float, float, float]] = []
+    swings: list[dict[str, float | str | bool]] = []
     sep_air = 0.0
     for side in ("L", "R"):
         other = "R" if side == "L" else "L"
         for iv in intervals(side):
             if len(iv) < 20:
                 continue
-            zs = [float(r[side + "z"]) for r in iv]
-            mid = zs[len(iv) // 2]
-            mx = max(zs)
+            clear_z, peak_z = _swing_window_z(iv, side)
             air = 0.0
             con = 0.0
             n_air = 0
+            air_x0 = 0.0
+            air_x1 = 0.0
             for a, b in zip(iv, iv[1:]):
                 d = float(b[side + "x"]) - float(a[side + "x"])
                 airborne = float(b[side + "fn"]) < AIR_N and int(b[side + "n"]) == 0
                 if airborne:
+                    if n_air == 0:
+                        air_x0 = float(b[side + "x"])
                     n_air += 1
+                    air_x1 = float(b[side + "x"])
                     sep_air = max(sep_air, abs(float(b["lx"]) - float(b["rx"])))
                 if d > 0.0:
                     if airborne:
@@ -640,44 +674,68 @@ def _step_honesty(rows: list[dict[str, float | str]], x_amp: float) -> dict[str,
                     else:
                         con += d
             landed = int(iv[-1][side + "n"]) > 0 or float(iv[-1][side + "fn"]) >= AIR_N
-            if not (landed and n_air > 10 and mx >= STEP_CLEAR_M):
+            if not landed:
                 continue
+            air_adv = (air_x1 - air_x0) if n_air > 0 else 0.0
             slip = math.hypot(
                 float(iv[-1][other + "x"]) - float(iv[0][other + "x"]),
                 float(iv[-1][other + "y"]) - float(iv[0][other + "y"]),
             )
             frac = air / (air + con) if (air + con) > 1e-6 else 0.0
-            mids.append(mid)
-            peaks.append(mx)
-            slips.append(slip)
-            fracs.append(frac)
-            advs.append(float(iv[-1][side + "x"]) - float(iv[0][side + "x"]))
-            windows.append((
-                float(iv[0]["t"]), float(iv[-1]["t"]),
-                float(iv[0]["bx"]), float(iv[-1]["bx"]),
-            ))
+            done = n_air > 10 and clear_z >= STEP_CLEAR_M
+            swings.append({
+                "side": side,
+                "t0": float(iv[0]["t"]),
+                "t1": float(iv[-1]["t"]),
+                "done": done,
+                "n_air": float(n_air),
+                "clear_mm": clear_z * 1000.0,
+                "peak_mm": peak_z * 1000.0,
+                "slip_mm": slip * 1000.0,
+                "frac": frac,
+                "air_mm": air_adv * 1000.0,
+                "air_fwd_mm": air * 1000.0,
+                "con_mm": con * 1000.0,
+                "net_mm": (float(iv[-1][side + "x"]) - float(iv[0][side + "x"])) * 1000.0,
+                "bx0": float(iv[0]["bx"]),
+                "bx1": float(iv[-1]["bx"]),
+            })
+    done_rows = [s for s in swings if bool(s["done"])]
+    scored = done_rows if done_rows else swings
     stand = [float(r["pitch"]) for r in rows if r["stage"] == "stand" and float(r["t"]) > 0.20]
     pitch0 = float(np.median(stand)) if stand else (float(rows[0]["pitch"]) if rows else 0.0)
     pitch1 = float(rows[-1]["pitch"]) if rows else pitch0
     v = 0.0
-    if windows:
-        windows.sort()
-        dt = windows[-1][1] - windows[0][0]
+    if done_rows:
+        ordered = sorted(done_rows, key=lambda s: float(s["t0"]))
+        dt = float(ordered[-1]["t1"]) - float(ordered[0]["t0"])
         if dt > 1e-6:
-            v = (windows[-1][3] - windows[0][2]) / dt
-    n = len(mids)
+            v = (float(ordered[-1]["bx1"]) - float(ordered[0]["bx0"])) / dt
+    n = len(done_rows)
+    airs = [float(s["air_mm"]) for s in done_rows]
+    air_report = airs if airs else [float(s["air_mm"]) for s in swings]
+    len_ok = (
+        n >= 1
+        and cmd > 1e-6
+        and all(abs(a / 1000.0 - cmd) <= STEP_LEN_TOL * cmd for a in airs)
+    )
     return {
         "n_steps": float(n),
-        "clear_mm": (min(mids) * 1000.0) if mids else float("nan"),
-        "clear_max_mm": (max(peaks) * 1000.0) if peaks else float("nan"),
-        "slip_mm": (max(slips) * 1000.0) if slips else float("nan"),
-        "slip_sum_mm": (sum(slips) * 1000.0) if slips else float("nan"),
+        "n_swings": float(len(swings)),
+        "clear_mm": (min(float(s["clear_mm"]) for s in scored)) if scored else float("nan"),
+        "clear_max_mm": (max(float(s["peak_mm"]) for s in scored)) if scored else float("nan"),
+        "slip_mm": (max(float(s["slip_mm"]) for s in scored)) if scored else float("nan"),
+        "slip_sum_mm": (sum(float(s["slip_mm"]) for s in scored)) if scored else float("nan"),
         "sep_mm": sep_air * 1000.0,
-        "step_frac": min(fracs) if fracs else float("nan"),
-        "adv_mm": (min(advs) * 1000.0) if advs else float("nan"),
+        "step_frac": (min(float(s["frac"]) for s in scored)) if scored else float("nan"),
+        "adv_mm": (min(float(s["net_mm"]) for s in scored)) if scored else float("nan"),
+        "air_mm": (min(air_report)) if air_report else float("nan"),
+        "cmd_mm": cmd * 1000.0,
+        "len_ok": len_ok,
         "x_amp_mm": abs(x_amp) * 1000.0,
         "pitch_deg": math.degrees(pitch1 - pitch0),
         "v_m_s": v,
+        "steps": swings,
     }
 
 
@@ -945,6 +1003,12 @@ def run_attempt(
             }
             for side in ("L", "R"):
                 gid = int(lipm.gid[side])
+                half_x = float(session.model.geom_size[gid, 0])
+                if abs(half_x - FOOT_HALF_X_M) > 1e-4:
+                    raise SystemExit(
+                        f"{side} contact box half-length {half_x:.4f} m "
+                        f"is not {FOOT_HALF_X_M:.4f} m"
+                    )
                 key = side.lower()
                 rec[side + "x"] = float(session.data.geom_xpos[gid][0])
                 rec[side + "y"] = float(session.data.geom_xpos[gid][1])
@@ -1065,7 +1129,7 @@ def run_attempt(
         and knee_rms < BASE_JOINT_JERK_RMS - 0.5
     )
     tip_ok = up_z >= 0.90
-    honesty = _step_honesty(foot_rows, x_amp_seen)
+    honesty = _step_honesty(foot_rows, x_amp_seen, vx_cmd, period_s)
     cop_p5 = float(np.percentile(decl_cop_mm, 5)) if decl_cop_mm else float("nan")
     if kit_baseline:
         step_ok = True
@@ -1077,7 +1141,8 @@ def run_attempt(
             and honesty["slip_mm"] <= STEP_SLIP_M * 1000.0
             and honesty["step_frac"] >= STEP_FRAC_MIN
             and honesty["sep_mm"] + 1e-6 >= honesty["x_amp_mm"]
-            and abs(honesty["pitch_deg"]) <= STEP_PITCH_DEG
+            and abs(float(honesty["pitch_deg"])) <= STEP_PITCH_DEG
+            and bool(honesty["len_ok"])
         )
         cop_p5_ok = math.isfinite(cop_p5) and cop_p5 >= COP_P5_MM
     cleared = (
@@ -1107,6 +1172,11 @@ def run_attempt(
         "sep_mm": honesty["sep_mm"],
         "step_frac": honesty["step_frac"],
         "adv_mm": honesty["adv_mm"],
+        "air_mm": honesty["air_mm"],
+        "cmd_mm": honesty["cmd_mm"],
+        "len_ok": honesty["len_ok"],
+        "n_swings": honesty["n_swings"],
+        "steps": honesty["steps"],
         "x_amp_mm": honesty["x_amp_mm"],
         "pitch_deg": honesty["pitch_deg"],
         "v_step_m_s": honesty["v_m_s"],
@@ -1239,10 +1309,30 @@ def _print_result(result: dict[str, object]) -> None:
         f"sep {float(result['sep_mm']):.2f} mm "
         f"(x {float(result['x_amp_mm']):.2f}) "
         f"frac {float(result['step_frac']):.3f} "
+        f"air {float(result['air_mm']):.1f} mm "
+        f"cmd {float(result['cmd_mm']):.1f} mm "
+        f"(±{STEP_LEN_TOL * 100.0:.0f}%, len {result['len_ok']}) "
         f"adv {float(result['adv_mm']):.1f} mm "
         f"pitch {float(result['pitch_deg']):+.2f} deg "
         f"v {float(result['v_step_m_s']):.4f} m/s"
     )
+    steps = result.get("steps")
+    if isinstance(steps, list) and steps:
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            mark = "step" if bool(step.get("done")) else "down"
+            print(
+                f"  {mark} {step['side']} "
+                f"t {float(step['t0']):.3f}-{float(step['t1']):.3f} "
+                f"air {float(step['air_mm']):.1f} mm "
+                f"cmd {float(result['cmd_mm']):.1f} mm "
+                f"clear {float(step['clear_mm']):.2f} mm "
+                f"(peak {float(step['peak_mm']):.2f}) "
+                f"slip {float(step['slip_mm']):.2f} mm "
+                f"frac {float(step['frac']):.3f} "
+                f"n_air {int(step['n_air'])}"
+            )
     print(
         f"  CoM out {result['com_out']} frac {float(result['com_out_frac']):.3f} "
         f"min {float(result['com_min_m']):+.6f} m  "
