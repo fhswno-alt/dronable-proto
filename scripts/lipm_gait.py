@@ -304,6 +304,9 @@ class LipmWalker:
                 pelvis_deg=cfg.gm_pelvis_deg,
                 hip_pitch_deg=cfg.gm_hip_pitch_deg,
             )
+            # Lateral preview spawns on a level sole. Kit stays pitched.
+            if cfg.preview_amp_m > 1e-6:
+                self.op3.sole_level = 1.0
             for name, val in self.op3.stand_joints().items():
                 if "sho" in name:
                     continue
@@ -644,6 +647,7 @@ class LipmWalker:
             self.preview_stage = "start"
             self._preview_clock = -float(self.cfg.preview_arm_s)
         if self.preview_stage == "start":
+            walker.sole_level = self._sole_level_now()
             future = self._zmp_future(self._preview_clock)
             com = preview.step(future)
             self.preview_com_y = com
@@ -665,6 +669,7 @@ class LipmWalker:
                 walker.ctrl_running = True
                 walker.update_movement()
             return
+        walker.sole_level = 0.0
         x_amp, angle = kit_bus_step(self.cmd_vx, self.cmd_yaw, self.cfg.gm_period_s)
         walker.set_command(x_amp, 0.0, angle)
         if self._hold_until_stance(walker, preview):
@@ -677,6 +682,24 @@ class LipmWalker:
         joints, info = walker.step(op3_walk.OP3_CTRL_S)
         self._note_preview_phase(info)
         self._write_preview_joints(joints)
+
+    def _sole_level_now(self) -> float:
+        """1 on the quiet stand, 0 once the arm has finished.
+
+        The stand spawns with the ankle matching the hip-pitch offset, so
+        all four sole corners start on the floor. The arm returns that
+        match to 0 on a smootherstep. The walk then uses the kit pitch.
+        """
+        arm = float(self.cfg.preview_arm_s)
+        if arm <= 1e-6:
+            return 0.0
+        u = (float(self._preview_clock) + arm) / arm
+        if u <= 0.0:
+            return 1.0
+        if u >= 1.0:
+            return 0.0
+        s = u * u * u * (u * (u * 6.0 - 15.0) + 10.0)
+        return 1.0 - s
 
     def _ssp_stance(self, t_s: float) -> str | None:
         """Stance foot during single support. None in double support."""

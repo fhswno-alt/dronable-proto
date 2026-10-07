@@ -1,0 +1,200 @@
+{
+  "cleared": true,
+  "margins_ok": true,
+  "ask_ok": true,
+  "jerk_ok": true,
+  "tip_ok": true,
+  "period_s": 6.4,
+  "dsp": 0.7,
+  "amp_m": 0.043,
+  "z_m": 0.004,
+  "arm_s": 2.4,
+  "vx_m_s": 0.04,
+  "kit_baseline": false,
+  "y_swap_m": 0.0,
+  "pelvis_deg": 0.0,
+  "zc_m": 0.18149204951041178,
+  "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+  "soft_pass": 0,
+  "hard_cap_ticks": 0,
+  "fault": "",
+  "dx_m": 0.0564841201784884,
+  "min_up_z": 0.9654892895443297,
+  "ik_fail": 0,
+  "gate_holds": 0,
+  "n_ticks": 1800,
+  "com_out": 0,
+  "cop_out": 0,
+  "zmp_out": 0,
+  "ask_over": 0,
+  "com_min_m": 0.021637693658216682,
+  "zmp_min_m": 0.021637693658216682,
+  "com_out_frac": 0.0,
+  "zmp_out_frac": 0.0,
+  "com_frac": {
+    "all": {
+      "n": 1800.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 21.637693658216683
+    },
+    "ss_L": {
+      "n": 99.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 22.019683474642164
+    },
+    "ss_R": {
+      "n": 190.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 22.068995581783614
+    },
+    "ds": {
+      "n": 1511.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 21.637693658216683
+    },
+    "air": {
+      "n": 0.0,
+      "n_out": 0.0,
+      "frac": NaN,
+      "min_mm": NaN
+    }
+  },
+  "zmp_frac": {
+    "all": {
+      "n": 1799.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 21.637693658216683
+    },
+    "ss_L": {
+      "n": 99.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 22.019683474642164
+    },
+    "ss_R": {
+      "n": 190.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 22.068995581783614
+    },
+    "ds": {
+      "n": 1510.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 21.637693658216683
+    },
+    "air": {
+      "n": 0.0,
+      "n_out": 0.0,
+      "frac": NaN,
+      "min_mm": NaN
+    }
+  },
+  "zmp_pos_frac": {
+    "all": {
+      "n": 1798.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 12.184749321638554
+    },
+    "ss_L": {
+      "n": 99.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 20.643498168423516
+    },
+    "ss_R": {
+      "n": 190.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 20.683158387986953
+    },
+    "ds": {
+      "n": 1509.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 12.184749321638554
+    },
+    "air": {
+      "n": 0.0,
+      "n_out": 0.0,
+      "frac": NaN,
+      "min_mm": NaN
+    }
+  },
+  "com_worst": "+21.64 mm t 0.168 s stage stand support double fn 11.64/11.61",
+  "cop_worst": "+8.89 mm t 0.128 s stage stand support double fn 11.69/11.66",
+  "zmp_worst": "+21.64 mm t 0.168 s stage stand support double fn 11.64/11.61",
+  "ask_worst": "r_hip_roll sum 1.9956 Nm signed +0.2465 Nm t 2.816 s stage walk q -0.14133 q_des -0.11330 kp 40.0 kv 1.7027 omega +0.5136",
+  "ask_nm": 1.995631587118884,
+  "jerk_joint": "r_knee",
+  "jerk_rad_s3": 1250.4078238076595,
+  "jerk_rms": 55.487486327744406,
+  "jerk_t": 0.4080000000000003,
+  "r_knee_jerk": 1250.4078238076595,
+  "r_knee_jerk_rms": 55.487486327744406,
+  "r_knee_jerk_t": 0.4080000000000003,
+  "torso_jerk_m_s3": 88.85277150719413,
+  "torso_jerk_rms": 3.7223634276158113,
+  "torso_jerk_t": 0.024000000000000007,
+  "torso_jerk_walk_peak": 56.01077215468779,
+  "torso_jerk_walk_rms": 2.3017606843132863,
+  "tau_joint": "l_knee",
+  "tau_nm": 0.868747421797309,
+  "tau_t": 0.4000000000000003,
+  "preview_peak_m": 0.04441683185799742,
+  "diag": [
+    "t 4.000 walk support R com_y -0.0347 foot_y -0.0479 preview_com -0.0426 preview_y +0.0426 margin +24.90 mm",
+    "t 4.008 walk support R com_y -0.0347 foot_y -0.0479 preview_com -0.0426 preview_y +0.0426 margin +24.91 mm",
+    "t 4.016 walk support R com_y -0.0347 foot_y -0.0479 preview_com -0.0426 preview_y +0.0426 margin +24.91 mm",
+    "t 4.024 walk support R com_y -0.0347 foot_y -0.0478 preview_com -0.0427 preview_y +0.0427 margin +24.91 mm"
+  ],
+  "worst_diag": "t 7.608 walk support L com_y +0.0306 foot_y +0.0466 preview_com +0.0430 preview_y -0.0430 margin +22.02 mm",
+  "stages": {
+    "stand": {
+      "com": "+21.64 mm t 0.168 s stage stand support double fn 11.64/11.61",
+      "cop": "+8.89 mm t 0.128 s stage stand support double fn 11.69/11.66",
+      "zmp": "+21.64 mm t 0.168 s stage stand support double fn 11.64/11.61",
+      "ask": "l_knee sum 0.6993 Nm signed -0.6993 Nm t 0.128 s stage stand q +1.06653 q_des +1.05222 kp 45.0 kv 1.4573 omega +0.0378",
+      "com_mm": 21.637693658216683,
+      "cop_mm": 8.88918016253912,
+      "zmp_mm": 21.637693658216683,
+      "ask_nm": 0.699250546042514
+    },
+    "start": {
+      "com": "+22.41 mm t 0.544 s stage start support double fn 11.65/11.37",
+      "cop": "+21.33 mm t 0.448 s stage start support double fn 11.34/11.21",
+      "zmp": "+22.41 mm t 0.544 s stage start support double fn 11.65/11.37",
+      "ask": "r_hip_roll sum 1.9069 Nm signed +0.3073 Nm t 2.784 s stage start q -0.15711 q_des -0.12943 kp 40.0 kv 1.7027 omega +0.4697",
+      "com_mm": 22.414088943563968,
+      "cop_mm": 21.331721895012784,
+      "zmp_mm": 22.414088943563968,
+      "ask_nm": 1.906906754348288
+    },
+    "walk": {
+      "com": "+22.02 mm t 7.608 s stage walk support L fn 21.64/1.39",
+      "cop": "+27.15 mm t 7.568 s stage walk support L fn 21.76/1.29",
+      "zmp": "+22.02 mm t 7.608 s stage walk support L fn 21.64/1.39",
+      "ask": "r_hip_roll sum 1.9956 Nm signed +0.2465 Nm t 2.816 s stage walk q -0.14133 q_des -0.11330 kp 40.0 kv 1.7027 omega +0.5136",
+      "com_mm": 22.019683474642164,
+      "cop_mm": 27.147825507437304,
+      "zmp_mm": 22.019683474642164,
+      "ask_nm": 1.995631587118884
+    },
+    "stop": {
+      "com": "+26.86 mm t 11.696 s stage stop support R fn 4.99/18.06",
+      "cop": "+28.76 mm t 11.704 s stage stop support R fn 5.00/18.06",
+      "zmp": "+26.86 mm t 11.696 s stage stop support R fn 4.99/18.06",
+      "ask": "r_ank_roll sum 0.8200 Nm signed +0.4428 Nm t 14.392 s stage stop q -0.20907 q_des -0.19103 kp 35.0 kv 1.1876 omega +0.1588",
+      "com_mm": 26.858296619237212,
+      "cop_mm": 28.755700103524195,
+      "zmp_mm": 26.858296619237212,
+      "ask_nm": 0.82001705351437
+    }
+  }
+}
