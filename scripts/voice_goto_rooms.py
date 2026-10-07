@@ -332,6 +332,12 @@ EAST_L_ONLINE_PAD_M = 0.05612963080175057
 EAST_L_ONLINE_N = 22
 EAST_L_ONLINE_RESIDUAL_M = -0.028436946196605833
 EAST_L_LIVE = "quantile"
+# Live kitchen −90° on the 75th percentile. Same pose as the online
+# stop: ray 0.234 m, left toe, error 0.02769 m, residual −0.0318 m.
+# Not a clear. Not applied to wall_hall_w_2.
+EAST_L_Q75_RESIDUAL_M = -0.03175107940399083
+EAST_L_Q75_RAY_M = 0.23443045430153236
+EAST_L_Q75_ERR_M = 0.02769268460514473
 # Close left-toe errors on wall_hall_w_2 only. Committing stops are
 # out. Right-toe samples are not in this list. East samples are not
 # in this list. N=19, so this pad can CLEAR. The 0.105 m outlier stays.
@@ -753,6 +759,9 @@ def _definition() -> DefinitionJson:
             f"{EAST_L_ONLINE_RESIDUAL_M:+.4f} m and is not the latch. "
             f"The live left latch is the 75th percentile of those "
             f"{len(EAST_L_ERR_M)} samples, {EAST_L_Q75_M:.5f} m. "
+            f"A live stop on that pad left residual "
+            f"{EAST_L_Q75_RESIDUAL_M:+.4f} m at ray {EAST_L_Q75_RAY_M:.3f} m "
+            "on the left toe. It does not clear. "
             "Right-toe samples median "
             f"{EAST_R_LATCH_M:.5f} m (n={len(EAST_R_ERR_M)}). An unknown "
             "toe gets pad 0. Contact "
@@ -3255,6 +3264,12 @@ def main() -> int:
         raise SystemExit("FAIL: online prior count moved")
     if abs(EAST_L_ONLINE_PAD_M - 0.05612963080175057) > 1e-12:
         raise SystemExit("FAIL: online pad moved")
+    if abs(EAST_L_Q75_RESIDUAL_M - -0.03175107940399083) > 1e-12:
+        raise SystemExit("FAIL: east left q75 residual moved")
+    if abs(EAST_L_Q75_ERR_M - (EAST_L_Q75_M + EAST_L_Q75_RESIDUAL_M)) > 1e-12:
+        raise SystemExit("FAIL: east left q75 error does not match the residual")
+    if abs(EAST_L_Q75_RESIDUAL_M) <= RANGE_ERR_MAX_M:
+        raise SystemExit("FAIL: the q75 residual was marked clear")
     if abs(EAST_L_Q75_M - 0.05944376400913556) > 1e-12:
         raise SystemExit(f"FAIL: east left q75 moved to {EAST_L_Q75_M}")
     if len(W2_L_ERR_M) != 19:
@@ -3423,6 +3438,9 @@ def main() -> int:
         "east_l_online_pad_m": EAST_L_ONLINE_PAD_M,
         "east_l_online_n": EAST_L_ONLINE_N,
         "east_l_online_residual_m": EAST_L_ONLINE_RESIDUAL_M,
+        "east_l_q75_residual_m": EAST_L_Q75_RESIDUAL_M,
+        "east_l_q75_ray_m": EAST_L_Q75_RAY_M,
+        "east_l_q75_err_m": EAST_L_Q75_ERR_M,
         "east_l_pad_rule": EAST_L_LIVE,
         "east_l_sample_count": len(EAST_L_ERR_M),
         "w2_l_latch_m": W2_L_LATCH_M,
