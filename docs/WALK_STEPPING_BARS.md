@@ -208,8 +208,76 @@ CoM jerk 88.853 / 2.987 m/s³. Joint jerk vector 779.752 / 50.612 rad/s³, large
 
 Stop returns to the stand pose. Final trunk pitch +1.67 deg against stand +1.61 deg (off +0.06 deg). Final 1 s contacts L/R 4/4, min up_z 1.000.
 
-Bus `vx·T` at 0.056 m/s and 20 s is 1.12 m. Both airborne advances are 76 mm, so the ±20% stride bar fails. Step fraction 0.794 is under 0.90 because 0.040 m of forward travel happens in contact. Clearance, slip, stance contacts, declared and actual margins, jerk, unclamped ask, and the stop pose pass. The row is STEPS and Prefer FAIL. The cadence grid is not on this commit, so there is no second row.
+Bus `vx·T` at 0.056 m/s and 20 s is 1.12 m. Both airborne advances are 76 mm, so the ±20% stride bar fails. Step fraction 0.794 is under 0.90 because 0.040 m of forward travel happens in contact. Clearance, slip, stance contacts, declared and actual margins, jerk, unclamped ask, and the stop pose pass. The hinge-speed bar is in the fail list when a leg hinge exceeds 5.82 rad/s. The row is STEPS and Prefer FAIL. The cadence grid is not on this commit, so there is no second row.
 
 Against the posted row: unclamped right hip roll 2.2567 Nm at 2.832 s matches. Declared CoM minimum +15.10 mm matches the posted +15.11 mm. Declared whole-bout ZMP minimum +0.002 mm matches the posted contact-CoP minimum. Declared single-support ZMP minima are +6.34 mm (ss_L) and +6.36 mm (ss_R). Stance contacts stay at 4. The right-foot peak clearance is 10.80 mm. The airborne-window minima are 8.41 mm and 8.60 mm, above the posted 8.08 mm, because this scorer's swing is the contact-off interval (5.06 s) and the posted window is the longer clocked single support. Stance-slip path is 0.27 mm, and the whole-bout step fraction is 0.794 with phase mismatch 0.094. Those three are this scorer's definitions. The feet do leave the floor: 633 and 632 ticks with zero contacts, zero force, and every box corner above the plane.
 
 Fail reasons: step fraction 0.794 is under 0.90 (airborne forward 0.1536 m, contact forward 0.0399 m); airborne advance 0.0763 m on L at 5.224 s is outside ±20% of vx·T (1.1200 m). vx·T/2 is the stance-to-stance spacing (0.5600 m), not this travel.
+
+Hinge speed and trunk vx:
+Period T 20.000 s, commanded vx 0.0560 m/s, actual trunk vx 0.0060 m/s (forward 0.1321 m over 22.000 s along the trunk heading), ratio 0.107.
+Peak |qvel| bar 5.82 rad/s passes. The plant has no velocity cap.
+
+| Joint | Peak rad/s | t s | Stage | Headroom rad/s |
+| --- | ---: | ---: | --- | ---: |
+| r_ank_roll | 0.6251 | 2.840 | walk | 5.1949 |
+| l_ank_roll | 0.5975 | 2.840 | walk | 5.2225 |
+| l_knee | 0.5904 | 10.520 | walk | 5.2296 |
+| r_hip_roll | 0.5894 | 2.840 | walk | 5.2306 |
+| l_hip_roll | 0.5696 | 2.840 | walk | 5.2504 |
+| r_knee | 0.5691 | 15.144 | walk | 5.2509 |
+| l_ank_pitch | 0.4264 | 23.816 | stop | 5.3936 |
+| r_ank_pitch | 0.3766 | 24.472 | stop | 5.4434 |
+| l_hip_pitch | 0.3029 | 5.224 | walk | 5.5171 |
+| r_hip_pitch | 0.3011 | 15.184 | walk | 5.5189 |
+| r_hip_yaw | 0.0516 | 23.520 | stop | 5.7684 |
+| l_hip_yaw | 0.0405 | 23.520 | stop | 5.7795 |
+
+## Hinge speed
+
+Soft-pass is off. Peak `|qvel|` on each of the 12 leg hinges must be
+≤ 5.82 rad/s (HX-35H no-load, 0.18 s/60°). The plant has no velocity
+cap. Headroom is 5.82 − peak. A joint over the bar is a row fail.
+Preview rows take the stage from `preview_stage`. The #90 kitchen
+walker has no preview stage, so its stage column is the gait phase.
+
+The speed line is period T, commanded vx, actual trunk vx, and the
+ratio. Actual trunk vx is the trunk origin's heading-frame forward
+displacement over the bus `move` window, divided by that window's
+duration. The ratio is reported. It is not a separate cutoff.
+
+`d6e8b5e` `voice-20` STEPS, Prefer FAIL. Hinge-speed bar passes. Plant `207f3d5e9c6a72e16f7aa0c8d224f75e` before and `207f3d5e9c6a72e16f7aa0c8d224f75e` after.
+Period T 20.000 s, commanded vx 0.0560 m/s, actual trunk vx 0.0060 m/s (forward 0.1321 m over 22.000 s), ratio 0.107.
+
+| Joint | Peak rad/s | t s | Stage | Headroom rad/s |
+| --- | ---: | ---: | --- | ---: |
+| r_ank_roll | 0.6251 | 2.840 | walk | 5.1949 |
+| l_ank_roll | 0.5975 | 2.840 | walk | 5.2225 |
+| l_knee | 0.5904 | 10.520 | walk | 5.2296 |
+| r_hip_roll | 0.5894 | 2.840 | walk | 5.2306 |
+| l_hip_roll | 0.5696 | 2.840 | walk | 5.2504 |
+| r_knee | 0.5691 | 15.144 | walk | 5.2509 |
+| l_ank_pitch | 0.4264 | 23.816 | stop | 5.3936 |
+| r_ank_pitch | 0.3766 | 24.472 | stop | 5.4434 |
+| l_hip_pitch | 0.3029 | 5.224 | walk | 5.5171 |
+| r_hip_pitch | 0.3011 | 15.184 | walk | 5.5189 |
+| r_hip_yaw | 0.0516 | 23.520 | stop | 5.7684 |
+| l_hip_yaw | 0.0405 | 23.520 | stop | 5.7795 |
+
+`51ae123` `kitchen-m90` STEPS, other bars not re-judged. Hinge-speed bar passes. Plant `207f3d5e9c6a72e16f7aa0c8d224f75e` before and `207f3d5e9c6a72e16f7aa0c8d224f75e` after.
+Period T 0.500 s, commanded vx 0.0560 m/s, actual trunk vx 0.0240 m/s (forward 0.5316 m over 22.128 s), ratio 0.429.
+
+| Joint | Peak rad/s | t s | Stage | Headroom rad/s |
+| --- | ---: | ---: | --- | ---: |
+| r_knee | 3.6088 | 14.432 | stand | 2.2112 |
+| l_hip_roll | 2.6229 | 2.312 | ds | 3.1971 |
+| l_knee | 2.6216 | 9.408 | ds | 3.1984 |
+| r_hip_roll | 2.6183 | 9.968 | ds | 3.2017 |
+| r_hip_pitch | 1.8124 | 35.968 | stand | 4.0076 |
+| l_ank_pitch | 1.8105 | 8.208 | ss_L | 4.0095 |
+| r_ank_pitch | 1.7696 | 12.456 | ss_R | 4.0504 |
+| l_ank_roll | 1.7505 | 1.576 | ss_R | 4.0695 |
+| r_ank_roll | 1.7397 | 1.840 | ss_L | 4.0803 |
+| l_hip_pitch | 1.4463 | 18.808 | ss_L | 4.3737 |
+| r_hip_yaw | 0.5870 | 1.680 | ss_R | 5.2330 |
+| l_hip_yaw | 0.5529 | 1.672 | ss_R | 5.2671 |

@@ -26,6 +26,8 @@ ROOT = Path(__file__).resolve().parents[1]
 FROZEN_MD5 = "207f3d5e9c6a72e16f7aa0c8d224f75e"
 STEP_BARS_PATH = Path(__file__).resolve().parent / "step_bars.py"
 RETRO_MD_HEADING = "## Retro voice tips"
+HINGE_MD_HEADING = "## Hinge speed"
+HINGE_JSON = ROOT / "previews" / "walk_hinge_speed.json"
 LEG_JOINTS = (
     "l_hip_yaw", "l_hip_roll", "l_hip_pitch", "l_knee", "l_ank_pitch", "l_ank_roll",
     "r_hip_yaw", "r_hip_roll", "r_hip_pitch", "r_knee", "r_ank_pitch", "r_ank_roll",
@@ -205,6 +207,28 @@ def _cop_margin(sw, session, walker, side: str, grounds) -> float:
     return float(sw.support_margin(world[:2], hull))
 
 
+def _hinge_block(step_bars, rec: Recorder, period: float, vx: float) -> dict[str, object]:
+    """Hinge-speed bar and trunk-speed line for one recorded bout.
+
+    This walker has no preview stage. The stage column is the gait phase
+    already used by the contact trace: stand, ds, ss_L, ss_R.
+    """
+    t = np.asarray(rec.cols["t"], dtype=np.float64)
+    omega = np.asarray(rec.omega, dtype=np.float64) if rec.omega else np.zeros((0, 12))
+    stage = np.asarray(rec.stage, dtype=object)
+    qvel = step_bars.hinge_speed_report(LEG_JOINTS, t, omega, stage)
+    speed = step_bars.trunk_speed_line(
+        t,
+        np.asarray(rec.trunk_x, dtype=np.float64),
+        np.asarray(rec.trunk_y, dtype=np.float64),
+        np.asarray(rec.trunk_yaw, dtype=np.float64),
+        np.asarray(rec.cols["mode"], dtype=object),
+        period_s=period,
+        vx_cmd_m_s=vx,
+    )
+    return {"qvel": qvel, "trunk_speed": speed}
+
+
 def _leg_q(model, data) -> list[float]:
     out: list[float] = []
     for name in LEG_JOINTS:
@@ -236,6 +260,12 @@ class Recorder:
         self.q: list[list[float]] = []
         self.applied_vx: list[float] = []
         self.half_x: float | None = None
+        self.omega: list[list[float]] = []
+        self.stage: list[str] = []
+        self.trunk_x: list[float] = []
+        self.trunk_y: list[float] = []
+        self.trunk_yaw: list[float] = []
+        self._dof: list[int] | None = None
         self._orig = sw.SteerSession.step
 
         def _step(session, *args, **kwargs):
@@ -245,6 +275,18 @@ class Recorder:
             return report
 
         sw.SteerSession.step = _step  # type: ignore[method-assign]
+
+    def _leg_omega(self, model, data) -> list[float]:
+        if self._dof is None:
+            addrs: list[int] = []
+            for name in LEG_JOINTS:
+                jid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, name)
+                if jid < 0:
+                    raise RuntimeError(f"missing joint {name}")
+                addrs.append(int(model.jnt_dofadr[jid]))
+            self._dof = addrs
+        qv = data.qvel
+        return [abs(float(qv[adr])) for adr in self._dof]
 
     def _sample(self, session) -> None:
         walker = session.lipm
@@ -292,6 +334,12 @@ class Recorder:
         cols["cop_r"].append(_cop_margin(self.sw, session, walker, "R", grounds))
         self.q.append(_leg_q(session.model, session.data))
         self.applied_vx.append(float(session.bus.applied_vx))
+        self.omega.append(self._leg_omega(session.model, session.data))
+        self.stage.append(str(cols["declared"][-1]))
+        origin = np.asarray(session.data.xpos[walker.bid_body], dtype=np.float64)
+        self.trunk_x.append(float(origin[0]))
+        self.trunk_y.append(float(origin[1]))
+        self.trunk_yaw.append(yaw)
         if self.half_x is None:
             self.half_x = float(session.model.geom_size[int(walker.gid["L"]), 0])
         n = len(cols["t"])
@@ -307,6 +355,11 @@ class Recorder:
         self.q = []
         self.applied_vx = []
         self.half_x = None
+        self.omega = []
+        self.stage = []
+        self.trunk_x = []
+        self.trunk_y = []
+        self.trunk_yaw = []
 
 
 def _q_err(step_bars, cols, q_rows: list[list[float]]) -> np.ndarray:
@@ -537,9 +590,12 @@ def run_voice(sw, step_bars, label: str, pr: int, sha: str, rooms: tuple[str, ..
             rec.on = False
         digest_after = _plant_md5(plant)
         summary = _summarize(step_bars, rec, vx, period)
+        hinge = _hinge_block(step_bars, rec, period, vx)
         bout = f"{name}-m90"
         row = _row_common(label, pr, sha, bout, digest_before, digest_after)
         row.update({
+            "qvel": _jsonable(hinge["qvel"]),
+            "trunk_speed": _jsonable(hinge["trunk_speed"]),
             "script": "voice_goto_rooms._run_room",
             "config": "locked_kit_config",
             "phrase": phrases[name],
@@ -837,6 +893,130 @@ def _retro_close(rows: list[dict[str, object]]) -> list[str]:
     ]
 
 
+def _replace_section(body: str, heading: str, section: str) -> str:
+    start = body.find(heading)
+    block = section if section.endswith("\n") else section + "\n"
+    if start < 0:
+        return body.rstrip() + "\n\n" + block
+    nxt = body.find("\n## ", start + len(heading))
+    if nxt < 0:
+        return body[:start].rstrip() + "\n\n" + block
+    return body[:start].rstrip() + "\n\n" + block + "\n" + body[nxt + 1:]
+
+
+def merge_hinge_row(row: dict[str, object]) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "soft_pass": False,
+        "bar_rad_s": 5.82,
+        "plant_md5": FROZEN_MD5,
+        "rows": [],
+    }
+    if HINGE_JSON.is_file():
+        loaded = json.loads(HINGE_JSON.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            payload = loaded
+    rows = payload.get("rows")
+    kept: list[dict[str, object]] = []
+    if isinstance(rows, list):
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            if item.get("tip") == row.get("tip") and item.get("bout") == row.get("bout"):
+                continue
+            kept.append(item)
+    kept.append(row)
+    order = {"d6e8b5e": 0, "51ae123": 1}
+    kept.sort(key=lambda item: (order.get(str(item.get("tip")), 9), str(item.get("bout"))))
+    payload["rows"] = kept
+    payload["soft_pass"] = False
+    payload["bar_rad_s"] = 5.82
+    payload["plant_md5"] = FROZEN_MD5
+    HINGE_JSON.parent.mkdir(parents=True, exist_ok=True)
+    HINGE_JSON.write_text(json.dumps(_jsonable(payload), indent=2) + "\n", encoding="utf-8")
+    return payload
+
+
+def hinge_markdown(payload: dict[str, object] | None = None) -> str:
+    if payload is None:
+        if not HINGE_JSON.is_file():
+            return ""
+        loaded = json.loads(HINGE_JSON.read_text(encoding="utf-8"))
+        if not isinstance(loaded, dict):
+            return ""
+        payload = loaded
+    rows = payload.get("rows")
+    if not isinstance(rows, list) or not rows:
+        return ""
+    lines = [
+        HINGE_MD_HEADING,
+        "",
+        "Soft-pass is off. Peak `|qvel|` on each of the 12 leg hinges must be",
+        "≤ 5.82 rad/s (HX-35H no-load, 0.18 s/60°). The plant has no velocity",
+        "cap. Headroom is 5.82 − peak. A joint over the bar is a row fail.",
+        "Preview rows take the stage from `preview_stage`. The #90 kitchen",
+        "walker has no preview stage, so its stage column is the gait phase.",
+        "",
+        "The speed line is period T, commanded vx, actual trunk vx, and the",
+        "ratio. Actual trunk vx is the trunk origin's heading-frame forward",
+        "displacement over the bus `move` window, divided by that window's",
+        "duration. The ratio is reported. It is not a separate cutoff.",
+        "",
+    ]
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        speed = row.get("trunk_speed")
+        if not isinstance(speed, dict):
+            speed = {}
+        qvel = row.get("qvel")
+        if not isinstance(qvel, dict):
+            qvel = {}
+        passed = "passes" if qvel.get("passes") else "fails"
+        lines.append(
+            f"`{row.get('tip')}` `{row.get('bout')}` {row.get('gait')}, {row.get('verdict')}. "
+            f"Hinge-speed bar {passed}. "
+            f"Plant `{row.get('plant_md5_before')}` before and `{row.get('plant_md5')}` after."
+        )
+        lines.append(
+            f"Period T {_num(speed.get('period_s'), 3)} s, commanded vx "
+            f"{_num(speed.get('vx_cmd_m_s'), 4)} m/s, actual trunk vx "
+            f"{_num(speed.get('actual_vx_m_s'), 4)} m/s "
+            f"(forward {_num(speed.get('fwd_m'), 4)} m over {_num(speed.get('move_s'), 3)} s), "
+            f"ratio {_num(speed.get('ratio'), 3)}."
+        )
+        lines.append("")
+        joints = qvel.get("joints")
+        if isinstance(joints, list) and joints:
+            lines.append("| Joint | Peak rad/s | t s | Stage | Headroom rad/s |")
+            lines.append("| --- | ---: | ---: | --- | ---: |")
+            for joint in joints:
+                if not isinstance(joint, dict):
+                    continue
+                lines.append(
+                    "| "
+                    + " | ".join([
+                        str(joint.get("joint")),
+                        _num(joint.get("peak_rad_s"), 4),
+                        _num(joint.get("t_s"), 3),
+                        str(joint.get("stage")),
+                        _num(joint.get("headroom_rad_s"), 4),
+                    ])
+                    + " |"
+                )
+            lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def splice_hinge_doc() -> None:
+    path = ROOT / "docs" / "WALK_STEPPING_BARS.md"
+    body = path.read_text(encoding="utf-8") if path.is_file() else "# Walk stepping bars\n"
+    section = hinge_markdown()
+    if not section:
+        raise SystemExit("no hinge-speed JSON")
+    path.write_text(_replace_section(body, HINGE_MD_HEADING, section), encoding="utf-8")
+    print(f"[hinge] wrote {path}")
+
+
 def splice_retro_doc() -> None:
     path = ROOT / "docs" / "WALK_STEPPING_BARS.md"
     body = path.read_text(encoding="utf-8") if path.is_file() else "# Walk stepping bars\n"
@@ -857,6 +1037,7 @@ def main() -> None:
     parser.add_argument("--pr", type=int)
     parser.add_argument("--kind", choices=("kit", "voice"))
     parser.add_argument("--rooms", default="kitchen,living,entrance")
+    parser.add_argument("--hinge", action="store_true", help="Write the hinge-speed self-test and do not replace the retro JSON")
     args = parser.parse_args()
     if args.doc:
         splice_retro_doc()
@@ -880,6 +1061,25 @@ def main() -> None:
     else:
         rooms = tuple(part.strip() for part in str(args.rooms).split(",") if part.strip())
         payload = run_voice(sw, step_bars, args.label, args.pr, args.sha, rooms)
+    if args.hinge:
+        for row in payload.get("rows") or []:
+            if not isinstance(row, dict):
+                continue
+            qvel = row.get("qvel") if isinstance(row.get("qvel"), dict) else {}
+            merge_hinge_row({
+                "tip": args.label,
+                "tip_sha": args.sha,
+                "pr": args.pr,
+                "bout": row.get("bout"),
+                "gait": row.get("verdict"),
+                "verdict": "hinge bar fails" if not qvel.get("passes") else "other bars not re-judged",
+                "plant_md5_before": row.get("plant_md5_before"),
+                "plant_md5": row.get("plant_md5_after"),
+                "qvel": qvel,
+                "trunk_speed": row.get("trunk_speed"),
+            })
+        splice_hinge_doc()
+        return
     write_tip(payload, args.label)
 
 

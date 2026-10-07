@@ -9,6 +9,7 @@ every contact-box corner above the floor plane, and zero summed normal force.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -215,6 +216,7 @@ def tiebreak_markdown(payload: dict[str, object] | None = None) -> str:
             lines.append("No swing passed the three-part airborne test.")
             lines.append("")
         lines.extend(_row_prose(row))
+        lines.extend(_hinge_lines(row))
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -312,7 +314,8 @@ def _row_prose(row: dict[str, object]) -> list[str]:
         "76 mm, so the ±20% stride bar fails. Step fraction 0.794 is under 0.90 "
         "because 0.040 m of forward travel happens in contact. Clearance, slip, "
         "stance contacts, declared and actual margins, jerk, unclamped ask, and "
-        "the stop pose pass. The row is STEPS and Prefer FAIL. "
+        "the stop pose pass. The hinge-speed bar is in the fail list when a "
+        "leg hinge exceeds 5.82 rad/s. The row is STEPS and Prefer FAIL. "
         "The cadence grid is not on this commit, so there is no second row.",
         "",
         "Against the posted row: unclamped right hip roll 2.2567 Nm at 2.832 s "
@@ -330,6 +333,48 @@ def _row_prose(row: dict[str, object]) -> list[str]:
         "",
         "Fail reasons: " + "; ".join(str(item) for item in (row.get("fail_reasons") or [])) + ".",
     ]
+
+
+def _hinge_lines(row: dict[str, object]) -> list[str]:
+    qvel = row.get("qvel")
+    speed = row.get("trunk_speed")
+    if not isinstance(qvel, dict) and not isinstance(speed, dict):
+        return []
+    lines = ["", "Hinge speed and trunk vx:"]
+    if isinstance(speed, dict):
+        lines.append(
+            f"Period T {_n(speed.get('period_s'), 3)} s, commanded vx "
+            f"{_n(speed.get('vx_cmd_m_s'), 4)} m/s, actual trunk vx "
+            f"{_n(speed.get('actual_vx_m_s'), 4)} m/s "
+            f"(forward {_n(speed.get('fwd_m'), 4)} m over {_n(speed.get('move_s'), 3)} s "
+            f"along the trunk heading), ratio {_n(speed.get('ratio'), 3)}."
+        )
+    if isinstance(qvel, dict):
+        passed = "passes" if qvel.get("passes") else "fails"
+        lines.append(
+            f"Peak |qvel| bar { _n(qvel.get('bar_rad_s'), 2) } rad/s {passed}. "
+            "The plant has no velocity cap."
+        )
+        joints = qvel.get("joints")
+        if isinstance(joints, list) and joints:
+            lines.append("")
+            lines.append("| Joint | Peak rad/s | t s | Stage | Headroom rad/s |")
+            lines.append("| --- | ---: | ---: | --- | ---: |")
+            for joint in joints:
+                if not isinstance(joint, dict):
+                    continue
+                lines.append(
+                    "| "
+                    + " | ".join([
+                        str(joint.get("joint")),
+                        _n(joint.get("peak_rad_s"), 4),
+                        _n(joint.get("t_s"), 3),
+                        str(joint.get("stage")),
+                        _n(joint.get("headroom_rad_s"), 4),
+                    ])
+                    + " |"
+                )
+    return lines
 
 
 def _deg(value: object) -> str:
@@ -356,10 +401,20 @@ def _splice_doc() -> None:
     section = tiebreak_markdown()
     if not section:
         raise SystemExit("no tiebreak JSON")
-    if HEADING in body:
-        body = body[: body.index(HEADING)].rstrip() + "\n"
-    path.write_text(body.rstrip() + "\n\n" + section, encoding="utf-8")
+    path.write_text(_replace_section(body, HEADING, section), encoding="utf-8")
     print(f"[tiebreak] wrote {path}")
+
+
+def _replace_section(body: str, heading: str, section: str) -> str:
+    """Replace one heading's section and keep a later heading."""
+    start = body.find(heading)
+    block = section if section.endswith("\n") else section + "\n"
+    if start < 0:
+        return body.rstrip() + "\n\n" + block
+    nxt = body.find("\n## ", start + len(heading))
+    if nxt < 0:
+        return body[:start].rstrip() + "\n\n" + block
+    return body[:start].rstrip() + "\n\n" + block + "\n" + body[nxt + 1:]
 
 
 def main() -> None:
@@ -550,7 +605,10 @@ def main() -> None:
         joint_rms=row["joint_jerk_rms"],
     )
     step_reasons = list(strict.get("fail_reasons") or [])
-    fail = mfg + step_reasons
+    qvel = row.get("qvel") if isinstance(row.get("qvel"), dict) else {}
+    trunk_speed = row.get("trunk_speed") if isinstance(row.get("trunk_speed"), dict) else {}
+    qvel_reasons = list(qvel.get("fail_reasons") or [])
+    fail = mfg + step_reasons + [str(item) for item in qvel_reasons]
     verdict = "CLEAR" if not fail else "Prefer FAIL"
     gait = _gait_label(strict)
     note = _note(row, strict, contact_only, swings, counts, disagree, meta, cop_ok, gait, verdict, fail)
@@ -589,6 +647,8 @@ def main() -> None:
         "preview_stages": row["preview_stages"],
         "min_up_z": row["min_up_z"],
         "fault_reasons": row["fault_reasons"],
+        "qvel": _jsonable(qvel),
+        "trunk_speed": _jsonable(trunk_speed),
         "stepping": _jsonable(strict),
         "stepping_contact_count": _jsonable(contact_only),
         "swings": swings,
@@ -617,11 +677,32 @@ def main() -> None:
     )
     print(f"[tiebreak] wrote {JSON_PATH}")
     _splice_doc()
+    retro_path = Path(__file__).resolve().parent / "score_retro_voice.py"
+    spec_mod = importlib.util.spec_from_file_location("score_retro_hinge", retro_path)
+    if spec_mod is None or spec_mod.loader is None:
+        raise SystemExit(f"cannot load {retro_path}")
+    retro = importlib.util.module_from_spec(spec_mod)
+    spec_mod.loader.exec_module(retro)
+    retro.merge_hinge_row({
+        "tip": "d6e8b5e",
+        "tip_sha": TIP,
+        "pr": 103,
+        "bout": payload_row["name"],
+        "gait": gait,
+        "verdict": verdict,
+        "plant_md5_before": payload_row["plant_md5_before"],
+        "plant_md5": payload_row["plant_md5"],
+        "qvel": payload_row["qvel"],
+        "trunk_speed": payload_row["trunk_speed"],
+    })
+    retro.splice_hinge_doc()
 
 
 def _note(row, strict, contact_only, swings, counts, disagree, meta, cop_ok, gait, verdict, fail) -> str:
     ss = strict.get("ss") or {}
     stop = strict.get("stop") or {}
+    qvel = row.get("qvel") if isinstance(row.get("qvel"), dict) else {}
+    trunk_speed = row.get("trunk_speed") if isinstance(row.get("trunk_speed"), dict) else {}
     parts = [
         f"Gait label {gait}. Bar verdict {verdict}.",
         f"Commanded x_amp peaked at {float(meta.get('x_cmd_max') or 0.0) * 1000.0:.2f} mm. "
@@ -651,7 +732,11 @@ def _note(row, strict, contact_only, swings, counts, disagree, meta, cop_ok, gai
         f"CoM jerk {row['com_jerk_whole_peak']} / {row['com_jerk_whole_rms']}. "
         f"Joint jerk {row['joint_jerk_peak']} / {row['joint_jerk_rms']} worst {row['worst_joint']}. "
         f"Unclamped {row['ask_joint']} {float(row['ask_nm']):.4f} Nm at {row['ask_t_s']} s, "
-        f"headroom {2.33 - float(row['ask_nm']):+.4f} Nm.",
+        f"headroom {2.33 - float(row['ask_nm']):+.4f} Nm. "
+        f"Hinge |qvel| bar {qvel.get('bar_rad_s')} passes={qvel.get('passes')}. "
+        f"Trunk speed T {trunk_speed.get('period_s')} s, commanded "
+        f"{trunk_speed.get('vx_cmd_m_s')} m/s, actual {trunk_speed.get('actual_vx_m_s')} m/s, "
+        f"ratio {trunk_speed.get('ratio')}.",
         f"Stop pose: {stop.get('pose')}, pitch {stop.get('final_pitch_rad')} "
         f"vs stand {stop.get('stand_pitch_rad')}.",
         f"Scored swings {len(swings)}. Disagreeing-tick patterns: {counts}. "

@@ -1,0 +1,227 @@
+{
+  "soft_pass": false,
+  "bar_rad_s": 5.82,
+  "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+  "rows": [
+    {
+      "tip": "d6e8b5e",
+      "tip_sha": "d6e8b5ebb801250814552fc728886a11dd0350c2",
+      "pr": 103,
+      "bout": "voice-20",
+      "gait": "STEPS",
+      "verdict": "Prefer FAIL",
+      "plant_md5_before": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+      "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+      "qvel": {
+        "bar_rad_s": 5.82,
+        "joints": [
+          {
+            "joint": "r_ank_roll",
+            "peak_rad_s": 0.6250508971833116,
+            "t_s": 2.839999999999909,
+            "stage": "walk",
+            "headroom_rad_s": 5.194949102816689
+          },
+          {
+            "joint": "l_ank_roll",
+            "peak_rad_s": 0.5974801944731559,
+            "t_s": 2.839999999999909,
+            "stage": "walk",
+            "headroom_rad_s": 5.2225198055268445
+          },
+          {
+            "joint": "l_knee",
+            "peak_rad_s": 0.5903585105935204,
+            "t_s": 10.520000000000183,
+            "stage": "walk",
+            "headroom_rad_s": 5.22964148940648
+          },
+          {
+            "joint": "r_hip_roll",
+            "peak_rad_s": 0.589435256429114,
+            "t_s": 2.839999999999909,
+            "stage": "walk",
+            "headroom_rad_s": 5.230564743570886
+          },
+          {
+            "joint": "l_hip_roll",
+            "peak_rad_s": 0.5696439878579986,
+            "t_s": 2.839999999999909,
+            "stage": "walk",
+            "headroom_rad_s": 5.250356012142001
+          },
+          {
+            "joint": "r_knee",
+            "peak_rad_s": 0.5690632180699419,
+            "t_s": 15.144000000001727,
+            "stage": "walk",
+            "headroom_rad_s": 5.250936781930059
+          },
+          {
+            "joint": "l_ank_pitch",
+            "peak_rad_s": 0.42640048814886117,
+            "t_s": 23.81599999999768,
+            "stage": "stop",
+            "headroom_rad_s": 5.393599511851139
+          },
+          {
+            "joint": "r_ank_pitch",
+            "peak_rad_s": 0.3765622386005574,
+            "t_s": 24.471999999997315,
+            "stage": "stop",
+            "headroom_rad_s": 5.4434377613994425
+          },
+          {
+            "joint": "l_hip_pitch",
+            "peak_rad_s": 0.3028593922065,
+            "t_s": 5.223999999999647,
+            "stage": "walk",
+            "headroom_rad_s": 5.5171406077935
+          },
+          {
+            "joint": "r_hip_pitch",
+            "peak_rad_s": 0.3011338537353628,
+            "t_s": 15.18400000000174,
+            "stage": "walk",
+            "headroom_rad_s": 5.518866146264638
+          },
+          {
+            "joint": "r_hip_yaw",
+            "peak_rad_s": 0.051581805916140956,
+            "t_s": 23.519999999997843,
+            "stage": "stop",
+            "headroom_rad_s": 5.76841819408386
+          },
+          {
+            "joint": "l_hip_yaw",
+            "peak_rad_s": 0.04050298706483292,
+            "t_s": 23.519999999997843,
+            "stage": "stop",
+            "headroom_rad_s": 5.779497012935168
+          }
+        ],
+        "fail_reasons": [],
+        "passes": true
+      },
+      "trunk_speed": {
+        "period_s": 20.0,
+        "vx_cmd_m_s": 0.056,
+        "actual_vx_m_s": 0.006005292251625305,
+        "ratio": 0.10723736163616616,
+        "fwd_m": 0.13211642953574745,
+        "move_s": 21.999999999998458,
+        "axis": "trunk heading"
+      }
+    },
+    {
+      "tip": "51ae123",
+      "tip_sha": "51ae123add3cc6bb9c3e5cd0f1d6b4035e65b29c",
+      "pr": 90,
+      "bout": "kitchen-m90",
+      "gait": "STEPS",
+      "verdict": "other bars not re-judged",
+      "plant_md5_before": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+      "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+      "qvel": {
+        "bar_rad_s": 5.82,
+        "joints": [
+          {
+            "joint": "r_knee",
+            "peak_rad_s": 3.6087926340171834,
+            "t_s": 14.432000000001489,
+            "stage": "stand",
+            "headroom_rad_s": 2.211207365982817
+          },
+          {
+            "joint": "l_hip_roll",
+            "peak_rad_s": 2.6228533781704964,
+            "t_s": 2.311999999999967,
+            "stage": "ds",
+            "headroom_rad_s": 3.197146621829504
+          },
+          {
+            "joint": "l_knee",
+            "peak_rad_s": 2.621577398877215,
+            "t_s": 9.407999999999811,
+            "stage": "ds",
+            "headroom_rad_s": 3.198422601122785
+          },
+          {
+            "joint": "r_hip_roll",
+            "peak_rad_s": 2.6183433809125236,
+            "t_s": 9.967999999999998,
+            "stage": "ds",
+            "headroom_rad_s": 3.2016566190874767
+          },
+          {
+            "joint": "r_hip_pitch",
+            "peak_rad_s": 1.8123961133133242,
+            "t_s": 35.96799999999799,
+            "stage": "stand",
+            "headroom_rad_s": 4.007603886686676
+          },
+          {
+            "joint": "l_ank_pitch",
+            "peak_rad_s": 1.8104917907872937,
+            "t_s": 8.20799999999941,
+            "stage": "ss_L",
+            "headroom_rad_s": 4.009508209212706
+          },
+          {
+            "joint": "r_ank_pitch",
+            "peak_rad_s": 1.7696354440413187,
+            "t_s": 12.456000000000829,
+            "stage": "ss_R",
+            "headroom_rad_s": 4.050364555958682
+          },
+          {
+            "joint": "l_ank_roll",
+            "peak_rad_s": 1.7504556797716841,
+            "t_s": 1.5760000000000012,
+            "stage": "ss_R",
+            "headroom_rad_s": 4.069544320228316
+          },
+          {
+            "joint": "r_ank_roll",
+            "peak_rad_s": 1.7396923211519713,
+            "t_s": 1.8400000000000014,
+            "stage": "ss_L",
+            "headroom_rad_s": 4.080307678848029
+          },
+          {
+            "joint": "l_hip_pitch",
+            "peak_rad_s": 1.4463202292903594,
+            "t_s": 18.808000000000455,
+            "stage": "ss_L",
+            "headroom_rad_s": 4.373679770709641
+          },
+          {
+            "joint": "r_hip_yaw",
+            "peak_rad_s": 0.5870259968606959,
+            "t_s": 1.6800000000000013,
+            "stage": "ss_R",
+            "headroom_rad_s": 5.232974003139304
+          },
+          {
+            "joint": "l_hip_yaw",
+            "peak_rad_s": 0.5529067454747187,
+            "t_s": 1.6720000000000013,
+            "stage": "ss_R",
+            "headroom_rad_s": 5.267093254525282
+          }
+        ],
+        "fail_reasons": [],
+        "passes": true
+      },
+      "trunk_speed": {
+        "period_s": 0.5,
+        "vx_cmd_m_s": 0.056,
+        "actual_vx_m_s": 0.024025497500928306,
+        "ratio": 0.4290267410880054,
+        "fwd_m": 0.5316362087005192,
+        "move_s": 22.12799999999907,
+        "axis": "trunk heading"
+      }
+    }
+  ]
+}

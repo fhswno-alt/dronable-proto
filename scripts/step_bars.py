@@ -33,6 +33,114 @@ UPRIGHT_MATCH_RAD = math.radians(5.0)
 STOP_UP_Z = 0.90
 KIT_BODY_PER_X = 7.50
 KIT_X_RAIL_M = 0.020
+# HX-35H no-load speed is 0.18 s per 60°. 60° is π/3 rad, so the rate is
+# (π/3)/0.18 ≈ 5.8178 rad/s. The bar is the stated 5.82 rad/s. The plant
+# has no joint velocity limit; this cutoff lives in the scorer.
+LEG_QVEL_BAR = 5.82
+
+
+def hinge_speed_report(
+    names: tuple[str, ...] | list[str],
+    t: np.ndarray,
+    omega_abs: np.ndarray,
+    stage: np.ndarray,
+) -> dict[str, object]:
+    """Peak |qvel| on each leg hinge against ``LEG_QVEL_BAR``.
+
+    ``omega_abs`` has shape ``(n, len(names))`` and is already absolute.
+    ``stage`` is one label per tick: the preview stage on a preview row, or
+    the gait phase on a voice bout that has no preview stage. Headroom is
+    ``LEG_QVEL_BAR - peak``. A joint at the bar still passes.
+    """
+    labels = [str(name) for name in names]
+    times = np.asarray(t, dtype=np.float64)
+    omega = np.asarray(omega_abs, dtype=np.float64)
+    stages = np.asarray(stage, dtype=object)
+    reasons: list[str] = []
+    joints: list[dict[str, object]] = []
+    if times.shape[0] < 1 or omega.ndim != 2 or omega.shape[0] != times.shape[0]:
+        reasons.append("no hinge-speed samples")
+        return {"bar_rad_s": LEG_QVEL_BAR, "joints": joints, "fail_reasons": reasons, "passes": False}
+    if omega.shape[1] != len(labels) or stages.shape[0] != times.shape[0]:
+        reasons.append("hinge-speed trace does not cover the 12 leg hinges")
+        return {"bar_rad_s": LEG_QVEL_BAR, "joints": joints, "fail_reasons": reasons, "passes": False}
+    for col, name in enumerate(labels):
+        series = omega[:, col]
+        idx = int(np.argmax(series))
+        peak = float(series[idx])
+        headroom = float(LEG_QVEL_BAR - peak)
+        label = str(stages[idx])
+        joints.append({
+            "joint": name,
+            "peak_rad_s": peak,
+            "t_s": float(times[idx]),
+            "stage": label,
+            "headroom_rad_s": headroom,
+        })
+        if peak > LEG_QVEL_BAR + 1e-12:
+            reasons.append(
+                f"peak |qvel| {peak:.4f} rad/s on {name} at {float(times[idx]):.3f} s "
+                f"stage {label} is over {LEG_QVEL_BAR:.2f} rad/s "
+                f"(headroom {headroom:.4f} rad/s)"
+            )
+    joints.sort(key=lambda row: float(row["peak_rad_s"]), reverse=True)
+    return {
+        "bar_rad_s": LEG_QVEL_BAR,
+        "joints": joints,
+        "fail_reasons": reasons,
+        "passes": not reasons,
+    }
+
+
+def trunk_speed_line(
+    t: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    yaw: np.ndarray,
+    mode: np.ndarray,
+    *,
+    period_s: float,
+    vx_cmd_m_s: float,
+) -> dict[str, object]:
+    """Actual trunk speed over the bus ``move`` window.
+
+    Forward is the trunk x axis, ``(cos yaw, sin yaw)``, taken at the later
+    tick. Displacement sums those steps between adjacent ticks that are both
+    in ``move``. Time is the sum of those step durations. The ratio is
+    actual divided by commanded ``vx``. The line is a report. It is not a
+    cutoff: a slow step still fails the existing ``vx·T`` stride bar.
+    """
+    times = np.asarray(t, dtype=np.float64)
+    xx = np.asarray(x, dtype=np.float64)
+    yy = np.asarray(y, dtype=np.float64)
+    heading = np.asarray(yaw, dtype=np.float64)
+    moving = np.array([str(item) == "move" for item in np.asarray(mode, dtype=object)])
+    fwd = 0.0
+    dur = 0.0
+    n = int(times.shape[0])
+    if xx.shape[0] != n or yy.shape[0] != n or heading.shape[0] != n or moving.shape[0] != n:
+        n = 0
+    for i in range(1, n):
+        if not (bool(moving[i]) and bool(moving[i - 1])):
+            continue
+        dx = float(xx[i] - xx[i - 1])
+        dy = float(yy[i] - yy[i - 1])
+        c = math.cos(float(heading[i]))
+        s = math.sin(float(heading[i]))
+        fwd += dx * c + dy * s
+        dur += float(times[i] - times[i - 1])
+    actual = (fwd / dur) if dur > 1e-9 else None
+    cmd = float(vx_cmd_m_s)
+    ratio = (actual / cmd) if actual is not None and abs(cmd) > 1e-9 else None
+    return {
+        "period_s": float(period_s),
+        "vx_cmd_m_s": cmd,
+        "actual_vx_m_s": actual,
+        "ratio": ratio,
+        "fwd_m": fwd,
+        "move_s": dur,
+        "axis": "trunk heading",
+    }
 
 
 def expected_steps(vx_m_s: float, period_s: float) -> dict[str, float]:
@@ -463,6 +571,44 @@ def self_test() -> int:
     stepped = summarize_trace(step, vx_m_s=0.056, period_s=3.60)
     expect(float(stepped["step_fraction"]) >= 0.90, "a real swing clears the step fraction")
     expect(int(stepped["n_scored_swings"]) == 1, "one swing event")
+    n_h = 4
+    ht = np.arange(n_h, dtype=np.float64) * 0.008
+    omega = np.zeros((n_h, 2), dtype=np.float64)
+    omega[1, 0] = LEG_QVEL_BAR
+    omega[2, 1] = LEG_QVEL_BAR + 0.01
+    hinges = hinge_speed_report(
+        ("l_knee", "r_knee"), ht, omega, np.array(["walk"] * n_h, dtype=object),
+    )
+    by_joint = {str(row["joint"]): row for row in hinges["joints"]}
+    expect(hinges["passes"] is False, "a hinge over 5.82 rad/s fails")
+    expect(len(hinges["fail_reasons"]) == 1, "only the over-speed hinge fails")
+    expect("r_knee" in str(hinges["fail_reasons"][0]), "the fail names r_knee")
+    expect(abs(float(by_joint["l_knee"]["headroom_rad_s"])) < 1e-12, "5.82 rad/s has zero headroom")
+    expect(float(by_joint["r_knee"]["headroom_rad_s"]) < 0.0, "over-speed headroom is negative")
+    expect(str(by_joint["r_knee"]["stage"]) == "walk", "peak keeps its stage")
+    nt = 21
+    tt = np.arange(nt, dtype=np.float64)
+    line = trunk_speed_line(
+        tt,
+        np.linspace(0.0, 0.084, nt),
+        np.zeros(nt),
+        np.zeros(nt),
+        np.array(["move"] * nt, dtype=object),
+        period_s=20.0,
+        vx_cmd_m_s=0.056,
+    )
+    expect(line["actual_vx_m_s"] is not None and abs(float(line["actual_vx_m_s"]) - 0.0042) < 1e-9, "0.084 m in 20 s is 0.0042 m/s")
+    expect(line["ratio"] is not None and abs(float(line["ratio"]) - (0.0042 / 0.056)) < 1e-9, "ratio against 0.056")
+    turned = trunk_speed_line(
+        tt,
+        np.zeros(nt),
+        np.linspace(0.0, -0.084, nt),
+        np.full(nt, -0.5 * math.pi),
+        np.array(["move"] * nt, dtype=object),
+        period_s=0.5,
+        vx_cmd_m_s=0.056,
+    )
+    expect(turned["actual_vx_m_s"] is not None and abs(float(turned["actual_vx_m_s"]) - 0.0042) < 1e-9, "heading-frame forward, not world +x")
     if failures:
         for msg in failures:
             print(f"FAIL {msg}")

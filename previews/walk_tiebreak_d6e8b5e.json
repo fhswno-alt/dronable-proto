@@ -267,6 +267,106 @@
       ],
       "min_up_z": 0.948879589655856,
       "fault_reasons": [],
+      "qvel": {
+        "bar_rad_s": 5.82,
+        "joints": [
+          {
+            "joint": "r_ank_roll",
+            "peak_rad_s": 0.6250508971833116,
+            "t_s": 2.839999999999909,
+            "stage": "walk",
+            "headroom_rad_s": 5.194949102816689
+          },
+          {
+            "joint": "l_ank_roll",
+            "peak_rad_s": 0.5974801944731559,
+            "t_s": 2.839999999999909,
+            "stage": "walk",
+            "headroom_rad_s": 5.2225198055268445
+          },
+          {
+            "joint": "l_knee",
+            "peak_rad_s": 0.5903585105935204,
+            "t_s": 10.520000000000183,
+            "stage": "walk",
+            "headroom_rad_s": 5.22964148940648
+          },
+          {
+            "joint": "r_hip_roll",
+            "peak_rad_s": 0.589435256429114,
+            "t_s": 2.839999999999909,
+            "stage": "walk",
+            "headroom_rad_s": 5.230564743570886
+          },
+          {
+            "joint": "l_hip_roll",
+            "peak_rad_s": 0.5696439878579986,
+            "t_s": 2.839999999999909,
+            "stage": "walk",
+            "headroom_rad_s": 5.250356012142001
+          },
+          {
+            "joint": "r_knee",
+            "peak_rad_s": 0.5690632180699419,
+            "t_s": 15.144000000001727,
+            "stage": "walk",
+            "headroom_rad_s": 5.250936781930059
+          },
+          {
+            "joint": "l_ank_pitch",
+            "peak_rad_s": 0.42640048814886117,
+            "t_s": 23.81599999999768,
+            "stage": "stop",
+            "headroom_rad_s": 5.393599511851139
+          },
+          {
+            "joint": "r_ank_pitch",
+            "peak_rad_s": 0.3765622386005574,
+            "t_s": 24.471999999997315,
+            "stage": "stop",
+            "headroom_rad_s": 5.4434377613994425
+          },
+          {
+            "joint": "l_hip_pitch",
+            "peak_rad_s": 0.3028593922065,
+            "t_s": 5.223999999999647,
+            "stage": "walk",
+            "headroom_rad_s": 5.5171406077935
+          },
+          {
+            "joint": "r_hip_pitch",
+            "peak_rad_s": 0.3011338537353628,
+            "t_s": 15.18400000000174,
+            "stage": "walk",
+            "headroom_rad_s": 5.518866146264638
+          },
+          {
+            "joint": "r_hip_yaw",
+            "peak_rad_s": 0.051581805916140956,
+            "t_s": 23.519999999997843,
+            "stage": "stop",
+            "headroom_rad_s": 5.76841819408386
+          },
+          {
+            "joint": "l_hip_yaw",
+            "peak_rad_s": 0.04050298706483292,
+            "t_s": 23.519999999997843,
+            "stage": "stop",
+            "headroom_rad_s": 5.779497012935168
+          }
+        ],
+        "fail_reasons": [],
+        "passes": true
+      },
+      "trunk_speed": {
+        "period_s": 20.0,
+        "vx_cmd_m_s": 0.056,
+        "actual_vx_m_s": 0.006005292251625305,
+        "ratio": 0.10723736163616616,
+        "fwd_m": 0.13211642953574745,
+        "move_s": 21.999999999998458,
+        "axis": "trunk heading"
+      },
       "stepping": {
         "expected": {
           "period_s": 20.0,
@@ -478,7 +578,7 @@
       },
       "cop_whole_p5_m": 0.0002713618542555448,
       "cop_whole_min_m": 2.481840764330018e-05,
-      "note": "Gait label STEPS. Bar verdict Prefer FAIL. Commanded x_amp peaked at 21.00 mm. z_flat was on. Contact-box bottom local z is -26.00 mm (L) and -26.00 mm (R). Floor plane z is 0.00 mm. Three-part step fraction 0.794, airborne 0.1536 m, contact 0.0399 m, mismatch 0.094, stance contacts min 4, slip 0.00026745349185954606, clearance min 0.008405389345966123. Contact-count-only step fraction 0.794, 2 scored swings, mismatch 0.094. Declared ZMP min 2.052084338746707e-06 outside 0.0. Declared CoM min 0.0150979328020853 outside 0.0. Actual-stance ZMP {'zmp_min_m': 0.00723163848471714, 'com_min_m': 0.0150979328020853, 'zmp_out': 0.0, 'com_out': 0.0}. CoP whole-bout min 2.481840764330018e-05 p5 0.0002713618542555448. Single-support CoP min 0.01752477889864352 p5 0.019279396106111655 p50 0.020373648572891697 p95 0.021481422955451603, edge dwell 0.0, on-edge 0.0, sole tilt max 0.017465366051038343 fraction over 1 deg 0.002364066193853428. CoM jerk 88.85277150722361 / 2.98734986539593. Joint jerk 779.7517500275992 / 50.61182423912657 worst r_ank_pitch. Unclamped r_hip_roll 2.2567 Nm at 2.8319999999999097 s, headroom +0.0733 Nm. Stop pose: returns to the stand pose, pitch 0.029135653283784747 vs stand 0.028113079322413893. Scored swings 2. Disagreeing-tick patterns: {}. Disagree runs L 0, R 0. Fail reasons: step fraction 0.794 is under 0.90 (airborne forward 0.1536 m, contact forward 0.0399 m); airborne advance 0.0763 m on L at 5.224 s is outside \u00b120% of vx\u00b7T (1.1200 m). vx\u00b7T/2 is the stance-to-stance spacing (0.5600 m), not this travel."
+      "note": "Gait label STEPS. Bar verdict Prefer FAIL. Commanded x_amp peaked at 21.00 mm. z_flat was on. Contact-box bottom local z is -26.00 mm (L) and -26.00 mm (R). Floor plane z is 0.00 mm. Three-part step fraction 0.794, airborne 0.1536 m, contact 0.0399 m, mismatch 0.094, stance contacts min 4, slip 0.00026745349185954606, clearance min 0.008405389345966123. Contact-count-only step fraction 0.794, 2 scored swings, mismatch 0.094. Declared ZMP min 2.052084338746707e-06 outside 0.0. Declared CoM min 0.0150979328020853 outside 0.0. Actual-stance ZMP {'zmp_min_m': 0.00723163848471714, 'com_min_m': 0.0150979328020853, 'zmp_out': 0.0, 'com_out': 0.0}. CoP whole-bout min 2.481840764330018e-05 p5 0.0002713618542555448. Single-support CoP min 0.01752477889864352 p5 0.019279396106111655 p50 0.020373648572891697 p95 0.021481422955451603, edge dwell 0.0, on-edge 0.0, sole tilt max 0.017465366051038343 fraction over 1 deg 0.002364066193853428. CoM jerk 88.85277150722361 / 2.98734986539593. Joint jerk 779.7517500275992 / 50.61182423912657 worst r_ank_pitch. Unclamped r_hip_roll 2.2567 Nm at 2.8319999999999097 s, headroom +0.0733 Nm. Hinge |qvel| bar 5.82 passes=True. Trunk speed T 20.0 s, commanded 0.056 m/s, actual 0.006005292251625305 m/s, ratio 0.10723736163616616. Stop pose: returns to the stand pose, pitch 0.029135653283784747 vs stand 0.028113079322413893. Scored swings 2. Disagreeing-tick patterns: {}. Disagree runs L 0, R 0. Fail reasons: step fraction 0.794 is under 0.90 (airborne forward 0.1536 m, contact forward 0.0399 m); airborne advance 0.0763 m on L at 5.224 s is outside \u00b120% of vx\u00b7T (1.1200 m). vx\u00b7T/2 is the stance-to-stance spacing (0.5600 m), not this travel."
     }
   ]
 }

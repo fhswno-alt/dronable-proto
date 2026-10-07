@@ -1721,6 +1721,17 @@ def run_preview_row(
         "up_z", "zmp_act", "com_act", "cop_l", "cop_r",
     )}
     q_stand_rows: list[list[float]] = []
+    leg_dof: list[int] = []
+    for name in LEG_JOINTS:
+        jid = mj.mj_name2id(session.model, mj.mjtObj.mjOBJ_JOINT, name)
+        if jid < 0:
+            raise RuntimeError(f"{spec.name}: missing joint {name}")
+        leg_dof.append(int(session.model.jnt_dofadr[jid]))
+    qvel_abs_rows: list[list[float]] = []
+    stage_ticks: list[str] = []
+    trunk_x: list[float] = []
+    trunk_y: list[float] = []
+    trunk_yaw: list[float] = []
     t_stop = spec.stand_s + spec.walk_s
     t_end = t_stop + spec.stop_s
     driver: steer_walk.ScriptedDriver | None = None
@@ -1781,6 +1792,14 @@ def run_preview_row(
             session.model, session.data, int(walker.gid["R"]), rug_box,
         )
         roll, pitch, up_z = _trunk_angles(session.data, int(walker.bid_body))
+        rot = np.asarray(session.data.xmat[int(walker.bid_body)], dtype=np.float64).reshape(3, 3)
+        origin = np.asarray(session.data.xpos[int(walker.bid_body)], dtype=np.float64)
+        qv = session.data.qvel
+        qvel_abs_rows.append([abs(float(qv[adr])) for adr in leg_dof])
+        stage_ticks.append(stage_name)
+        trunk_x.append(float(origin[0]))
+        trunk_y.append(float(origin[1]))
+        trunk_yaw.append(math.atan2(float(rot[1, 0]), float(rot[0, 0])))
         zmp_act, com_act = _actual_margins(session, walker, grounds, n_l, n_r)
         step_cols["t"].append(t_post)
         step_cols["x_l"].append(x_l)
@@ -1904,6 +1923,24 @@ def run_preview_row(
     step_reasons = stepping.get("fail_reasons")
     if isinstance(step_reasons, list):
         fail_reasons.extend(str(reason) for reason in step_reasons)
+    qvel_report = step_bars.hinge_speed_report(
+        LEG_JOINTS,
+        np.asarray(times, dtype=np.float64),
+        np.asarray(qvel_abs_rows, dtype=np.float64) if qvel_abs_rows else np.zeros((0, 12)),
+        np.asarray(stage_ticks, dtype=object),
+    )
+    qvel_reasons = qvel_report.get("fail_reasons")
+    if isinstance(qvel_reasons, list):
+        fail_reasons.extend(str(reason) for reason in qvel_reasons)
+    trunk_speed = step_bars.trunk_speed_line(
+        np.asarray(times, dtype=np.float64),
+        np.asarray(trunk_x, dtype=np.float64),
+        np.asarray(trunk_y, dtype=np.float64),
+        np.asarray(trunk_yaw, dtype=np.float64),
+        np.asarray(step_cols["mode"], dtype=object),
+        period_s=spec.period_s,
+        vx_cmd_m_s=vx_cmd,
+    )
     verdict: Literal["CLEAR", "Prefer FAIL"] = "CLEAR" if not fail_reasons else "Prefer FAIL"
     knee_peak = None if joint_jerk is None else joint_jerk.axis_peak.get("r_knee")
     knee_rms = None if joint_jerk is None else joint_jerk.axis_rms.get("r_knee")
@@ -1985,6 +2022,8 @@ def run_preview_row(
         "sag_bar_nm": SAG_BAR_NM,
         "preview_shape": float(spec.preview_shape),
         "stepping": stepping,
+        "qvel": qvel_report,
+        "trunk_speed": trunk_speed,
     }
 
 
@@ -3115,6 +3154,18 @@ def render_stepping_md(payloads: list[dict[str, object]]) -> str:
         "  roll stay within 5° of the stand median, and `up_z` stays at least 0.90.",
         "  The pose line says whether that window returns to the stand joints or",
         "  freezes in a lean.",
+        "- Leg hinge speed: peak `|qvel|` on each of the 12 leg hinges ≤ 5.82 rad/s",
+        "  (HX-35H no-load, 0.18 s/60°). The plant has no velocity cap. Headroom is",
+        "  5.82 − peak. A miss names the joint, the peak, the time, and the stage.",
+        "  Preview rows use `preview_stage`. A voice bout with no preview stage uses",
+        "  the gait phase.",
+        "",
+        "Each row also reports period T, commanded vx, actual trunk vx, and the",
+        "ratio. Actual trunk vx is the trunk origin's heading-frame forward",
+        "displacement over the bus `move` window, divided by that window's",
+        "duration. The ratio is a report. It does not add a cutoff. A step that",
+        "keeps the commanded period and misses the commanded speed still fails",
+        "the `vx·T` stride bar.",
         "",
         "Fore/aft separation, CoP percentiles, edge dwell, and sole tilt are reported.",
         "They do not add a second cutoff.",
@@ -3213,6 +3264,16 @@ def render_stepping_md(payloads: list[dict[str, object]]) -> str:
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
             section = mod.tiebreak_markdown()
+            if section:
+                text = text.rstrip() + "\n\n" + section
+                if not text.endswith("\n"):
+                    text += "\n"
+    if retro_path.is_file():
+        spec = importlib.util.spec_from_file_location("score_retro_hinge_doc", retro_path)
+        if spec is not None and spec.loader is not None:
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            section = mod.hinge_markdown()
             if section:
                 text = text.rstrip() + "\n\n" + section
                 if not text.endswith("\n"):
