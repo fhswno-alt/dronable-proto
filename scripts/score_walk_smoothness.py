@@ -1674,6 +1674,8 @@ def run_preview_row(
     spec: PreviewRowSpec,
     perturb: Perturb | None = None,
     tip_sha: str = TIP_SHA,
+    lipm_config: lipm_gait.LipmConfig | None = None,
+    probe: object | None = None,
 ) -> dict[str, object]:
     digest_before = _plant_md5()
     if digest_before != FROZEN_MD5:
@@ -1683,7 +1685,11 @@ def run_preview_row(
         scene = steer_walk.ROOT / "mujoco" / "room_entrance.xml"
         if not scene.is_file():
             raise RuntimeError(f"{spec.name}: entrance rug scene is not on this tip")
-    session = steer_walk.SteerSession(video=False, lipm=_preview_config(spec), scene_xml=scene)
+    session = steer_walk.SteerSession(
+        video=False,
+        lipm=lipm_config if lipm_config is not None else _preview_config(spec),
+        scene_xml=scene,
+    )
     walker = session.lipm
     if walker is None or walker.op3 is None:
         raise RuntimeError(f"{spec.name}: walker did not build")
@@ -1799,6 +1805,19 @@ def run_preview_row(
         step_cols["cop_l"].append(_foot_cop_margin(session, walker, "L", grounds))
         step_cols["cop_r"].append(_foot_cop_margin(session, walker, "R", grounds))
         q_stand_rows.append(_leg_q(session.model, session.data))
+        if probe is not None:
+            probe({
+                "session": session,
+                "walker": walker,
+                "grounds": grounds,
+                "t": t_post,
+                "n_l": n_l,
+                "n_r": n_r,
+                "z_l": z_l,
+                "z_r": z_r,
+                "mode": mode,
+                "declared": tick.phase,
+            })
         if session.bus.fault:
             break
     session.assert_plant_unchanged()
@@ -3183,6 +3202,17 @@ def render_stepping_md(payloads: list[dict[str, object]]) -> str:
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
             section = mod.retro_markdown()
+            if section:
+                text = text.rstrip() + "\n\n" + section
+                if not text.endswith("\n"):
+                    text += "\n"
+    tie_path = Path(__file__).resolve().parent / "score_tiebreak_d6e8b5e.py"
+    if tie_path.is_file():
+        spec = importlib.util.spec_from_file_location("score_tiebreak_doc", tie_path)
+        if spec is not None and spec.loader is not None:
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            section = mod.tiebreak_markdown()
             if section:
                 text = text.rstrip() + "\n\n" + section
                 if not text.endswith("\n"):

@@ -180,3 +180,36 @@ This pass, wall residuals: #82 kitchen-m90 residual -0.0016 m wall clear False; 
 The #70 lock `MID_SWING_TOE_MIN_M` = −0.003066 is the entrance-straight loaded scuff that tip recorded. It is not this day-1 kit bout. The kit script (`scripts/steer_walk.py` `_bus_kit_forward_stop`, `BUS_KIT_SCRIPT`, `locked_kit_config`) steps: fraction 0.961, 585 airborne ticks, lowest corner +2.02 mm. That does not reopen the toe lock as a skate, and it does not meet the 8 mm sole bar.
 
 Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` held before and after every bout. None of these tips predates that plant.
+
+## Tiebreak d6e8b5e
+
+Soft-pass is off. The gait is tip `d6e8b5ebb801250814552fc728886a11dd0350c2` and the metrics are the #102 scorer. Controls' step-honesty function is not called. The plant file is not written.
+
+A tick is airborne only when three tests agree on that foot: zero `mjData` contacts between its group-0 contact box and the floor, all eight corners of that box above the floor plane, and summed `mj_contactForce` normal equal to 0. The mesh is not sampled. HW's mesh sole sits about 2.9 mm above this box bottom.
+
+This tip has one scored bout: stand 0.40 s, walk 22.00 s, stop 8.00 s, period 20.0 s, dsp 0.35, swing height 18 mm, hip-frame cap 21 mm, bus vx 0.056 m/s. The cadence grid (T 0.5–2.0 s, x_amp = vx·T/4) is not on this commit.
+
+`voice-20` STEPS / Prefer FAIL. Plant `207f3d5e9c6a72e16f7aa0c8d224f75e` before and `207f3d5e9c6a72e16f7aa0c8d224f75e` after.
+
+| Side | Lift s | Touch s | Dur s | Clear 20–80 mm | Peak 20–80 mm | Peak air mm | Air m | Stance dx m | Slip mm |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| L | 5.224 | 10.288 | 5.064 | 8.41 | 10.67 | 10.67 | 0.0763 | -0.0000 | 0.27 |
+| R | 15.240 | 20.296 | 5.056 | 8.60 | 10.80 | 10.80 | 0.0764 | -0.0000 | 0.26 |
+
+The three tests never disagree. Contact count, corner height, and normal force pick the same airborne ticks on both feet. Contact-box bottom local z is -26.00 mm. Floor plane z is 0. The mesh is not in the score.
+
+Commanded hip-frame `x_amp` peaked at 21.00 mm and `z_flat` was on. Two swings, left then right. Row step fraction 0.794 (airborne 0.1536 m, contact 0.0399 m). Whole-bout phase mismatch 0.094. Stance contact count minimum 4. Worst stance slip 0.27 mm. Lowest corner over 20–80% of the airborne window 8.41 mm (honest max of those minima 8.60 mm).
+
+Single-support CoP margin min 17.52 mm, p5 19.28 mm, p50 20.37 mm, p95 21.48 mm. Edge dwell under 5 mm is 0.000. Sole tilt max +1.00 deg, fraction over 1 deg 0.0024.
+
+Declared-phase contact ZMP minimum 0.002 mm, outside 0.000. Declared CoM minimum 15.10 mm, outside 0.000. Actual-stance ZMP minimum 7.23 mm, CoM minimum 15.10 mm, outside 0.000 and 0.000.
+
+CoM jerk 88.853 / 2.987 m/s³. Joint jerk vector 779.752 / 50.612 rad/s³, largest hinge r_ank_pitch 616.809 / 21.822. Unclamped peak r_hip_roll 2.2567 Nm at 2.832 s, headroom 0.0733 Nm. Leg asks: r_hip_roll 2.2567 Nm at 2.832 s, headroom 0.0733 Nm; l_knee 2.2556 Nm at 5.248 s, headroom 0.0744 Nm; r_knee 2.2147 Nm at 15.208 s, headroom 0.1153 Nm; l_hip_roll 2.1076 Nm at 2.832 s, headroom 0.2224 Nm; r_ank_roll 1.9795 Nm at 2.816 s, headroom 0.3505 Nm; l_hip_pitch 1.7934 Nm at 1.832 s, headroom 0.5366 Nm.
+
+Stop returns to the stand pose. Final trunk pitch +1.67 deg against stand +1.61 deg (off +0.06 deg). Final 1 s contacts L/R 4/4, min up_z 1.000.
+
+Bus `vx·T` at 0.056 m/s and 20 s is 1.12 m. Both airborne advances are 76 mm, so the ±20% stride bar fails. Step fraction 0.794 is under 0.90 because 0.040 m of forward travel happens in contact. Clearance, slip, stance contacts, declared and actual margins, jerk, unclamped ask, and the stop pose pass. The row is STEPS and Prefer FAIL. The cadence grid is not on this commit, so there is no second row.
+
+Against the posted row: unclamped right hip roll 2.2567 Nm at 2.832 s matches. Declared CoM minimum +15.10 mm matches the posted +15.11 mm. Declared whole-bout ZMP minimum +0.002 mm matches the posted contact-CoP minimum. Declared single-support ZMP minima are +6.34 mm (ss_L) and +6.36 mm (ss_R). Stance contacts stay at 4. The right-foot peak clearance is 10.80 mm. The airborne-window minima are 8.41 mm and 8.60 mm, above the posted 8.08 mm, because this scorer's swing is the contact-off interval (5.06 s) and the posted window is the longer clocked single support. Stance-slip path is 0.27 mm, and the whole-bout step fraction is 0.794 with phase mismatch 0.094. Those three are this scorer's definitions. The feet do leave the floor: 633 and 632 ticks with zero contacts, zero force, and every box corner above the plane.
+
+Fail reasons: step fraction 0.794 is under 0.90 (airborne forward 0.1536 m, contact forward 0.0399 m); airborne advance 0.0763 m on L at 5.224 s is outside ±20% of vx·T (1.1200 m). vx·T/2 is the stance-to-stance spacing (0.5600 m), not this travel.
