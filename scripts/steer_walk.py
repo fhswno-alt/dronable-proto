@@ -789,32 +789,34 @@ BUS_KIT_SCRIPT: tuple[DemoSegment, ...] = (
 
 # vel at or under this bus speed selects the voice row. The kit row
 # stays the config for anything faster. Do not retune the kit to match.
-# The bus stays 0.056 m/s. A kinematic step at that speed is
-# x_amp = vx·T/4 = 50.4 mm on a 3.60 s cycle, and the knee asks ~12 Nm.
-# 21 mm on a 20 s cycle is the longest step whose lowest sole corner
-# stays at 8 mm over 20–80% of the swing without leaving 2.33 Nm.
-# Body speed of that step is 4·x_amp/T = 0.0042 m/s.
+# The bus stays 0.056 m/s. The step is the kinematic x_amp = vx·T/4.
+# At the kit cadence, T = 0.50 s, that amplitude is 7.0 mm. The ZMP
+# reference is the foot-box centre: a 0.50 s preview orbit does not
+# carry the CoM out to 16 mm on a smaller reference. dsp is inside
+# 0.1–0.3. The 8 mm sole is the clearance target. The 42-cell grid
+# does not hold 2.33 Nm. This row is that design point, not a clear.
 VOICE_VX_M_S = 0.056
-VOICE_PERIOD_S = 20.0
-VOICE_DSP = 0.35
+VOICE_PERIOD_S = 0.50
+VOICE_DSP = 0.25
 VOICE_AMP_M = 0.043
-VOICE_Z_M = 0.018
-VOICE_STEP_M = 0.021
-VOICE_ARM_S = 2.40
+VOICE_Z_M = 0.008
+VOICE_STEP_M = 0.007
+VOICE_ARM_S = 1.00
 VOICE_PREVIEW_R = 1.0e-4
-# 0 is the straight double-support ramp. 1 is the raised cosine, whose
-# hip-roll peak at 3.60 s was 2.3135 Nm.
+# 0 is the straight double-support ramp.
 VOICE_PREVIEW_SHAPE = 0.0
 
 
 def voice_preview_config() -> LipmConfig:
     """Lateral preview for the voice command.
 
-    y_swap stays 0. The sway is preview_y. gm_x_m caps the hip-frame
-    step. The kinematic step for the bus speed is vx·T/4, and the walk
-    uses the smaller of the two. The swing sole holds its peak from
-    20% to 80% of the swing. Stand before the first step is the level
-    sole. The stop blends back to that stand.
+    y_swap stays 0. The sway is preview_y. The hip-frame step is
+    x_amp = vx·T/4, and gm_x_m is that amplitude at the bus speed.
+    The swing sole rises through the double support before the swing
+    and holds the peak across single support. Stand before the first
+    step is the level sole. The stop blends back to that stand.
+    Crouch stays 25 mm. A shallower drop fails stand IK or asks more
+    on the knee, because the lift rate, not the crouch moment, binds.
     """
     return LipmConfig(
         name="voice056",

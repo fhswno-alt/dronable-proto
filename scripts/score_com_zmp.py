@@ -863,6 +863,9 @@ def run_attempt(
     preview_shape: float = 1.0,
     select_gait: bool = False,
     perturb: Perturb | None = None,
+    crouch_m: float = 0.025,
+    hip_pitch_deg: float = 15.0,
+    gait_name: str = "preview",
 ) -> dict[str, object]:
     md5_before = _plant_md5()
     if md5_before != sw.PLANT_MD5:
@@ -890,20 +893,20 @@ def run_attempt(
         script = sw.voice_bus_script(stand_s, walk_s, stop_s, 0.0)
     else:
         cfg = lipm_gait.LipmConfig(
-            name="preview",
+            name=gait_name,
             clear_m=z_m,
             arms=True,
             schedule="gait_manager",
             gm_period_s=period_s,
             gm_dsp=dsp,
             gm_y_swap_m=0.0,
-            gm_x_m=0.020,
+            gm_x_m=abs(float(vx_m_s)) * float(period_s) / 4.0,
             gm_z_m=z_m,
             gm_z_swap_m=0.0,
             gm_pelvis_deg=0.0,
-            gm_hip_pitch_deg=15.0,
+            gm_hip_pitch_deg=hip_pitch_deg,
             gm_start_lead="L",
-            gm_crouch_m=0.025,
+            gm_crouch_m=crouch_m,
             gm_move_s=0.020,
             preview_amp_m=amp_m,
             preview_arm_s=arm_s,

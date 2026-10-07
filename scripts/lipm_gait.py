@@ -746,22 +746,14 @@ class LipmWalker:
     def _voice_x_amp(self) -> float:
         """Hip-frame step for one swing of a full L+R cycle.
 
-        The stance foot's hip-frame x runs from +x_amp to −x_amp while it
-        stays planted, so the hip advances 2·x_amp per swing and 4·x_amp
-        per cycle. The speed that step produces is 4·x_amp/T, which is
-        x_amp = vx·T/4. kit_bus_step uses vx/7.50 and ignores T. That
-        gain matches 4/T only near the 0.50 s kit period.
-
-        vx·T/4 at the bus 0.056 m/s is a 50 mm step on a 3.60 s cycle.
-        The knee asks about 12 Nm there. gm_x_m is the longest step that
-        still clears 8 mm under 2.33 Nm, so the command is the smaller
-        of the two.
+        A planted stance foot runs from +x_amp to −x_amp in the hip
+        frame, so the body advances 4·x_amp per cycle. The step that
+        matches the bus is x_amp = vx·T/4. kit_bus_step uses vx/7.50
+        and ignores T, which only matches 4/T near the 0.50 s kit period.
         """
         period = float(self.cfg.gm_period_s)
         kin = abs(float(self.cmd_vx)) * period / 4.0
-        cap = abs(float(self.cfg.gm_x_m))
-        mag = min(kin, cap) if cap > 1e-6 else kin
-        return math.copysign(mag, float(self.cmd_vx))
+        return math.copysign(kin, float(self.cmd_vx))
 
     def _tick_preview_gait(self, walker: op3_walk.Op3Walker, walking: bool) -> None:
         """Shift CoM over the stance foot, then walk, then return in double support.
