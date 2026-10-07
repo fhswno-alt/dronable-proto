@@ -176,7 +176,16 @@ CLOSE_GAP_M = 0.40
 # further in-place re-points are dropped and the walk stays at yaw 0
 # so the ray can enter the close class. Not a pad. A right toe does
 # not arm it and does not stop the bout.
+# Kitchen +90° and entrance +90° on tip 9c3a119 never arm it.
+# Closest body-forward rays are 0.6278 m on wall_hall_e_1, left toe,
+# heading −0.573, and 0.6661 m on wall_hall_w_1, right toe, heading
+# +2.802. Camera toe gaps on those bouts also stay above 0.60 m.
+# far_same_name is a latch class, not this comparison. The lead toe
+# is the forward foot; its offset span on the close samples is 1.3 cm,
+# smaller than either shortfall. The threshold stays 0.60 m.
 EAST_L_HOLD_M = 0.60
+HOLD_DIAG_KITCHEN_RAY_M = 0.6278051138121317
+HOLD_DIAG_ENTRANCE_RAY_M = 0.6661160747244295
 # Kitchen −90° wall_hall_e_1 on tip aac2baa. Same rule as the living
 # set: same wall id, sim ray at or under 0.40 m. Forty-three samples,
 # each with heading, cam_z, camera pitch, and leading-toe offset.
@@ -4026,6 +4035,12 @@ def main() -> int:
         raise SystemExit("FAIL: living close with no toe can clear")
     if abs(EAST_L_HOLD_M - 0.60) > 1e-12:
         raise SystemExit(f"FAIL: walk hold moved to {EAST_L_HOLD_M}")
+    if abs(HOLD_DIAG_KITCHEN_RAY_M - 0.6278051138121317) > 1e-12:
+        raise SystemExit("FAIL: the kitchen +90 hold diagnosis moved")
+    if abs(HOLD_DIAG_ENTRANCE_RAY_M - 0.6661160747244295) > 1e-12:
+        raise SystemExit("FAIL: the entrance +90 hold diagnosis moved")
+    if HOLD_DIAG_KITCHEN_RAY_M <= EAST_L_HOLD_M or HOLD_DIAG_ENTRANCE_RAY_M <= EAST_L_HOLD_M:
+        raise SystemExit("FAIL: walk hold was raised over the diagnosed approach rays")
     if _yaw_toward_u(100.0) != voice.YAW_RAD_S or _yaw_toward_u(540.0) != -voice.YAW_RAD_S:
         raise SystemExit("FAIL: doorway pixel yaw sign moved")
     if _yaw_toward_u(rc.WIDTH / 2.0) != 0.0:
@@ -4175,6 +4190,8 @@ def main() -> int:
         "toe_outboard_m": TOE_OUTBOARD_M,
         "east_source": "aac2baa kitchen -90 wall_hall_e_1 ray<=0.40 held out",
         "east_l_hold_m": EAST_L_HOLD_M,
+        "hold_diag_kitchen_ray_m": HOLD_DIAG_KITCHEN_RAY_M,
+        "hold_diag_entrance_ray_m": HOLD_DIAG_ENTRANCE_RAY_M,
         "east_r_can_clear": False,
         "bias_fit": False,
         "close_gap_m": CLOSE_GAP_M,
