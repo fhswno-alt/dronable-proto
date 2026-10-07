@@ -372,10 +372,12 @@ E0_R_THIN_ERR_M = 0.05314792560472206
 # A cross-bout line through those two residuals is not the latch.
 # Tip 30b4708 took the mean of all five errors in that window.
 # Pad 0.04034 m, N=5, error 0.02519 m, residual −0.0152 m. Not the latch.
+# Tip 3e4c255 dropped the min and max errors and meant the other three.
+# Pad 0.04051 m, N=3, error 0.02519 m, residual −0.0153 m. Not the latch.
 # Live rule on this wall×toe only: the same filled window (ray ≤ 0.30 m,
-# last 5, commit excluded, dark until 5 samples). Drop one minimum
-# error and one maximum error, then the pad is the mean of the other
-# three. A tie drops one sample, not every copy of that error. Not the
+# last 5, commit excluded, dark until 5 samples). Drop the farthest ray
+# and take the mean of the other four. A tie on that ray drops the
+# larger error, then the later sample. Not the trimmed mean. Not the
 # full mean. Not the median. Not the closest 3. Left samples are not
 # in it. No other wall is in it.
 E0_R_CLOSE3_PAD_M = 0.033479728268314496
@@ -386,11 +388,16 @@ E0_R_MEAN_PAD_M = 0.040344212760911456
 E0_R_MEAN_N = 5
 E0_R_MEAN_RESIDUAL_M = -0.0151506301921698
 E0_R_MEAN_ERR_M = 0.025193582568741656
+E0_R_TRIM_PAD_M = 0.04050543713119664
+E0_R_TRIM_N = 3
+E0_R_TRIM_RESIDUAL_M = -0.015311854562454985
+E0_R_TRIM_ERR_M = 0.025193582568741657
 E0_R_NEAR_GATE_M = EAST_L_NEAR_GATE_M
 E0_R_NEAR_K = EAST_L_NEAR_K
 E0_R_NEAR_MIN_N = EAST_L_NEAR_K
 E0_R_CLOSE_N = 3
-E0_R_LIVE = "e0_r_trimmean"
+E0_R_CLOSE4_N = 4
+E0_R_LIVE = "e0_r_close4"
 EAST_L_Q75_RESIDUAL_M = -0.03175107940399083
 EAST_L_Q75_RAY_M = 0.23443045430153236
 EAST_L_Q75_ERR_M = 0.02769268460514473
@@ -907,10 +914,13 @@ def _definition() -> DefinitionJson:
             f"window once its own ray is at or under "
             f"{E0_R_NEAR_GATE_M:.2f} m. The pad stays undefined until "
             f"{E0_R_NEAR_MIN_N} samples are in the window. The live "
-            "pad drops one minimum error and one maximum error, then "
-            "takes the mean of the remaining three. The full mean of "
-            "the window, the median of the window, and the median of "
-            "its three closest rays are recorded and are not the latch. "
+            "pad drops the farthest ray and takes the mean of the other "
+            f"{E0_R_CLOSE4_N}. The trimmed mean, the full mean, the "
+            "median of the window, and the median of its three closest "
+            "rays are recorded and are not the latch. "
+            f"The scored trimmed mean is pad {E0_R_TRIM_PAD_M:.5f} m "
+            f"(N={E0_R_TRIM_N}), residual {E0_R_TRIM_RESIDUAL_M:+.4f} m, "
+            "and is not the latch. "
             f"The scored full-window mean is pad {E0_R_MEAN_PAD_M:.5f} m "
             f"(N={E0_R_MEAN_N}), residual {E0_R_MEAN_RESIDUAL_M:+.4f} m, "
             "and is not the latch. "
@@ -1423,11 +1433,10 @@ def _e0_r_window(seen: list[tuple[float, float]]) -> list[tuple[float, float]]:
     return chosen
 
 
-def _e0_r_picked(seen: list[tuple[float, float]]) -> list[tuple[float, float]]:
-    """Three closest rays inside a filled e_0 right window.
+def _e0_r_by_ray(seen: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Filled e_0 right window ordered by ray, then error, then age.
 
-    An unfilled window returns nothing, so the latch stays dark.
-    Ties break toward the smaller error, then the earlier sample.
+    An unfilled window returns nothing. The earlier sample wins a tie.
     """
     window = _e0_r_window(seen)
     if len(window) < E0_R_NEAR_MIN_N:
@@ -1436,7 +1445,24 @@ def _e0_r_picked(seen: list[tuple[float, float]]) -> list[tuple[float, float]]:
         enumerate(window),
         key=lambda item: (item[1][0], item[1][1], item[0]),
     )
-    return [pair for _index, pair in order[:E0_R_CLOSE_N]]
+    return [pair for _index, pair in order]
+
+
+def _e0_r_close4(seen: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Four closest rays in a filled window. The farthest ray is dropped.
+
+    A tie on that farthest ray drops the larger error, then the later
+    sample, so four remain. An unfilled window returns nothing.
+    """
+    return _e0_r_by_ray(seen)[:E0_R_CLOSE4_N]
+
+
+def _e0_r_picked(seen: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Three closest rays inside a filled e_0 right window.
+
+    Recorded. Not the latch. An unfilled window returns nothing.
+    """
+    return _e0_r_close4(seen)[:E0_R_CLOSE_N]
 
 
 def _e0_r_median5(seen: list[tuple[float, float]]) -> float | None:
@@ -1478,18 +1504,27 @@ def _e0_r_trim_kept(seen: list[tuple[float, float]]) -> list[float]:
     return kept
 
 
-def _e0_r_near_pad(seen: list[tuple[float, float]]) -> tuple[float, int, bool]:
-    """Trimmed mean of the filled last-5 window on wall_hall_e_0 right.
-
-    Drop one minimum error and one maximum error, then mean the other
-    three. Not the full mean. Not the median. Not the closest-3 median.
-    A shorter window stays undefined. Left samples are not in seen.
-    The commit sample is not in seen.
-    """
+def _e0_r_trim_pad(seen: list[tuple[float, float]]) -> float | None:
+    """Trimmed mean of the filled window. Recorded. Not the latch."""
     kept = _e0_r_trim_kept(seen)
     if len(kept) != 3:
+        return None
+    return float(statistics.mean(kept))
+
+
+def _e0_r_near_pad(seen: list[tuple[float, float]]) -> tuple[float, int, bool]:
+    """Mean of the four closest rays in the filled last-5 window.
+
+    The farthest ray is dropped. Not the trimmed mean. Not the full
+    mean. Not the median. Not the closest-3 median. A shorter window
+    stays undefined. Left samples are not in seen. The commit sample
+    is not in seen.
+    """
+    picked = _e0_r_close4(seen)
+    if len(picked) != E0_R_CLOSE4_N:
         return 0.0, len(_e0_r_window(seen)), False
-    return float(statistics.mean(kept)), len(kept), True
+    errs = [err for _ray, err in picked]
+    return float(statistics.mean(errs)), len(errs), True
 
 
 def _residual_m(err: float | None, pad: float) -> float | None:
@@ -3050,10 +3085,11 @@ def _run_room(
                                         f"lead_side={reading['lead_side']}"
                                         + (
                                             (
+                                                f" off_trim={_e0_r_trim_pad(e0_r_seen)}"
                                                 f" off_mean={_e0_r_mean(e0_r_seen)}"
                                                 f" off_median5={_e0_r_median5(e0_r_seen)}"
                                                 f" off_close3={_e0_r_close3_median(e0_r_seen)}"
-                                                f" trim_kept={_e0_r_trim_kept(e0_r_seen)}"
+                                                f" close4={[[float(ray), float(err)] for ray, err in _e0_r_close4(e0_r_seen)]}"
                                             )
                                             if near_rule == E0_R_LIVE
                                             else ""
@@ -3676,8 +3712,10 @@ def main() -> int:
         raise SystemExit(f"FAIL: e0 right near K moved to {E0_R_NEAR_K}")
     if E0_R_NEAR_MIN_N != 5:
         raise SystemExit(f"FAIL: e0 right min N moved to {E0_R_NEAR_MIN_N}")
-    if E0_R_LIVE != "e0_r_trimmean":
+    if E0_R_LIVE != "e0_r_close4":
         raise SystemExit(f"FAIL: e0 right live rule {E0_R_LIVE}")
+    if E0_R_CLOSE4_N != 4:
+        raise SystemExit(f"FAIL: e0 right close4 count moved to {E0_R_CLOSE4_N}")
     if E0_R_CLOSE_N != 3:
         raise SystemExit(f"FAIL: e0 right close count moved to {E0_R_CLOSE_N}")
     if E0_R_CLOSE3_N != 3 or abs(E0_R_CLOSE3_PAD_M - 0.033479728268314496) > 1e-12:
@@ -3692,6 +3730,12 @@ def main() -> int:
         raise SystemExit("FAIL: the e0 full-mean residual was marked clear")
     if abs(E0_R_MEAN_ERR_M - (E0_R_MEAN_PAD_M + E0_R_MEAN_RESIDUAL_M)) > 1e-12:
         raise SystemExit("FAIL: e0 full-mean error does not match the residual")
+    if E0_R_TRIM_N != 3 or abs(E0_R_TRIM_PAD_M - 0.04050543713119664) > 1e-12:
+        raise SystemExit("FAIL: the e0 trimmed-mean miss moved")
+    if abs(E0_R_TRIM_RESIDUAL_M) <= RANGE_ERR_MAX_M:
+        raise SystemExit("FAIL: the e0 trimmed-mean residual was marked clear")
+    if abs(E0_R_TRIM_ERR_M - (E0_R_TRIM_PAD_M + E0_R_TRIM_RESIDUAL_M)) > 1e-12:
+        raise SystemExit("FAIL: e0 trimmed-mean error does not match the residual")
     rejected_interp = (
         E0_R_FAIL_PAD_M
         - E0_R_FAIL_RESIDUAL_M
@@ -3728,9 +3772,17 @@ def main() -> int:
         (0.22, 0.025),
     ]
     e0_demo_pad, e0_demo_n, e0_demo_on = _e0_r_near_pad(e0_demo)
-    e0_demo_trim = float(statistics.mean([0.044, 0.033, 0.026]))
-    if not e0_demo_on or e0_demo_n != 3 or abs(e0_demo_pad - e0_demo_trim) > 1e-12:
-        raise SystemExit(f"FAIL: e0 right trim pad moved to {e0_demo_pad} n={e0_demo_n}")
+    e0_demo_close4 = float(statistics.mean([0.025, 0.026, 0.033, 0.044]))
+    if not e0_demo_on or e0_demo_n != 4 or abs(e0_demo_pad - e0_demo_close4) > 1e-12:
+        raise SystemExit(f"FAIL: e0 right close4 pad moved to {e0_demo_pad} n={e0_demo_n}")
+    if _e0_r_close4(e0_demo) != [
+        (0.22, 0.025), (0.23, 0.026), (0.24, 0.033), (0.26, 0.044),
+    ]:
+        raise SystemExit(f"FAIL: e0 close4 moved to {_e0_r_close4(e0_demo)}")
+    e0_demo_trim = _e0_r_trim_pad(e0_demo)
+    e0_demo_trim_expect = float(statistics.mean([0.044, 0.033, 0.026]))
+    if e0_demo_trim is None or abs(e0_demo_trim - e0_demo_trim_expect) > 1e-12:
+        raise SystemExit(f"FAIL: e0 trim pad moved to {e0_demo_trim}")
     if _e0_r_trim_kept(e0_demo) != [0.044, 0.033, 0.026]:
         raise SystemExit(f"FAIL: e0 trim kept moved to {_e0_r_trim_kept(e0_demo)}")
     e0_demo_mean = _e0_r_mean(e0_demo)
@@ -3743,13 +3795,16 @@ def main() -> int:
     if e0_demo_c3 is None or abs(e0_demo_c3 - 0.026) > 1e-12:
         raise SystemExit(f"FAIL: e0 closest-3 median moved to {e0_demo_c3}")
     if (
-        abs(e0_demo_pad - e0_demo_mean) < 1e-12
+        abs(e0_demo_pad - e0_demo_trim) < 1e-12
+        or abs(e0_demo_pad - e0_demo_mean) < 1e-12
         or abs(e0_demo_pad - e0_demo_med) < 1e-12
         or abs(e0_demo_pad - e0_demo_c3) < 1e-12
     ):
-        raise SystemExit("FAIL: e0 trim pad collapsed onto a recorded statistic")
+        raise SystemExit("FAIL: e0 close4 pad collapsed onto a recorded statistic")
+    if abs(e0_demo_pad - statistics.median([0.025, 0.026, 0.033, 0.044])) < 1e-12:
+        raise SystemExit("FAIL: e0 close4 pad copied the median of those four")
     if abs(e0_demo_pad - rejected_interp) < 1e-3:
-        raise SystemExit("FAIL: e0 trim pad copied the rejected interpolate")
+        raise SystemExit("FAIL: e0 close4 pad copied the rejected interpolate")
     e0_demo_pick = _e0_r_picked(e0_demo)
     if e0_demo_pick != [(0.22, 0.025), (0.23, 0.026), (0.24, 0.033)]:
         raise SystemExit(f"FAIL: e0 right close3 moved to {e0_demo_pick}")
@@ -3761,6 +3816,8 @@ def main() -> int:
         raise SystemExit("FAIL: e0 right near pad copied the closest-3 miss")
     if abs(e0_demo_pad - E0_R_MEAN_PAD_M) < 1e-9:
         raise SystemExit("FAIL: e0 right near pad copied the full-mean miss")
+    if abs(e0_demo_pad - E0_R_TRIM_PAD_M) < 1e-9:
+        raise SystemExit("FAIL: e0 right near pad copied the trimmed-mean miss")
     e0_order = [
         (0.21, 0.040),
         (0.30, 0.080),
@@ -3770,23 +3827,47 @@ def main() -> int:
     ]
     e0_order_pad, e0_order_n, e0_order_on = _e0_r_near_pad(e0_order)
     e0_order_pick = _e0_r_picked(e0_order)
-    if not e0_order_on or e0_order_n != 3 or abs(e0_order_pad - 0.060) > 1e-12:
-        raise SystemExit(f"FAIL: e0 trim pad moved to {e0_order_pad} n={e0_order_n}")
+    e0_order_expect = float(statistics.mean([0.040, 0.050, 0.060, 0.070]))
+    if not e0_order_on or e0_order_n != 4 or abs(e0_order_pad - e0_order_expect) > 1e-12:
+        raise SystemExit(f"FAIL: e0 close4 pad moved to {e0_order_pad} n={e0_order_n}")
+    if _e0_r_close4(e0_order) != [
+        (0.21, 0.040), (0.27, 0.050), (0.28, 0.060), (0.29, 0.070),
+    ]:
+        raise SystemExit(f"FAIL: e0 order close4 moved to {_e0_r_close4(e0_order)}")
     if _e0_r_trim_kept(e0_order) != [0.070, 0.060, 0.050]:
         raise SystemExit(f"FAIL: e0 order trim kept moved to {_e0_r_trim_kept(e0_order)}")
     if e0_order_pick != [(0.21, 0.040), (0.27, 0.050), (0.28, 0.060)]:
         raise SystemExit(f"FAIL: e0 close3 followed recency {e0_order_pick}")
     if abs(e0_order_pad - float(e0_order_pick[1][1])) < 1e-12:
-        raise SystemExit("FAIL: e0 trim pad copied the closest-3 median")
-    e0_tie_pad, e0_tie_n, e0_tie_on = _e0_r_near_pad([
+        raise SystemExit("FAIL: e0 close4 pad copied the closest-3 median")
+    if _e0_r_trim_pad(e0_order) is None or abs(e0_order_pad - _e0_r_trim_pad(e0_order)) < 1e-12:
+        raise SystemExit("FAIL: e0 close4 pad copied the trimmed mean")
+    e0_trim_tie = _e0_r_trim_pad([
         (0.30, 0.010),
         (0.29, 0.010),
         (0.28, 0.020),
         (0.27, 0.030),
         (0.26, 0.040),
     ])
-    if not e0_tie_on or e0_tie_n != 3 or abs(e0_tie_pad - 0.020) > 1e-12:
-        raise SystemExit(f"FAIL: e0 trim dropped every tied min {e0_tie_pad} n={e0_tie_n}")
+    if e0_trim_tie is None or abs(e0_trim_tie - 0.020) > 1e-12:
+        raise SystemExit(f"FAIL: e0 trim dropped every tied min {e0_trim_tie}")
+    e0_ray_tie = [
+        (0.20, 0.010),
+        (0.21, 0.020),
+        (0.22, 0.030),
+        (0.30, 0.040),
+        (0.30, 0.050),
+    ]
+    e0_ray_pad, e0_ray_n, e0_ray_on = _e0_r_near_pad(e0_ray_tie)
+    if (
+        not e0_ray_on
+        or e0_ray_n != 4
+        or abs(e0_ray_pad - 0.025) > 1e-12
+        or _e0_r_close4(e0_ray_tie) != [
+            (0.20, 0.010), (0.21, 0.020), (0.22, 0.030), (0.30, 0.040),
+        ]
+    ):
+        raise SystemExit(f"FAIL: e0 close4 dropped both tied rays {e0_ray_pad} n={e0_ray_n}")
     e0_cap_pad, e0_cap_n, e0_cap_on = _e0_r_near_pad([
         (0.20, 0.010),
         (0.28, 0.054),
@@ -3795,10 +3876,10 @@ def main() -> int:
         (0.23, 0.026),
         (0.22, 0.025),
     ])
-    if not e0_cap_on or e0_cap_n != 3 or abs(e0_cap_pad - e0_demo_pad) > 1e-12:
+    if not e0_cap_on or e0_cap_n != 4 or abs(e0_cap_pad - e0_demo_pad) > 1e-12:
         raise SystemExit(f"FAIL: e0 right cap moved to {e0_cap_pad} n={e0_cap_n}")
-    if abs(e0_cap_pad - 0.032) < 1e-12:
-        raise SystemExit("FAIL: e0 trim reached outside the last-5 window")
+    if abs(e0_cap_pad - float(statistics.mean([0.010, 0.025, 0.026, 0.033]))) < 1e-12:
+        raise SystemExit("FAIL: e0 close4 reached outside the last-5 window")
     e0_far_pad, e0_far_n, e0_far_on = _e0_r_near_pad([
         (0.31, 0.090),
         (0.29, 0.050),
@@ -4042,6 +4123,10 @@ def main() -> int:
         "e0_r_mean_pad_m": E0_R_MEAN_PAD_M,
         "e0_r_mean_n": E0_R_MEAN_N,
         "e0_r_mean_residual_m": E0_R_MEAN_RESIDUAL_M,
+        "e0_r_trim_pad_m": E0_R_TRIM_PAD_M,
+        "e0_r_trim_n": E0_R_TRIM_N,
+        "e0_r_trim_residual_m": E0_R_TRIM_RESIDUAL_M,
+        "e0_r_close4_n": E0_R_CLOSE4_N,
         "e0_r_pad_rule": E0_R_LIVE,
         "e0_r_near_gate_m": E0_R_NEAR_GATE_M,
         "e0_r_near_k": E0_R_NEAR_K,
