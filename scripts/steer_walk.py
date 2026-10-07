@@ -789,15 +789,17 @@ BUS_KIT_SCRIPT: tuple[DemoSegment, ...] = (
 
 # vel at or under this bus speed selects the voice row. The kit row
 # stays the config for anything faster. Do not retune the kit to match.
-# The body does not reach 0.056 m/s. A real step under 2.33 Nm is a
-# 11 mm amplitude on a 7 s period, and the measured speed is reported
-# from the sim, not from KIT_BODY_PER_X.
+# The bus stays 0.056 m/s. A kinematic step at that speed is
+# x_amp = vx·T/4 = 50.4 mm on a 3.60 s cycle, and the knee asks ~12 Nm.
+# 21 mm on a 20 s cycle is the longest step whose lowest sole corner
+# stays at 8 mm over 20–80% of the swing without leaving 2.33 Nm.
+# Body speed of that step is 4·x_amp/T = 0.0042 m/s.
 VOICE_VX_M_S = 0.056
-VOICE_PERIOD_S = 7.00
+VOICE_PERIOD_S = 20.0
 VOICE_DSP = 0.35
 VOICE_AMP_M = 0.043
 VOICE_Z_M = 0.018
-VOICE_STEP_M = 0.011
+VOICE_STEP_M = 0.021
 VOICE_ARM_S = 2.40
 VOICE_PREVIEW_R = 1.0e-4
 # 0 is the straight double-support ramp. 1 is the raised cosine, whose
@@ -808,9 +810,11 @@ VOICE_PREVIEW_SHAPE = 0.0
 def voice_preview_config() -> LipmConfig:
     """Lateral preview for the voice command.
 
-    y_swap stays 0. The sway is preview_y. gm_x_m is the step amplitude
-    the 2.33 Nm bar can lift, not vx/7.50. Stand before the first step
-    is the level sole. The stop blends back to that stand.
+    y_swap stays 0. The sway is preview_y. gm_x_m caps the hip-frame
+    step. The kinematic step for the bus speed is vx·T/4, and the walk
+    uses the smaller of the two. The swing sole holds its peak from
+    20% to 80% of the swing. Stand before the first step is the level
+    sole. The stop blends back to that stand.
     """
     return LipmConfig(
         name="voice056",

@@ -263,6 +263,10 @@ class Op3Walker:
         # pose, foot pitched with the hip. Preview stands at 1 and ramps
         # to 0 before the first lift. Kit stays at 0.
         self.sole_level = 0.0
+        # Voice only. The kit sine leaves the sole near the floor at 20%
+        # and 80% of the swing. The hold keeps the peak height across that
+        # window. Kit stays off.
+        self.z_flat = False
         self.z_swap_cmd = float(z_swap_m)
         self.step_fb = float(step_fb)
         self.pelvis_offset = math.radians(pelvis_deg)
@@ -690,18 +694,46 @@ class Op3Walker:
         z_phase = math.pi / 2.0 + 2.0 * math.pi / max(self.z_move_period, 1e-6) * phase_t
         return wsin(t_z, self.z_move_period, z_phase, self._z_move, self._z_move_shift)
 
+    def _swing_z(self, t: float, start: float, end: float, phase_t: float) -> float:
+        """OP3 sine, or a flat peak across the scored part of the swing.
+
+        The sine gap is z·sin(πf)². At 20% and 80% of the swing that is
+        35% of the peak, so a 4 mm peak is 1.4 mm and an 18 mm peak is
+        6 mm. The loaded sole does not clear either. The voice walk
+        rises with a smootherstep over the first 20% and holds the peak
+        until 80%. Kit leaves ``z_flat`` off and keeps the sine.
+        """
+        if not self.z_flat or end <= start + 1e-9:
+            return self._z_at(t, phase_t)
+        z_lo = self._z_at(start, phase_t)
+        z_hi = self._z_at(start + 0.5 * (end - start), phase_t)
+        frac = (t - start) / (end - start)
+        rise = 0.20
+
+        def smoother(u: float) -> float:
+            u = min(1.0, max(0.0, u))
+            return u * u * u * (u * (u * 6.0 - 15.0) + 10.0)
+
+        if frac <= rise:
+            scale = smoother(frac / rise)
+        elif frac >= 1.0 - rise:
+            scale = smoother((1.0 - frac) / rise)
+        else:
+            scale = 1.0
+        return z_lo + (z_hi - z_lo) * scale
+
     def _right_z(self, t: float) -> float:
         if t <= self.r_ssp_start:
             return self._z_at(self.r_ssp_start, self.r_ssp_start)
         if t <= self.r_ssp_end:
-            return self._z_at(t, self.r_ssp_start)
+            return self._swing_z(t, self.r_ssp_start, self.r_ssp_end, self.r_ssp_start)
         return self._z_at(self.r_ssp_end, self.r_ssp_start)
 
     def _left_z(self, t: float) -> float:
         if t <= self.l_ssp_start:
             return self._z_at(self.l_ssp_start, self.l_ssp_start)
         if t <= self.l_ssp_end:
-            return self._z_at(t, self.l_ssp_start)
+            return self._swing_z(t, self.l_ssp_start, self.l_ssp_end, self.l_ssp_start)
         return self._z_at(self.l_ssp_end, self.l_ssp_start)
 
     def _apply_direction(self, raw: np.ndarray, names: tuple[str, ...]) -> np.ndarray:

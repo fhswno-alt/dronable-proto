@@ -46,6 +46,12 @@ STEP_PITCH_DEG = 3.0
 STEP_LEN_TOL = 0.20
 STEP_SWING_LO = 0.20
 STEP_SWING_HI = 0.80
+# Single support is a flat stance sole: three or more floor contacts,
+# and the swing foot airborne, over the same 20–80% window.
+STANCE_CONTACT_N = 3
+# Upright stop. Both soles on the floor, corner spread under 3 mm.
+FLAT_SPREAD_M = 0.003
+FLAT_SOLE_Z_M = 0.003
 # Feet at double support, each side of the pelvis, for the 3.60 s example
 # (vx·T/2 = 0.10 m, so each foot is vx·T/4 = 0.05 m from the pelvis).
 DS_FOOT_M = 0.050
@@ -570,6 +576,31 @@ def _apply_perturb(session: sw.SteerSession, perturb: Perturb) -> dict[str, obje
     return info
 
 
+def _sole_spread_pitch(session: sw.SteerSession, side: str) -> tuple[float, float]:
+    """Corner spread (m) and sole pitch (deg). Positive pitch is nose-down."""
+    lipm = session.lipm
+    if lipm is None:
+        return 0.0, 0.0
+    gid = int(lipm.gid[side])
+    bid = int(lipm.bid[side])
+    pos = np.asarray(session.model.geom_pos[gid], dtype=np.float64)
+    half = np.asarray(session.model.geom_size[gid], dtype=np.float64)
+    rot = np.asarray(session.data.xmat[bid], dtype=np.float64).reshape(3, 3)
+    origin = np.asarray(session.data.xpos[bid], dtype=np.float64)
+    zs: list[float] = []
+    for sx in (-1.0, 1.0):
+        for sy in (-1.0, 1.0):
+            local = np.array(
+                [pos[0] + sx * half[0], pos[1] + sy * half[1], pos[2] - half[2]],
+                dtype=np.float64,
+            )
+            zs.append(float((origin + rot @ local)[2]))
+    pitch = math.degrees(
+        math.atan2(-float(rot[2, 0]), math.hypot(float(rot[0, 0]), float(rot[1, 0])))
+    )
+    return max(zs) - min(zs), pitch
+
+
 def _n_ground(session: sw.SteerSession, side: str) -> int:
     lipm = session.lipm
     if lipm is None:
@@ -700,6 +731,23 @@ def _step_honesty(
             )
             frac = air / (air + con) if (air + con) > 1e-6 else 0.0
             done = n_air > 10 and clear_z >= STEP_CLEAR_M
+            t0 = float(iv[0]["t"])
+            t1 = float(iv[-1]["t"])
+            span = t1 - t0
+            lo = t0 + STEP_SWING_LO * span
+            hi = t0 + STEP_SWING_HI * span
+            window = [r for r in iv if lo - 1e-12 <= float(r["t"]) <= hi + 1e-12]
+            n_win = 0
+            n_mis = 0
+            stance_n_min = 99.0
+            for r in window:
+                n_win += 1
+                swing_up = float(r[side + "fn"]) < AIR_N and int(r[side + "n"]) == 0
+                stance_n = float(r[other + "n"])
+                stance_n_min = min(stance_n_min, stance_n)
+                stance_down = float(r[other + "fn"]) >= LOAD_N and stance_n + 1e-9 >= STANCE_CONTACT_N
+                if not swing_up or not stance_down:
+                    n_mis += 1
             swings.append({
                 "side": side,
                 "t0": float(iv[0]["t"]),
@@ -721,6 +769,9 @@ def _step_honesty(
                 "net_mm": (float(iv[-1][side + "x"]) - float(iv[0][side + "x"])) * 1000.0,
                 "bx0": float(iv[0]["bx"]),
                 "bx1": float(iv[-1]["bx"]),
+                "n_win": float(n_win),
+                "n_mis": float(n_mis),
+                "stance_n": stance_n_min if n_win else 0.0,
             })
     done_rows = [s for s in swings if bool(s["done"])]
     scored = done_rows if done_rows else swings
@@ -734,6 +785,24 @@ def _step_honesty(
         if dt > 1e-6:
             v = (float(ordered[-1]["bx1"]) - float(ordered[0]["bx0"])) / dt
     n = len(done_rows)
+    n_win = sum(int(s["n_win"]) for s in swings)
+    n_mis = sum(int(s["n_mis"]) for s in swings)
+    stance_ns = [float(s["stance_n"]) for s in swings if int(s["n_win"]) > 0]
+    end = rows[-1] if rows else None
+    flat = False
+    flat_spread = float("nan")
+    flat_pitch = float("nan")
+    if end is not None and "Lsp" in end and "Rsp" in end:
+        spreads = (float(end["Lsp"]), float(end["Rsp"]))
+        pitches = (float(end["Lpit"]), float(end["Rpit"]))
+        zs = (float(end["Lz"]), float(end["Rz"]))
+        flat_spread = max(spreads)
+        flat_pitch = max(abs(p) for p in pitches)
+        flat = (
+            flat_spread <= FLAT_SPREAD_M
+            and all(-0.004 <= z <= FLAT_SOLE_Z_M for z in zs)
+            and flat_pitch <= 1.5
+        )
     airs = [float(s["air_mm"]) for s in done_rows]
     air_report = airs if airs else [float(s["air_mm"]) for s in swings]
     place_ok = bool(swings) and step_cmd > 1e-6 and all(
@@ -770,6 +839,11 @@ def _step_honesty(
         "pitch_deg": math.degrees(pitch1 - pitch0),
         "v_m_s": v,
         "steps": swings,
+        "phase_mis": (n_mis / n_win) if n_win else 1.0,
+        "stance_n": min(stance_ns) if stance_ns else 0.0,
+        "flat": flat,
+        "flat_spread_mm": flat_spread * 1000.0 if math.isfinite(flat_spread) else float("nan"),
+        "flat_pitch_deg": flat_pitch,
     }
 
 
@@ -1061,6 +1135,9 @@ def run_attempt(
                 rec[side + "z"] = lipm_gait.sole_clearance(
                     session.model, session.data, lipm.bid[side], gid,
                 )
+                spread_m, sole_pitch = _sole_spread_pitch(session, side)
+                rec[side + "sp"] = spread_m
+                rec[side + "pit"] = sole_pitch
                 rec[side + "fn"] = float(lipm.foot_normal(side))
                 rec[side + "n"] = float(_n_ground(session, side))
                 pel = np.asarray(session.data.xpos[bid_pelvis], dtype=np.float64)
@@ -1201,6 +1278,9 @@ def run_attempt(
             and honesty["sep_mm"] + 1e-6 >= honesty["x_amp_mm"]
             and abs(float(honesty["pitch_deg"])) <= STEP_PITCH_DEG
             and bool(honesty["len_ok"])
+            and float(honesty["phase_mis"]) <= 1e-9
+            and float(honesty["stance_n"]) + 1e-9 >= STANCE_CONTACT_N
+            and bool(honesty["flat"])
         )
         cop_p5_ok = math.isfinite(cop_p5) and cop_p5 >= COP_P5_MM
     cleared = (
@@ -1239,6 +1319,11 @@ def run_attempt(
         "stride_ok": honesty["stride_ok"],
         "ds_ok": honesty["ds_ok"],
         "len_ok": honesty["len_ok"],
+        "phase_mis": honesty["phase_mis"],
+        "stance_n": honesty["stance_n"],
+        "flat": honesty["flat"],
+        "flat_spread_mm": honesty["flat_spread_mm"],
+        "flat_pitch_deg": honesty["flat_pitch_deg"],
         "n_swings": honesty["n_swings"],
         "steps": honesty["steps"],
         "leg_m": leg_m,
@@ -1391,7 +1476,12 @@ def _print_result(result: dict[str, object]) -> None:
         f"(stride {float(result['stride_mm']):.1f}, {result['stride_ok']}) "
         f"ds ±{float(result['ds_mm']):.1f} mm ({result['ds_ok']}) "
         f"pitch {float(result['pitch_deg']):+.2f} deg "
-        f"v {float(result['v_step_m_s']):.4f} m/s"
+        f"v {float(result['v_step_m_s']):.4f} m/s "
+        f"phase_mis {float(result['phase_mis']):.3f} "
+        f"stance_n {float(result['stance_n']):.0f} "
+        f"flat {result['flat']} "
+        f"spread {float(result['flat_spread_mm']):.2f} mm "
+        f"sole {float(result['flat_pitch_deg']):.2f} deg"
     )
     print(
         f"  crouch min {float(result['crouch_mm']):.1f} mm "

@@ -638,29 +638,37 @@ class LipmWalker:
         self._stab_preview_m = self._slew(self._stab_preview_m, target, 0.020)
         return -float(com) + self._stab_preview_m
 
+    def _sole_pitch_rad(self, side: Side) -> float:
+        """Sole pitch. Positive is toe-down, the same sign as the trunk."""
+        bid = int(self.bid[side])
+        rot = np.asarray(self.data.xmat[bid], dtype=np.float64).reshape(3, 3)
+        return math.atan2(-float(rot[2, 0]), math.hypot(float(rot[0, 0]), float(rot[1, 0])))
+
     def _swing_toe_bias(self, side: Side) -> float:
         """No toe-up through the swing.
 
         A clocked 0.040 rad toe-up held the lowest sole corner on the
         floor, so the foot slid instead of stepping. The swing ankle
-        stays on the IK target. During the stop blend the sole is raked
-        and the light foot's CoP sits on the toe face, so both ankles
-        take a toe-up that fades out as the upright stand arrives.
-        +pitch raises the left toe. The right ankle is the opposite sign.
+        stays on the IK target. During the stop blend the just-landed
+        sole rocks onto its heel (about −3°). A fixed toe-up makes that
+        worse. This asks the ankle to take that pitch back out, then
+        fades as the upright stand arrives. +pitch raises the left toe.
+        The right ankle is the opposite sign.
         """
         if self._stand_q1 is None or self._stand_u <= 0.0 or self._stand_u >= 2.0:
             return 0.0
         u = min(1.0, self._stand_u / 2.0)
-        # Hold the toe up through the rake, then fade as the stand arrives.
-        # A smootherstep from the first tick lets the light foot's CoP
-        # fall back onto the toe face while the knees are still moving.
         if u < 0.80:
             fade = 1.0
         else:
             v = (u - 0.80) / 0.20
             fade = 1.0 - v * v * v * (v * (v * 6.0 - 15.0) + 10.0)
         sign = 1.0 if side == "L" else -1.0
-        return sign * 0.070 * fade
+        # Gain above 1. The blend keeps pitching the sole, so matching
+        # the measured pitch once leaves about half of it. 4× leaves a
+        # fifth. Cap at 0.12 rad, about 4 Nm if the ankle does not follow.
+        pitch = min(0.12, max(-0.12, 4.0 * self._sole_pitch_rad(side)))
+        return sign * pitch * fade
 
     def _stabilize_contacts(self) -> None:
         """Hip roll from the capture point.
@@ -702,7 +710,8 @@ class LipmWalker:
                 continue
             gait = float(joints[jn])
             q = self.q(jn)
-            self._stab_pitch[side] = self._slew(self._stab_pitch[side], self._swing_toe_bias(side), 0.35)
+            rate = 1.20 if self._stand_u > 0.0 else 0.35
+            self._stab_pitch[side] = self._slew(self._stab_pitch[side], self._swing_toe_bias(side), rate)
             want = gait + self._stab_pitch[side]
             # The 16 mrad band keeps a late swing gap off the ankle.
             # The stop blend's toe-up is already slewed; clamping it
@@ -733,6 +742,26 @@ class LipmWalker:
         else:
             self.phase = "shift"
         return joints
+
+    def _voice_x_amp(self) -> float:
+        """Hip-frame step for one swing of a full L+R cycle.
+
+        The stance foot's hip-frame x runs from +x_amp to −x_amp while it
+        stays planted, so the hip advances 2·x_amp per swing and 4·x_amp
+        per cycle. The speed that step produces is 4·x_amp/T, which is
+        x_amp = vx·T/4. kit_bus_step uses vx/7.50 and ignores T. That
+        gain matches 4/T only near the 0.50 s kit period.
+
+        vx·T/4 at the bus 0.056 m/s is a 50 mm step on a 3.60 s cycle.
+        The knee asks about 12 Nm there. gm_x_m is the longest step that
+        still clears 8 mm under 2.33 Nm, so the command is the smaller
+        of the two.
+        """
+        period = float(self.cfg.gm_period_s)
+        kin = abs(float(self.cmd_vx)) * period / 4.0
+        cap = abs(float(self.cfg.gm_x_m))
+        mag = min(kin, cap) if cap > 1e-6 else kin
+        return math.copysign(mag, float(self.cmd_vx))
 
     def _tick_preview_gait(self, walker: op3_walk.Op3Walker, walking: bool) -> None:
         """Shift CoM over the stance foot, then walk, then return in double support.
@@ -788,12 +817,22 @@ class LipmWalker:
             walker.sole_level = self._sole_level_now()
             # The foot height grows with the arm. Dropping the full
             # swing in on the first tick is a knee step of several Nm.
-            walker.z_move_cmd = float(self.cfg.gm_z_m) * (1.0 - self._sole_level_now())
+            level = self._sole_level_now()
+            walker.z_move_cmd = float(self.cfg.gm_z_m) * (1.0 - level)
             future = self._zmp_future(self._preview_clock)
             com = preview.step(future)
             self.preview_com_y = com
-            walker.set_command(0.0, 0.0, 0.0)
-            walker.previous_x = 0.0
+            # Voice spreads the step during the arm. A full x_amp on the
+            # first walk tick is a hip-pitch step of several Nm. The kit
+            # path still starts from zero.
+            if self.cfg.name == "voice056" and abs(self.cmd_vx) > 1e-4:
+                walker.z_flat = True
+                x_full = self._voice_x_amp()
+                walker.set_command(x_full * (1.0 - level), 0.0, 0.0)
+                walker.previous_x = x_full
+            else:
+                walker.set_command(0.0, 0.0, 0.0)
+                walker.previous_x = 0.0
             walker.time = 0.0
             walker.ctrl_running = False
             walker.update_movement()
@@ -807,16 +846,22 @@ class LipmWalker:
                 self.preview_stage = "walk"
                 walker.z_move_cmd = float(self.cfg.gm_z_m)
                 walker.time = 0.0
-                walker.previous_x = 0.0
+                # Nonzero previous_x keeps the first swing at full amplitude.
+                # Zero here is the OP3 half-step, which lands short of vx·T/2.
+                if self.cfg.name == "voice056" and abs(self.cmd_vx) > 1e-4:
+                    walker.previous_x = self._voice_x_amp()
+                else:
+                    walker.previous_x = 0.0
                 walker.ctrl_running = True
                 walker.update_movement()
             return
         walker.sole_level = 0.0
         x_amp, angle = kit_bus_step(self.cmd_vx, self.cmd_yaw, self.cfg.gm_period_s)
-        # vx/7.50 was fit on a skate and under-steps a real lift. The voice
-        # row's gm_x_m is the amplitude the 2.33 Nm bar can still raise.
+        # vx/7.50 ignores the period. One cycle advances the body by
+        # 4·x_amp, so the step that matches vx is x_amp = vx·T/4.
         if self.cfg.name == "voice056" and abs(self.cmd_vx) > 1e-4:
-            x_amp = math.copysign(float(self.cfg.gm_x_m), self.cmd_vx)
+            walker.z_flat = True
+            x_amp = self._voice_x_amp()
         walker.set_command(x_amp, 0.0, angle)
         if self._hold_until_stance(walker, preview):
             return
