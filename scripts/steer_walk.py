@@ -1330,6 +1330,8 @@ class SteerSession:
         self.gid_rfoot = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_GEOM, "r_foot_contact")
         self.gid_floor = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_GEOM, "floor")
         self.gid_rug = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_GEOM, "col_mat_rug")
+        if self.gid_rug < 0:
+            self.gid_rug = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_GEOM, "mat_rug")
         self.foot_local = {
             "L": (
                 self.bid_lf,

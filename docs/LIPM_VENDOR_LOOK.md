@@ -2133,5 +2133,50 @@ The 10 Hz bus bout is stand 0.40 s, vel(0.056, 0) for 11.00 s, stop 3.00 s, 1800
 - Period 3.70 s, same ramp. CLEAR. CoM/ZMP minimum +20.93 mm at 5.616 s, walk, left single support. Single support +20.93 / +21.00 mm. Unclamped right knee 2.0212 Nm at 9.472 s. Headroom to 2.20 Nm is +0.1788 Nm. Headroom to 2.33 Nm is +0.3088 Nm. Stop ask right hip pitch 1.3957 Nm at 11.400 s. The shape-1 row at this period was right hip roll 2.2619 Nm, which is 0.0619 Nm over 2.20 and 0.0681 Nm under 2.33.
 - Period 3.56 s, shape 0. Prefer FAIL. The walk knee is 2.0707 Nm. The stop left knee is 2.4627 Nm at 11.936 s, over 2.20 and over 2.33. 3.57 s is the shortest period that holds.
 
+Robustness on that 3.57 s row and on the 3.60 s row, same ramp, vx 0.056 m/s, whole bout, soft-pass off. A cell holds only when CoM and ZMP margins stay ≥0, the outside fraction is 0, the unclamped ask stays ≤2.33 Nm, hard_cap is 0, and the bout does not tip. Mass, friction, the mat, and the hinge seed are applied to the loaded MjModel. The plant file is not written. md5 stays `207f3d5e9c6a72e16f7aa0c8d224f75e`. Ten seeds draw hinge q at σ 0.002 rad and qd at σ 0.01 rad/s. The free joint is left on the seated stand. Friction sets the sliding coefficient of the floor and both foot boxes to 1.2, 1.4, or 1.6. Latency +1 holds the previous ctrl for one planner tick. Latency −1 leads by one tick. The entrance mat is `mat_rug`, slid so its near edge is 15 mm ahead of the toes, top left at 20 mm, and counted as ground. Start/stop is three bus cycles of the 11 s vel and the 3 s soft stop. Numbers are in `previews/com_zmp_robust.json`.
+
+| Period | Cell | Ask Nm | Joint | t | CoM mm | ZMP mm | CoM/ZMP out | Overs | hard_cap | up_z | Result |
+| ---: | --- | ---: | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | --- |
+| 3.57 | seed 0 | 2.0693 | r_knee | 9.248 | +17.93 | +17.93 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.57 | seed 1 | 2.0694 | r_knee | 9.248 | +17.93 | +17.93 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.57 | seed 2 | 2.0692 | r_knee | 9.248 | −9.65 | +17.93 | 1/0 | 0 | 0 | 0.960 | FAIL |
+| 3.57 | seed 3 | 2.0697 | r_knee | 9.248 | +17.92 | +17.92 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.57 | seed 4 | 2.0698 | r_knee | 9.248 | −10.33 | +17.92 | 1/0 | 0 | 0 | 0.960 | FAIL |
+| 3.57 | seed 5 | 2.0693 | r_knee | 9.248 | +17.93 | +17.93 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.57 | seed 6 | 2.0692 | r_knee | 9.248 | +17.93 | +17.93 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.57 | seed 7 | 2.0698 | r_knee | 9.248 | +17.92 | +17.92 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.57 | seed 8 | 2.0698 | r_knee | 9.248 | +17.92 | +17.92 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.57 | seed 9 | 2.0693 | r_knee | 9.248 | +17.93 | +17.93 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.57 | mass −5% | 4.0224 | l_hip_roll | 14.272 | −2.11 | −2.11 | 2/2 | 84 | 0 | 0.960 | FAIL |
+| 3.57 | mass +5% | 2.0801 | r_knee | 9.248 | +20.85 | +20.85 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.57 | friction 1.2 | 2.0546 | r_hip_pitch | 9.032 | +17.35 | +17.35 | 0/0 | 0 | 0 | 0.963 | CLEAR |
+| 3.57 | friction 1.4 | 2.0345 | l_hip_pitch | 10.824 | +17.33 | +17.33 | 0/0 | 0 | 0 | 0.961 | CLEAR |
+| 3.57 | friction 1.6 | 2.0695 | r_knee | 9.248 | +17.93 | +17.93 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.57 | latency +1 | 2.2164 | r_knee | 9.248 | +18.36 | +18.36 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.57 | latency −1 | 1.9354 | l_knee | 0.416 | +20.81 | +20.81 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.57 | entrance rug | 8.0444 | r_ank_pitch | 13.144 | no support | +20.82 | 5/0 | 22 | 0 | 0.957 | FAIL |
+| 3.57 | start/stop ×3 | 2.0695 | r_knee | 9.248 | +17.93 | +17.93 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | seed 0 | 2.0570 | r_knee | 9.256 | +19.00 | +19.00 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | seed 1 | 2.0571 | r_knee | 9.256 | +19.00 | +19.00 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | seed 2 | 2.0569 | r_knee | 9.256 | −9.65 | +19.00 | 1/0 | 0 | 0 | 0.960 | FAIL |
+| 3.60 | seed 3 | 2.0574 | r_knee | 9.256 | +19.00 | +19.00 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | seed 4 | 2.0576 | r_knee | 9.256 | −10.33 | +18.99 | 1/0 | 0 | 0 | 0.960 | FAIL |
+| 3.60 | seed 5 | 2.0570 | r_knee | 9.256 | +19.00 | +19.00 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | seed 6 | 2.0569 | r_knee | 9.256 | +19.00 | +19.00 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | seed 7 | 2.0575 | r_knee | 9.256 | +18.99 | +18.99 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | seed 8 | 2.0575 | r_knee | 9.256 | +18.99 | +18.99 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | seed 9 | 2.0570 | r_knee | 9.256 | +19.00 | +19.00 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | mass −5% | 2.0443 | r_hip_pitch | 9.040 | +18.66 | +18.66 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | mass +5% | 2.0674 | r_knee | 9.256 | +20.90 | +20.90 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | friction 1.2 | 2.0548 | r_hip_pitch | 9.064 | +17.99 | +17.99 | 0/0 | 0 | 0 | 0.963 | CLEAR |
+| 3.60 | friction 1.4 | 2.0240 | r_hip_pitch | 9.040 | +17.95 | +17.95 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | friction 1.6 | 2.0572 | r_knee | 9.256 | +19.00 | +19.00 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | latency +1 | 2.2021 | r_knee | 9.256 | +18.95 | +18.95 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | latency −1 | 1.9354 | l_knee | 0.416 | +20.86 | +20.86 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | entrance rug | 8.0479 | r_ank_pitch | 13.144 | no support | +20.87 | 5/0 | 22 | 0 | 0.957 | FAIL |
+| 3.60 | start/stop ×3 | 2.0572 | r_knee | 9.256 | +19.00 | +19.00 | 0/0 | 0 | 0 | 0.960 | CLEAR |
+
+The worst cell is the 3.60 s entrance rug. Right ankle pitch 8.0479 Nm at 13.144 s, stop, q −0.47657 rad, q_des −0.57790 rad, omega +3.7575 rad/s, 22 ticks over, hard_cap 0. At that tick the support is air, foot normals 2.79 N and 0.15 N. Rug normal peaks at 5.46 N. min up_z is 0.957, so it does not tip. The 3.57 s rug is the same miss, 8.0444 Nm at the same time. Seeds 2 and 4 miss on the spawn tick only: CoM −9.65 mm and −10.33 mm at t 0.000 s, one foot under 5 N, and the walk ask stays at the nominal knee. Mass −5% (2.230 kg) holds on 3.60 s at right hip pitch 2.0443 Nm and fails on 3.57 s: left hip roll 4.0224 Nm at 14.272 s, CoM and ZMP −2.11 mm at 14.304 s, 84 ticks over. Mass +5%, friction 1.2/1.4/1.6, both latencies, and three start/stop cycles hold ≤2.33 Nm with margins ≥0. The +1 tick delay is the thin clear: 2.2164 Nm at 3.57 s and 2.2021 Nm at 3.60 s, under 2.33 Nm and over the 2.20 Nm headroom. No cell raises hard_cap. Not kit-safe. Not go-anywhere.
+
 The same gait on a 20.00 s bus bout, stand 3.00 s, walk 11.00 s, stop 6.00 s, 2500 ticks, keeps the walk phase at the stop. applied_vx is +0.0560 / +0.0560 m/s. Unclamped peak is the same right knee 2.0695 Nm, now at 11.848 s. CoM/ZMP minimum is the same +17.93 mm, now at 14.384 s. CoM jerk stays 88.853. The clip is `docs/media/voice_vx_056_side_front.mp4`, side and front, 30 fps. Not kit-safe. Not go-anywhere. Kit vx 0.150 m/s is still left hip pitch 4.4462 Nm.
 

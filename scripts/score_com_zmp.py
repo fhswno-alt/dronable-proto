@@ -147,7 +147,10 @@ def _cop_xy(session: sw.SteerSession, kind: str) -> np.ndarray | None:
             con = session.data.contact[i]
             g1 = int(con.geom1)
             g2 = int(con.geom2)
-            if not ((g1 == gid and g2 == floor) or (g2 == gid and g1 == floor)):
+            grounds = {floor}
+            if session.lipm is not None:
+                grounds.update(int(g) for g in session.lipm.ground_extra if int(g) >= 0)
+            if not ((g1 == gid and g2 in grounds) or (g2 == gid and g1 in grounds)):
                 continue
             force = np.zeros(6, dtype=np.float64)
             mj.mj_contactForce(session.model, session.data, i, force)
@@ -307,6 +310,163 @@ def _applied_settle(session: sw.SteerSession, t_stop: float) -> float:
     return float(window[-1].applied_vx)
 
 
+SEED_Q_STD = 0.002
+SEED_QD_STD = 0.01
+RUG_EDGE_AHEAD_M = 0.015
+
+
+@dataclass
+class Perturb:
+    """Runtime-only. The plant file is not written."""
+
+    label: str = "nominal"
+    seed: int | None = None
+    mass_scale: float = 1.0
+    friction: float | None = None
+    latency_ticks: int = 0
+    rug: bool = False
+    cycles: int = 0
+
+
+def _scale_mass(model: mj.MjModel, data: mj.MjData, scale: float) -> None:
+    model.body_mass[1:] *= float(scale)
+    model.body_inertia[1:] *= float(scale)
+    mj.mj_setConst(model, data)
+
+
+def _set_sliding_friction(model: mj.MjModel, mu: float) -> None:
+    for name in ("floor", "l_foot_contact", "r_foot_contact"):
+        gid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, name)
+        if gid < 0:
+            raise RuntimeError(f"missing geom {name}")
+        model.geom_friction[gid, 0] = float(mu)
+
+
+def _seed_hinges(session: sw.SteerSession, seed: int) -> None:
+    """Hinge q and qd noise. The free joint is left on the seated stand."""
+    rng = np.random.default_rng(int(seed))
+    model = session.model
+    data = session.data
+    for jid in range(model.njnt):
+        if int(model.jnt_type[jid]) != int(mj.mjtJoint.mjJNT_HINGE):
+            continue
+        qadr = int(model.jnt_qposadr[jid])
+        vadr = int(model.jnt_dofadr[jid])
+        q = float(data.qpos[qadr]) + float(rng.normal(0.0, SEED_Q_STD))
+        lo = float(model.jnt_range[jid, 0])
+        hi = float(model.jnt_range[jid, 1])
+        data.qpos[qadr] = min(hi, max(lo, q))
+        data.qvel[vadr] = float(data.qvel[vadr]) + float(rng.normal(0.0, SEED_QD_STD))
+    mj.mj_forward(model, data)
+
+
+def _place_entrance_rug(session: sw.SteerSession) -> dict[str, float]:
+    """Slide the entrance mat so its near edge is just ahead of the toes.
+
+    The authored height stays. The geom is ground for load and for the
+    airborne check. The plant file is not written.
+    """
+    gid = int(session.gid_rug)
+    if gid < 0:
+        raise RuntimeError("entrance rug geom missing")
+    bid = int(session.model.geom_bodyid[gid])
+    half_x = float(session.model.geom_size[gid, 0])
+    half_z = float(session.model.geom_size[gid, 2])
+    front = -1.0e9
+    for body, geom in (
+        (session.bid_lf, session.gid_lfoot),
+        (session.bid_rf, session.gid_rfoot),
+    ):
+        corners = session._foot_corners(body, geom)
+        front = max(front, float(np.max(corners[:, 0])))
+    near = front + RUG_EDGE_AHEAD_M
+    session.model.body_pos[bid, 0] = near + half_x
+    mj.mj_forward(session.model, session.data)
+    if session.lipm is not None:
+        session.lipm.ground_extra = (gid,)
+    top = float(session.data.geom_xpos[gid, 2]) + half_z
+    return {"near_x_m": near, "top_z_m": top, "half_x_m": half_x}
+
+
+def _install_latency(session: sw.SteerSession, ticks: int) -> None:
+    """+1 holds the previous ctrl for one planner tick. -1 leads by one tick."""
+    if ticks not in (-1, 1):
+        raise ValueError(f"latency ticks {ticks}")
+    orig = session._lipm_substep
+    prev: list[np.ndarray | None] = [None]
+
+    def wrapped(ctrl_from: np.ndarray | None = None) -> None:
+        commanded = np.array(session.data.ctrl, dtype=np.float64, copy=True)
+        if prev[0] is None:
+            applied = commanded
+        elif ticks > 0:
+            applied = prev[0]
+        else:
+            applied = commanded + (commanded - prev[0])
+        prev[0] = commanded.copy()
+        session.data.ctrl[:] = applied
+        orig(ctrl_from)
+
+    session._lipm_substep = wrapped  # type: ignore[method-assign]
+
+
+def _cycle_script(
+    n_cycles: int,
+    stand_s: float = 0.40,
+    walk_s: float = 11.0,
+    stop_s: float = 3.0,
+) -> tuple[sw.DemoSegment, ...]:
+    """Repeat the cleared vel window. Each stop is the same 11 s phase."""
+    t = float(stand_s)
+    segments = [sw.DemoSegment(t, "stand", 0.0, 0.0, "stand")]
+    for i in range(int(n_cycles)):
+        t += float(walk_s)
+        segments.append(sw.DemoSegment(t, "vel", sw.VOICE_VX_M_S, 0.0, f"forward{i}"))
+        t += float(stop_s)
+        segments.append(sw.DemoSegment(t, "stop", 0.0, 0.0, f"stop{i}"))
+    return tuple(segments)
+
+
+def _rug_normal(session: sw.SteerSession) -> float:
+    gid = int(session.gid_rug)
+    if gid < 0:
+        return 0.0
+    total = 0.0
+    for i in range(session.data.ncon):
+        con = session.data.contact[i]
+        if int(con.geom1) != gid and int(con.geom2) != gid:
+            continue
+        force = np.zeros(6, dtype=np.float64)
+        mj.mj_contactForce(session.model, session.data, i, force)
+        total += float(force[0])
+    return total
+
+
+def _apply_perturb(session: sw.SteerSession, perturb: Perturb) -> dict[str, object]:
+    info: dict[str, object] = {"label": perturb.label}
+    if abs(float(perturb.mass_scale) - 1.0) > 1e-12:
+        _scale_mass(session.model, session.data, float(perturb.mass_scale))
+        session._reset_stand()
+        info["mass_scale"] = float(perturb.mass_scale)
+        info["mass_kg"] = float(np.sum(session.model.body_mass[1:]))
+    if perturb.friction is not None:
+        _set_sliding_friction(session.model, float(perturb.friction))
+        info["friction"] = float(perturb.friction)
+    if perturb.rug:
+        info["rug"] = _place_entrance_rug(session)
+    if perturb.seed is not None:
+        _seed_hinges(session, int(perturb.seed))
+        info["seed"] = int(perturb.seed)
+        info["q_std_rad"] = SEED_Q_STD
+        info["qd_std_rad_s"] = SEED_QD_STD
+    if perturb.latency_ticks:
+        _install_latency(session, int(perturb.latency_ticks))
+        info["latency_ticks"] = int(perturb.latency_ticks)
+    if perturb.cycles:
+        info["cycles"] = int(perturb.cycles)
+    return info
+
+
 def run_attempt(
     *,
     period_s: float,
@@ -322,6 +482,7 @@ def run_attempt(
     preview_r: float = 1.0e-4,
     preview_shape: float = 1.0,
     select_gait: bool = False,
+    perturb: Perturb | None = None,
 ) -> dict[str, object]:
     md5_before = _plant_md5()
     if md5_before != sw.PLANT_MD5:
@@ -369,7 +530,13 @@ def run_attempt(
             preview_r=preview_r,
             preview_shape=preview_shape,
         )
-    session = sw.SteerSession(video=False, lipm=cfg)
+    scene = None
+    if perturb is not None and perturb.rug:
+        scene = sw.ROOT / "mujoco" / "room_entrance.xml"
+    session = sw.SteerSession(video=False, lipm=cfg, scene_xml=scene)
+    perturb_info: dict[str, object] = {}
+    if perturb is not None:
+        perturb_info = _apply_perturb(session, perturb)
     lipm = session.lipm
     if lipm is None or lipm.op3 is None:
         raise SystemExit("walker did not build")
@@ -377,6 +544,8 @@ def run_attempt(
         raise SystemExit("y_swap_cmd is not 0")
     if kit_baseline:
         driver = sw.ScriptedDriver(sw.BUS_KIT_SCRIPT)
+    elif perturb is not None and perturb.cycles:
+        driver = sw.ScriptedDriver(_cycle_script(int(perturb.cycles)))
     elif script is not None:
         driver = sw.ScriptedDriver(script)
     else:
@@ -414,6 +583,8 @@ def run_attempt(
     else:
         vx_cmd = float(sw.VX_FWD_CAP if vx_m_s <= 0.0 else vx_m_s)
     t_end = t_stop + stop_s
+    if perturb is not None and perturb.cycles:
+        t_end = float(_cycle_script(int(perturb.cycles))[-1].t_end)
     last_send = -1.0
     stop_sent = False
     fault = ""
@@ -423,6 +594,7 @@ def run_attempt(
     diag: list[str] = []
     worst_diag = ""
     worst_com = float("inf")
+    rug_peak = 0.0
     while float(session.data.time) < t_end - 1e-12:
         now = float(session.data.time)
         if driver is not None:
@@ -438,6 +610,8 @@ def run_attempt(
             stop_sent = True
         n_ask = len(asks)
         session.step()
+        if perturb is not None and perturb.rug:
+            rug_peak = max(rug_peak, _rug_normal(session))
         if not kit_baseline and lipm.op3.y_swap_cmd != 0.0:
             raise SystemExit("y_swap_cmd changed")
         if kit_baseline:
@@ -695,6 +869,8 @@ def run_attempt(
         "applied_vx_peak": _applied_peak(session),
         "applied_vx_settle": _applied_settle(session, t_stop),
         "select_gait": bool(select_gait),
+        "perturb": perturb_info,
+        "rug_peak_n": rug_peak,
         "diag": diag,
         "worst_diag": worst_diag,
         "stages": by_stage,

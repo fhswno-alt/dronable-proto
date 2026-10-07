@@ -370,6 +370,9 @@ class LipmWalker:
             "R": mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "r_foot_contact"),
         }
         self.gid_floor = mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, "floor")
+        # Extra ground geoms, empty on the walk plant. The entrance rug
+        # is added here at runtime so a foot on the mat still counts as load.
+        self.ground_extra: tuple[int, ...] = ()
         self.e_sat: dict[str, float] = {}
         self._kp: dict[str, float] = {}
         for name, idx in act_idx.items():
@@ -405,6 +408,9 @@ class LipmWalker:
         self._gate_wait_s = 0.0
         self._gate_open = False
         self.preview_gate_holds = 0
+        # A later vel, after the soft stop has planted, arms again at the
+        # kit pitch. The spawn is the only place sole_level starts at 1.
+        self._restart = False
 
     def other(self, side: Side) -> Side:
         return "R" if side == "L" else "L"
@@ -651,6 +657,21 @@ class LipmWalker:
             self.preview_stage = "stop"
             self._tick_preview_stop(walker)
             return
+        if self.preview_stage == "stop":
+            # A new vel after the soft stop has planted arms the shift
+            # again. Until the return is done, the feet stay in that stop.
+            if not self._return_done:
+                self._tick_preview_stop(walker)
+                return
+            self.preview_stage = "stand"
+            self._stop_planted = False
+            self._stop_hold_s = 0.0
+            self._return_t = 0.0
+            self._return_hold = False
+            self._return_done = False
+            self._gate_open = False
+            self._gate_wait_s = 0.0
+            self._restart = True
         preview = self._ensure_preview(walker)
         if self.preview_stage == "stand":
             self.preview_stage = "start"
@@ -699,6 +720,8 @@ class LipmWalker:
         all four sole corners start on the floor. The arm returns that
         match to 0 on a smootherstep. The walk then uses the kit pitch.
         """
+        if self._restart:
+            return 0.0
         arm = float(self.cfg.preview_arm_s)
         if arm <= 1e-6:
             return 0.0
@@ -1549,28 +1572,38 @@ class LipmWalker:
     def _foot_xy(self, side: Side) -> np.ndarray:
         return np.asarray(self.data.geom_xpos[self.gid[side], :2], dtype=np.float64)
 
+    def _on_ground(self, g1: int, g2: int, gid: int) -> bool:
+        if g1 != gid and g2 != gid:
+            return False
+        other = g2 if g1 == gid else g1
+        if other == self.gid_floor:
+            return True
+        return other in self.ground_extra
+
     def foot_contact(self, side: Side) -> bool:
         bid = self.bid[side]
+        grounds = {int(self.gid_floor), *[int(g) for g in self.ground_extra if int(g) >= 0]}
         for i in range(self.data.ncon):
             c = self.data.contact[i]
             g1, g2 = int(c.geom1), int(c.geom2)
             b1 = int(self.model.geom_bodyid[g1])
             b2 = int(self.model.geom_bodyid[g2])
-            if (b1 == bid or b2 == bid) and (g1 == self.gid_floor or g2 == self.gid_floor):
+            if (b1 == bid or b2 == bid) and (g1 in grounds or g2 in grounds):
                 return True
         return False
 
     def foot_normal(self, side: Side) -> float:
-        """Floor normal only. Overlapping 135 mm soles collide with each other
-        on a 2 cm step; that foot-foot force is not weight on the rear foot.
+        """Floor normal, plus any runtime ground geom such as the entrance rug.
+
+        Overlapping 135 mm soles collide with each other on a 2 cm step.
+        That foot-foot force is not weight on the rear foot.
         """
         gid = self.gid[side]
-        floor = self.gid_floor
         total = 0.0
         for i in range(self.data.ncon):
             c = self.data.contact[i]
             g1, g2 = int(c.geom1), int(c.geom2)
-            if not ((g1 == gid and g2 == floor) or (g2 == gid and g1 == floor)):
+            if not self._on_ground(g1, g2, gid):
                 continue
             force = np.zeros(6, dtype=np.float64)
             mj.mj_contactForce(self.model, self.data, i, force)
