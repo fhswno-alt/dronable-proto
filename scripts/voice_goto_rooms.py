@@ -618,6 +618,18 @@ class EastLeftFact(TypedDict):
     pad_rule: str
 
 
+class ApproachBand(TypedDict):
+    """Closest forward wall ray on this bout, and whether the walk held."""
+    hold: bool
+    hold_m: float
+    closest_ray_m: float | None
+    closest_wall: str
+    closest_toe: str
+    closest_t: float | None
+    closest_heading_rad: float | None
+    entered_0_30: bool
+
+
 class RoomJson(TypedDict):
     room: str
     scene: str
@@ -675,6 +687,7 @@ class RoomJson(TypedDict):
     wall_stop_lead_side: str
     wall_stop_pad_m: float | None
     east_left: EastLeftFact
+    approach_band: ApproachBand
     wall_residual_max_m: float | None
     same_wall_count: int
     surface_reject_count: int
@@ -858,10 +871,11 @@ def _definition() -> DefinitionJson:
             f"at most {RANGE_ERR_MAX_M:.2f} m. A large negative residual "
             "does not clear. Right toe "
             f"has {len(EAST_R_ERR_M)} samples, under {len(SAME_WALL_ERR_M)}, "
-            "so it cannot clear and it does not stop the walk. Once the "
-            f"left toe's ray on {EAST_WALL} is at or under "
-            f"{EAST_L_HOLD_M:.2f} m, further in-place re-points are "
-            "dropped and the walk stays at yaw 0. No pitch, camera "
+            "so it cannot clear and it does not stop the walk. Once any "
+            f"forward wall ray is at or under {EAST_L_HOLD_M:.2f} m, "
+            "further in-place re-points are dropped and the walk stays "
+            "at yaw 0. That is the same hold the east left toe already "
+            "uses. The threshold is not widened. No pitch, camera "
             "height, or toe bias is fit across pooled samples. "
             "Room reach is a "
             "separate bar. In-place body "
@@ -2253,6 +2267,12 @@ def _run_room(
     wall_stop_lead_side = ""
     wall_stop_pad: float | None = None
     east_l_hold = False
+    walk_hold = False
+    closest_ray: float | None = None
+    closest_wall = ""
+    closest_toe = ""
+    closest_t: float | None = None
+    closest_heading: float | None = None
     east_l_seen: list[tuple[float, float]] = []
     east_l_pad_n = 0
     other_near: dict[tuple[str, str], list[tuple[float, float]]] = {}
@@ -2741,6 +2761,26 @@ def _run_room(
                             east_l_min_pitch = float(reading["cam_pitch_rad"])
                             east_l_min_lead = float(reading["lead_off_m"])
                         if (
+                            str(true_name).startswith("wall_")
+                            and true_gap is not None
+                            and (
+                                closest_ray is None
+                                or float(true_gap) < closest_ray
+                            )
+                        ):
+                            closest_ray = float(true_gap)
+                            closest_wall = true_name
+                            closest_toe = side
+                            closest_t = now
+                            closest_heading = heading
+                        if (
+                            str(true_name).startswith("wall_")
+                            and true_gap is not None
+                            and float(true_gap) <= EAST_L_HOLD_M
+                        ):
+                            walk_hold = True
+                            approach_yaw = 0.0
+                        if (
                             true_name == EAST_WALL
                             and side == "L"
                             and true_gap is not None
@@ -2981,7 +3021,7 @@ def _run_room(
                 look = _capture()
                 last_capture = look["heading_at_capture"]
                 decision = consider(look)
-                if east_l_hold:
+                if walk_hold:
                     approach_yaw = 0.0
                     need_search = False
                 elif decision == "commit":
@@ -3025,6 +3065,8 @@ def _run_room(
                     false_stop=False,
                     latch_pass=False,
                 )
+            if stop["path"] == "" and float(session.data.time) >= TIME_LIMIT_S - 1e-9:
+                _time_stop(f"time limit {TIME_LIMIT_S:.1f} s")
         if bout.peak_actuator == "":
             raise SystemExit(f"FAIL {room_name}: no leg actuator force")
         for row in asks:
@@ -3173,6 +3215,18 @@ def _run_room(
                 lead_side="L" if east_l_min_ray is not None else "",
                 online_n=east_l_pad_n,
                 pad_rule=EAST_L_LIVE,
+            ),
+            approach_band=ApproachBand(
+                hold=walk_hold,
+                hold_m=EAST_L_HOLD_M,
+                closest_ray_m=closest_ray,
+                closest_wall=closest_wall,
+                closest_toe=closest_toe,
+                closest_t=closest_t,
+                closest_heading_rad=closest_heading,
+                entered_0_30=(
+                    closest_ray is not None and closest_ray <= EAST_L_NEAR_GATE_M
+                ),
             ),
             wall_residual_max_m=wall_residual_max,
             same_wall_count=same_wall_count,
@@ -3524,7 +3578,7 @@ def main() -> int:
     if _toe_ready("living_close"):
         raise SystemExit("FAIL: living close with no toe can clear")
     if abs(EAST_L_HOLD_M - 0.60) > 1e-12:
-        raise SystemExit(f"FAIL: east left hold moved to {EAST_L_HOLD_M}")
+        raise SystemExit(f"FAIL: walk hold moved to {EAST_L_HOLD_M}")
     if _yaw_toward_u(100.0) != voice.YAW_RAD_S or _yaw_toward_u(540.0) != -voice.YAW_RAD_S:
         raise SystemExit("FAIL: doorway pixel yaw sign moved")
     if _yaw_toward_u(rc.WIDTH / 2.0) != 0.0:
@@ -3730,6 +3784,11 @@ def main() -> int:
                     f"pitch={row['wall_stop_pitch_rad']} "
                     f"lead={row['wall_stop_lead_m']} "
                     f"toe={row['wall_stop_lead_side']}  "
+                    f"walk_hold={row['approach_band']['hold']} "
+                    f"closest_ray={row['approach_band']['closest_ray_m']} "
+                    f"closest_wall={row['approach_band']['closest_wall']} "
+                    f"closest_toe={row['approach_band']['closest_toe']} "
+                    f"band={row['approach_band']['entered_0_30']} "
                     f"east_l_hold={row['east_left']['hold']} "
                     f"east_l_ray={row['east_left']['min_ray_m']} "
                     f"east_l_presented={row['east_left']['presented']} "
