@@ -1,0 +1,205 @@
+{
+  "cleared": true,
+  "margins_ok": true,
+  "ask_ok": true,
+  "jerk_ok": true,
+  "tip_ok": true,
+  "period_s": 3.57,
+  "dsp": 0.7,
+  "amp_m": 0.043,
+  "z_m": 0.004,
+  "arm_s": 2.4,
+  "preview_r": 0.0001,
+  "preview_shape": 0.0,
+  "vx_m_s": 0.056,
+  "kit_baseline": false,
+  "y_swap_m": 0.0,
+  "pelvis_deg": 0.0,
+  "zc_m": 0.18147112435248963,
+  "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+  "soft_pass": 0,
+  "hard_cap_ticks": 0,
+  "fault": "",
+  "dx_m": 0.06802606962760434,
+  "min_up_z": 0.9601070366774758,
+  "ik_fail": 0,
+  "gate_holds": 0,
+  "n_ticks": 2500,
+  "com_out": 0,
+  "cop_out": 0,
+  "zmp_out": 0,
+  "ask_over": 0,
+  "com_min_m": 0.017925008057361188,
+  "zmp_min_m": 0.017925008057361188,
+  "com_out_frac": 0.0,
+  "zmp_out_frac": 0.0,
+  "com_frac": {
+    "all": {
+      "n": 2500.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 17.92500805736119
+    },
+    "ss_L": {
+      "n": 91.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 20.823778167820887
+    },
+    "ss_R": {
+      "n": 183.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 17.92500805736119
+    },
+    "ds": {
+      "n": 2226.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 21.637693658216683
+    },
+    "air": {
+      "n": 0.0,
+      "n_out": 0.0,
+      "frac": NaN,
+      "min_mm": NaN
+    }
+  },
+  "zmp_frac": {
+    "all": {
+      "n": 2499.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 17.92500805736119
+    },
+    "ss_L": {
+      "n": 91.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 20.823778167820887
+    },
+    "ss_R": {
+      "n": 183.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 17.92500805736119
+    },
+    "ds": {
+      "n": 2225.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 21.637693658216683
+    },
+    "air": {
+      "n": 0.0,
+      "n_out": 0.0,
+      "frac": NaN,
+      "min_mm": NaN
+    }
+  },
+  "zmp_pos_frac": {
+    "all": {
+      "n": 2498.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 12.184749321638554
+    },
+    "ss_L": {
+      "n": 91.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 15.386785727879921
+    },
+    "ss_R": {
+      "n": 183.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 15.364650850515735
+    },
+    "ds": {
+      "n": 2224.0,
+      "n_out": 0.0,
+      "frac": 0.0,
+      "min_mm": 12.184749321638554
+    },
+    "air": {
+      "n": 0.0,
+      "n_out": 0.0,
+      "frac": NaN,
+      "min_mm": NaN
+    }
+  },
+  "com_worst": "+17.93 mm t 14.384 s stage stop support R fn 4.88/18.03",
+  "cop_worst": "+8.89 mm t 0.128 s stage stand support double fn 11.69/11.66",
+  "zmp_worst": "+17.93 mm t 14.384 s stage stop support R fn 4.88/18.03",
+  "ask_worst": "r_knee sum 2.0695 Nm signed +0.7774 Nm t 11.848 s stage walk q -0.93894 q_des -0.90731 kp 45.0 kv 1.4573 omega +0.4433",
+  "ask_nm": 2.069465793540158,
+  "jerk_joint": "r_knee",
+  "jerk_rad_s3": 1247.6673378648827,
+  "jerk_rms": 51.404561021062925,
+  "jerk_t": 3.0079999999998903,
+  "r_knee_jerk": 1247.6673378648827,
+  "r_knee_jerk_rms": 51.404561021062925,
+  "r_knee_jerk_t": 3.0079999999998903,
+  "torso_jerk_m_s3": 88.85277150719413,
+  "torso_jerk_rms": 4.875927282330812,
+  "torso_jerk_t": 0.024000000000000007,
+  "torso_jerk_walk_peak": 55.98672770041866,
+  "torso_jerk_walk_rms": 4.5359628769882185,
+  "tau_joint": "l_hip_pitch",
+  "tau_nm": 1.1384667967801825,
+  "tau_t": 11.856000000000629,
+  "preview_peak_m": 0.04991687519950303,
+  "applied_vx_peak": 0.056,
+  "applied_vx_settle": 0.056,
+  "select_gait": true,
+  "diag": [
+    "t 6.064 walk support R com_y -0.0314 foot_y -0.0480 preview_com -0.0395 preview_y +0.0395 margin +21.52 mm",
+    "t 6.072 walk support R com_y -0.0316 foot_y -0.0480 preview_com -0.0397 preview_y +0.0397 margin +21.73 mm",
+    "t 6.080 walk support R com_y -0.0318 foot_y -0.0480 preview_com -0.0399 preview_y +0.0399 margin +21.92 mm",
+    "t 6.088 walk support R com_y -0.0320 foot_y -0.0480 preview_com -0.0400 preview_y +0.0400 margin +22.10 mm"
+  ],
+  "worst_diag": "t 14.384 stop support R com_y -0.0291 foot_y -0.0493 preview_com -0.0367 preview_y +0.0367 margin +17.93 mm",
+  "stages": {
+    "stand": {
+      "com": "+21.64 mm t 0.168 s stage stand support double fn 11.64/11.61",
+      "cop": "+8.89 mm t 0.128 s stage stand support double fn 11.69/11.66",
+      "zmp": "+21.64 mm t 0.168 s stage stand support double fn 11.64/11.61",
+      "ask": "l_knee sum 0.6993 Nm signed -0.6993 Nm t 0.128 s stage stand q +1.06653 q_des +1.05222 kp 45.0 kv 1.4573 omega +0.0378",
+      "com_mm": 21.637693658216683,
+      "cop_mm": 8.88918016253912,
+      "zmp_mm": 21.637693658216683,
+      "ask_nm": 0.699250546042514
+    },
+    "start": {
+      "com": "+22.48 mm t 3.176 s stage start support double fn 11.54/11.49",
+      "cop": "+21.55 mm t 3.232 s stage start support double fn 11.30/11.75",
+      "zmp": "+22.48 mm t 3.176 s stage start support double fn 11.54/11.49",
+      "ask": "l_knee sum 1.8464 Nm signed -0.9000 Nm t 3.024 s stage start q +1.06100 q_des +1.03048 kp 45.0 kv 1.4573 omega -0.3247",
+      "com_mm": 22.47741084885919,
+      "cop_mm": 21.551885481638703,
+      "zmp_mm": 22.47741084885919,
+      "ask_nm": 1.8463530601770914
+    },
+    "walk": {
+      "com": "+20.82 mm t 8.128 s stage walk support L fn 20.55/2.51",
+      "cop": "+25.40 mm t 6.304 s stage walk support R fn 2.02/21.05",
+      "zmp": "+20.82 mm t 8.128 s stage walk support L fn 20.55/2.51",
+      "ask": "r_knee sum 2.0695 Nm signed +0.7774 Nm t 11.848 s stage walk q -0.93894 q_des -0.90731 kp 45.0 kv 1.4573 omega +0.4433",
+      "com_mm": 20.823778167820887,
+      "cop_mm": 25.399849175478963,
+      "zmp_mm": 20.823778167820887,
+      "ask_nm": 2.069465793540158
+    },
+    "stop": {
+      "com": "+17.93 mm t 14.384 s stage stop support R fn 4.88/18.03",
+      "cop": "+24.17 mm t 14.696 s stage stop support R fn 2.91/20.22",
+      "zmp": "+17.93 mm t 14.384 s stage stop support R fn 4.88/18.03",
+      "ask": "l_hip_roll sum 1.7921 Nm signed -0.0585 Nm t 14.328 s stage stop q -0.20808 q_des -0.23122 kp 40.0 kv 1.7027 omega -0.5091",
+      "com_mm": 17.92500805736119,
+      "cop_mm": 24.169501680938424,
+      "zmp_mm": 17.92500805736119,
+      "ask_nm": 1.792143358192515
+    }
+  }
+}

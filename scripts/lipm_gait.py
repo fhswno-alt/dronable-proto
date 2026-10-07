@@ -216,6 +216,12 @@ class LipmConfig:
     # Seconds of double support used to shift onto the first stance foot
     # before the clock starts. Not a torque cap.
     preview_arm_s: float = 0.60
+    # Cart-table jerk weight. 1e-4 is the kit-tight preview. A larger R
+    # slows the sway so hip-roll rate stays under the unclamped bar.
+    preview_r: float = 1.0e-4
+    # 1 is the raised-cosine sway. Lower spends the double support closer
+    # to a steady hip-roll rate. 0 is a straight ramp.
+    preview_shape: float = 1.0
 
 
 @dataclass
@@ -552,7 +558,9 @@ class LipmWalker:
             zc = 0.22
         self._preview_zc = zc
         horizon = max(8, int(round(1.6 / op3_walk.OP3_CTRL_S)))
-        self._preview = zmp_preview.ZmpPreview(zc, op3_walk.OP3_CTRL_S, horizon)
+        self._preview = zmp_preview.ZmpPreview(
+            zc, op3_walk.OP3_CTRL_S, horizon, float(self.cfg.preview_r),
+        )
         self._preview_clock = -float(self.cfg.preview_arm_s)
         return self._preview
 
@@ -568,6 +576,7 @@ class LipmWalker:
             walker.r_ssp_start,
             walker.r_ssp_end,
             self.cfg.preview_amp_m,
+            float(self.cfg.preview_shape),
         )
 
     def _zmp_at(self, t_s: float) -> float:

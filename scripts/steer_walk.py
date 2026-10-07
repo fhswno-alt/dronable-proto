@@ -787,6 +787,85 @@ BUS_KIT_SCRIPT: tuple[DemoSegment, ...] = (
     DemoSegment(BUS_KIT_STOP_S, "stop", 0.0, 0.0, "stop"),
 )
 
+# Cleared voice row. vel at or under this speed selects it. The kit row
+# stays the config for anything faster. Do not retune the kit to match.
+VOICE_VX_M_S = 0.056
+VOICE_PERIOD_S = 3.57
+VOICE_DSP = 0.70
+VOICE_AMP_M = 0.043
+VOICE_Z_M = 0.004
+VOICE_ARM_S = 2.40
+VOICE_PREVIEW_R = 1.0e-4
+# 0 is the straight double-support ramp. 1 is the raised cosine, whose
+# hip-roll peak at 3.60 s was 2.3135 Nm.
+VOICE_PREVIEW_SHAPE = 0.0
+
+
+def voice_preview_config() -> LipmConfig:
+    """Lateral preview that holds the voice-speed bout under 2.20 Nm.
+
+    y_swap stays 0. The sway is preview_y. Stand before the first step
+    is the level sole. Stop after the walk is the preview soft stop,
+    not the kit stand solve.
+    """
+    return LipmConfig(
+        name="voice056",
+        clear_m=VOICE_Z_M,
+        arms=True,
+        schedule="gait_manager",
+        gm_period_s=VOICE_PERIOD_S,
+        gm_dsp=VOICE_DSP,
+        gm_y_swap_m=0.0,
+        gm_x_m=0.020,
+        gm_z_m=VOICE_Z_M,
+        gm_z_swap_m=0.0,
+        gm_pelvis_deg=0.0,
+        gm_hip_pitch_deg=15.0,
+        gm_start_lead="L",
+        gm_crouch_m=0.025,
+        gm_move_s=0.020,
+        preview_amp_m=VOICE_AMP_M,
+        preview_arm_s=VOICE_ARM_S,
+        preview_r=VOICE_PREVIEW_R,
+        preview_shape=VOICE_PREVIEW_SHAPE,
+    )
+
+
+def gait_for_command(vx: float, yaw_rate: float) -> LipmConfig:
+    """Day-1 vel(vx, yaw_rate) picks the walk. Stand and stop do not.
+
+    vx at or under 0.056 m/s, including reverse, selects the voice
+    preview. yaw_rate is accepted on that same gait and is applied as
+    cycle yaw. It does not select a second walk. A faster forward
+    command stays on the locked kit. The bus stop snaps applied speed
+    to 0, and this config then returns through the soft stop.
+    """
+    if not math.isfinite(float(yaw_rate)):
+        raise ValueError("yaw_rate is not finite")
+    if float(vx) <= VOICE_VX_M_S + 1e-12:
+        return voice_preview_config()
+    return locked_kit_config()
+
+
+def voice_bus_script(
+    stand_s: float,
+    walk_s: float,
+    stop_s: float,
+    yaw_rate: float = 0.0,
+) -> tuple[DemoSegment, ...]:
+    """stand, then 10 Hz vel(0.056, yaw), then one stop.
+
+    Walk duration is what sets the gait phase at the stop. A longer
+    quiet stand or a longer settled stop does not move that phase.
+    """
+    t_vel = float(stand_s) + float(walk_s)
+    t_stop = t_vel + float(stop_s)
+    return (
+        DemoSegment(float(stand_s), "stand", 0.0, 0.0, "stand"),
+        DemoSegment(t_vel, "vel", VOICE_VX_M_S, float(yaw_rate), "forward"),
+        DemoSegment(t_stop, "stop", 0.0, 0.0, "stop"),
+    )
+
 
 class ScriptedDriver:
     """Resend vel at 10 Hz. stand once; stop once. Silence is the watchdog's job."""

@@ -32,6 +32,8 @@ import steer_walk as sw
 G = 9.81
 LOAD_N = 5.0
 ASK_NM = 2.33
+# Tighter voice-speed target. CLEAR stays at ASK_NM. This is the headroom bar.
+HEADROOM_NM = 2.20
 LEG_JOINTS: tuple[str, ...] = (
     "l_hip_yaw", "l_hip_roll", "l_hip_pitch", "l_knee", "l_ank_pitch", "l_ank_roll",
     "r_hip_yaw", "r_hip_roll", "r_hip_pitch", "r_knee", "r_ank_pitch", "r_ank_roll",
@@ -288,6 +290,23 @@ def _leg_actuator_nm(session: sw.SteerSession) -> tuple[str, float]:
     return name, peak
 
 
+def _applied_peak(session: sw.SteerSession) -> float:
+    if not session.samples:
+        return 0.0
+    return max(float(sample.applied_vx) for sample in session.samples)
+
+
+def _applied_settle(session: sw.SteerSession, t_stop: float) -> float:
+    """Last applied_vx in the second before the stop command."""
+    window = [
+        sample for sample in session.samples
+        if (t_stop - 1.0) <= float(sample.t) < t_stop - 1e-9
+    ]
+    if not window:
+        return 0.0
+    return float(window[-1].applied_vx)
+
+
 def run_attempt(
     *,
     period_s: float,
@@ -300,10 +319,14 @@ def run_attempt(
     stop_s: float,
     kit_baseline: bool = False,
     vx_m_s: float = 0.0,
+    preview_r: float = 1.0e-4,
+    preview_shape: float = 1.0,
+    select_gait: bool = False,
 ) -> dict[str, object]:
     md5_before = _plant_md5()
     if md5_before != sw.PLANT_MD5:
         raise SystemExit(f"plant md5 {md5_before} != {sw.PLANT_MD5}")
+    script = None
     if kit_baseline:
         cfg = sw.locked_kit_config()
         stand_s = sw.BUS_KIT_STAND_S
@@ -314,6 +337,16 @@ def run_attempt(
         amp_m = 0.0
         z_m = cfg.gm_z_m
         arm_s = 0.0
+    elif select_gait:
+        cfg = sw.gait_for_command(sw.VOICE_VX_M_S, 0.0)
+        period_s = float(cfg.gm_period_s)
+        dsp = float(cfg.gm_dsp)
+        amp_m = float(cfg.preview_amp_m)
+        z_m = float(cfg.gm_z_m)
+        arm_s = float(cfg.preview_arm_s)
+        preview_r = float(cfg.preview_r)
+        preview_shape = float(cfg.preview_shape)
+        script = sw.voice_bus_script(stand_s, walk_s, stop_s, 0.0)
     else:
         cfg = lipm_gait.LipmConfig(
             name="preview",
@@ -333,6 +366,8 @@ def run_attempt(
             gm_move_s=0.020,
             preview_amp_m=amp_m,
             preview_arm_s=arm_s,
+            preview_r=preview_r,
+            preview_shape=preview_shape,
         )
     session = sw.SteerSession(video=False, lipm=cfg)
     lipm = session.lipm
@@ -340,7 +375,12 @@ def run_attempt(
         raise SystemExit("walker did not build")
     if not kit_baseline and lipm.op3.y_swap_cmd != 0.0:
         raise SystemExit("y_swap_cmd is not 0")
-    driver = sw.ScriptedDriver(sw.BUS_KIT_SCRIPT) if kit_baseline else None
+    if kit_baseline:
+        driver = sw.ScriptedDriver(sw.BUS_KIT_SCRIPT)
+    elif script is not None:
+        driver = sw.ScriptedDriver(script)
+    else:
+        driver = None
     asks: list[AskRow] = []
     _install_ask_log(lipm, asks)
     margins: list[MarginRow] = []
@@ -369,7 +409,10 @@ def run_attempt(
     tau_t = 0.0
     t_move0 = stand_s
     t_stop = stand_s + walk_s
-    vx_cmd = float(sw.VX_FWD_CAP if vx_m_s <= 0.0 else vx_m_s)
+    if select_gait:
+        vx_cmd = float(sw.VOICE_VX_M_S)
+    else:
+        vx_cmd = float(sw.VX_FWD_CAP if vx_m_s <= 0.0 else vx_m_s)
     t_end = t_stop + stop_s
     last_send = -1.0
     stop_sent = False
@@ -601,6 +644,8 @@ def run_attempt(
         "amp_m": amp_m,
         "z_m": z_m,
         "arm_s": arm_s,
+        "preview_r": float(preview_r),
+        "preview_shape": float(preview_shape),
         "vx_m_s": vx_cmd,
         "kit_baseline": kit_baseline,
         "y_swap_m": float(cfg.gm_y_swap_m),
@@ -647,6 +692,9 @@ def run_attempt(
         "tau_nm": tau_peak,
         "tau_t": tau_t,
         "preview_peak_m": preview_peak,
+        "applied_vx_peak": _applied_peak(session),
+        "applied_vx_settle": _applied_settle(session, t_stop),
+        "select_gait": bool(select_gait),
         "diag": diag,
         "worst_diag": worst_diag,
         "stages": by_stage,
@@ -729,7 +777,17 @@ def _print_result(result: dict[str, object]) -> None:
     print(f"  CoM worst {result['com_worst']}")
     print(f"  CoP worst {result['cop_worst']}  CoP out {result['cop_out']}")
     print(f"  ZMP worst {result['zmp_worst']}")
-    print(f"  ask worst {result['ask_worst']}  ask over {result['ask_over']}")
+    print(
+        f"  ask worst {result['ask_worst']}  ask over {result['ask_over']}  "
+        f"headroom to {HEADROOM_NM:.2f} "
+        f"{HEADROOM_NM - float(result['ask_nm']):+.4f} Nm  "
+        f"to {ASK_NM:.2f} {ASK_NM - float(result['ask_nm']):+.4f} Nm"
+    )
+    print(
+        f"  applied_vx peak {float(result.get('applied_vx_peak', 0.0)):+.4f} "
+        f"settle {float(result.get('applied_vx_settle', 0.0)):+.4f} m/s  "
+        f"select_gait {result.get('select_gait')}"
+    )
     print(
         f"  actuator {result['tau_joint']} {float(result['tau_nm']):.4f} Nm "
         f"t {float(result['tau_t']):.3f} s  #102 {BASE_TAU_NM:.3f} Nm"
@@ -772,6 +830,68 @@ def _print_result(result: dict[str, object]) -> None:
             print(f"  [{name}] ask {row['ask']}")
 
 
+def render_side_front(
+    out_mp4: Path,
+    stand_s: float = 3.0,
+    walk_s: float = 11.0,
+    stop_s: float = 6.0,
+) -> None:
+    """Side and front of the voice bout. 30 fps. No second mj_forward."""
+    import tempfile
+
+    import imageio.v2 as imageio
+
+    import walk_gait_ainex as wg
+
+    cfg = sw.gait_for_command(sw.VOICE_VX_M_S, 0.0)
+    if cfg.preview_amp_m <= 1e-6 or cfg.gm_y_swap_m != 0.0:
+        raise SystemExit("voice command did not select the preview gait")
+    session = sw.SteerSession(
+        video=True,
+        lipm=cfg,
+        cam_distance=1.70,
+        cam_elevation=-8.0,
+        cam_azimuth=90.0,
+    )
+    if session.lipm is None or session.lipm.op3 is None or session.lipm.op3.y_swap_cmd != 0.0:
+        raise SystemExit("preview walker is not the voice gait")
+    script = sw.voice_bus_script(stand_s, walk_s, stop_s, 0.0)
+    driver = sw.ScriptedDriver(script)
+    t_end = float(script[-1].t_end)
+    next_frame = 0.0
+    frame_dt = 1.0 / 30.0
+    out_mp4.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="voice_frames_") as tmp:
+        folder = Path(tmp)
+        n = 0
+        while float(session.data.time) < t_end - 1e-12:
+            now = float(session.data.time)
+            driver.publish(session.bus, now)
+            session.step()
+            if session.lipm.op3.y_swap_cmd != 0.0:
+                raise SystemExit("y_swap_cmd changed")
+            if now + 1e-9 < next_frame:
+                continue
+            session.cam.distance = 1.70
+            session.cam.elevation = -8.0
+            session.cam.azimuth = 90.0
+            side = session.render([f"side  t {now:5.2f}s"])
+            session.cam.azimuth = 0.0
+            front = session.render([
+                f"front  t {now:5.2f}s  vx {session.bus.applied_vx:+.3f}",
+            ])
+            imageio.imwrite(folder / f"frame_{n:05d}.png", np.concatenate([side, front], axis=1))
+            n += 1
+            next_frame += frame_dt
+        if n < 2:
+            raise SystemExit("render produced no frames")
+        wg._encode_mp4_ffmpeg(folder, out_mp4, fps=30)
+    print(
+        f"  wrote {out_mp4}  frames {n}  video {n / 30.0:.2f} s  "
+        f"sim {t_end:.2f} s  fault {session.bus.fault_reason or 'none'}"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Score preview CoM/ZMP and unclamped ask")
     parser.add_argument("--period", type=float, default=1.40)
@@ -785,7 +905,14 @@ def main() -> None:
     parser.add_argument("--tag", type=str, default="a")
     parser.add_argument("--baseline", action="store_true")
     parser.add_argument("--vx", type=float, default=0.0)
+    parser.add_argument("--preview-r", type=float, default=1.0e-4)
+    parser.add_argument("--preview-shape", type=float, default=1.0)
+    parser.add_argument("--select-gait", action="store_true")
+    parser.add_argument("--render", type=str, default="")
     args = parser.parse_args()
+    if args.render:
+        render_side_front(Path(args.render), stand_s=float(args.stand), walk_s=float(args.walk), stop_s=float(args.stop))
+        return
     result = run_attempt(
         period_s=float(args.period),
         dsp=float(args.dsp),
@@ -797,6 +924,9 @@ def main() -> None:
         stop_s=float(args.stop),
         kit_baseline=bool(args.baseline),
         vx_m_s=float(args.vx),
+        preview_r=float(args.preview_r),
+        preview_shape=float(args.preview_shape),
+        select_gait=bool(args.select_gait),
     )
     _print_result(result)
     out = Path("previews") / f"com_zmp_preview_{args.tag}.json"

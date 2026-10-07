@@ -25,18 +25,23 @@ ENTRY_Y_M = 0.0080
 class ZmpPreview:
     """One lateral axis. ``step`` returns the CoM position in metres."""
 
-    def __init__(self, zc_m: float, dt_s: float, horizon: int) -> None:
+    def __init__(
+        self, zc_m: float, dt_s: float, horizon: int, r_weight: float = 1.0e-4,
+    ) -> None:
         if zc_m < 0.05:
             raise ValueError(f"preview height {zc_m} m is below 0.05 m")
         if dt_s <= 0.0:
             raise ValueError(f"preview dt {dt_s} s is not positive")
         if horizon < 8:
             raise ValueError(f"preview horizon {horizon} is below 8")
+        if r_weight <= 0.0:
+            raise ValueError(f"preview R {r_weight} is not positive")
         self.zc_m = float(zc_m)
         self.dt_s = float(dt_s)
         self.horizon = int(horizon)
+        self.r_weight = float(r_weight)
         a_state, b_state, c_state, k_gain, f_gain = _preview_gains(
-            self.zc_m, self.dt_s, self.horizon,
+            self.zc_m, self.dt_s, self.horizon, self.r_weight,
         )
         self._a = a_state
         self._b = b_state
@@ -76,7 +81,7 @@ class ZmpPreview:
 
 
 def _preview_gains(
-    zc_m: float, dt_s: float, horizon: int,
+    zc_m: float, dt_s: float, horizon: int, r_weight: float = 1.0e-4,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Discrete gains. Q weights ZMP error. R weights jerk."""
     a_state = np.array(
@@ -100,7 +105,6 @@ def _preview_gains(
     a_aug[1:, 1:] = a_state
     b_aug[1:] = b_state
     q_weight = 1.0
-    r_weight = 1.0e-4
     q_aug = np.zeros((4, 4), dtype=np.float64)
     q_aug[0, 0] = q_weight
     p_riccati = q_aug.copy()
@@ -147,6 +151,7 @@ def cycle_zmp(
     r_ssp_start_s: float,
     r_ssp_end_s: float,
     amp_m: float,
+    shape: float = 1.0,
 ) -> float:
     """ZMP y over one walk cycle. +y is toward the left foot.
 
@@ -169,7 +174,7 @@ def cycle_zmp(
     if r0 < t <= r1:
         return amp
     if l1 < t <= r0:
-        return _cosine(t, l1, r0, -amp, amp)
+        return _cosine(t, l1, r0, -amp, amp, shape)
     # Wrap-around double support: after the right swing, back to the right foot.
     span = (period - r1) + l0
     if span <= 1e-9:
@@ -178,7 +183,7 @@ def cycle_zmp(
         u_time = t - r1
     else:
         u_time = (period - r1) + t
-    return _cosine_u(u_time / span, amp, -amp)
+    return _cosine_u(u_time / span, amp, -amp, shape)
 
 
 def arm_zmp(t_before_s: float, arm_s: float, amp_m: float) -> float:
@@ -193,16 +198,27 @@ def arm_zmp(t_before_s: float, arm_s: float, amp_m: float) -> float:
     return -float(amp_m) * s
 
 
-def _cosine(t_s: float, t0_s: float, t1_s: float, y0_m: float, y1_m: float) -> float:
+def _cosine(
+    t_s: float, t0_s: float, t1_s: float, y0_m: float, y1_m: float, shape: float = 1.0,
+) -> float:
     span = float(t1_s) - float(t0_s)
     if span <= 1e-9:
         return float(y1_m)
     u = min(1.0, max(0.0, (float(t_s) - float(t0_s)) / span))
-    return _cosine_u(u, y0_m, y1_m)
+    return _cosine_u(u, y0_m, y1_m, shape)
 
 
-def _cosine_u(u: float, y0_m: float, y1_m: float) -> float:
-    w = 0.5 - 0.5 * math.cos(math.pi * min(1.0, max(0.0, u)))
+def _cosine_u(u: float, y0_m: float, y1_m: float, shape: float = 1.0) -> float:
+    """Blend a ramp and a raised cosine. ``shape`` 1 is the cosine.
+
+    The cosine peaks at pi/2 times the mean rate. A lower shape spends
+    more of the double support at a steady rate, so the hip-roll peak
+    drops. 0 is a straight ramp.
+    """
+    u_clamped = min(1.0, max(0.0, u))
+    cosine = 0.5 - 0.5 * math.cos(math.pi * u_clamped)
+    blend = min(1.0, max(0.0, float(shape)))
+    w = (1.0 - blend) * u_clamped + blend * cosine
     return float(y0_m) + (float(y1_m) - float(y0_m)) * w
 
 
