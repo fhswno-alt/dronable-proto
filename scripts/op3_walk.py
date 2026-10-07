@@ -259,6 +259,10 @@ class Op3Walker:
         self.yaw_offset = 0.0
         # Kit trim, stand and walk. See the module note.
         self.hit_pitch_offset = math.radians(hip_pitch_deg)
+        # 1 keeps the sole level under the hip-pitch offset. 0 is the kit
+        # pose, foot pitched with the hip. Preview stands at 1 and ramps
+        # to 0 before the first lift. Kit stays at 0.
+        self.sole_level = 0.0
         self.z_swap_cmd = float(z_swap_m)
         self.step_fb = float(step_fb)
         self.pelvis_offset = math.radians(pelvis_deg)
@@ -732,6 +736,13 @@ class Op3Walker:
         # at the 0.025 m crouch is +0.766 rad; the knee stays −1.049 rad.
         jr[2] -= self.directions["r_hip_pitch"] * self.hit_pitch_offset
         jl[2] -= self.directions["l_hip_pitch"] * self.hit_pitch_offset
+        if self.sole_level > 1e-6:
+            # Same offset on the ankle, opposite the hip, scaled by
+            # sole_level. At 1 the sole the IK asked for stays level.
+            # At 0 the kit pitch is unchanged.
+            scale = float(self.sole_level)
+            jr[4] += self.directions["r_ank_pitch"] * self.hit_pitch_offset * scale
+            jl[4] += self.directions["l_ank_pitch"] * self.hit_pitch_offset * scale
         out: dict[str, float] = {}
         for i, name in enumerate(_LEG_R):
             out[name] = float(jr[i])
