@@ -890,6 +890,8 @@ def self_test() -> int:
     expect(strictly_below(32.662, BASE_COM_JERK_RMS, COM_JERK_TOL), "lower CoM RMS is below")
     expect(strictly_below(5857.0, BASE_JOINT_JERK_PEAK, JOINT_JERK_TOL), "lower joint peak is below")
     expect(not strictly_below(39843.130, BASE_JOINT_JERK_PEAK, JOINT_JERK_TOL), "baseline joint peak is not below")
+    expect(abs(command_time(0.40, 1, 0.008) - 0.392) < 1e-12, "+1 tick latency is one tick late")
+    expect(abs(command_time(0.392, -1, 0.008) - 0.400) < 1e-12, "-1 tick latency is one tick early")
 
     if failures:
         for msg in failures:
@@ -909,8 +911,13 @@ BASE_JOINT_JERK_RMS = 4111.0
 COM_JERK_TOL = 1e-3
 JOINT_JERK_TOL = 0.5
 TIP_SHA = "58ce1d861b85a2af3f4ca09f0eeead629baa40d1"
+TIP_SHA_AC81435 = "ac814356f484735c442f825a2afb567ed65785d6"
 ROW_JSON = ROOT / "previews" / "walk_smoothness_rerun.json"
 ROW_MD = ROOT / "docs" / "WALK_SMOOTHNESS_RERUN.md"
+AC_JSON = ROOT / "previews" / "walk_smoothness_ac81435.json"
+AC_MD = ROOT / "docs" / "WALK_SMOOTHNESS_AC81435.md"
+SEED_SIGMA_RAD = 0.002
+STAGE_NAMES: tuple[str, ...] = ("stand", "start", "walk", "stop")
 LEG_JOINTS: tuple[str, ...] = (
     "l_hip_yaw", "l_hip_roll", "l_hip_pitch", "l_knee", "l_ank_pitch", "l_ank_roll",
     "r_hip_yaw", "r_hip_roll", "r_hip_pitch", "r_knee", "r_ank_pitch", "r_ank_roll",
@@ -1036,12 +1043,155 @@ POSTED: dict[str, PostedRow] = {
 }
 
 
+# Voice rows on tip ac81435. Timings are the vendor log's stand 0.40 / walk
+# 11.00 / stop 3.00 (1800 ticks), the same clock as tag ``l`` / ``p`` / ``s``.
+# The 58ce1d8 ``PREVIEW_ROWS`` above stay the older tip.
+AC81435_ROWS: tuple[PreviewRowSpec, ...] = (
+    PreviewRowSpec(
+        name="voice-3.60",
+        period_s=3.60,
+        dsp=0.70,
+        amp_m=0.043,
+        z_m=0.004,
+        arm_s=2.40,
+        vx_m_s=0.056,
+        stand_s=0.40,
+        walk_s=11.00,
+        stop_s=3.00,
+        source=(
+            "previews/com_zmp_preview_s.json period 3.60 dsp 0.70 amp 0.043 "
+            "z 0.004 arm 2.40 vx 0.056 stand 0.40 walk 11.00 stop 3.00"
+        ),
+    ),
+    PreviewRowSpec(
+        name="voice-3.70",
+        period_s=3.70,
+        dsp=0.70,
+        amp_m=0.043,
+        z_m=0.004,
+        arm_s=2.40,
+        vx_m_s=0.056,
+        stand_s=0.40,
+        walk_s=11.00,
+        stop_s=3.00,
+        source=(
+            "previews/com_zmp_preview_p.json period 3.70 dsp 0.70 amp 0.043 "
+            "z 0.004 arm 2.40 vx 0.056 stand 0.40 walk 11.00 stop 3.00"
+        ),
+    ),
+    PreviewRowSpec(
+        name="slow",
+        period_s=6.40,
+        dsp=0.70,
+        amp_m=0.043,
+        z_m=0.004,
+        arm_s=2.40,
+        vx_m_s=0.040,
+        stand_s=0.40,
+        walk_s=11.00,
+        stop_s=3.00,
+        source=(
+            "previews/com_zmp_preview_l.json period 6.40 dsp 0.70 amp 0.043 "
+            "z 0.004 arm 2.40 vx 0.040 stand 0.40 walk 11.00 stop 3.00"
+        ),
+    ),
+)
+
+
+@dataclass(frozen=True)
+class AcClaim:
+    """Controls' posted figures for one ac81435 row. Their margin is cart-table."""
+
+    margin_mm: float
+    ask_nm: float
+    ask_joint: str
+    ask_t_s: float
+    com_jerk_peak: float
+    com_jerk_rms: float
+    knee_peak: float
+    knee_rms: float
+    stop_margin_mm: float
+    stop_ask_nm: float
+    stop_ask_joint: str
+    stop_ask_t_s: float
+    joint_name: str
+    joint_peak: float
+    joint_rms: float
+
+
+AC81435_CLAIMS: dict[str, AcClaim] = {
+    "voice-3.60": AcClaim(
+        margin_mm=21.380818889018192,
+        ask_nm=2.313474049378506,
+        ask_joint="r_hip_roll",
+        ask_t_s=8.176,
+        com_jerk_peak=395.30944711258593,
+        com_jerk_rms=12.014751454517079,
+        knee_peak=1250.4078238076595,
+        knee_rms=73.14132832050701,
+        stop_margin_mm=24.824043203363395,
+        stop_ask_nm=2.2712777994990185,
+        stop_ask_joint="r_ank_pitch",
+        stop_ask_t_s=14.392,
+        joint_name="r_ank_pitch",
+        joint_peak=8367.011450050986,
+        joint_rms=222.3453170100869,
+    ),
+    "voice-3.70": AcClaim(
+        margin_mm=21.417031134190564,
+        ask_nm=2.261872523867808,
+        ask_joint="r_hip_roll",
+        ask_t_s=8.352,
+        com_jerk_peak=88.85277150719413,
+        com_jerk_rms=5.353261716101873,
+        knee_peak=1250.4078238076595,
+        knee_rms=71.36159608040991,
+        stop_margin_mm=47.71525680297464,
+        stop_ask_nm=1.5982087191771084,
+        stop_ask_joint="l_knee",
+        stop_ask_t_s=11.400,
+        joint_name="r_knee",
+        joint_peak=1250.4078238076595,
+        joint_rms=71.36159608040991,
+    ),
+    "slow": AcClaim(
+        margin_mm=21.637693658216682,
+        ask_nm=1.995631587118884,
+        ask_joint="r_hip_roll",
+        ask_t_s=2.816,
+        com_jerk_peak=88.85277150719413,
+        com_jerk_rms=3.7223634276158113,
+        knee_peak=1250.4078238076595,
+        knee_rms=55.487486327744406,
+        stop_margin_mm=26.858296619237212,
+        stop_ask_nm=0.82001705351437,
+        stop_ask_joint="r_ank_roll",
+        stop_ask_t_s=14.392,
+        joint_name="r_knee",
+        joint_peak=1250.4078238076595,
+        joint_rms=55.487486327744406,
+    ),
+}
+
+
+@dataclass(frozen=True)
+class Perturb:
+    """Runtime-only change on the loaded MjModel. The plant XML is not written."""
+
+    label: str
+    seed: int | None = None
+    mass_scale: float = 1.0
+    friction: float | None = None
+    latency_ticks: int = 0
+
+
 @dataclass
 class AskSample:
     t_s: float
     joint: str
     signed_nm: float
     sum_nm: float
+    stage: str = ""
 
 
 @dataclass
@@ -1139,6 +1289,11 @@ def _preview_config(spec: PreviewRowSpec) -> lipm_gait.LipmConfig:
     )
 
 
+def command_time(now: float, latency_ticks: int, dt: float) -> float:
+    """Clock the bus command is chosen on. The bus itself still sees ``now``."""
+    return now - latency_ticks * dt
+
+
 def _masked_jerk(samples: Vec, dt: float, keep: Vec) -> tuple[float, float] | None:
     jerk = finite_jerk(samples, dt)
     if jerk.shape[0] == 0 or keep.shape[0] != samples.shape[0]:
@@ -1202,7 +1357,102 @@ def _mfg_reasons(
     return reasons
 
 
-def run_preview_row(spec: PreviewRowSpec) -> dict[str, object]:
+def _apply_perturb(session: steer_walk.SteerSession, perturb: Perturb) -> None:
+    """Scale mass, friction, or the spawn pose on the loaded model.
+
+    Mass and inertia are scaled together so a rigid body stays consistent.
+    Sliding friction is geom_friction column 0 on the floor and both foot
+    boxes. A seed adds Gaussian noise to the twelve leg hinges only.
+    ``mj_setConst`` refreshes derived mass fields. The XML file is not opened
+    for writing.
+    """
+    model = session.model
+    data = session.data
+    touched = False
+    if abs(perturb.mass_scale - 1.0) > 1e-12:
+        model.body_mass[:] *= float(perturb.mass_scale)
+        model.body_inertia[:] *= float(perturb.mass_scale)
+        # mj_setConst refreshes invweight from the new mass, and it also
+        # writes qpos back to qpos0. Keep the seated stand pose.
+        qpos = data.qpos.copy()
+        qvel = data.qvel.copy()
+        ctrl = data.ctrl.copy()
+        act = data.act.copy()
+        time_s = float(data.time)
+        mj.mj_setConst(model, data)
+        data.qpos[:] = qpos
+        data.qvel[:] = qvel
+        data.ctrl[:] = ctrl
+        data.act[:] = act
+        data.time = time_s
+        touched = True
+    if perturb.friction is not None:
+        for gid in (int(session.gid_floor), int(session.gid_lfoot), int(session.gid_rfoot)):
+            if gid < 0:
+                raise RuntimeError("floor or foot contact geom is missing")
+            model.geom_friction[gid, 0] = float(perturb.friction)
+        touched = True
+    if perturb.seed is not None:
+        rng = np.random.Generator(np.random.PCG64(int(perturb.seed)))
+        for jn in LEG_JOINTS:
+            jid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, jn)
+            if jid < 0:
+                raise RuntimeError(f"missing joint {jn}")
+            adr = int(model.jnt_qposadr[jid])
+            data.qpos[adr] += float(rng.normal(0.0, SEED_SIGMA_RAD))
+        touched = True
+    if touched:
+        mj.mj_forward(model, data)
+
+
+def _asks_by_joint(asks: list[AskSample]) -> list[dict[str, object]]:
+    best: dict[str, AskSample] = {}
+    for sample in asks:
+        prev = best.get(sample.joint)
+        if prev is None or sample.sum_nm > prev.sum_nm:
+            best[sample.joint] = sample
+    rows: list[dict[str, object]] = []
+    for sample in best.values():
+        rows.append({
+            "joint": sample.joint,
+            "sum_nm": sample.sum_nm,
+            "t_s": sample.t_s,
+            "signed_nm": sample.signed_nm,
+            "headroom_nm": SAG_BAR_NM - sample.sum_nm,
+            "stage": sample.stage,
+        })
+    rows.sort(key=lambda row: float(row["sum_nm"]), reverse=True)
+    return rows
+
+
+def _stage_blob(score: PhaseScore, asks: list[AskSample]) -> dict[str, object]:
+    picked = [sample for sample in asks if sample.stage == score.phase]
+    peak = max(picked, key=lambda sample: sample.sum_nm) if picked else None
+    return {
+        "stage": score.phase,
+        "n": score.n,
+        "zmp_min_margin_m": score.zmp_min_m,
+        "zmp_min_t_s": score.zmp_min_t_s,
+        "zmp_outside_fraction": score.zmp_frac() if score.n else None,
+        "zmp_outside_n": score.n_zmp_outside,
+        "com_min_margin_m": score.com_min_m,
+        "com_min_t_s": score.com_min_t_s,
+        "com_outside_fraction": score.com_frac() if score.n_com else None,
+        "com_n": score.n_com,
+        "com_outside_n": score.n_com_outside,
+        "ask_joint": None if peak is None else peak.joint,
+        "ask_nm": None if peak is None else peak.sum_nm,
+        "ask_t_s": None if peak is None else peak.t_s,
+        "ask_signed_nm": None if peak is None else peak.signed_nm,
+        "ask_headroom_nm": None if peak is None else SAG_BAR_NM - peak.sum_nm,
+    }
+
+
+def run_preview_row(
+    spec: PreviewRowSpec,
+    perturb: Perturb | None = None,
+    tip_sha: str = TIP_SHA,
+) -> dict[str, object]:
     digest_before = _plant_md5()
     if digest_before != FROZEN_MD5:
         raise SystemExit(f"plant md5 {digest_before} != {FROZEN_MD5}")
@@ -1215,8 +1465,15 @@ def run_preview_row(spec: PreviewRowSpec) -> dict[str, object]:
     notes = plant_notes(session.model)
     asks: list[AskSample] = []
     _install_ask_log(walker, asks)
+    if perturb is not None:
+        _apply_perturb(session, perturb)
+    if _plant_md5() != FROZEN_MD5:
+        raise SystemExit("plant XML md5 changed while applying a runtime perturb")
     phases: dict[str, PhaseScore] = {
         name: PhaseScore(phase=name) for name in ("stand", "ds", "ss_L", "ss_R", "unknown")
+    }
+    stages: dict[str, PhaseScore] = {
+        name: PhaseScore(phase=name) for name in STAGE_NAMES
     }
     times: list[float] = []
     pre_times: list[float] = []
@@ -1227,20 +1484,30 @@ def run_preview_row(spec: PreviewRowSpec) -> dict[str, object]:
     t_stop = spec.stand_s + spec.walk_s
     t_end = t_stop + spec.stop_s
     vx_cmd = spec.vx_m_s if spec.vx_m_s > 0.0 else float(steer_walk.VX_FWD_CAP)
+    latency_ticks = 0 if perturb is None else int(perturb.latency_ticks)
+    ctrl_dt = float(session.ctrl_dt)
     last_send = -1.0
     stop_sent = False
     while float(session.data.time) < t_end - 1e-12:
         now = float(session.data.time)
-        if now + 1e-12 < spec.stand_s:
+        # Positive latency delivers the command one tick late. Negative
+        # latency delivers it one tick early. The bus timeout still sees the
+        # real clock.
+        cmd_t = command_time(now, latency_ticks, ctrl_dt)
+        if cmd_t + 1e-12 < spec.stand_s:
             pass
-        elif now + 1e-12 < t_stop:
+        elif cmd_t + 1e-12 < t_stop:
             if last_send < 0.0 or (now - last_send) >= (steer_walk.VEL_RESEND_S - 1e-12):
                 session.bus.vel(vx_cmd, 0.0, now)
                 last_send = now
         elif not stop_sent:
             session.bus.stop(now)
             stop_sent = True
+        n_ask = len(asks)
         session.step()
+        stage_name = str(getattr(walker, "preview_stage", "unknown"))
+        for sample in asks[n_ask:]:
+            sample.stage = stage_name
         if walker.op3.y_swap_cmd != 0.0:
             raise RuntimeError(f"{spec.name}: y_swap_cmd changed")
         if session.bus.fault and session.bus.fault_reason and session.bus.fault_reason not in reasons:
@@ -1248,6 +1515,8 @@ def run_preview_row(spec: PreviewRowSpec) -> dict[str, object]:
         tick = sample_zmp(session, walker)
         t_post = float(session.data.time)
         phases[tick.phase].add(tick, t_post)
+        if stage_name in stages:
+            stages[stage_name].add(tick, t_post)
         names, q = actuated_q(session.model, session.data)
         if not joint_names:
             joint_names = names
@@ -1319,10 +1588,19 @@ def run_preview_row(spec: PreviewRowSpec) -> dict[str, object]:
     knee_peak = None if joint_jerk is None else joint_jerk.axis_peak.get("r_knee")
     knee_rms = None if joint_jerk is None else joint_jerk.axis_rms.get("r_knee")
     phase_rows = [phases[name] for name in ("stand", "ds", "ss_L", "ss_R")]
+    joint_asks = _asks_by_joint(asks)
+    stage_rows = [_stage_blob(stages[name], asks) for name in STAGE_NAMES]
+    floor_mu = float(session.model.geom_friction[int(session.gid_floor), 0])
     return {
         "name": spec.name,
         "source": spec.source,
-        "tip_sha": TIP_SHA,
+        "tip_sha": tip_sha,
+        "perturb_label": None if perturb is None else perturb.label,
+        "seed": None if perturb is None else perturb.seed,
+        "mass_scale": 1.0 if perturb is None else perturb.mass_scale,
+        "latency_ticks": latency_ticks,
+        "friction_sliding": floor_mu,
+        "runtime_mass_kg": float(np.sum(session.model.body_mass)),
         "plant_md5": digest_after,
         "soft_pass": SOFT_PASS,
         "verdict": verdict,
@@ -1380,6 +1658,8 @@ def run_preview_row(spec: PreviewRowSpec) -> dict[str, object]:
         "ask_signed_nm": None if ask_peak is None else ask_peak.signed_nm,
         "ask_over_ticks": len(over_times),
         "ask_over_writes": sum(1 for row in asks if row.sum_nm > SAG_BAR_NM + 1e-9),
+        "asks_by_joint": joint_asks,
+        "preview_stages": stage_rows,
         "max_leg_actuator_nm": float(session.max_leg_tau),
         "sag_bar_nm": SAG_BAR_NM,
     }
@@ -1682,6 +1962,564 @@ def render_rows_md(rows: list[dict[str, object]]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _near(value: float | None, posted: float, tol: float) -> bool:
+    return value is not None and math.isfinite(value) and abs(value - posted) <= tol
+
+
+def _named_blobs(row: dict[str, object], key: str, name_key: str) -> dict[str, dict[str, object]]:
+    blobs = row.get(key)
+    out: dict[str, dict[str, object]] = {}
+    if not isinstance(blobs, list):
+        return out
+    for blob in blobs:
+        if isinstance(blob, dict) and isinstance(blob.get(name_key), str):
+            out[str(blob[name_key])] = blob
+    return out
+
+
+def _time_cell(blob: object, field: str) -> str:
+    if not isinstance(blob, dict):
+        return "unmeasured"
+    value = blob.get(field)
+    if not isinstance(value, float):
+        return "unmeasured"
+    return f"{value:.3f} s"
+
+
+def _nm(value: float | None) -> str:
+    if value is None or not math.isfinite(value):
+        return "unmeasured"
+    return f"{value:.4f} Nm"
+
+
+def _ac_notes(row: dict[str, object]) -> list[str]:
+    claim = AC81435_CLAIMS.get(str(row["name"]))
+    if claim is None:
+        return ["no posted Controls numbers for this row"]
+    notes: list[str] = []
+    zmp = _opt(row, "zmp_min_margin_m")
+    com = _opt(row, "com_min_margin_m")
+    z_out = _f(row, "zmp_outside_fraction")
+    c_out = _f(row, "com_outside_fraction")
+    same_margin = (
+        _near(None if zmp is None else zmp * 1000.0, claim.margin_mm, 0.05)
+        and _near(None if com is None else com * 1000.0, claim.margin_mm, 0.05)
+        and z_out == 0.0
+        and c_out == 0.0
+    )
+    if same_margin:
+        notes.append(
+            f"Whole-bout contact-CoP and CoM margins match Controls' "
+            f"+{claim.margin_mm:.2f} mm with outside fraction 0."
+        )
+    else:
+        notes.append(
+            f"Measured whole-bout contact CoP minimum is {_mm(zmp)}, outside fraction "
+            f"{z_out:.3f}. CoM minimum is {_mm(com)}, outside fraction {c_out:.3f}. "
+            f"Controls posted +{claim.margin_mm:.2f} mm and outside fraction 0. "
+            "Their margin is the cart-table ZMP on the hull of feet with floor normal "
+            "above 5 N. This margin is the contact CoP on the declared phase polygon. "
+            "Swing uses the stance foot only, including while the stop is still in swing."
+        )
+        stages_now = _named_blobs(row, "preview_stages", "stage")
+        for stage_name in ("walk", "stand"):
+            blob = stages_now.get(stage_name, {})
+            stage_com = blob.get("com_min_margin_m")
+            stage_com_f = stage_com if isinstance(stage_com, float) else None
+            if _near(None if stage_com_f is None else stage_com_f * 1000.0, claim.margin_mm, 0.05):
+                notes.append(
+                    f"The {stage_name}-stage CoM minimum is {_mm(stage_com_f)}. "
+                    f"That is the +{claim.margin_mm:.2f} mm Controls posted as the "
+                    "whole-bout minimum."
+                )
+                break
+    ask = _opt(row, "ask_nm")
+    ask_t = _opt(row, "ask_t_s")
+    ask_joint = str(row.get("ask_joint"))
+    if (
+        ask_joint == claim.ask_joint
+        and _near(ask, claim.ask_nm, 1e-3)
+        and _near(ask_t, claim.ask_t_s, 1e-4)
+    ):
+        notes.append(
+            f"Unclamped peak matches: {ask_joint} {_nm(ask)} at {ask_t:.3f} s "
+            f"(posted {claim.ask_nm:.4f} Nm at {claim.ask_t_s:.3f} s)."
+        )
+    else:
+        notes.append(
+            f"Unclamped peak is {ask_joint} {_nm(ask)} at {ask_t} s. "
+            f"Controls posted {claim.ask_joint} {claim.ask_nm:.4f} Nm at {claim.ask_t_s:.3f} s."
+        )
+    peak = _opt(row, "com_jerk_whole_peak")
+    rms = _opt(row, "com_jerk_whole_rms")
+    if _near(peak, claim.com_jerk_peak, 1e-2) and _near(rms, claim.com_jerk_rms, 1e-2):
+        notes.append(
+            f"CoM jerk matches: peak {peak:.3f}, RMS {rms:.3f} "
+            f"(posted {claim.com_jerk_peak:.3f} / {claim.com_jerk_rms:.3f})."
+        )
+    else:
+        notes.append(
+            f"CoM jerk is {peak} / {rms}. Controls posted "
+            f"{claim.com_jerk_peak:.3f} / {claim.com_jerk_rms:.3f}."
+        )
+    knee_peak = _opt(row, "r_knee_peak")
+    knee_rms = _opt(row, "r_knee_rms")
+    if _near(knee_peak, claim.knee_peak, 1e-2) and _near(knee_rms, claim.knee_rms, 1e-2):
+        notes.append(
+            f"r_knee jerk matches: {knee_peak:.3f} / {knee_rms:.3f}."
+        )
+    else:
+        notes.append(
+            f"r_knee jerk is {knee_peak} / {knee_rms}. Controls posted "
+            f"{claim.knee_peak:.3f} / {claim.knee_rms:.3f}."
+        )
+    worst = str(row.get("worst_joint"))
+    worst_peak = _opt(row, "worst_joint_peak")
+    worst_rms = _opt(row, "worst_joint_rms")
+    if (
+        worst == claim.joint_name
+        and _near(worst_peak, claim.joint_peak, 1e-2)
+        and _near(worst_rms, claim.joint_rms, 1e-2)
+    ):
+        notes.append(
+            f"Worst-joint scalar matches: {worst} {worst_peak:.3f} / {worst_rms:.3f}."
+        )
+    else:
+        worst_txt = (
+            f"{worst_peak:.3f} / {worst_rms:.3f}"
+            if worst_peak is not None and worst_rms is not None
+            else f"{worst_peak} / {worst_rms}"
+        )
+        notes.append(
+            f"Worst-joint scalar is {worst} {worst_txt}. "
+            f"Controls posted {claim.joint_name} {claim.joint_peak:.3f} / {claim.joint_rms:.3f}, "
+            "the largest leg hinge. This scorer names the largest actuated hinge, arms included."
+        )
+    stages = _named_blobs(row, "preview_stages", "stage")
+    stop = stages.get("stop", {})
+    stop_com = stop.get("com_min_margin_m")
+    stop_zmp = stop.get("zmp_min_margin_m")
+    stop_com_f = stop_com if isinstance(stop_com, float) else None
+    stop_zmp_f = stop_zmp if isinstance(stop_zmp, float) else None
+    stop_same = (
+        _near(None if stop_com_f is None else stop_com_f * 1000.0, claim.stop_margin_mm, 0.05)
+        and _near(None if stop_zmp_f is None else stop_zmp_f * 1000.0, claim.stop_margin_mm, 0.05)
+    )
+    if stop_same:
+        notes.append(
+            f"Stop-stage contact CoP and CoM minima match Controls' "
+            f"+{claim.stop_margin_mm:.2f} mm."
+        )
+    else:
+        notes.append(
+            f"Stop-stage contact CoP minimum is {_mm(stop_zmp_f)}, CoM minimum is "
+            f"{_mm(stop_com_f)}. Controls posted stop margin +{claim.stop_margin_mm:.2f} mm "
+            "on the loaded-foot hull."
+        )
+    stop_ask = stop.get("ask_nm")
+    stop_ask_f = stop_ask if isinstance(stop_ask, float) else None
+    stop_t = stop.get("ask_t_s")
+    stop_t_f = stop_t if isinstance(stop_t, float) else None
+    stop_joint = str(stop.get("ask_joint"))
+    if (
+        stop_joint == claim.stop_ask_joint
+        and _near(stop_ask_f, claim.stop_ask_nm, 1e-3)
+        and _near(stop_t_f, claim.stop_ask_t_s, 1e-4)
+    ):
+        notes.append(
+            f"Stop ask matches: {stop_joint} {_nm(stop_ask_f)} at {stop_t_f:.3f} s."
+        )
+    else:
+        notes.append(
+            f"Stop ask is {stop_joint} {_nm(stop_ask_f)} at {stop_t_f} s. "
+            f"Controls posted {claim.stop_ask_joint} {claim.stop_ask_nm:.4f} Nm "
+            f"at {claim.stop_ask_t_s:.3f} s."
+        )
+    return notes
+
+
+def _case_margin(row: dict[str, object]) -> tuple[float, str]:
+    pairs: list[tuple[float, str]] = []
+    zmp = _opt(row, "zmp_min_margin_m")
+    com = _opt(row, "com_min_margin_m")
+    if zmp is not None:
+        pairs.append((zmp, "ZMP"))
+    if com is not None:
+        pairs.append((com, "CoM"))
+    if not pairs:
+        return float("-inf"), "unmeasured"
+    return min(pairs, key=lambda item: item[0])
+
+
+def _worst_axis(cases: list[dict[str, object]]) -> dict[str, object]:
+    margin_case = min(cases, key=lambda row: _case_margin(row)[0])
+    margin_m, margin_signal = _case_margin(margin_case)
+    torque_case = max(cases, key=lambda row: _opt(row, "ask_nm") if _opt(row, "ask_nm") is not None else -1.0)
+    tips = [row for row in cases if bool(row.get("tipped"))]
+    ask_nm = _opt(torque_case, "ask_nm")
+
+    def label_of(row: dict[str, object]) -> str:
+        return str(row.get("perturb_label") or row.get("name"))
+
+    return {
+        "n": len(cases),
+        "worst_margin_m": margin_m,
+        "worst_margin_signal": margin_signal,
+        "worst_margin_label": label_of(margin_case),
+        "worst_margin_zmp_m": margin_case.get("zmp_min_margin_m"),
+        "worst_margin_com_m": margin_case.get("com_min_margin_m"),
+        "worst_margin_zmp_out": margin_case.get("zmp_outside_fraction"),
+        "worst_margin_com_out": margin_case.get("com_outside_fraction"),
+        "worst_ask_nm": ask_nm,
+        "worst_ask_joint": torque_case.get("ask_joint"),
+        "worst_ask_t_s": torque_case.get("ask_t_s"),
+        "worst_ask_label": label_of(torque_case),
+        "worst_ask_headroom_nm": None if ask_nm is None else SAG_BAR_NM - ask_nm,
+        "tip": bool(tips),
+        "tip_labels": [label_of(row) for row in tips],
+        "plant_md5s": sorted({str(row.get("plant_md5")) for row in cases}),
+    }
+
+
+def _compact_case(row: dict[str, object]) -> dict[str, object]:
+    keys = (
+        "perturb_label", "verdict", "n_samples", "zmp_min_margin_m", "zmp_outside_fraction",
+        "com_min_margin_m", "com_outside_fraction", "ask_nm", "ask_joint", "ask_t_s",
+        "min_up_z", "tipped", "com_jerk_whole_peak", "com_jerk_whole_rms",
+        "joint_jerk_peak", "joint_jerk_rms", "plant_md5", "runtime_mass_kg",
+        "friction_sliding", "latency_ticks", "seed", "mass_scale", "fault_reasons",
+    )
+    return {key: row.get(key) for key in keys}
+
+
+def _joint_lines(row: dict[str, object]) -> list[str]:
+    asks = row.get("asks_by_joint")
+    lines = [
+        "| Joint | Unclamped peak | Time | Headroom to 2.33 | Stage |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    if not isinstance(asks, list):
+        return lines
+    for blob in asks:
+        if not isinstance(blob, dict):
+            continue
+        t_s = blob.get("t_s")
+        t_txt = f"{float(t_s):.3f} s" if isinstance(t_s, float) else "unmeasured"
+        head = blob.get("headroom_nm")
+        head_txt = f"{float(head):+.4f} Nm" if isinstance(head, float) else "unmeasured"
+        summed = blob.get("sum_nm")
+        lines.append(
+            f"| {blob.get('joint')} | {_nm(summed if isinstance(summed, float) else None)} | "
+            f"{t_txt} | {head_txt} | {blob.get('stage')} |"
+        )
+    return lines
+
+
+def _axis_line(name: str, worst: dict[str, object]) -> str:
+    margin = worst.get("worst_margin_m")
+    margin_f = margin if isinstance(margin, float) else None
+    ask = worst.get("worst_ask_nm")
+    ask_f = ask if isinstance(ask, float) else None
+    tip = "yes" if worst.get("tip") else "no"
+    tip_labels = worst.get("tip_labels")
+    tip_txt = tip if not tip_labels else f"yes ({', '.join(str(item) for item in tip_labels)})"
+    return (
+        f"| {name} | {_mm(margin_f)} {worst.get('worst_margin_signal')} | "
+        f"{worst.get('worst_margin_label')} | "
+        f"{worst.get('worst_ask_joint')} {_nm(ask_f)} | {worst.get('worst_ask_label')} | {tip_txt} |"
+    )
+
+
+def _case_table(cases: list[dict[str, object]]) -> list[str]:
+    lines = [
+        "| Case | ZMP min | ZMP out | CoM min | CoM out | Unclamped | min up_z | Tip | Plant md5 |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in cases:
+        lines.append(
+            f"| {row.get('perturb_label')} | {_mm(_opt(row, 'zmp_min_margin_m'))} | "
+            f"{_f(row, 'zmp_outside_fraction'):.3f} | {_mm(_opt(row, 'com_min_margin_m'))} | "
+            f"{_f(row, 'com_outside_fraction'):.3f} | {row.get('ask_joint')} {_nm(_opt(row, 'ask_nm'))} | "
+            f"{_f(row, 'min_up_z'):.3f} | {'yes' if row.get('tipped') else 'no'} | `{row.get('plant_md5')}` |"
+        )
+    return lines
+
+
+def render_ac81435_md(payload: dict[str, object]) -> str:
+    rows = payload["rows"]
+    row_list = rows if isinstance(rows, list) else []
+    perturb = payload["perturbation"]
+    perturb_map = perturb if isinstance(perturb, dict) else {}
+    lines = [
+        "# Walk smoothness, tip ac81435",
+        "",
+        "The 58ce1d8 rerun is already scored in `docs/WALK_SMOOTHNESS_RERUN.md`. "
+        "Both the slow row and the kit-vx row on that tip are Prefer FAIL. "
+        "This file scores tip ac81435, whole bout, with the same #102 rules. "
+        "Soft-pass is off. The plant file was not edited. The gait was not edited.",
+        "",
+        f"Tip `{payload['tip_sha']}`. Frozen plant md5 `{FROZEN_MD5}`. "
+        f"File hash after the runs: `{payload['plant_md5']}`.",
+        "",
+        "The gate is the whole bout. Margin ≥ 0, outside fraction 0, unclamped ask "
+        f"≤ {SAG_BAR_NM:.2f} Nm, CoM jerk below {BASE_COM_JERK_PEAK}/{BASE_COM_JERK_RMS}, "
+        f"joint-jerk vector below {BASE_JOINT_JERK_PEAK:.0f}/{BASE_JOINT_JERK_RMS:.0f}. "
+        "Below means lower by more than the last reported digit. "
+        "Preview stages (stand / start / walk / stop) are diagnostic. "
+        "They do not replace the phase polygon.",
+        "",
+        "| Row | Verdict | Samples | ZMP min | ZMP out | CoM min | CoM out | "
+        "CoM jerk | Joint jerk | Unclamped | min up_z |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in row_list:
+        if not isinstance(row, dict):
+            continue
+        lines.append(
+            f"| {row['name']} | {row['verdict']} | {row['n_samples']} | "
+            f"{_mm(_opt(row, 'zmp_min_margin_m'))} | {_f(row, 'zmp_outside_fraction'):.3f} | "
+            f"{_mm(_opt(row, 'com_min_margin_m'))} | {_f(row, 'com_outside_fraction'):.3f} | "
+            f"{_f(row, 'com_jerk_whole_peak'):.3f}/{_f(row, 'com_jerk_whole_rms'):.3f} | "
+            f"{_f(row, 'joint_jerk_peak'):.3f}/{_f(row, 'joint_jerk_rms'):.3f} | "
+            f"{row['ask_joint']} {_f(row, 'ask_nm'):.4f} Nm | {_f(row, 'min_up_z'):.3f} |"
+        )
+    lines.append("")
+    for row in row_list:
+        if not isinstance(row, dict):
+            continue
+        lines.extend(_ac_row_md(row))
+    lines.extend([
+        "## Perturbation, voice-3.60",
+        "",
+        "Scorer-side only, on the loaded MjModel. The plant XML is not written. "
+        f"Seeds 0–9 add Gaussian noise, sigma {SEED_SIGMA_RAD} rad, to the twelve leg "
+        "hinges after the stand pose. The nominal bout is not one of those seeds. "
+        "Mass ±5% scales `body_mass` and `body_inertia` together, then `mj_setConst`. "
+        "`mj_setConst` writes qpos back to qpos0, so the seated stand pose is restored "
+        "before the bout. "
+        "Friction sets sliding friction on the floor and both foot boxes to 1.2, 1.4, "
+        "and 1.6. Latency ±1 tick shifts the command clock. The bus timeout still uses "
+        "the real clock. Axes are separate, not a full factorial.",
+        "",
+        str(perturb_map.get("rug", "")),
+        "",
+        str(perturb_map.get("commandbus_repeats", "")),
+        "",
+        "| Axis | Worst margin | Case | Worst unclamped | Case | Tip |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ])
+    axes = perturb_map.get("axes")
+    if isinstance(axes, dict):
+        for name in ("seed", "mass", "friction", "latency"):
+            worst = axes.get(name)
+            if isinstance(worst, dict):
+                lines.append(_axis_line(name, worst))
+    lines.append("")
+    overall = perturb_map.get("overall")
+    if isinstance(overall, dict):
+        lines.append("Overall worst case, nominal plus every axis:")
+        lines.append("")
+        lines.append("| Scope | Worst margin | Case | Worst unclamped | Case | Tip |")
+        lines.append("| --- | --- | --- | --- | --- | --- |")
+        lines.append(_axis_line("overall", overall))
+        lines.append("")
+        md5s = overall.get("plant_md5s")
+        lines.append(f"Plant file hashes in that set: `{md5s}`.")
+        lines.append("")
+    cases = perturb_map.get("cases")
+    if isinstance(cases, dict):
+        for name in ("seed", "mass", "friction", "latency"):
+            group = cases.get(name)
+            if not isinstance(group, list):
+                continue
+            lines.append(f"### {name}")
+            lines.append("")
+            lines.extend(_case_table([item for item in group if isinstance(item, dict)]))
+            lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+def _ac_row_md(row: dict[str, object]) -> list[str]:
+    lines = [
+        f"## {row['name']}: {row['verdict']}",
+        "",
+        f"Source: `{row['source']}`",
+        "",
+        f"Plant md5 `{row['plant_md5']}`. Samples {row['n_samples']}. "
+        f"vx {_f(row, 'vx_m_s'):.3f} m/s. Runtime mass {_f(row, 'runtime_mass_kg'):.4f} kg. "
+        f"Sliding friction {_f(row, 'friction_sliding'):.2f}. Soft-pass off.",
+        "",
+        "| Signal | Value |",
+        "| --- | --- |",
+        f"| ZMP min margin | {_mm(_opt(row, 'zmp_min_margin_m'))} |",
+        f"| ZMP outside fraction | {_f(row, 'zmp_outside_fraction'):.3f} |",
+        f"| CoM min margin | {_mm(_opt(row, 'com_min_margin_m'))} |",
+        f"| CoM outside fraction | {_f(row, 'com_outside_fraction'):.3f} |",
+        (
+            f"| CoM jerk whole bout (gate) | "
+            f"{_f(row, 'com_jerk_whole_peak'):.3f} / {_f(row, 'com_jerk_whole_rms'):.3f} m/s³ |"
+        ),
+        (
+            f"| Joint jerk vector L2 (gate) | "
+            f"{_f(row, 'joint_jerk_peak'):.3f} / {_f(row, 'joint_jerk_rms'):.3f} rad/s³ |"
+        ),
+        (
+            f"| Worst joint scalar | {row['worst_joint']} "
+            f"{_f(row, 'worst_joint_peak'):.3f} / {_f(row, 'worst_joint_rms'):.3f} rad/s³ |"
+        ),
+        (
+            f"| r_knee scalar | "
+            f"{_f(row, 'r_knee_peak'):.3f} / {_f(row, 'r_knee_rms'):.3f} rad/s³ |"
+        ),
+        f"| min up_z | {_f(row, 'min_up_z'):.3f} |",
+        (
+            f"| Unclamped leg ask | {row['ask_joint']} {_nm(_opt(row, 'ask_nm'))} "
+            f"at {_f(row, 'ask_t_s'):.3f} s, signed {_f(row, 'ask_signed_nm'):+.4f} Nm, "
+            f"headroom {SAG_BAR_NM - _f(row, 'ask_nm'):+.4f} Nm, "
+            f"{row['ask_over_ticks']} ticks over {SAG_BAR_NM:.2f} |"
+        ),
+        "",
+        "| Phase | ZMP min | ZMP at | ZMP outside | CoM min | CoM at | CoM outside |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    phases = row.get("phases")
+    if isinstance(phases, list):
+        for blob in phases:
+            if not isinstance(blob, dict):
+                continue
+            lines.append(
+                f"| {blob.get('phase')} | {_phase_cell(blob, 'zmp_min_margin_m')} | "
+                f"{_time_cell(blob, 'zmp_min_t_s')} | "
+                f"{_frac_cell(blob, 'zmp_outside_fraction')} | "
+                f"{_phase_cell(blob, 'com_min_margin_m')} | "
+                f"{_time_cell(blob, 'com_min_t_s')} | "
+                f"{_frac_cell(blob, 'com_outside_fraction')} |"
+            )
+    lines.extend([
+        "",
+        "| Preview stage | ZMP min | ZMP outside | CoM min | CoM outside | Unclamped ask |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ])
+    stages = row.get("preview_stages")
+    if isinstance(stages, list):
+        for blob in stages:
+            if not isinstance(blob, dict):
+                continue
+            ask_nm = blob.get("ask_nm")
+            ask_t = blob.get("ask_t_s")
+            ask_txt = "none"
+            if isinstance(ask_nm, float):
+                t_txt = f"{ask_t:.3f} s" if isinstance(ask_t, float) else "unmeasured"
+                head = blob.get("ask_headroom_nm")
+                head_txt = f"{head:+.4f} Nm" if isinstance(head, float) else "unmeasured"
+                ask_txt = f"{blob.get('ask_joint')} {_nm(ask_nm)} at {t_txt}, headroom {head_txt}"
+            lines.append(
+                f"| {blob.get('stage')} | {_phase_cell(blob, 'zmp_min_margin_m')} | "
+                f"{_frac_cell(blob, 'zmp_outside_fraction')} | "
+                f"{_phase_cell(blob, 'com_min_margin_m')} | "
+                f"{_frac_cell(blob, 'com_outside_fraction')} | {ask_txt} |"
+            )
+    lines.extend(["", "Unclamped peak per joint:", ""])
+    lines.extend(_joint_lines(row))
+    lines.append("")
+    fails = row.get("fail_reasons")
+    if isinstance(fails, list) and fails:
+        lines.append("Gate:")
+        lines.append("")
+        for reason in fails:
+            lines.append(f"- {reason}")
+        lines.append("")
+    else:
+        lines.append("Gate: every MFG bar holds. CLEAR.")
+        lines.append("")
+    lines.append("Against Controls' posted numbers:")
+    lines.append("")
+    for note in _ac_notes(row):
+        lines.append(f"- {note}")
+    lines.append("")
+    return lines
+
+
+def run_ac81435() -> dict[str, object]:
+    nominal: list[dict[str, object]] = []
+    for spec in AC81435_ROWS:
+        print(f"[ac81435] {spec.name}", flush=True)
+        row = run_preview_row(spec, tip_sha=TIP_SHA_AC81435)
+        nominal.append(row)
+        print(
+            f"[ac81435] {spec.name} n={row['n_samples']} "
+            f"ask={row['ask_joint']} {row['ask_nm']:.4f} at {row['ask_t_s']} "
+            f"jerk={row['com_jerk_whole_peak']:.3f}/{row['com_jerk_whole_rms']:.3f} "
+            f"zmp={row['zmp_min_margin_m']} com={row['com_min_margin_m']} "
+            f"{row['verdict']}",
+            flush=True,
+        )
+    voice = AC81435_ROWS[0]
+    grouped: dict[str, list[dict[str, object]]] = {
+        "seed": [],
+        "mass": [],
+        "friction": [],
+        "latency": [],
+    }
+    for seed in range(10):
+        label = f"seed-{seed}"
+        print(f"[ac81435] {label}", flush=True)
+        grouped["seed"].append(run_preview_row(
+            voice, Perturb(label=label, seed=seed), TIP_SHA_AC81435,
+        ))
+    for scale in (0.95, 1.05):
+        label = f"mass-{scale:.2f}"
+        print(f"[ac81435] {label}", flush=True)
+        grouped["mass"].append(run_preview_row(
+            voice, Perturb(label=label, mass_scale=scale), TIP_SHA_AC81435,
+        ))
+    for mu in (1.2, 1.4, 1.6):
+        label = f"friction-{mu:.1f}"
+        print(f"[ac81435] {label}", flush=True)
+        grouped["friction"].append(run_preview_row(
+            voice, Perturb(label=label, friction=mu), TIP_SHA_AC81435,
+        ))
+    for ticks in (-1, 1):
+        label = f"latency-{ticks:+d}"
+        print(f"[ac81435] {label}", flush=True)
+        grouped["latency"].append(run_preview_row(
+            voice, Perturb(label=label, latency_ticks=ticks), TIP_SHA_AC81435,
+        ))
+    nominal_voice = dict(nominal[0])
+    nominal_voice["perturb_label"] = "nominal"
+    overall_rows = [nominal_voice]
+    for group in grouped.values():
+        overall_rows.extend(group)
+    file_md5 = _plant_md5()
+    return {
+        "tip_sha": TIP_SHA_AC81435,
+        "plant_md5": file_md5,
+        "soft_pass": SOFT_PASS,
+        "rows": nominal,
+        "perturbation": {
+            "row": "voice-3.60",
+            "seed_sigma_rad": SEED_SIGMA_RAD,
+            "seeds": list(range(10)),
+            "mass_scales": [0.95, 1.05],
+            "inertia_scaled_with_mass": True,
+            "frictions": [1.2, 1.4, 1.6],
+            "latency_ticks": [-1, 1],
+            "rug": (
+                "Rug was not run. The plant can name `col_mat_rug`, and `steer_walk` "
+                "has entrance CommandBus scripts. Neither is a preview scene for "
+                "vx 0.056 at period 3.60 s, so a rug bout was not invented."
+            ),
+            "commandbus_repeats": (
+                "Extra CommandBus start/stop repeats were not added. This preview row "
+                "already sends one `vel` and one `stop`."
+            ),
+            "axes": {name: _worst_axis(group) for name, group in grouped.items()},
+            "overall": _worst_axis(overall_rows),
+            "cases": {name: [_compact_case(row) for row in group] for name, group in grouped.items()},
+        },
+    }
+
+
 def run_preview_rows() -> list[dict[str, object]]:
     return [run_preview_row(spec) for spec in PREVIEW_ROWS]
 
@@ -1690,11 +2528,35 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Score Day-1 kit walk jerk and ZMP margin")
     parser.add_argument("--self-test", action="store_true", help="Finite-difference and fail-rule checks")
     parser.add_argument("--rows", action="store_true", help="Score the 58ce1d8 preview rows")
+    parser.add_argument("--ac81435", action="store_true", help="Score the ac81435 preview rows and perturbations")
     parser.add_argument("--json", type=Path, default=OUT_JSON)
     parser.add_argument("--md", type=Path, default=OUT_MD)
     args = parser.parse_args()
     if args.self_test:
         raise SystemExit(self_test())
+    if args.ac81435:
+        payload = run_ac81435()
+        json_path = args.json if args.json != OUT_JSON else AC_JSON
+        md_path = args.md if args.md != OUT_MD else AC_MD
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        json_path.write_text(json.dumps(payload, indent=2) + "\n")
+        md_path.write_text(render_ac81435_md(payload))
+        rows = payload["rows"]
+        if isinstance(rows, list):
+            for row in rows:
+                if isinstance(row, dict):
+                    print(
+                        f"{row['name']}: {row['verdict']} plant {row['plant_md5']} "
+                        f"n {row['n_samples']} ask {row['ask_joint']} {row['ask_nm']}"
+                    )
+        print(f"[smoothness] wrote {json_path}")
+        print(f"[smoothness] wrote {md_path}")
+        if isinstance(rows, list) and any(
+            isinstance(row, dict) and row["verdict"] != "CLEAR" for row in rows
+        ):
+            raise SystemExit(1)
+        return
     if args.rows:
         rows = run_preview_rows()
         json_path = args.json if args.json != OUT_JSON else ROW_JSON
