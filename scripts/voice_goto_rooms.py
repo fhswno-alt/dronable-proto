@@ -186,6 +186,13 @@ CLOSE_GAP_M = 0.40
 EAST_L_HOLD_M = 0.60
 HOLD_DIAG_KITCHEN_RAY_M = 0.6278051138121317
 HOLD_DIAG_ENTRANCE_RAY_M = 0.6661160747244295
+# On those two bouts the hold stays dark, the next look re-points,
+# and the body-forward wall ray lengthens. Drop that door-pixel
+# re-point only while the latest wall ray is in (0.60, 0.90] m.
+# Look, settle, capture, and commit still run. A ray at 0.60 m is
+# the existing hold. A ray past 0.90 m may still re-point. The
+# 0.90 m edge is not a second hold and is not raised after a score.
+NEAR_MISS_HI_M = 0.90
 # Kitchen −90° wall_hall_e_1 on tip aac2baa. Same rule as the living
 # set: same wall id, sim ray at or under 0.40 m. Forty-three samples,
 # each with heading, cam_z, camera pitch, and leading-toe offset.
@@ -698,6 +705,10 @@ class ApproachBand(TypedDict):
     closest_t: float | None
     closest_heading_rad: float | None
     entered_0_30: bool
+    latest_wall_ray_m: float | None
+    repoint_suppress_n: int
+    repoint_band_ray_m: float | None
+    near_miss_hi_m: float
 
 
 class RoomJson(TypedDict):
@@ -976,7 +987,12 @@ def _definition() -> DefinitionJson:
             f"forward wall ray is at or under {EAST_L_HOLD_M:.2f} m, "
             "further in-place re-points are dropped and the walk stays "
             "at yaw 0. That is the same hold the east left toe already "
-            "uses. The threshold is not widened. No pitch, camera "
+            "uses. The threshold is not widened. While the latest "
+            "body-forward wall ray is past that hold and at or under "
+            f"{NEAR_MISS_HI_M:.2f} m, the in-place door-pixel re-point "
+            "is also dropped. Look, settle, capture, and commit still "
+            "run. The hold itself stays at "
+            f"{EAST_L_HOLD_M:.2f} m. No pitch, camera "
             "height, or toe bias is fit across pooled samples. "
             "Room reach is a "
             "separate bar. In-place body "
@@ -1161,6 +1177,11 @@ def _doorway_fraction(
     if total == 0:
         return 0.0
     return hit / total
+
+
+def _near_miss_ray(ray: float | None) -> bool:
+    """Wall ray past the hold and inside the near-miss band."""
+    return ray is not None and EAST_L_HOLD_M < float(ray) <= NEAR_MISS_HI_M
 
 
 def _yaw_toward_u(u: float) -> float:
@@ -2489,6 +2510,9 @@ def _run_room(
     wall_stop_pad: float | None = None
     east_l_hold = False
     walk_hold = False
+    latest_wall_ray: float | None = None
+    repoint_suppress_n = 0
+    repoint_band_ray: float | None = None
     closest_ray: float | None = None
     closest_wall = ""
     closest_toe = ""
@@ -3002,6 +3026,11 @@ def _run_room(
                         if (
                             str(true_name).startswith("wall_")
                             and true_gap is not None
+                        ):
+                            latest_wall_ray = float(true_gap)
+                        if (
+                            str(true_name).startswith("wall_")
+                            and true_gap is not None
                             and (
                                 closest_ray is None
                                 or float(true_gap) < closest_ray
@@ -3288,6 +3317,14 @@ def _run_room(
                 if walk_hold:
                     approach_yaw = 0.0
                     need_search = False
+                elif decision == "commit" and _near_miss_ray(latest_wall_ray):
+                    # Door pixel would re-point here. The latest wall
+                    # ray is still outside the hold, so keep yaw 0 and
+                    # let the next look run. Do not arm the hold.
+                    approach_yaw = 0.0
+                    need_search = False
+                    repoint_suppress_n += 1
+                    repoint_band_ray = latest_wall_ray
                 elif decision == "commit":
                     if look["door_u"] is not None:
                         approach_yaw = _yaw_toward_u(float(look["door_u"]))
@@ -3492,6 +3529,10 @@ def _run_room(
                 entered_0_30=(
                     closest_ray is not None and closest_ray <= EAST_L_NEAR_GATE_M
                 ),
+                latest_wall_ray_m=latest_wall_ray,
+                repoint_suppress_n=repoint_suppress_n,
+                repoint_band_ray_m=repoint_band_ray,
+                near_miss_hi_m=NEAR_MISS_HI_M,
             ),
             wall_residual_max_m=wall_residual_max,
             same_wall_count=same_wall_count,
@@ -4041,6 +4082,18 @@ def main() -> int:
         raise SystemExit("FAIL: the entrance +90 hold diagnosis moved")
     if HOLD_DIAG_KITCHEN_RAY_M <= EAST_L_HOLD_M or HOLD_DIAG_ENTRANCE_RAY_M <= EAST_L_HOLD_M:
         raise SystemExit("FAIL: walk hold was raised over the diagnosed approach rays")
+    if abs(NEAR_MISS_HI_M - 0.90) > 1e-12:
+        raise SystemExit(f"FAIL: near-miss band moved to {NEAR_MISS_HI_M}")
+    if not _near_miss_ray(HOLD_DIAG_KITCHEN_RAY_M):
+        raise SystemExit("FAIL: kitchen diagnosis ray is outside the near-miss band")
+    if not _near_miss_ray(HOLD_DIAG_ENTRANCE_RAY_M):
+        raise SystemExit("FAIL: entrance diagnosis ray is outside the near-miss band")
+    if _near_miss_ray(0.59) or _near_miss_ray(EAST_L_HOLD_M) or _near_miss_ray(0.91):
+        raise SystemExit("FAIL: near-miss band swallowed the hold or a far ray")
+    if not _near_miss_ray(NEAR_MISS_HI_M):
+        raise SystemExit("FAIL: the 0.90 m edge left the near-miss band")
+    if _near_miss_ray(None):
+        raise SystemExit("FAIL: a missing ray suppressed re-point")
     if _yaw_toward_u(100.0) != voice.YAW_RAD_S or _yaw_toward_u(540.0) != -voice.YAW_RAD_S:
         raise SystemExit("FAIL: doorway pixel yaw sign moved")
     if _yaw_toward_u(rc.WIDTH / 2.0) != 0.0:
@@ -4192,6 +4245,7 @@ def main() -> int:
         "east_l_hold_m": EAST_L_HOLD_M,
         "hold_diag_kitchen_ray_m": HOLD_DIAG_KITCHEN_RAY_M,
         "hold_diag_entrance_ray_m": HOLD_DIAG_ENTRANCE_RAY_M,
+        "near_miss_hi_m": NEAR_MISS_HI_M,
         "east_r_can_clear": False,
         "bias_fit": False,
         "close_gap_m": CLOSE_GAP_M,
@@ -4277,6 +4331,9 @@ def main() -> int:
                     f"closest_wall={row['approach_band']['closest_wall']} "
                     f"closest_toe={row['approach_band']['closest_toe']} "
                     f"band={row['approach_band']['entered_0_30']} "
+                    f"repoint_suppress={row['approach_band']['repoint_suppress_n']} "
+                    f"repoint_ray={row['approach_band']['repoint_band_ray_m']} "
+                    f"latest_wall={row['approach_band']['latest_wall_ray_m']} "
                     f"east_l_hold={row['east_left']['hold']} "
                     f"east_l_ray={row['east_left']['min_ray_m']} "
                     f"east_l_presented={row['east_left']['presented']} "
