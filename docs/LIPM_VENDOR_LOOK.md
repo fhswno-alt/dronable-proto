@@ -2822,7 +2822,7 @@ The leg residual equals `|qfrc_passive|` within 1.6×10⁻⁴ Nm. It crosses 0.0
 | T 1.00 / 0.016, knee gait | 1.5e-4 | 1.860 | x | 0.241 | r_knee | 851 | +1.59 | 3.424 |
 | T 1.20 / 0.024, knee gait | 5.2e-4 | 5.416 | y | 0.186 | r_knee | 845 | +2.26 | 3.776 |
 
-Knee ID is the largest `|qfrc_inverse|` on a knee whose residual on that step is ≤ 0.05 Nm. On T 0.60 it is the plant rail, 2.45 Nm, which is over 2.33 Nm.
+Knee ID is the largest `|qfrc_inverse|` on a knee whose residual on that step is ≤ 0.05 Nm. The feedforward rows leave the support: τ_des is updated only on a step whose residual passes, so the fast steps run on feedback alone and the signed ask reaches 7 Nm. The build decision uses the knee gait, which stays up. On that T 0.60 row the residual-passing knee inverse is the plant rail, −2.45 Nm, at 2.496 s.
 
 The same T 0.60 knee gait, mass scaled on the body inertias at load, ten hinge seeds at +5% and ten at −5%, plus the entrance rug. Every residual-passing knee sample is included. The root wrench stays under 7.8×10⁻⁴ Nm. The worst knee ID is 2.450 Nm, on the right knee near 2.50 s, at both mass scales and on every seed. The rug peaks are 1.698 Nm and 1.716 Nm. 2.450 Nm is over 2.33 Nm, so the feedforward path is not worth building.
 
