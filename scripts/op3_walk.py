@@ -304,6 +304,11 @@ class Op3Walker:
         # Positive moves the feet toward +y in the hip frame, so the pelvis
         # sits toward -y. y_swap_cmd is a different channel and stays put.
         self.preview_y = 0.0
+        # Per-foot addition, metres, hip frame. The swing foot uses this to
+        # land on the world y it left. The stance foot stays at 0 so the
+        # pelvis sway is not applied a second time to the airborne foot.
+        self.foot_bias_l = 0.0
+        self.foot_bias_r = 0.0
         self.period = self.period_cmd
         self.pelvis_swing = 0.0
         self.l_ssp_start = 0.0
@@ -667,7 +672,7 @@ class Op3Walker:
         leg = self.lengths.thigh_m + self.lengths.calf_m + self.lengths.ankle_m
         er = np.array([
             swap_x + right[0] + self.x_offset,
-            swap_y + right[1] - self.y_offset / 2.0,
+            swap_y + right[1] - self.y_offset / 2.0 + self.foot_bias_r,
             swap_z + right_z + self.z_offset - leg,
             0.0 - self.roll_offset / 2.0,
             0.0 + self.pitch_offset,
@@ -675,7 +680,7 @@ class Op3Walker:
         ], dtype=np.float64)
         el = np.array([
             swap_x + left[0] + self.x_offset,
-            swap_y + left[1] + self.y_offset / 2.0,
+            swap_y + left[1] + self.y_offset / 2.0 + self.foot_bias_l,
             swap_z + left_z + self.z_offset - leg,
             0.0 + self.roll_offset / 2.0,
             0.0 + self.pitch_offset,
@@ -879,6 +884,8 @@ class Op3Walker:
             self.time,
             self.previous_x,
             self.ctrl_running,
+            self.foot_bias_l,
+            self.foot_bias_r,
         )
         self.x_cmd = 0.0
         self.y_cmd = 0.0
@@ -886,6 +893,8 @@ class Op3Walker:
         self.z_move_cmd = 0.0
         self.y_swap_cmd = 0.0
         self.z_swap_cmd = 0.0
+        self.foot_bias_l = 0.0
+        self.foot_bias_r = 0.0
         self.time = 0.0
         self.previous_x = 0.0
         self.ctrl_running = False
@@ -902,6 +911,8 @@ class Op3Walker:
             self.time,
             self.previous_x,
             self.ctrl_running,
+            self.foot_bias_l,
+            self.foot_bias_r,
         ) = saved
         self.update_time()
         self.update_movement()

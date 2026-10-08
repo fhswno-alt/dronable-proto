@@ -86,6 +86,18 @@ STOP_KNEE_QDD_MAX = 25.0
 # and that row is a transfer risk. The same cap covers the other leg
 # joints: a hip-pitch corner near −100 rad/s² does not fit at 0.025.
 WALK_KNEE_QDD_MAX = 40.0
+# Stance hip roll at armature 0.025. A planned 28 rad/s² on top of the
+# contact moment is about 1.4 Nm, past the 1.3 Nm guard, while the CoM
+# is still inside the box. 18 rad/s² leaves that moment inside the guard.
+# The knee cap stays 40. This is the planned acceleration, not a torque clip.
+HIP_ROLL_QDD_MAX = 18.0
+# Single-support stance hip roll. The whole 2.347 kg on one foot is
+# 23.0 N times the CoP offset from the hip axis: −0.55 to +1.2 Nm across
+# the foot, 0.32 Nm at the box centre. 1.3 Nm is just past the outer edge.
+# A plan past that, or a planned CoM more than 5 mm outside the stance
+# box, is a frame error and is not commanded.
+SS_HIP_TAU_MAX = 1.3
+SS_COM_OUT_M = 0.005
 STOP_BLEND_MIN_S = 0.5
 # The position servo does not command the double-support load split.
 # Each tick both feet are loaded, move the ZMP/CoM plan by a fraction of
@@ -103,8 +115,13 @@ DCM_ZMP_RATE = 0.40
 DCM_STEP_K = 0.50
 DCM_STEP_MAX = 0.025
 # 0.10 m/s reversed inside one tick and the hip-roll reference
-# accelerated at about 130 rad/s². 0.015 m/s keeps that under a few.
+# accelerated at about 130 rad/s². 0.015 m/s is the step-size cap.
+# The raw capture-point error still crosses that cap every 8 ms, and
+# the hip reference then accelerates at about ±25 rad/s². At armature
+# 0.025 that crosses the 1.3 Nm stance-hip guard. The error is averaged
+# for 80 ms before the cap, so a persistent offset still moves the step.
 DCM_STEP_RATE = 0.015
+DCM_ERR_TAU_S = 0.080
 # Ankle torque from the sole-frame CoP error, Nm per metre, then capped.
 COP_TAU_K = 40.0
 COP_TAU_CAP = 0.50
@@ -206,6 +223,10 @@ HEEL_LEAD_M = 0.006
 
 Side = Literal["L", "R"]
 PhaseName = Literal["stand", "shift", "swing"]
+
+
+class PlanInconsistent(RuntimeError):
+    """The planned single-support wrench does not fit this body."""
 
 
 @dataclass(frozen=True)
@@ -547,6 +568,9 @@ class LipmWalker:
         self._gm_swing: Side | None = None
         self.preview_stage = "stand"
         self.preview_com_y = 0.0
+        self._foot_y_latch: dict[str, float] = {}
+        self._anchor_was = {"L": False, "R": False}
+        self._anchor_data: mj.MjData | None = None
         self._preview: zmp_preview.ZmpPreview | None = None
         self._preview_clock = 0.0
         self._preview_zc = 0.0
@@ -753,6 +777,7 @@ class LipmWalker:
         self._dcm_zmp = 0.0
         self._swing_z_full = False
         self._dcm_step = 0.0
+        self._dcm_err_f = 0.0
         self.id_plan_root_max = 0.0
         self.id_plan_root_t = 0.0
         self.id_plan_root_i = -1
@@ -1145,8 +1170,12 @@ class LipmWalker:
         """
         err = self._dcm_error_y()
         self.stab_err_peak = max(getattr(self, "stab_err_peak", 0.0), abs(err))
-        target = 0.0 if self.preview_stage == "stop" else DCM_STEP_K * err
-        target = min(DCM_STEP_MAX, max(-DCM_STEP_MAX, target))
+        # Average first. A one-tick reversal of the raw error was the
+        # whole rate budget, and the hip-roll samples then alternated.
+        alpha = op3_walk.OP3_CTRL_S / DCM_ERR_TAU_S
+        self._dcm_err_f += alpha * (err - self._dcm_err_f)
+        filtered = 0.0 if self.preview_stage == "stop" else self._dcm_err_f
+        target = min(DCM_STEP_MAX, max(-DCM_STEP_MAX, DCM_STEP_K * filtered))
         self._dcm_step = self._slew(self._dcm_step, target, DCM_STEP_RATE)
         return -float(com) + self._dcm_step
 
@@ -2058,6 +2087,7 @@ class LipmWalker:
         if worst_name:
             self._plan_term_name = self._planned_term(scratch, self._leg_dof[worst_name])
             self._plan_term_phase = phase_of.get(worst_name, "")
+        self._guard_ss_plan(scratch, out)
         return out
 
     def _note_planned_req(
@@ -2481,10 +2511,11 @@ class LipmWalker:
                 continue
             vadr = int(self.model.jnt_dofadr[jid])
             cmd = float(qdd.get(name, 0.0))
-            if cmd > cap:
-                cmd = cap
-            elif cmd < -cap:
-                cmd = -cap
+            lim = HIP_ROLL_QDD_MAX if name.endswith("hip_roll") else cap
+            if cmd > lim:
+                cmd = lim
+            elif cmd < -lim:
+                cmd = -lim
             scratch.qacc[vadr] = cmd
             qdd[name] = cmd
 
@@ -2722,6 +2753,118 @@ class LipmWalker:
         kin = abs(float(self.cmd_vx)) * period / 4.0
         return math.copysign(kin, float(self.cmd_vx))
 
+    def _latch_foot_y(self) -> None:
+        """Remember each planted foot's world y. The swing returns to it.
+
+        A foot that is being held off the ground does not refresh the
+        latch. A one-tick brush at a drifted sole would otherwise become
+        the new target.
+        """
+        for side in ("L", "R"):
+            if self._anchor_was.get(side, False):
+                continue
+            if self.foot_normal(side) >= 5.0:
+                self._foot_y_latch[side] = float(self.data.geom_xpos[int(self.gid[side])][1])
+
+    def _fk_box_y(self, joints: dict[str, float], side: str) -> float:
+        if self._anchor_data is None:
+            self._anchor_data = mj.MjData(self.model)
+        scratch = self._anchor_data
+        scratch.qpos[:] = self.data.qpos
+        for name, val in joints.items():
+            jid = int(mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, name))
+            if jid < 0:
+                continue
+            scratch.qpos[int(self.model.jnt_qposadr[jid])] = float(val)
+        mj.mj_forward(self.model, scratch)
+        return float(scratch.geom_xpos[int(self.gid[side])][1])
+
+    def _anchor_bias(self, walker: op3_walk.Op3Walker, side: str) -> float:
+        return float(walker.foot_bias_l if side == "L" else walker.foot_bias_r)
+
+    def _set_anchor_bias(self, walker: op3_walk.Op3Walker, side: str, val: float) -> None:
+        if side == "L":
+            walker.foot_bias_l = float(val)
+        else:
+            walker.foot_bias_r = float(val)
+
+    def _clock_swing_side(self, walker: op3_walk.Op3Walker) -> str:
+        """Foot that swings in this half of the period.
+
+        The correction starts at the half boundary, while that foot is
+        still down, so the hip-frame target is already on the latched
+        world y when the sole leaves. The other foot stays at bias 0
+        and the pelvis sway still runs through it.
+        """
+        period = float(walker.period)
+        local = float(walker.time) % period if period > 1e-9 else 0.0
+        if local < period * 0.5:
+            return "L"
+        return "R"
+
+    def _anchor_swing_foot(self, walker: op3_walk.Op3Walker) -> None:
+        """Keep the swing sole on the world y it left.
+
+        ``preview_y`` is the pelvis sway, and the soles are already at
+        the box centres. Left on the foot that is about to lift, that
+        sway is a hip-frame target off the sole the ground is holding.
+        The error releases at liftoff and the swing sole flies out to it.
+        """
+        if not self.cfg.gm_id_ff:
+            self._anchor_was = {"L": False, "R": False}
+            walker.foot_bias_l = 0.0
+            walker.foot_bias_r = 0.0
+            self._latch_foot_y()
+            return
+        swing = self._clock_swing_side(walker)
+        for side in ("L", "R"):
+            if side == swing:
+                continue
+            if self.foot_normal(side) >= 5.0:
+                self._foot_y_latch[side] = float(self.data.geom_xpos[int(self.gid[side])][1])
+        walker.foot_bias_l = 0.0
+        walker.foot_bias_r = 0.0
+        if swing not in self._foot_y_latch:
+            return
+        prev = 1.0
+        for _ in range(8):
+            joints, _info = walker.joints_now()
+            if not joints:
+                return
+            err = float(self._foot_y_latch[swing]) - self._fk_box_y(joints, swing)
+            self._set_anchor_bias(walker, swing, self._anchor_bias(walker, swing) + err)
+            if abs(err) < 1.0e-4 or abs(err) >= prev - 1.0e-5:
+                break
+            prev = abs(err)
+
+    def _guard_ss_plan(self, scratch: mj.MjData, tau: dict[str, float]) -> None:
+        """Abort a single-support plan the foot cannot hold."""
+        if not self.cfg.gm_id_ff:
+            return
+        stance = self._planned_stance()
+        if stance not in ("L", "R"):
+            return
+        name = f"{stance.lower()}_hip_roll"
+        hip_tau = float(tau.get(name, 0.0))
+        gid = int(self.gid[stance])
+        box = float(scratch.geom_xpos[gid][1])
+        half = float(self.model.geom_size[gid][1])
+        com = float(self.preview_com_y)
+        hid = int(mj.mj_name2id(
+            self.model, mj.mjtObj.mjOBJ_BODY, f"{stance.lower()}_hip_roll_link",
+        ))
+        hip = float(scratch.xpos[hid][1])
+        live = float(self.data.subtree_com[self.bid_body][1])
+        outside = abs(com - box) - half
+        if abs(hip_tau) <= SS_HIP_TAU_MAX + 1e-9 and outside <= SS_COM_OUT_M:
+            return
+        raise PlanInconsistent(
+            f"SS plan inconsistent stance {stance} hip τ {hip_tau:+.3f} Nm "
+            f"planned CoM {com:+.4f} ZMP {float(self._zmp_cmd):+.4f} "
+            f"box {box:+.4f} hip {hip:+.4f} live CoM {live:+.4f} "
+            f"outside {outside * 1000.0:+.1f} mm"
+        )
+
     def _tick_preview_gait(self, walker: op3_walk.Op3Walker, walking: bool) -> None:
         """Shift CoM over the stance foot, then walk, then return in double support.
 
@@ -2819,6 +2962,7 @@ class LipmWalker:
             walker.ctrl_running = False
             walker.update_movement()
             walker.preview_y = self._preview_y_with_stab(com)
+            self._anchor_swing_foot(walker)
             joints = self._preview_pose(walker)
             self.phase = "shift"
             self.stance = "R" if self.start_lead == "L" else "L"
@@ -2871,6 +3015,7 @@ class LipmWalker:
         com = self._step_preview(preview, future)
         self.preview_com_y = com
         walker.preview_y = self._preview_y_with_stab(com)
+        self._anchor_swing_foot(walker)
         joints, info = walker.step(op3_walk.OP3_CTRL_S)
         self._note_preview_phase(info)
         self._write_preview_joints(joints)
@@ -2992,6 +3137,7 @@ class LipmWalker:
         com = self._step_preview(preview, future)
         self.preview_com_y = com
         walker.preview_y = self._preview_y_with_stab(com)
+        self._anchor_swing_foot(walker)
         joints = self._preview_pose(walker)
         self.phase = "shift"
         self.stance = stance_next  # type: ignore[assignment]
@@ -3219,6 +3365,7 @@ class LipmWalker:
                     com = self._step_preview(preview, future)
                     self.preview_com_y = com
                     walker.preview_y = self._preview_y_with_stab(com)
+                    self._anchor_swing_foot(walker)
                     joints = self._preview_pose(walker)
                     self.phase = "shift"
                     self._write_preview_joints(joints)
@@ -3236,6 +3383,7 @@ class LipmWalker:
                 com = self._step_preview(preview, future)
                 self.preview_com_y = com
                 walker.preview_y = self._preview_y_with_stab(com)
+                self._anchor_swing_foot(walker)
                 joints, info = walker.step(op3_walk.OP3_CTRL_S)
                 self._note_preview_phase(info)
                 # Contact still names the support. A clock swing whose swing
@@ -3282,6 +3430,7 @@ class LipmWalker:
         self._zmp_cmd = float(future[0])
         walker.time = self._freeze_time
         walker.preview_y = self._preview_y_with_stab(com)
+        self._anchor_swing_foot(walker)
         joints = self._stand_blend_joints(walker)
         # Stay in double support. Phase "stand" arms the kit stand hold,
         # which rewrites every leg toward the flat-floor pose. On the
