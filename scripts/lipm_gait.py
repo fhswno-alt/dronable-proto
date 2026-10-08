@@ -53,6 +53,9 @@ ID_FF_ARMATURE = 0.01
 # DC-motor model line, not a datasheet. |qvel| ≤ 5.82·(1 − |τ|/3.43).
 DC_QVEL_LIM = 5.82
 DC_STALL_NM = 3.43
+# Solver tolerance for a matched forward/inverse pair. A tick is not
+# bucketed while the leg residual is above this.
+ID_RESID_NM = 0.05
 # Stop/silence command budget for every leg joint. Hip yaw, hip roll,
 # hip pitch, knee, ankle pitch, and ankle roll share the HX-35H class.
 # The sag bar stays 2.33. Sitting the prediction on that bar measured
@@ -485,6 +488,29 @@ class LipmWalker:
         self._id_split_residual = 0.0
         self.id_ff_impossible = 0
         self.id_ff_broke = 0
+        # Consistent inverse from the last forward, before integration.
+        self._consistent_tau: dict[str, float] = {}
+        self.id_tick_tau: dict[str, float] = {}
+        self.id_tick_arm: dict[str, float] = {}
+        self.id_tick_stripped: dict[str, float] = {}
+        self.id_tick_resid: dict[str, float] = {}
+        self.id_tick_resid_pas: dict[str, float] = {}
+        self.id_tick_ok: dict[str, bool] = {}
+        self.id_phys_n = 0
+        self.id_resid_fail_n = 0
+        self.id_resid_max = 0.0
+        self.id_resid_joint = ""
+        self.id_resid_pas_max = 0.0
+        self.id_wall_phys_n = 0
+        self.id_arm_phys_n = 0
+        self.ctrl_ticks = 0
+        self.limit_ticks = 0
+        self.limit_ctrl_n = 0
+        self.limit_force_n = 0
+        self.limit_slew_n = 0
+        self.limit_band_n = 0
+        self.limit_torque_n = 0
+        self._limit_this_tick = False
 
     def other(self, side: Side) -> Side:
         return "R" if side == "L" else "L"
@@ -526,7 +552,15 @@ class LipmWalker:
         # MuJoCo clips ctrl to ctrlrange before the force. The ask log
         # records q_des before this clip. A leg command outside ±2.09
         # is a fail even though the applied ctrl is the clipped value.
-        self.data.ctrl[idx] = min(hi_lim, max(lo_lim, cmd))
+        applied = min(hi_lim, max(lo_lim, cmd))
+        if _leg_joint(jn):
+            if abs(cmd - float(q_des)) > 1e-12:
+                self.limit_band_n += 1
+                self._limit_this_tick = True
+            if abs(applied - cmd) > 1e-12:
+                self.limit_ctrl_n += 1
+                self._limit_this_tick = True
+        self.data.ctrl[idx] = applied
 
     def write_force_limited(self, jn: str, q_des: float, limit_nm: float | None = None) -> None:
         """Stand target whose predicted servo force stays inside the budget.
@@ -560,7 +594,11 @@ class LipmWalker:
             cmd = q + min(e_hi, max(e_lo, e_des))
         lo_lim = float(self.model.actuator_ctrlrange[idx, 0])
         hi_lim = float(self.model.actuator_ctrlrange[idx, 1])
-        self.data.ctrl[idx] = min(hi_lim, max(lo_lim, cmd))
+        applied = min(hi_lim, max(lo_lim, cmd))
+        if _leg_joint(jn) and abs(applied - float(q_des)) > 1e-12:
+            self.limit_force_n += 1
+            self._limit_this_tick = True
+        self.data.ctrl[idx] = applied
 
     def hold_stand(self) -> None:
         self.phase = "stand"
@@ -999,54 +1037,145 @@ class LipmWalker:
         self.id_ff_stripped = cand_stripped
         self.id_ff_stripped_abs = abs(cand_stripped)
 
+    def _ensure_leg_dof(self) -> None:
+        if self._leg_dof:
+            return
+        for name in (
+            "l_hip_yaw", "l_hip_roll", "l_hip_pitch", "l_knee", "l_ank_pitch", "l_ank_roll",
+            "r_hip_yaw", "r_hip_roll", "r_hip_pitch", "r_knee", "r_ank_pitch", "r_ank_roll",
+        ):
+            jid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, name)
+            if jid < 0:
+                continue
+            self._leg_dof[name] = int(self.model.jnt_dofadr[jid])
+
+    def begin_id_tick(self) -> None:
+        """Clear the per-command inverse record. Physics fills it."""
+        self._ensure_leg_dof()
+        self.id_tick_tau = {}
+        self.id_tick_arm = {}
+        self.id_tick_stripped = {}
+        self.id_tick_resid = {}
+        self.id_tick_resid_pas = {}
+        self.id_tick_ok = {name: True for name in self._leg_dof}
+        self._limit_this_tick = False
+
+    def finish_id_tick(self) -> None:
+        self.ctrl_ticks += 1
+        if self._limit_this_tick:
+            self.limit_ticks += 1
+
+    def audit_forward_inverse(self) -> None:
+        """Inverse of this forward, before integration.
+
+        q, q̇, q̈, contacts, and the actuator force are the ones
+        mj_forward just wrote. mj_inverse on a copy of that data keeps
+        the same configuration. The matched residual is
+        |qfrc_inverse − (qfrc_actuator + qfrc_applied)|. Adding
+        qfrc_passive leaves the joint damper, which is logged and is
+        not this gate. A leg residual above ID_RESID_NM is not bucketed.
+        """
+        self._ensure_leg_dof()
+        if self._id_data is None:
+            self._id_data = mj.MjData(self.model)
+        act = np.array(self.data.qfrc_actuator, dtype=np.float64, copy=True)
+        app = np.array(self.data.qfrc_applied, dtype=np.float64, copy=True)
+        pas = np.array(self.data.qfrc_passive, dtype=np.float64, copy=True)
+        qacc = np.array(self.data.qacc, dtype=np.float64, copy=True)
+        scratch = self._id_data
+        mj.mj_copyData(scratch, self.model, self.data)
+        mj.mj_inverse(self.model, scratch)
+        inv = np.array(scratch.qfrc_inverse, dtype=np.float64, copy=True)
+        self.id_phys_n += 1
+        step_fail = False
+        rot = np.array(self.data.xmat[self.bid_body], dtype=np.float64).reshape(3, 3)
+        upright = float(rot[2, 2]) >= 0.92
+        sag = float(KNEE_SAG_NM)
+        for name, adr in self._leg_dof.items():
+            tau = float(inv[adr])
+            arm = ID_FF_ARMATURE * float(qacc[adr])
+            stripped = tau - arm
+            resid = abs(tau - (float(act[adr]) + float(app[adr])))
+            resid_pas = abs(tau - (float(act[adr]) + float(pas[adr]) + float(app[adr])))
+            prev_resid = float(self.id_tick_resid.get(name, -1.0))
+            if resid > prev_resid:
+                self.id_tick_resid[name] = resid
+            prev_pas = float(self.id_tick_resid_pas.get(name, -1.0))
+            if resid_pas > prev_pas:
+                self.id_tick_resid_pas[name] = resid_pas
+            if resid > ID_RESID_NM:
+                self.id_tick_ok[name] = False
+                step_fail = True
+            elif abs(tau) >= abs(float(self.id_tick_tau.get(name, 0.0))):
+                self.id_tick_tau[name] = tau
+                self.id_tick_arm[name] = arm
+                self.id_tick_stripped[name] = stripped
+            if resid <= ID_RESID_NM:
+                self._consistent_tau[name] = tau
+            if resid > self.id_resid_max:
+                self.id_resid_max = resid
+                self.id_resid_joint = name
+            if resid_pas > self.id_resid_pas_max:
+                self.id_resid_pas_max = resid_pas
+            if resid > ID_RESID_NM or not upright:
+                continue
+            if abs(stripped) > sag + 1e-9:
+                self.id_wall_phys_n += 1
+                if abs(stripped) <= self.id_ff_stripped_abs and self.id_ff_bucket == "wall":
+                    continue
+                phase = self._ff_phase(name)
+                side = "l" if name.startswith("l_") else "r"
+                other = "r" if side == "l" else "l"
+                cop = self._ankle_cop_mm(side)
+                if cop is None:
+                    cop = self._ankle_cop_mm(other)
+                cop_h = None if cop is None else cop[2]
+                term = self._id_dominant(scratch, adr, phase, cop_h)
+                self.id_ff_bucket = "wall"
+                self.id_ff_peak_abs = abs(tau)
+                self.id_ff_peak_joint = name
+                self.id_ff_peak_phase = phase
+                self.id_ff_peak_term = term
+                self.id_ff_peak_tau = tau
+                self.id_ff_peak_t = float(self.data.time)
+                self.id_ff_arm = arm
+                self.id_ff_stripped = stripped
+                self.id_ff_stripped_abs = abs(stripped)
+            elif abs(tau) > sag + 1e-9:
+                self.id_arm_phys_n += 1
+                if self.id_ff_bucket == "wall" or abs(tau) <= self.id_ff_peak_abs:
+                    continue
+                self.id_ff_bucket = "unsourced-armature candidate"
+                self.id_ff_peak_abs = abs(tau)
+                self.id_ff_peak_joint = name
+                self.id_ff_peak_phase = self._ff_phase(name)
+                self.id_ff_peak_term = "unsourced-armature candidate"
+                self.id_ff_peak_tau = tau
+                self.id_ff_peak_t = float(self.data.time)
+                self.id_ff_arm = arm
+                self.id_ff_stripped = stripped
+                self.id_ff_stripped_abs = abs(stripped)
+        if step_fail:
+            self.id_resid_fail_n += 1
+
     def _id_feedforward(self, joints: dict[str, float]) -> None:
         """Replace each leg target with the ctrl that applies τ.
 
         A position actuator applies kp·(ctrl−q) − kv·q̇. kv is
-        −actuator_biasprm[i, 2], the same value the scorer uses. The
-        plant kp stays in the XML, so the torque command is
+        −actuator_biasprm[i, 2]. The plant kp stays in the XML:
 
             ctrl = q + (τ_des + kv·q̇) / kp
 
-        Without the kv·q̇ term the damping eats the feedforward at
-        speed. τ_des starts from mj_inverse at this step's q, q̇, and
-        q̈. q̈ is data.qacc, not a finite difference of the IK
-        reference. Feedback is ID_FF_KP·(q_ref−q), reduced first, and
-        the sum stays inside ±2.33 Nm and on the DC line. ctrl is not
-        pulled into ctrlrange. MuJoCo clips that range before the
-        force, and a command outside ±2.09 is a fail the scorer
-        counts. This is not write_force_limited and it does not edit
-        forcerange.
+        τ_des is the last matched inverse plus ID_FF_KP·(q_ref−q).
+        The sum is not saturated and not clipped into ±2.33 Nm. A
+        limiter that pulls the command onto that bar is a hard-cap.
+        ctrl is not pulled into ctrlrange here.
         """
         if not self.cfg.gm_id_ff:
             return
-        if self._id_data is None:
-            self._id_data = mj.MjData(self.model)
-        if not self._leg_dof:
-            for name in joints:
-                if not _leg_joint(name):
-                    continue
-                jid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, name)
-                if jid < 0:
-                    continue
-                self._leg_dof[name] = int(self.model.jnt_dofadr[jid])
-        scratch = self._id_data
-        scratch.qpos[:] = self.data.qpos
-        scratch.qvel[:] = self.data.qvel
-        scratch.qacc[:] = self.data.qacc
-        scratch.qfrc_applied[:] = 0.0
-        scratch.xfrc_applied[:] = 0.0
-        mj.mj_inverse(self.model, scratch)
-        inv = np.array(scratch.qfrc_inverse, dtype=np.float64, copy=True)
-        q_ref = {
-            name: float(joints[name])
-            for name in self._leg_dof
-            if name in joints
-        }
-        self._note_id_peak(inv, q_ref, hold=False)
-        sag = float(KNEE_SAG_NM)
+        self._ensure_leg_dof()
         for name, adr in self._leg_dof.items():
-            if name not in q_ref:
+            if name not in joints:
                 continue
             act = name + "_pos"
             idx = self.act_idx.get(act)
@@ -1059,27 +1188,10 @@ class LipmWalker:
                 continue
             q = self.q(name)
             omega = float(self.data.qvel[adr])
-            speed_room = DC_STALL_NM * (1.0 - abs(omega) / DC_QVEL_LIM)
-            if speed_room < 0.0:
-                speed_room = 0.0
-            room = min(sag, speed_room)
-            tau_ff = float(inv[adr])
-            fb = ID_FF_KP * (q_ref[name] - q)
-            if room <= 1e-9:
-                tau = 0.0
-            elif abs(tau_ff) >= room:
-                tau = math.copysign(room, tau_ff)
-            else:
-                tau = tau_ff + fb
-                if tau > room:
-                    tau = room
-                elif tau < -room:
-                    tau = -room
-            ctrl = q + (tau + kv * omega) / kp
-            signed = kp * (ctrl - q) - kv * omega
-            if abs(signed) > sag + 1e-6 or abs(signed) > room + 1e-4:
-                self.id_ff_broke += 1
-            joints[name] = ctrl
+            tau_ff = float(self._consistent_tau.get(name, 0.0))
+            fb = ID_FF_KP * (float(joints[name]) - q)
+            tau = tau_ff + fb
+            joints[name] = q + (tau + kv * omega) / kp
 
     def _shape_sagittal(self, joints: dict[str, float]) -> None:
         """Rate- and accel-limit hip pitch, knee, and ankle pitch.

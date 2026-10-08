@@ -1459,6 +1459,7 @@ class SteerSession:
             # approach it over HIP_KNEE_MOVE_S; this 20 ms tick only covers
             # part of that move. Snapshot the command before the write.
             ctrl_from = np.array(self.data.ctrl, dtype=np.float64, copy=True)
+            self.lipm.begin_id_tick()
             if self.bus.fault:
                 self.lipm.hold_stand()
                 holding = True
@@ -1958,6 +1959,12 @@ class SteerSession:
         ):
             ctrl_from = ctrl_to
             end = ctrl_to.copy()
+        elif self.lipm is not None:
+            for idx in self._move_ctrl_idx:
+                if abs(float(end[idx]) - float(ctrl_to[idx])) > 1e-12:
+                    self.lipm.limit_slew_n += 1
+                    self.lipm._limit_this_tick = True
+                    break
         for i in range(n):
             alpha = (i + 1) / float(n)
             self.data.ctrl[:] = ctrl_from + (end - ctrl_from) * alpha
@@ -1969,7 +1976,19 @@ class SteerSession:
                         self.lipm.write_force_limited(jn, val)
             self.data.qfrc_applied[:] = 0.0
             self.data.xfrc_applied[:] = 0.0
-            mj.mj_step(self.model, self.data)
+            # Same integration as mj_step (implicitfast). The inverse is
+            # taken after the forward and before mj_implicit, on this
+            # q, q̇, qacc, and contact state.
+            mj.mj_step1(self.model, self.data)
+            mj.mj_fwdActuation(self.model, self.data)
+            mj.mj_fwdAcceleration(self.model, self.data)
+            mj.mj_fwdConstraint(self.model, self.data)
+            if self.lipm is not None:
+                self.lipm.audit_forward_inverse()
+            mj.mj_sensorAcc(self.model, self.data)
+            mj.mj_implicit(self.model, self.data)
+        if self.lipm is not None:
+            self.lipm.finish_id_tick()
 
     def _substep_plant(self, amp: float, phi: float) -> None:
         for _ in range(self.steps_per_ctrl):

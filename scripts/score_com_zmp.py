@@ -1229,6 +1229,14 @@ def run_attempt(
     dc_joint = ""
     signed_over = 0
     sum_over = 0
+    id_wall_n = 0
+    id_arm_n = 0
+    id_ctrl_n = 0
+    id_skip_n = 0
+    id_in_n = 0
+    id_over_signed = 0
+    stop_up_z = float("nan")
+    stop_up_n = 0
     dc_tau = 0.0
     dc_spd = 0.0
     dc_lim = 0.0
@@ -1302,6 +1310,25 @@ def run_attempt(
             clo, chi = ctrl_lim[row.joint]
             if row.q_des < clo - 1e-9 or row.q_des > chi + 1e-9:
                 ctrl_clip[row.joint] += 1
+            # Bucket only after the matched residual is inside 0.05 Nm.
+            # The inverse is the pre-integration forward of this command.
+            tau_id = lipm.id_tick_tau.get(row.joint)
+            resid_id = float(lipm.id_tick_resid.get(row.joint, float("inf")))
+            ok_id = bool(lipm.id_tick_ok.get(row.joint, False)) and tau_id is not None
+            if abs(row.signed_nm) > ASK_NM + 1e-9:
+                id_over_signed += 1
+            if not ok_id or resid_id > lipm_gait.ID_RESID_NM:
+                id_skip_n += 1
+            else:
+                stripped_id = float(lipm.id_tick_stripped.get(row.joint, float(tau_id)))
+                if abs(stripped_id) > ASK_NM + 1e-9:
+                    id_wall_n += 1
+                elif abs(float(tau_id)) > ASK_NM + 1e-9:
+                    id_arm_n += 1
+                elif abs(row.signed_nm) > ASK_NM + 1e-9:
+                    id_ctrl_n += 1
+                else:
+                    id_in_n += 1
             # τ and ω are this write. ω is the qvel the torque used,
             # before mj_step replaces it.
             tau = abs(row.signed_nm)
@@ -1408,6 +1435,10 @@ def run_attempt(
         if stand_s - 1e-12 <= now < t_stop - 1e-12:
             vx_sum += float(session._body_forward_speed())
             vx_n += 1
+        if stage == "stop":
+            stop_uz = float(session._up_z())
+            stop_up_z = stop_uz if stop_up_n == 0 else min(stop_up_z, stop_uz)
+            stop_up_n += 1
         preview_peak = max(preview_peak, abs(float(lipm.preview_com_y)))
         if not kit_baseline and lipm.op3 is not None:
             if stage == "walk":
@@ -1695,6 +1726,33 @@ def run_attempt(
         "id_ff_hold_over_n": int(getattr(lipm, "id_ff_hold_over_n", 0)),
         "id_ff_impossible": int(getattr(lipm, "id_ff_impossible", 0)),
         "id_ff_broke": int(getattr(lipm, "id_ff_broke", 0)),
+        "id_resid_max": float(getattr(lipm, "id_resid_max", 0.0)),
+        "id_resid_joint": str(getattr(lipm, "id_resid_joint", "")),
+        "id_resid_pas_max": float(getattr(lipm, "id_resid_pas_max", 0.0)),
+        "id_resid_fail_n": int(getattr(lipm, "id_resid_fail_n", 0)),
+        "id_phys_n": int(getattr(lipm, "id_phys_n", 0)),
+        "id_wall_n": id_wall_n,
+        "id_arm_n": id_arm_n,
+        "id_ctrl_n": id_ctrl_n,
+        "id_skip_n": id_skip_n,
+        "id_in_n": id_in_n,
+        "id_over_signed": id_over_signed,
+        "id_wall_phys_n": int(getattr(lipm, "id_wall_phys_n", 0)),
+        "id_arm_phys_n": int(getattr(lipm, "id_arm_phys_n", 0)),
+        "limit_ticks": int(getattr(lipm, "limit_ticks", 0)),
+        "ctrl_ticks": int(getattr(lipm, "ctrl_ticks", 0)),
+        "limit_frac": (
+            float(getattr(lipm, "limit_ticks", 0)) / float(lipm.ctrl_ticks)
+            if int(getattr(lipm, "ctrl_ticks", 0)) else float("nan")
+        ),
+        "limit_ok": int(getattr(lipm, "limit_ticks", 0)) == 0 and int(getattr(lipm, "ctrl_ticks", 0)) > 0,
+        "limit_ctrl_n": int(getattr(lipm, "limit_ctrl_n", 0)),
+        "limit_force_n": int(getattr(lipm, "limit_force_n", 0)),
+        "limit_slew_n": int(getattr(lipm, "limit_slew_n", 0)),
+        "limit_band_n": int(getattr(lipm, "limit_band_n", 0)),
+        "limit_torque_n": int(getattr(lipm, "limit_torque_n", 0)),
+        "stop_up_z": stop_up_z,
+        "stop_up_n": stop_up_n,
         "clamp_frac": clamp_frac,
         "clamp_max": clamp_max,
         "clamp_joint": clamp_joint,
