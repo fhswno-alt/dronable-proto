@@ -679,4 +679,50 @@ The planned τ for T 0.60 s / vx 0.032 m/s, worst tick of each phase. QP is the 
 | stop | r_ank_pitch | 2.504 | ss | +2.636 | +0.021 | +2.636 | +0.021 | +2.636 | +0.021 | 0.000 |
 | stop | r_ank_roll | 2.672 | ss | -0.393 | -0.012 | -0.393 | -0.012 | -0.393 | -0.012 | 0.000 |
 
+Armature 0.025 is a load-time sensitivity, not a plant edit. The scorer checks the plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`, loads that XML through `mujoco.MjSpec`, sets armature 0.025 on the twelve leg joints, and compiles. `dampratio=1` recomputes `actuator_biasprm` kv at that compile. `model.dof_armature` is not written after compile. The file is not written. The label is `sensitivity, HW cited bound 0.0012–0.045 (STS3215 SysID 0.022–0.026), not plant`. It is informational while a row is still an intermediate result. It is a hard gate before that row is called locked. A row that is CLEAR at 0.01 and not CLEAR at 0.025 is `transfer risk`. The pass on the plant stays armature 0.01.
+
+The scorer prints kv at 0.01 and 0.025 side by side and stops if any leg matches. Every joint moved:
+
+| Joint | kv at 0.01 | kv at 0.025 |
+| --- | ---: | ---: |
+| l_hip_yaw | 1.291860 | 2.017152 |
+| l_hip_roll | 1.702690 | 2.301989 |
+| l_hip_pitch | 1.810179 | 2.444739 |
+| l_knee | 1.457342 | 2.196326 |
+| l_ank_pitch | 1.198019 | 1.880226 |
+| l_ank_roll | 1.187611 | 1.873612 |
+| r_hip_yaw | 1.291860 | 2.017152 |
+| r_hip_roll | 1.702689 | 2.301988 |
+| r_hip_pitch | 1.810178 | 2.444738 |
+| r_knee | 1.457341 | 2.196325 |
+| r_ank_pitch | 1.198019 | 1.880226 |
+| r_ank_roll | 1.187611 | 1.873612 |
+
+The bout is the best row of the committed grid and that bout's stop, on the full bar set, at both armatures. The best row is T 0.50 s / vx 0.016 m/s: seven fail reasons, the signed ask passes, and the match residual stays under 1e-3 Nm. The 0.01 rescore matches that committed cell. The stop is the final 1 s of the same bout.
+
+At 0.01 the row is Prefer FAIL STEPS. Signed ask peaks at 1.850 Nm on the left knee, with the note `passes signed, fails sum`. The stop is not upright: min up_z 0.998, contacts 4/4, trunk pitch 5.18° off the stand, roll 0.20° off. It freezes in a lean. Match residual peaks at 2.91e-4 Nm, 0 ticks over 1e-3. Limiter fraction 0.125 (73/585). Double-support QP wall ticks are 0 of 508 feasible (3 infeasible). The largest stop QP value without armature is +1.294 Nm, left hip roll at 2.488 s. Single support above 2.33 Nm without armature is required single-foot torque: right hip pitch at 2.016 s, −9.010 Nm with armature and −8.983 Nm without. CoP flags 129 of 508 feasible ticks, minimum margin 0.005 m, median 0.011 m. Realised versus QP: 496 ticks, share-difference median 0.027 and maximum 0.504, force-gap median 5.64 N and maximum 33.0 N.
+
+At 0.025 the same row is Prefer FAIL STEPS. It is not `transfer risk`: the row does not clear at 0.01. It is not locked. The signed ask now fails, 3.694 Nm on the left knee at 2.288 s in the stop (6/585 ticks) and 2.353 Nm on the right knee (1/585). The clamp bar fails, 4/585 ticks on the left knee. The DC-motor line fails on that same stop sample, margin −0.963 rad/s. Limiter fraction 0.181 (106/585). The stop pitch off the stand is 6.59°, roll 0.08°, min up_z 0.996, contacts 4/4, still a lean. Match residual peaks at 4.15e-4 Nm, leg match 5.95e-5 Nm, 0 ticks over 1e-3. The knee inverse sits on the rail, −2.450 Nm at 2.288 s, and strips to −0.041 Nm. Eight over-bar samples are clamped and eight are unsourced-armature candidates. Double-support QP wall ticks stay 0, of 506 feasible (5 infeasible). CoP flags 153 of 506, minimum margin 0.005 m, median 0.0085 m. Realised versus QP: 492 ticks, share-difference median 0.034 and maximum 0.615, force-gap median 6.74 N and maximum 32.1 N. Phase medians of the largest |τ| without armature on the QP are 0.534 Nm in the start, 0.924 Nm in the walk, and 0.522 Nm in the stop. The foot-line and min-norm medians are 0.770 / 1.323 / 0.648 Nm.
+
+Single support above 2.33 Nm without armature is still required single-foot torque. The largest is the right hip roll at 2.176 s in the walk, −6.291 Nm with armature and +10.442 Nm without. The largest with-armature sample is the left hip roll at 2.184 s, +45.140 Nm with armature and +7.083 Nm without. The three columns match and the spread is 0. Neither tick is a double-support wall.
+
+The planned τ for the stop at armature 0.025, worst tick of each joint. QP is the disk minimax on that same tick, with each foot's CoP inside the sole shrunk by 0.005 m. In single support the three torque columns match. The no-armature columns subtract `dof_armature·q̈_ref` with the compiled armature 0.025.
+
+| Phase | Joint | t s | Support | Linear Nm | Linear, no armature | Min-norm Nm | Min-norm, no armature | QP Nm | QP, no armature | Spread Nm |
+| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| stop | l_hip_yaw | 2.544 | ds | +0.183 | +0.183 | +0.094 | +0.094 | +0.412 | +0.412 | 0.089 |
+| stop | l_hip_roll | 2.544 | ds | +2.008 | +0.726 | +2.553 | +1.271 | +2.471 | +1.189 | 0.544 |
+| stop | l_hip_pitch | 2.280 | ss | +7.285 | +0.238 | +7.285 | +0.238 | +7.285 | +0.238 | 0.000 |
+| stop | l_knee | 2.280 | ss | -15.339 | -0.698 | -15.339 | -0.698 | -15.339 | -0.698 | 0.000 |
+| stop | l_ank_pitch | 2.288 | ss | -11.595 | -0.345 | -11.595 | -0.345 | -11.595 | -0.345 | 0.000 |
+| stop | l_ank_roll | 2.544 | ds | +1.124 | -0.157 | +1.288 | +0.006 | +1.328 | +0.046 | 0.164 |
+| stop | r_hip_yaw | 2.544 | ds | +0.633 | +0.633 | +0.178 | +0.178 | -0.044 | -0.044 | 0.455 |
+| stop | r_hip_roll | 2.544 | ds | +3.334 | +2.030 | +2.762 | +1.458 | +2.493 | +1.189 | 0.572 |
+| stop | r_hip_pitch | 2.304 | ds | -2.280 | -2.221 | -0.669 | -0.610 | -1.398 | -1.338 | 1.611 |
+| stop | r_knee | 2.304 | ds | +0.390 | +0.099 | +2.460 | +2.169 | +1.629 | +1.338 | 2.070 |
+| stop | r_ank_pitch | 2.536 | ds | -1.013 | +0.253 | -1.775 | -0.509 | -1.805 | -0.539 | 0.762 |
+| stop | r_ank_roll | 2.544 | ds | +1.243 | -0.061 | +1.292 | -0.012 | +1.618 | +0.314 | 0.049 |
+
+The stop left knee clears 2.33 Nm only after the 0.025 armature term is removed. That sample is an unsourced-armature candidate on the planned columns. The plant ask on the same stop is 3.694 Nm, so the row stays Prefer FAIL. Full table: `previews/walk_a5a9183_armature_sensitivity.json`.
+
 SHA `e180454`. Logs from SHA `424b3d0`. Prior goal-ask score SHA `697d53b`.

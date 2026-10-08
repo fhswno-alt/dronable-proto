@@ -121,6 +121,17 @@ QP_COP_INSET_M = float(step_bars.EDGE_DWELL_M)
 # A reported CoP is on the shrunk edge when its margin to the sole matches
 # the inset within this tolerance. Same 0.1 mm the full-box check already uses.
 QP_COP_BOUND_TOL_M = 1e-4
+# Plant file value. The sensitivity compile must not replace this literal
+# with a hand-picked inertia, and it must not write the XML.
+PLANT_ARMATURE = 0.01
+SENSITIVITY_ARMATURE = 0.025
+SENSITIVITY_LABEL = (
+    "sensitivity, HW cited bound 0.0012–0.045 "
+    "(STS3215 SysID 0.022–0.026), not plant"
+)
+# Committed 54-cell grid: fewest fail reasons, signed ask passes, and the
+# match residual stays under 1e-3. The stop is this bout's final 1 s.
+BEST_ROW = (0.50, 0.016)
 KNEE_ID_CONTROLS_NM = 2.045
 KNEE_ID_CONTROLS_DISCRETE_NM = (0.934, 1.087)
 ROOT_DOFS = 6
@@ -329,6 +340,102 @@ def _plant_md5() -> str:
     digest = hashlib.md5()
     digest.update(sws.steer_walk.PLANT_XML.read_bytes())
     return digest.hexdigest()
+
+
+def _open_session(
+    cfg: sws.lipm_gait.LipmConfig,
+    scene: Path | None,
+    compiled: mj.MjModel | None,
+) -> sws.steer_walk.SteerSession:
+    """Open a session. A compiled model replaces the plant load.
+
+    The gait session loads with ``MjModel.from_xml_path``. When ``compiled``
+    is set, that call returns the MjSpec model for the plant path. The
+    compiled ``dof_armature`` is left as ``compile`` wrote it.
+    """
+    if compiled is None:
+        return sws.steer_walk.SteerSession(video=False, lipm=cfg, scene_xml=scene)
+    real = mj.MjModel.from_xml_path
+    plant = sws.steer_walk.PLANT_XML.resolve()
+
+    def _load(path: str) -> mj.MjModel:
+        if Path(path).resolve() == plant:
+            return compiled
+        return real(path)
+
+    mj.MjModel.from_xml_path = _load  # type: ignore[method-assign]
+    try:
+        return sws.steer_walk.SteerSession(video=False, lipm=cfg, scene_xml=scene)
+    finally:
+        mj.MjModel.from_xml_path = real  # type: ignore[method-assign]
+
+
+def compile_leg_armature(armature: float) -> mj.MjModel:
+    """Compile the plant with a leg-armature override set before kv.
+
+    The file md5 is checked first. Armature is written on the MjSpec joints,
+    then ``compile`` runs. A position actuator with ``dampratio=1`` recomputes
+    ``actuator_biasprm`` kv from that inertia. ``model.dof_armature`` is not
+    assigned after compile. The XML file is not written.
+    """
+    path = sws.steer_walk.PLANT_XML
+    digest = _plant_md5()
+    if digest != PLANT_MD5:
+        raise SystemExit(f"plant md5 {digest} != {PLANT_MD5}")
+    spec = mj.MjSpec.from_file(str(path.resolve()))
+    found: list[str] = []
+    for joint in spec.joints:
+        if joint.name in sws.LEG_JOINTS:
+            joint.armature = float(armature)
+            found.append(str(joint.name))
+    if set(found) != set(sws.LEG_JOINTS):
+        raise SystemExit(f"spec leg joints {sorted(found)} != the twelve leg joints")
+    model = spec.compile()
+    for name in sws.LEG_JOINTS:
+        jid = int(mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, name))
+        got = float(model.dof_armature[int(model.jnt_dofadr[jid])])
+        if abs(got - float(armature)) > 1e-12:
+            raise SystemExit(f"{name} compiled armature {got} != {armature}")
+    if _plant_md5() != PLANT_MD5:
+        raise SystemExit("plant file changed during the armature compile")
+    return model
+
+
+def _leg_kv(model: mj.MjModel) -> dict[str, float]:
+    rows: dict[str, float] = {}
+    for name in sws.LEG_JOINTS:
+        idx = int(mj.mj_name2id(model, mj.mjtObj.mjOBJ_ACTUATOR, name + "_pos"))
+        if idx < 0:
+            raise SystemExit(f"missing actuator {name}_pos")
+        rows[name] = -float(model.actuator_biasprm[idx, 2])
+    return rows
+
+
+def print_kv_side_by_side() -> list[dict[str, float | str]]:
+    """Print plant kv beside the sensitivity kv and refuse a joint that matches."""
+    if _plant_md5() != PLANT_MD5:
+        raise SystemExit(f"plant md5 {_plant_md5()} != {PLANT_MD5}")
+    plant = mj.MjModel.from_xml_path(str(sws.steer_walk.PLANT_XML))
+    sens = compile_leg_armature(SENSITIVITY_ARMATURE)
+    kv_plant = _leg_kv(plant)
+    kv_sens = _leg_kv(sens)
+    print(
+        f"leg kv, dampratio=1, armature {PLANT_ARMATURE:.3f} beside {SENSITIVITY_ARMATURE:.3f}",
+        flush=True,
+    )
+    print(f"{'joint':16} {'kv_0.01':>12} {'kv_0.025':>12}", flush=True)
+    rows: list[dict[str, float | str]] = []
+    for name in sws.LEG_JOINTS:
+        left = kv_plant[name]
+        right = kv_sens[name]
+        if abs(left - right) <= 1e-9:
+            raise SystemExit(
+                f"{name} kv {left} at armature {PLANT_ARMATURE} "
+                f"equals kv at {SENSITIVITY_ARMATURE}"
+            )
+        print(f"{name:16} {left:12.6f} {right:12.6f}", flush=True)
+        rows.append({"joint": name, "kv_0_01": left, "kv_0_025": right})
+    return rows
 
 
 def _forcerange_audit(model: mj.MjModel, walker: sws.lipm_gait.LipmWalker) -> dict[str, object]:
@@ -2060,11 +2167,14 @@ def score_cell(
     vx: float,
     amp: float,
     perturb: sws.Perturb | None = None,
+    leg_armature: float | None = None,
 ) -> dict[str, object]:
     global _CAPTURE_ON, _ID_COPY, _ID_MODEL, _FOOT_SINK, _FOOT_SPEC
     digest_before = _plant_md5()
     if digest_before != PLANT_MD5:
         raise SystemExit(f"plant md5 {digest_before} != {PLANT_MD5}")
+    armature = PLANT_ARMATURE if leg_armature is None else float(leg_armature)
+    override = abs(armature - PLANT_ARMATURE) > 1e-12
     stand_s = 0.25
     walk_s = 1.00 + 2.05 * float(period_s)
     stop_s = 2.40
@@ -2074,7 +2184,10 @@ def score_cell(
     scene = None
     if perturb is not None and perturb.rug:
         scene = sws.steer_walk.ROOT / "mujoco" / "room_entrance.xml"
-    session = sws.steer_walk.SteerSession(video=False, lipm=cfg, scene_xml=scene)
+    if override and scene is not None:
+        raise SystemExit("armature override does not load a scene include")
+    compiled = compile_leg_armature(armature) if override else None
+    session = _open_session(cfg, scene, compiled)
     if perturb is not None:
         sws._apply_perturb(session, perturb)
         if perturb.rug:
@@ -2120,6 +2233,9 @@ def score_cell(
         damp = float(session.model.dof_damping[int(leg["dof"])])
         if abs(damp - JOINT_DAMPING) > 1e-12:
             raise RuntimeError(f"{leg['joint']} damping {damp} is not {JOINT_DAMPING}")
+        arm = float(session.model.dof_armature[int(leg["dof"])])
+        if abs(arm - armature) > 1e-12:
+            raise RuntimeError(f"{leg['joint']} armature {arm} is not {armature}")
     kv_of = {str(leg["joint"]): float(leg["kv"]) for leg in legs}
     ctrl_hist: dict[str, list[float]] = {name: [] for name in sws.LEG_JOINTS}
     raw_unavailable = False
@@ -2617,7 +2733,9 @@ def score_cell(
                         )
                     cop_x, cop_y = cop_cache[key]
                     parts = {
-                        "armature·q̈": float(split["arm_001"][adr]),
+                        "armature·q̈": float(
+                            split["arm_model" if override else "arm_001"][adr]
+                        ),
                         "impact/contact": float(split["contact"][adr]),
                         "link inertia": float(split["link"][adr]),
                         "gravity": float(split["gravity"][adr]),
@@ -3013,6 +3131,9 @@ def score_cell(
         "soft_pass": False,
         "plant_md5_before": digest_before,
         "plant_md5_after": digest_after,
+        "leg_armature_kgm2": armature,
+        "armature_label": SENSITIVITY_LABEL if override else "plant",
+        "leg_kv": kv_of,
         "verdict": verdict,
         "gait": gait,
         "fail_reasons": fail_reasons,
@@ -3236,7 +3357,7 @@ def score_cell(
         return format(float(val), spec)
 
     print(
-        f"T {period_s:.2f} vx {vx:.3f} {verdict} {gait} "
+        f"T {period_s:.2f} vx {vx:.3f} arm {armature:.3f} {verdict} {gait} "
         f"ask {row['ask_peak_nm']:.3f} {row['ask_peak_joint']} "
         f"goal {row['goal_ask_peak_nm']:.3f} "
         f"clip {clip_fraction} lim {row['limiter_active_fraction']:.3f} "
@@ -3270,6 +3391,67 @@ def score_cell(
     return row
 
 
+def _slim_row(row: dict[str, object]) -> dict[str, object]:
+    """Drop per-tick traces. The bar results and the planned τ table stay."""
+    out = dict(row)
+    for key in ("over_bar", "root_id_per_tick_nm", "solver_fwdinv_per_tick"):
+        out.pop(key, None)
+    planned = out.get("planned")
+    if isinstance(planned, dict):
+        planned = dict(planned)
+        cop = planned.get("qp_cop")
+        if isinstance(cop, dict):
+            cop = dict(cop)
+            cop.pop("ticks", None)
+            planned["qp_cop"] = cop
+        out["planned"] = planned
+    return out
+
+
+def _passes(blob: object) -> bool:
+    return isinstance(blob, dict) and bool(blob.get("passes"))
+
+
+def _bar_map(row: dict[str, object]) -> dict[str, bool]:
+    reasons = [str(item) for item in row.get("fail_reasons", [])]
+    return {
+        "verdict_clear": row.get("verdict") == "CLEAR",
+        "signed": bool(row.get("signed_pass")),
+        "sum": bool(row.get("sum_pass")),
+        "stop": not any(item.startswith("stop does not") for item in reasons),
+        "stepping": bool(row.get("stepping_passes")),
+        "limiter": float(row.get("limiter_active_fraction") or 0.0) == 0.0,
+        "match": int(row.get("match_over_1e-3_ticks") or 0) == 0,
+        "clip": row.get("ctrl_clip_fraction") == 0,
+        "qvel": _passes(row.get("qvel")),
+        "clamp": _passes(row.get("clamp")),
+        "dc": _passes(row.get("dc")),
+        "zmp": not any(item.startswith("ZMP") for item in reasons),
+        "com": not any(item.startswith("CoM") for item in reasons),
+        "jerk": not any("jerk" in item for item in reasons),
+    }
+
+
+def _sensitivity_comparison(plant: dict[str, object], sens: dict[str, object]) -> dict[str, object]:
+    """0.025 is informational on an intermediate CLEAR and a hard gate before locked."""
+    clears_plant = plant.get("verdict") == "CLEAR"
+    clears_sens = sens.get("verdict") == "CLEAR"
+    transfer = bool(clears_plant and not clears_sens)
+    return {
+        "label": "transfer risk" if transfer else None,
+        "transfer_risk": transfer,
+        "sensitivity_role": (
+            "informational for an intermediate CLEAR"
+            if clears_plant
+            else "informational"
+        ),
+        "lock_gate": "0.025 is a hard gate before locked",
+        "locked": bool(clears_plant and clears_sens),
+        "bars_0_01": _bar_map(plant),
+        "bars_0_025": _bar_map(sens),
+    }
+
+
 def _parse_cells(text: str) -> list[tuple[float, float]]:
     cells: list[tuple[float, float]] = []
     for chunk in text.split(","):
@@ -3288,6 +3470,14 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=-1)
     parser.add_argument("--rug", action="store_true")
     parser.add_argument("--compact", action="store_true", help="Drop per-tick traces from the JSON.")
+    parser.add_argument(
+        "--armature", type=float, default=PLANT_ARMATURE,
+        help="Leg armature. 0.01 loads the plant file. Any other value compiles an MjSpec.",
+    )
+    parser.add_argument(
+        "--sensitivity", action="store_true",
+        help="Score the best row and its stop at armature 0.01 and 0.025.",
+    )
     args = parser.parse_args()
     if sws.SOFT_PASS:
         raise SystemExit("soft-pass is on")
@@ -3301,6 +3491,59 @@ def main() -> None:
     )
     if _plant_md5() != PLANT_MD5:
         raise SystemExit(f"plant md5 {_plant_md5()} != {PLANT_MD5}")
+    if args.sensitivity or abs(float(args.armature) - PLANT_ARMATURE) > 1e-12:
+        kv_rows = print_kv_side_by_side()
+    else:
+        kv_rows = None
+    if args.sensitivity:
+        if args.rug or args.seed >= 0 or abs(args.mass_scale - 1.0) > 1e-12:
+            raise SystemExit("the armature sensitivity is the nominal plant")
+        cache: dict[float, float] = {}
+        period_s, vx = BEST_ROW
+        amp = _amp(period_s, cache)
+        scored = [
+            score_cell(period_s, vx, amp, None, leg_armature=arm)
+            for arm in (PLANT_ARMATURE, SENSITIVITY_ARMATURE)
+        ]
+        if _plant_md5() != PLANT_MD5:
+            raise SystemExit("plant md5 changed")
+        plant_row, sens_row = scored
+        comparison = _sensitivity_comparison(plant_row, sens_row)
+        label = comparison["label"] or "-"
+        print(
+            f"sensitivity {SENSITIVITY_LABEL} "
+            f"best T {period_s:.2f} vx {vx:.3f} "
+            f"verdict {plant_row['verdict']} / {sens_row['verdict']} "
+            f"label {label} locked {comparison['locked']}",
+            flush=True,
+        )
+        payload = {
+            "tip": TIP_SHA,
+            "soft_pass": False,
+            "plant_md5": PLANT_MD5,
+            "plant_armature_kgm2": PLANT_ARMATURE,
+            "sensitivity_armature_kgm2": SENSITIVITY_ARMATURE,
+            "sensitivity_label": SENSITIVITY_LABEL,
+            "best_row": {
+                "T_s": period_s,
+                "vx_m_s": vx,
+                "why": (
+                    "Fewest fail reasons on the committed 54-cell grid, "
+                    "signed ask passes, match residual under 1e-3. "
+                    "The stop is this bout's final 1 s."
+                ),
+            },
+            "kv": kv_rows,
+            "lock_gate": comparison["lock_gate"],
+            "comparison": comparison,
+            "rows": [_slim_row(plant_row), _slim_row(sens_row)],
+        }
+        if args.out:
+            path = Path(args.out)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(_jsonable(payload), indent=2) + "\n", encoding="utf-8")
+            print(f"wrote {path}", flush=True)
+        return
     cells = _parse_cells(args.cells) if args.cells else [
         (period, vx) for period in PERIODS for vx in SPEEDS
     ]
@@ -3322,7 +3565,10 @@ def main() -> None:
     cache: dict[float, float] = {}
     rows = []
     for period_s, vx in cells:
-        row = score_cell(period_s, vx, _amp(period_s, cache), perturb)
+        row = score_cell(
+            period_s, vx, _amp(period_s, cache), perturb,
+            leg_armature=float(args.armature),
+        )
         if args.compact:
             for key in (
                 "over_bar", "root_id_per_tick_nm", "solver_fwdinv_per_tick",
