@@ -1316,7 +1316,7 @@ def run_attempt(
                 raw_tau = lipm.id_tick_tau.get(row.joint)
                 bind_tau = float("nan") if raw_tau is None else float(raw_tau)
                 bind_resid = float(lipm.id_tick_resid.get(row.joint, float("inf")))
-                bind_inside = bool(lipm.id_tick_ok.get(row.joint, False)) and bind_resid <= lipm_gait.ID_RESID_EXACT_NM
+                bind_inside = bool(lipm.id_tick_ok.get(row.joint, False)) and bind_resid <= lipm_gait.ID_RESID_BUCKET_NM
             if abs(row.signed_nm) > ASK_NM + 1e-9:
                 signed_over += 1
             if row.sum_nm > ASK_NM + 1e-9:
@@ -1330,13 +1330,13 @@ def run_attempt(
                 ctrl_clip[row.joint] += 1
             # The residual chooses a bucket. It does not relax the
             # 2.33 Nm applied-ask bar, which is signed_over above.
-            # A tick outside 1e-3 Nm stays unbucketed.
+            # 1e-3 Nm is a Prefer FAIL. The bucket gate is 1e-2 Nm.
             tau_id = lipm.id_tick_tau.get(row.joint)
             resid_id = float(lipm.id_tick_resid.get(row.joint, float("inf")))
             ok_id = bool(lipm.id_tick_ok.get(row.joint, False)) and tau_id is not None
             if abs(row.signed_nm) > ASK_NM + 1e-9:
                 id_over_signed += 1
-            if not ok_id or resid_id > lipm_gait.ID_RESID_EXACT_NM:
+            if not ok_id or resid_id > lipm_gait.ID_RESID_BUCKET_NM:
                 id_skip_n += 1
             else:
                 stripped_id = float(lipm.id_tick_stripped.get(row.joint, float(tau_id)))
@@ -1764,6 +1764,26 @@ def run_attempt(
         "id_plan_phase": str(getattr(lipm, "id_plan_phase", "")),
         "id_plan_term": str(getattr(lipm, "id_plan_term", "")),
         "id_plan_t": float(getattr(lipm, "id_plan_t", 0.0)),
+        "id_resid_exact_n": int(getattr(lipm, "id_resid_exact_n", 0)),
+        "id_resid_bucket_nm": float(lipm_gait.ID_RESID_BUCKET_NM),
+        "id_req_with": dict(getattr(lipm, "id_req_with", {})),
+        "id_req_bare": dict(getattr(lipm, "id_req_bare", {})),
+        "id_req_wall": bool(getattr(lipm, "id_req_wall", False)),
+        "id_req_wall_n": int(getattr(lipm, "id_req_wall_n", 0)),
+        "id_req_wall_joint": str(getattr(lipm, "id_req_wall_joint", "")),
+        "id_req_wall_tau": float(getattr(lipm, "id_req_wall_tau", 0.0)),
+        "id_req_wall_bare": float(getattr(lipm, "id_req_wall_bare", 0.0)),
+        "id_req_wall_phase": str(getattr(lipm, "id_req_wall_phase", "")),
+        "id_req_wall_t": float(getattr(lipm, "id_req_wall_t", 0.0)),
+        "id_req_knee_abs": float(getattr(lipm, "id_req_knee_abs", 0.0)),
+        "id_req_knee_tau": float(getattr(lipm, "id_req_knee_tau", 0.0)),
+        "id_req_knee_joint": str(getattr(lipm, "id_req_knee_joint", "")),
+        "id_req_knee_phase": str(getattr(lipm, "id_req_knee_phase", "")),
+        "id_req_knee_t": float(getattr(lipm, "id_req_knee_t", 0.0)),
+        "id_req_knee_qdd": float(getattr(lipm, "id_req_knee_qdd", 0.0)),
+        "id_req_knee_bare": float(getattr(lipm, "id_req_knee_bare", 0.0)),
+        "id_stop_span": float(getattr(lipm, "id_stop_span", 0.0)),
+        "id_stop_qdd": float(getattr(lipm, "id_stop_qdd", 0.0)),
         "id_bind_joint": bind_joint,
         "id_bind_phase": bind_phase,
         "id_bind_term": bind_term,

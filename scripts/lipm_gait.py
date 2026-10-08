@@ -54,11 +54,22 @@ ID_FF_ARMATURE = 0.01
 # DC-motor model line, not a datasheet. |qvel| ≤ 5.82·(1 − |τ|/3.43).
 DC_QVEL_LIM = 5.82
 DC_STALL_NM = 3.43
-# Discrete implicitfast residual. A tick is bucketed only while every
-# leg joint is inside ID_RESID_EXACT_NM. There is no wider band.
-# The residual does not relax the 2.33 Nm applied-ask bar.
+# Discrete implicitfast residual.
+# ID_RESID_EXACT_NM is the target. The measured nominal max is
+# 1.476e-3 Nm, 4/2440 ticks, so that target is a Prefer FAIL.
+# A tick is still bucketed while every leg joint is inside
+# ID_RESID_BUCKET_NM (1e-2). The bucket does not relax the 2.33 Nm
+# applied-ask bar, and it does not turn the 1e-3 miss into a pass.
 ID_RESID_EXACT_NM = 1.0e-3
-ID_RESID_NM = ID_RESID_EXACT_NM
+ID_RESID_BUCKET_NM = 1.0e-2
+ID_RESID_NM = ID_RESID_BUCKET_NM
+# Planned knee torque during the stop blend, including the 0.01 armature
+# already in mj_inverse. The blend span grows until the knee reference
+# acceleration keeps this budget. It is not a command clip.
+PLAN_KNEE_TAU_NM = 2.0
+# 0.01·q̈ at this cap is 0.25 Nm, inside the 2.0 Nm knee budget.
+STOP_KNEE_QDD_MAX = 25.0
+STOP_BLEND_MIN_S = 0.5
 # Stop/silence command budget for every leg joint. Hip yaw, hip roll,
 # hip pitch, knee, ankle pitch, and ankle roll share the HX-35H class.
 # The sag bar stays 2.33. Sitting the prediction on that bar measured
@@ -294,6 +305,44 @@ class LipmTrace:
     sho_r: list[float] = field(default_factory=list)
 
 
+def _quintic_coeff(q0: float, q1: float, v0: float, span: float, a0: float = 0.0) -> tuple[float, float, float, float, float]:
+    """Rest-to-rest quintic with a matched initial velocity. a(0) = a0, a(T) = 0."""
+    span = max(float(span), 1e-6)
+    b1 = float(v0) * span
+    b2 = 0.5 * float(a0) * span * span
+    remain = (float(q1) - float(q0)) - b1 - b2
+    end_vel = -b1 - 2.0 * b2
+    end_acc = -2.0 * b2
+    d_coef = end_vel - 3.0 * remain
+    e_coef = end_acc - 6.0 * remain
+    c5 = 0.5 * (e_coef - 6.0 * d_coef)
+    c4 = d_coef - 2.0 * c5
+    c3 = remain - c4 - c5
+    return b1, b2, c3, c4, c5
+
+
+def _quintic_sample(
+    q0: float, q1: float, v0: float, span: float, t_s: float, a0: float = 0.0,
+) -> tuple[float, float, float]:
+    """Position, velocity, and acceleration of the stop quintic at t_s."""
+    span = max(float(span), 1e-6)
+    u = min(1.0, max(0.0, float(t_s) / span))
+    b1, b2, c3, c4, c5 = _quintic_coeff(q0, q1, v0, span, a0)
+    q = q0 + u * (b1 + u * (b2 + u * (c3 + u * (c4 + c5 * u))))
+    dqdu = b1 + u * (2.0 * b2 + u * (3.0 * c3 + u * (4.0 * c4 + 5.0 * c5 * u)))
+    d2du = 2.0 * b2 + u * (6.0 * c3 + u * (12.0 * c4 + 20.0 * c5 * u))
+    return q, dqdu / span, d2du / (span * span)
+
+
+def _quintic_qdd_peak(q0: float, q1: float, v0: float, span: float) -> float:
+    """Peak |q̈| of the stop quintic. Sampled, the analytic ends are zero."""
+    peak = 0.0
+    for i in range(65):
+        _q, _qd, qdd = _quintic_sample(q0, q1, v0, span, (i / 64.0) * span)
+        peak = max(peak, abs(qdd))
+    return peak
+
+
 def _leg_joint(name: str) -> bool:
     return name.endswith((
         "hip_yaw", "hip_roll", "hip_pitch", "knee", "ank_pitch", "ank_roll",
@@ -446,8 +495,13 @@ class LipmWalker:
         self._freeze_time = 0.0
         self._stand_q0: dict[str, float] | None = None
         self._stand_q1: dict[str, float] | None = None
+        self._stand_v0: dict[str, float] | None = None
         self._stand_u = 0.0
+        self._stop_span = 0.0
+        self._com_v0 = 0.0
         self._stop_swing_end: float | None = None
+        self.id_stop_span = 0.0
+        self.id_stop_qdd = 0.0
         self.preview_ik_fail = 0
         self._gate_wait_s = 0.0
         self._gate_open = False
@@ -537,7 +591,24 @@ class LipmWalker:
         self.id_impl_at_resid = 0.0
         self.id_band_at_resid = ID_RESID_NM
         self.id_resid_over_n = 0
+        self.id_resid_exact_n = 0
         self.id_rail_n = 0
+        self.id_req_with: dict[str, dict[str, float | str]] = {}
+        self.id_req_bare: dict[str, dict[str, float | str]] = {}
+        self.id_req_wall = False
+        self.id_req_wall_n = 0
+        self.id_req_wall_joint = ""
+        self.id_req_wall_tau = 0.0
+        self.id_req_wall_bare = 0.0
+        self.id_req_wall_phase = ""
+        self.id_req_wall_t = 0.0
+        self.id_req_knee_abs = 0.0
+        self.id_req_knee_tau = 0.0
+        self.id_req_knee_joint = ""
+        self.id_req_knee_phase = ""
+        self.id_req_knee_t = 0.0
+        self.id_req_knee_qdd = 0.0
+        self.id_req_knee_bare = 0.0
         self.id_ff_resid = 0.0
         self._id_qvel0: np.ndarray | None = None
         self.id_tick_offset: dict[str, float] = {}
@@ -833,9 +904,10 @@ class LipmWalker:
         upright stand arrives. +pitch raises the left toe. The right
         ankle is the opposite sign.
         """
-        if self._stand_q1 is None or self._stand_u <= 0.0 or self._stand_u >= 2.0:
+        span = self._stop_span if self._stop_span > 1e-6 else 2.0
+        if self._stand_q1 is None or self._stand_u <= 0.0 or self._stand_u >= span - 1e-9:
             return 0.0
-        u = min(1.0, self._stand_u / 2.0)
+        u = min(1.0, self._stand_u / span)
         if u < 0.80:
             fade = 1.0
         else:
@@ -1264,6 +1336,7 @@ class LipmWalker:
             self.id_root_fail_n += 1
         step_fail = False
         step_over = False
+        step_exact = False
         rot = np.array(self.data.xmat[self.bid_body], dtype=np.float64).reshape(3, 3)
         upright = float(rot[2, 2]) >= 0.92
         sag = float(KNEE_SAG_NM)
@@ -1297,7 +1370,10 @@ class LipmWalker:
             prev_resid = float(self.id_tick_resid.get(name, -1.0))
             if resid > prev_resid:
                 self.id_tick_resid[name] = resid
-            outside = resid > ID_RESID_EXACT_NM
+            # 1e-3 is the missed target. 1e-2 is the bucket gate.
+            if resid > ID_RESID_EXACT_NM:
+                step_exact = True
+            outside = resid > ID_RESID_BUCKET_NM
             if outside:
                 step_over = True
                 self.id_tick_ok[name] = False
@@ -1352,6 +1428,9 @@ class LipmWalker:
                 self.id_resid_joint = name
             if outside or not upright:
                 continue
+            # A realised inverse on a clamped actuator returns the clamp.
+            # That tick cannot separate the controller from the physics.
+            # The wall test is the planned trajectory, below.
             if abs(stripped) > sag + 1e-9:
                 self.id_wall_phys_n += 1
                 if abs(stripped) <= self.id_ff_stripped_abs and self.id_ff_bucket == "wall":
@@ -1383,6 +1462,8 @@ class LipmWalker:
                 self.id_ff_arm = arm
                 self.id_ff_stripped = stripped
                 self.id_ff_stripped_abs = abs(stripped)
+        if step_exact:
+            self.id_resid_exact_n += 1
         if step_over:
             self.id_resid_over_n += 1
         if step_fail:
@@ -1510,6 +1591,7 @@ class LipmWalker:
         data, not on the live step. The plant XML is not edited.
         """
         self._plan_term_name = ""
+        self._plan_term_phase = ""
         qd, qdd = self._ref_derivatives(joints)
         if self._plan_data is None:
             self._plan_data = mj.MjData(self.model)
@@ -1565,17 +1647,73 @@ class LipmWalker:
         out: dict[str, float] = {}
         worst = 0.0
         worst_name = ""
+        phase_of: dict[str, str] = {}
         for name, adr in self._leg_dof.items():
             # mj_inverse does not subtract qfrc_applied. With contacts
             # off, the actuator that realises the plan is inverse − wrench.
+            # The plant armature is 0.01, so tau includes 0.01·q̈_ref.
             tau = float(inv[adr] - applied[adr])
             out[name] = tau
+            qdd_i = float(qdd.get(name, 0.0))
+            bare = tau - ID_FF_ARMATURE * qdd_i
+            phase = self._ff_phase(name)
+            phase_of[name] = phase
+            self._note_planned_req(name, tau, bare, qdd_i, phase)
             if abs(tau) > worst:
                 worst = abs(tau)
                 worst_name = name
         if worst_name:
             self._plan_term_name = self._planned_term(scratch, self._leg_dof[worst_name])
+            self._plan_term_phase = phase_of.get(worst_name, "")
         return out
+
+    def _note_planned_req(
+        self, name: str, tau: float, bare: float, qdd: float, phase: str,
+    ) -> None:
+        """Per-joint peaks of the planned inverse, with and without armature.
+
+        ``tau`` is ID(q_ref, q̇_ref, q̈_ref) and already includes 0.01·q̈_ref.
+        ``bare`` is tau − 0.01·q̈_ref. A wall is |bare| > 2.33. The knee
+        budget is |tau| ≤ 2.0, armature included.
+        """
+        t = float(self.data.time)
+        with_rec = self.id_req_with.get(name)
+        if with_rec is None or abs(tau) > float(with_rec["abs"]):
+            self.id_req_with[name] = {
+                "abs": abs(tau),
+                "tau": float(tau),
+                "bare": float(bare),
+                "qdd": float(qdd),
+                "t": t,
+                "phase": phase,
+            }
+        bare_rec = self.id_req_bare.get(name)
+        if bare_rec is None or abs(bare) > float(bare_rec["abs"]):
+            self.id_req_bare[name] = {
+                "abs": abs(bare),
+                "tau": float(tau),
+                "bare": float(bare),
+                "qdd": float(qdd),
+                "t": t,
+                "phase": phase,
+            }
+        if abs(bare) > KNEE_SAG_NM + 1e-9:
+            self.id_req_wall = True
+            self.id_req_wall_n += 1
+            if abs(bare) > abs(self.id_req_wall_bare):
+                self.id_req_wall_joint = name
+                self.id_req_wall_tau = float(tau)
+                self.id_req_wall_bare = float(bare)
+                self.id_req_wall_phase = phase
+                self.id_req_wall_t = t
+        if name.endswith("knee") and abs(tau) >= self.id_req_knee_abs:
+            self.id_req_knee_abs = abs(tau)
+            self.id_req_knee_tau = float(tau)
+            self.id_req_knee_joint = name
+            self.id_req_knee_phase = phase
+            self.id_req_knee_t = t
+            self.id_req_knee_qdd = float(qdd)
+            self.id_req_knee_bare = float(bare)
 
     def _free_dof(self) -> int:
         for jid in range(int(self.model.njnt)):
@@ -1870,7 +2008,10 @@ class LipmWalker:
             self._return_done = False
             self._stand_q0 = None
             self._stand_q1 = None
+            self._stand_v0 = None
             self._stand_u = 0.0
+            self._stop_span = 0.0
+            self._com_v0 = 0.0
             self._stop_swing_end = None
             self._gate_open = False
             self._gate_wait_s = 0.0
@@ -2096,44 +2237,149 @@ class LipmWalker:
         self.lat = float(info.swap_y_m)
 
     def _plant_preview_return(self, walker: op3_walk.Op3Walker) -> None:
-        """Both feet are down. Return starts from the shift we are holding."""
+        """Both feet are down. The blend starts on this tick, at the walk velocity."""
         self._stop_planted = True
-        self._return_t = 0.0
         self._freeze_time = float(walker.time)
-        self._return_zmp0 = float(self.preview_com_y)
         self._return_hold = False
         self._return_done = False
-        self._stand_q0 = None
-        self._stand_q1 = None
-        self._stand_u = 0.0
         self._stop_swing_end = None
+        self._capture_stop_blend(walker)
 
-    def _stand_blend_joints(self, walker: op3_walk.Op3Walker) -> dict[str, float] | None:
-        """Smootherstep from the frozen walk pose to the upright stand.
+    def _ref_velocity(self) -> dict[str, float]:
+        """Joint velocity of the last two planned references. rad/s."""
+        hist = self._plan_q_hist
+        dt = float(op3_walk.OP3_CTRL_S)
+        out: dict[str, float] = {}
+        if len(hist) < 2 or dt <= 1e-9:
+            return out
+        for name, q1 in hist[-1].items():
+            if name not in hist[-2]:
+                continue
+            out[name] = (float(q1) - float(hist[-2][name])) / dt
+        return out
 
-        Joint space, two seconds, zero slope at both ends. Phase stays
-        shift so this does not arm the kit stand hold.
+    def _capture_stop_blend(self, walker: op3_walk.Op3Walker) -> bool:
+        """q0 and v0 from the last reference, before this tick appends another.
+
+        q_stand is the spawn pose, sole_level 1, trunk upright.
+        stand_joints() during the walk uses sole_level 0 and keeps the
+        hip-pitch lean, so the blend target is q_stand.
         """
-        if self._stand_q0 is None:
+        hist = self._plan_q_hist
+        if hist:
+            q0 = {k: float(v) for k, v in hist[-1].items()}
+        else:
             frozen = self._preview_pose(walker)
             if frozen is None:
+                return False
+            q0 = {k: float(v) for k, v in frozen.items()}
+        self._stand_q0 = q0
+        self._stand_v0 = self._ref_velocity()
+        self._stand_q1 = {
+            k: float(v) for k, v in self.q_stand.items() if k in q0
+        }
+        self._stand_u = 0.0
+        self._return_t = 0.0
+        self._return_zmp0 = float(self.preview_com_y)
+        if self._preview is not None:
+            self._com_v0 = float(self._preview.com_vel_m_s)
+        else:
+            self._com_v0 = 0.0
+        self._stop_span = self._stop_blend_span()
+        return True
+
+    def _stop_blend_span(self) -> float:
+        """At least 0.5 s, or one double-support interval, whichever is longer.
+
+        The span then grows until both knees' quintic |q̈| stays inside
+        STOP_KNEE_QDD_MAX. That cap is what keeps the planned knee torque,
+        armature included, inside PLAN_KNEE_TAU_NM. The check is the
+        measured τ_req, not this cap by itself.
+        """
+        period = float(self.cfg.gm_period_s)
+        ds = max(0.0, float(self.cfg.gm_dsp)) * period
+        span = max(STOP_BLEND_MIN_S, ds)
+        q0 = self._stand_q0 or {}
+        q1 = self._stand_q1 or {}
+        v0 = self._stand_v0 or {}
+        peak = 0.0
+        for _ in range(16):
+            peak = 0.0
+            for name in ("l_knee", "r_knee"):
+                if name not in q0 or name not in q1:
+                    continue
+                peak = max(peak, _quintic_qdd_peak(
+                    float(q0[name]), float(q1[name]), float(v0.get(name, 0.0)), span,
+                ))
+            if peak <= STOP_KNEE_QDD_MAX or span >= 4.0:
+                break
+            span = min(4.0, span * 1.3)
+        self.id_stop_qdd = float(peak)
+        self.id_stop_span = float(span)
+        return float(span)
+
+    def _com_quintic(self, t_s: float, span: float) -> tuple[float, float, float]:
+        """Planned CoM y, velocity, and acceleration into the DS centre."""
+        return _quintic_sample(
+            float(self._return_zmp0), 0.0, float(self._com_v0), max(span, 1e-6), t_s,
+        )
+
+    def _stance_y_limits(self) -> tuple[float, float]:
+        """World-y extent of both contact boxes. The planned ZMP stays inside."""
+        ys: list[float] = []
+        for side in ("L", "R"):
+            gid = int(self.gid[side])
+            center = np.array(self.data.geom_xpos[gid], dtype=np.float64)
+            rot = np.array(self.data.geom_xmat[gid], dtype=np.float64).reshape(3, 3)
+            half = np.array(self.model.geom_size[gid], dtype=np.float64)
+            for sx in (-1.0, 1.0):
+                for sy in (-1.0, 1.0):
+                    local = np.array([sx * half[0], sy * half[1], -half[2]], dtype=np.float64)
+                    ys.append(float((center + rot @ local)[1]))
+        if not ys:
+            return -0.081, 0.081
+        return min(ys), max(ys)
+
+    def _stop_zmp_future(self, horizon: int, t_now: float, span: float) -> np.ndarray:
+        """LIPM ZMP of the planned CoM deceleration, clamped into the stance boxes."""
+        dt = float(op3_walk.OP3_CTRL_S)
+        zc = float(self._preview_zc) if self._preview_zc > 0.05 else 0.18
+        lo, hi = self._stance_y_limits()
+        out = np.zeros(horizon, dtype=np.float64)
+        for i in range(horizon):
+            t = min(span, t_now + i * dt)
+            com, _vel, acc = self._com_quintic(t, span)
+            zmp = com - (zc / G) * acc
+            if zmp < lo:
+                zmp = lo
+            elif zmp > hi:
+                zmp = hi
+            out[i] = zmp
+        return out
+
+    def _stand_blend_joints(self, walker: op3_walk.Op3Walker) -> dict[str, float] | None:
+        """Quintic from the walk reference to stand, matching the incoming velocity.
+
+        The first sample is one control step along the curve. A sample at
+        u = 0 would repeat the last pose and drop q̇_ref to zero in 8 ms.
+        End velocity and acceleration are zero, so the hold that follows
+        does not add another step. Phase stays shift so this does not arm
+        the kit stand hold.
+        """
+        if self._stand_q0 is None or self._stand_q1 is None:
+            if not self._capture_stop_blend(walker):
                 return None
-            self._stand_q0 = {k: float(v) for k, v in frozen.items()}
-            # q_stand is the spawn pose, sole_level 1, trunk upright.
-            # stand_joints() during the walk uses sole_level 0 and keeps
-            # the hip-pitch lean.
-            self._stand_q1 = {
-                k: float(v) for k, v in self.q_stand.items() if k in self._stand_q0
-            }
-            self._stand_u = 0.0
-        span = 2.0
-        u = min(1.0, self._stand_u / span)
-        s = u * u * u * (u * (u * 6.0 - 15.0) + 10.0)
-        self._stand_u += op3_walk.OP3_CTRL_S
+        assert self._stand_q0 is not None and self._stand_q1 is not None
+        span = self._stop_span if self._stop_span >= STOP_BLEND_MIN_S else STOP_BLEND_MIN_S
+        dt = float(op3_walk.OP3_CTRL_S)
+        t = min(span, self._stand_u + dt)
+        self._stand_u = t
+        v0 = self._stand_v0 or {}
         out: dict[str, float] = {}
         for key, dest in self._stand_q1.items():
             src = float(self._stand_q0.get(key, dest))
-            out[key] = (1.0 - s) * src + s * float(dest)
+            q, _qd, _qdd = _quintic_sample(src, float(dest), float(v0.get(key, 0.0)), span, t)
+            out[key] = q
         return out
 
     def _tick_preview_stop(self, walker: op3_walk.Op3Walker) -> None:
@@ -2163,84 +2409,75 @@ class LipmWalker:
             end = float(self._stop_swing_end) % period if period > 1e-6 else 0.0
             finishing = t_mod + 1e-9 < end
             if not finishing:
-                future = np.full(preview.horizon, float(self.preview_com_y), dtype=np.float64)
+                # Plant on the first double-support tick. A held pose
+                # drops the reference velocity to zero in one 8 ms sample.
+                if both_contact and clock_stance is None:
+                    self._plant_preview_return(walker)
+                else:
+                    future = np.full(preview.horizon, float(self.preview_com_y), dtype=np.float64)
+                    com = self._step_preview(preview, future)
+                    self.preview_com_y = com
+                    walker.preview_y = self._preview_y_with_stab(com)
+                    joints = self._preview_pose(walker)
+                    self.phase = "shift"
+                    self._write_preview_joints(joints)
+                    self._stop_hold_s = 0.0
+                    return
+            else:
+                self._stop_hold_s = 0.0
+                # One foot is up. Finish this step on the declared stance
+                # box. Do not steer the ZMP onto the foot the clock calls
+                # the swing. Do not zero the step length: that snaps hip pitch.
+                if loaded is None:
+                    future = self._zmp_future(float(walker.time))
+                else:
+                    future = np.full(preview.horizon, loaded, dtype=np.float64)
                 com = self._step_preview(preview, future)
                 self.preview_com_y = com
                 walker.preview_y = self._preview_y_with_stab(com)
-                joints = self._preview_pose(walker)
-                self.phase = "shift"
+                joints, info = walker.step(op3_walk.OP3_CTRL_S)
+                self._note_preview_phase(info)
+                # Contact still names the support. A clock swing whose swing
+                # foot is the only loaded foot is that foot's stance, not the
+                # clock's.
+                if loaded is not None and info.phase in ("L", "R"):
+                    heavy: Side = "L" if loaded > 0.0 else "R"
+                    if self.stance != heavy:
+                        self.phase = "swing"
+                        self.stance = heavy
+                        self._gm_swing = self.other(heavy)
                 self._write_preview_joints(joints)
-                # Plant only after the clock is back in double support.
-                # Freezing a mid-swing target pops the foot up again.
-                if both_contact and clock_stance is None:
-                    self._stop_hold_s += op3_walk.OP3_CTRL_S
-                    if self._stop_hold_s >= 0.20:
-                        self._plant_preview_return(walker)
-                else:
-                    self._stop_hold_s = 0.0
                 return
-            self._stop_hold_s = 0.0
-            # One foot is up. Finish this step on the declared stance
-            # box. Do not steer the ZMP onto the foot the clock calls
-            # the swing.
-            if loaded is None:
-                future = self._zmp_future(float(walker.time))
-            else:
-                future = np.full(preview.horizon, loaded, dtype=np.float64)
-            com = self._step_preview(preview, future)
-            self.preview_com_y = com
-            walker.preview_y = self._preview_y_with_stab(com)
-            joints, info = walker.step(op3_walk.OP3_CTRL_S)
-            self._note_preview_phase(info)
-            # Contact still names the support. A clock swing whose swing
-            # foot is the only loaded foot is that foot's stance, not the
-            # clock's.
-            if loaded is not None and info.phase in ("L", "R"):
-                heavy: Side = "L" if loaded > 0.0 else "R"
-                if self.stance != heavy:
-                    self.phase = "swing"
-                    self.stance = heavy
-                    self._gm_swing = self.other(heavy)
-            self._write_preview_joints(joints)
-            return
         dt = op3_walk.OP3_CTRL_S
-        span = 1.50
-        # Zero is only a double-support target. One light foot sends the
-        # ZMP back to that sole's box centre, ±0.043 m. Once the return
-        # has finished, a light foot does not rewind it: the joints are
-        # blending to the stand.
-        # The 8 N split stays the in-swing abort. Once both soles are
-        # down, a 5 N share is still double support: aborting on it
-        # holds the walk lean and the light foot never reaches 8 N.
+        if self._stand_q0 is None:
+            if not self._capture_stop_blend(walker):
+                self.phase = "shift"
+                self._write_preview_joints(None)
+                return
+        span = self._stop_span if self._stop_span >= STOP_BLEND_MIN_S else STOP_BLEND_MIN_S
+        # One light foot keeps the ZMP on that sole's box. The joint
+        # quintic is not rewound: clearing it was the velocity step.
         airborne = self.foot_normal("L") < 1.0 or self.foot_normal("R") < 1.0
         loaded = self._loaded_box_zmp()
-        future = np.zeros(preview.horizon, dtype=np.float64)
-        if self._return_done:
-            pass
-        elif airborne and loaded is not None:
-            future[:] = loaded
-            self._return_t = 0.0
-            self._return_done = False
+        t_now = min(span, self._return_t + dt)
+        if airborne and loaded is not None and not self._return_done:
+            future = np.full(preview.horizon, loaded, dtype=np.float64)
             self._return_hold = True
-            self._return_zmp0 = float(self.preview_com_y)
-            self._stand_q0 = None
-            self._stand_u = 0.0
         else:
             self._return_hold = False
-            for i in range(preview.horizon):
-                u = min(1.0, max(0.0, (self._return_t + i * dt) / span))
-                s = u * u * u * (u * (u * 6.0 - 15.0) + 10.0)
-                future[i] = self._return_zmp0 * (1.0 - s)
-            self._return_t += dt
-            if self._return_t >= span:
-                self._return_done = True
-        com = self._step_preview(preview, future)
+            future = self._stop_zmp_future(preview.horizon, t_now, span)
+        self._return_t = t_now
+        if self._return_t >= span - 1e-9:
+            self._return_done = True
+        self._step_preview(preview, future)
+        if self._return_hold:
+            com = float(self.preview_com_y)
+        else:
+            com, _vel, _acc = self._com_quintic(t_now, span)
         self.preview_com_y = com
+        self._zmp_cmd = float(future[0])
         walker.time = self._freeze_time
         walker.preview_y = self._preview_y_with_stab(com)
-        # Blend as soon as both soles are down. Waiting for the ZMP
-        # return leaves the trunk in the walk lean, and the light foot
-        # never picks up enough load to finish that return.
         joints = self._stand_blend_joints(walker)
         # Stay in double support. Phase "stand" arms the kit stand hold,
         # which rewrites every leg toward the flat-floor pose. On the
