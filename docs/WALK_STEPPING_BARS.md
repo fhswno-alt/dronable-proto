@@ -580,6 +580,8 @@ bout. Its signed-ask pass, sum column, and any `passes signed, fails sum`
 joint notes are in the kitchen table above. The 10.17 Nm / 3.61 rad/s
 r_knee sample is the sum, not the pre-clamp ask.
 
+Each of those seven rows, and each full-bar re-verdict row of `d6e8b5e` and `51ae123`, carries a manifest. `xml_md5` is `207f3d5e9c6a72e16f7aa0c8d224f75e`. `compiled_md5` is `03ed33386178ab8d05db76a7307f1c1d`. That hash matches `previews/compiled_refs.json` at MuJoCo `3.14.0`, key `armature_0.01`. The perturbation is `none`. The seed is unset. `d7b06e7`, `ac81435`, and `58ce1d8` stay `not logged` on the signed ask. Index: `previews/torque_clear_audit.json`.
+
 ## Signed ID a5a9183
 
 Independent score of Controls tip `a5a9183461105016211bebbf110051c2bb8f9df2` (PR #103, `cursor/declared-stance-sync-16df`). The gait is that tip's `voice056` path. This branch only scores. Soft-pass is off. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` before and after every cell. All 12 leg `forcerange` and `actuatorfrcrange` values are ±2.45 Nm. Joint armature is 0.01. Every leg position actuator has `ctrlrange` ±2.09. The loaded model reports `actuator_ctrllimited` = 1 on all 12 leg actuators in every cell. No gait edit and no plant edit.

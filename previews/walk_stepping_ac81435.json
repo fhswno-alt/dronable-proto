@@ -7,6 +7,21 @@
   "period_definition": "op3_walk.update_time puts both single-support windows inside one period, so period is one left-plus-right cycle. Each foot swings once per period. The no-slip per-swing foot travel is vx\u00b7T. vx\u00b7T/2 is the stance-to-stance spacing.",
   "rows": [
     {
+      "manifest": {
+        "xml_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+        "compiled_md5": "03ed33386178ab8d05db76a7307f1c1d",
+        "compiled_md5_check": {
+          "refs": "previews/compiled_refs.json",
+          "mujoco_version": "3.14.0",
+          "ref_key": "armature_0.01",
+          "ref_md5": "03ed33386178ab8d05db76a7307f1c1d",
+          "match": true
+        },
+        "perturbation": "none",
+        "tip_sha": "ac814356f484735c442f825a2afb567ed65785d6",
+        "seed": null,
+        "cmd": "MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/score_walk_smoothness.py --stepping ac81435"
+      },
       "name": "voice-3.60",
       "source": "previews/com_zmp_preview_s.json period 3.60 dsp 0.70 amp 0.043 z 0.004 arm 2.40 vx 0.056 stand 0.40 walk 11.00 stop 3.00",
       "tip_sha": "ac814356f484735c442f825a2afb567ed65785d6",
@@ -369,6 +384,21 @@
       }
     },
     {
+      "manifest": {
+        "xml_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+        "compiled_md5": "03ed33386178ab8d05db76a7307f1c1d",
+        "compiled_md5_check": {
+          "refs": "previews/compiled_refs.json",
+          "mujoco_version": "3.14.0",
+          "ref_key": "armature_0.01",
+          "ref_md5": "03ed33386178ab8d05db76a7307f1c1d",
+          "match": true
+        },
+        "perturbation": "none",
+        "tip_sha": "ac814356f484735c442f825a2afb567ed65785d6",
+        "seed": null,
+        "cmd": "MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/score_walk_smoothness.py --stepping ac81435"
+      },
       "name": "voice-3.70",
       "source": "previews/com_zmp_preview_p.json period 3.70 dsp 0.70 amp 0.043 z 0.004 arm 2.40 vx 0.056 stand 0.40 walk 11.00 stop 3.00",
       "tip_sha": "ac814356f484735c442f825a2afb567ed65785d6",
