@@ -36,9 +36,9 @@ Caps stay `vx` **+0.056 / −0.032** m/s and yaw **±0.25** rad/s. This caller d
 
 `MUJOCO_GL=osmesa python scripts/voice_caller.py --clip` plays the claimed nav-left window as phrases: **stand → walk forward → turn left → walk forward → stop**. Times are 1 s, 15 s, 12.5 s, 6 s, then a 2.5 s stop. The bus commands are `stand`, `vel(+0.056, +0.000)`, `vel(+0.056, +0.250)`, `vel(+0.056, +0.000)`, `stop`. Each frame captions the phrase and that bus command. The view is the third-person camera so the body is visible. `kit_cam` stays at `0.050 0.019 0.007` and is not the demo camera.
 
-Controls' claimed envelope on that same path is approach **+0.598 m**, left arc **+75.7 deg**, resume **+0.317 m**, min up_z **0.954**, end mode stand. This voice run matched it: approach **+0.598 m**, left arc **+75.7 deg** (mean yaw rate **+0.106 rad/s**, not the 0.25 command), resume **+0.317 m**, end heading **+72.0 deg**, min up_z **0.954**, peak leg torque **2.10 Nm**, CoP in the box, end mode **stand**, end margin **+0.063 m**, no fault, no tip. Plant md5 `71b2c86d133ebc603f58b99c53e496f3`. `kit_cam` stayed at `0.050 0.019 0.007`.
+The voice clip on main matched the previous gait basin: approach **+0.598 m**, left arc **+75.7 deg**, resume **+0.317 m**, min up_z **0.954**. This step-cycle basin uses the same phrases and the same bus, and it does not match that envelope. The remeasured walk is in `docs/DEMO_8PM_MOTION.md` (approach **+0.695 m**, left arc **+61.1 deg**, resume **+0.340 m**, min up_z **0.940**). `vx = 0` yaw still does not change heading.
 
-This is not nav-multi, not a 14 s left hold from t=15 s (that tips on the resume), and not a kitchen arrival.
+This is not nav-multi, not a 14 s left hold from t=15 s, and not a kitchen arrival. Those other orders were not re-qualified with this basin.
 
 ```bash
 python scripts/voice_caller.py "turn left"

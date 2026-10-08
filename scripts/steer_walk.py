@@ -38,18 +38,13 @@ Clamps (what we actually apply — not the raw request):
                 while reversing. Realized retreat is about two to three body
                 lengths, then stop. Not a Gate Q pass.
   |yaw_rate|  ≤ YAW_RATE_CAP (0.25 rad/s). While walking forward this scales
-                the outside step longer than the inside step and adds a
-                hip-yaw bias clipped at YAW_HIP_CLIP. Both hip-yaw joints
-                use axis −Z, so that same bias toes the swing foot the
-                other way. Left subtracts TURN_LEFT_BIAS first. Right keeps
-                the full clip, and the swing foot used to land toed against
-                the turn (heading stalled near −16°). The swing leg now
-                keeps TURN_RIGHT_SWING_YAW_SCALE of that command; the stance
-                leg does not. Heading that remains after stop is the measured
-                turn. Once the gait has already been walking for
-                ESTABLISHED_GAIT_S the open-loop left drift has settled, so a
-                left command drops that bias and uses a slightly longer
-                outside step. Cold-start turns finish before that gate.
+                the outside step longer than the inside step. Heading change
+                is the airborne foot: hip yaw stays 0 through stance and
+                double support, then the swing foot toes into the turn and
+                plants. +hip yaw toes the foot right (axis −Z), so a left
+                command uses a negative swing hip yaw. Reverse does not use
+                that toe. vx=0 yaw still does not turn this plant in place.
+                Heading that remains after stop is the measured turn.
                 vx and yaw_rate are applied together; the nav clips walk,
                 arc, walk, then stop. The multi clip chains both claimed
                 holds without stopping between them: forward, left arc
@@ -77,12 +72,21 @@ Clamps (what we actually apply — not the raw request):
 
 Gait: scripts/walk_gait_ainex.py gait_targets. Forward uses a shorter cadence
 than Gate D CSF50 (that basin crawled at ~1 cm/s): T=0.55 s, hip amp 0.24 rad,
-DS=0.1375 s, stance-slip damper 25 N/(m/s) instead of CSF50's 115. CP swing
-and mild stance VIK stay on. Feet, friction, kp, and ±2.1 Nm are unchanged;
-the legs still pin at 2.1 Nm. Balance assist stays off (it locks yaw and
-fakes speed). Residual npz stays off. This is not a clean-walk or Gate E
-PASS. If many legs pin, or up_z approaches a tip, applied velocity is capped
-(not compounded). Tip / collapse latches mode=fault and stands.
+DS=0.1375 s, stance-slip damper 25 N/(m/s) instead of CSF50's 115. Lateral
+COM shift is 0.16 rad (was 0.275) so the torso does not waddle as hard.
+Forward swing adds LOOK_KNEE_LIFT at mid-swing. While yaw is near zero the
+contralateral shoulder is slewed up to LOOK_ARM_SCALE_STRAIGHT; a yaw command
+slews it back to LOOK_ARM_SCALE. Both stay inside the existing ±0.7 Nm clip.
+Reverse keeps the un-lifted knee: a shorter DS or more swing dorsiflex
+dropped the retreat under up_z 0.90. CP swing and mild stance VIK stay on.
+Feet, friction, kp, and ±2.1 Nm are unchanged; the legs still pin at 2.1 Nm.
+Balance assist stays off (it locks yaw and fakes speed). The stance-vx npz
+residual stays off. A forward-only swing residual (hold, contact preload,
+stance push) is in this file and measured off: the swing knee is already on
+the ±2.1 Nm clip, and the variants that stay upright do not raise the median
+sole enough to see. This is not a clean-walk or Gate E PASS.
+If many legs pin, or up_z approaches a tip, applied velocity is capped (not
+compounded). Tip / collapse latches mode=fault and stands.
 
 Honesty: pure yaw (vx=0) still runs a reduced forward CPG because this plant
 has no turn-in-place gait, so some +X creep is expected. Reverse mirrors hip
@@ -206,8 +210,63 @@ TURN_STEP_ASYM_ESTABLISHED = 0.24
 # 0.60 still walks forward (Δx stays with the left turn) and the early
 # stall is gone. Stance hip yaw is not scaled. Not a yaw-cap or plant change.
 TURN_RIGHT_SWING_YAW_SCALE = 0.60
+# Forward step look. Reverse does not take the knee lift or the arm scale:
+# shortening DS or raising swing dorsiflex tipped the retreat under up_z 0.90.
+# COM shift was 0.275 rad and read as a toy waddle. 0.16 rad still unweights
+# the swing leg enough for the extra knee flexion to clear the sole.
+LOOK_COM_SHIFT = 0.16
+# Added at mid-swing on top of KNEE_SWING, forward only. Ankle pitch moves
+# with the knee so the sole stays roughly flat while the leg shortens.
+LOOK_KNEE_LIFT = 0.38
+# gait_targets already swings the opposite shoulder. 1.0 is a few degrees.
+# 3.4 is about ±0.11 rad and still looks frozen from the side, but a cold
+# left turn at 6.0 tips (min up_z 0.42, then -1). Straight walking slews
+# up to 11.0 (measured shoulder peak-to-peak about 0.67 rad, torque still
+# clipped at ±0.7 Nm) and a yaw command slews back to 3.4. 11.0 keeps
+# nav-left near +61 deg and the chained right arc near -90 deg. 11.4 tips
+# nav-multi. 9.0 tips the left arc. Do not nudge this without re-running
+# smoke, nav-left, nav-right, and nav-multi.
+LOOK_ARM_SCALE = 3.4
+LOOK_ARM_SCALE_STRAIGHT = 11.0
+LOOK_ARM_SLEW = 8.0  # scale units per second
+# Airborne hip yaw at full yaw stick (rad). +joint toes the foot right.
+LOOK_TOE_LEFT = 0.10
+LOOK_TOE_RIGHT = 0.12
+# Right yaw after a long straight compounds the 0.20 outside-step with the
+# airborne toe and can spin past the support box. A shorter right step keeps
+# the cold-start right arc and the post-straight right arc upright.
+LOOK_RIGHT_STEP_ASYM = 0.10
 # vx=0 and yaw!=0: reduced forward CPG so a step exists to yaw on.
 INPLACE_YAW_AMP = 0.35
+# Swing residual. Forward only, after CP swing and stance VIK. Defaults off.
+# Measured on the shipped gait, straight walk, swing sole median 2.31 cm,
+# contact fraction during swing 0.00 (the foot is already ~2 cm up, so a
+# contact-triggered swing kick never fires). Knee / hip-pitch / ankle-pitch
+# sit on the ±2.1 Nm clip for much of the swing; position error is several
+# tenths of a radian, so more swing flexion command does not add torque.
+#   hold (don't reverse into extension while sole < 4.5 cm): median 2.31 cm
+#   contact preload 0.20 rad while the foot is still down: median 2.45 cm
+#   preload 0.45 rad and above lowers the sole (the hip crouches)
+#   stance push 0.10 rad: median 2.59 cm, straight yaw +5.6 deg in 3 s
+#   stance push 0.25 rad: median 2.84 cm, straight yaw +9.4 deg in 3 s
+#   stance push 0.40 rad: tips (min up_z −1)
+# None of the upright cases is a visible step, and the larger pushes walk
+# off heading. Left off so the open-loop baseline (arms ~0.67 rad, sole
+# ~2.4 cm, left arc ~+61 deg) stays the shipped gait. Not a torque or period
+# change. Reverse never takes it.
+USE_SWING_HOLD_RESIDUAL = False
+SWING_HOLD_CLEAR_M = 0.045
+SWING_HOLD_S_MAX = 0.72
+SWING_HOLD_FADE = 0.12
+SWING_HOLD_MARGIN = 0.05
+SWING_HOLD_CLIP = 0.35
+USE_SWING_PRELOAD = False
+SWING_PRELOAD_RAD = 0.20
+SWING_PRELOAD_PHASE0 = 0.48
+USE_STANCE_PUSH = False
+STANCE_PUSH_RAD = 0.10
+STANCE_PUSH_PHASE0 = 0.22
+STANCE_PUSH_PHASE1 = 0.48
 
 # Joint-space constants, scaled into velocity units (see module docstring).
 DEADBAND_VX = TELEOP_DEADBAND * VX_FWD_CAP
@@ -690,7 +749,7 @@ def apply_frozen_forward_gait() -> None:
     wg.HIP_PITCH_AMP = 0.24
     wg.HIP_BIAS_FWD = 0.06
     wg.DS_S = 0.1375
-    wg.COM_SHIFT_AMP = 0.275
+    wg.COM_SHIFT_AMP = LOOK_COM_SHIFT
     wg.COM_SHIFT_LEAD = 0.23
     wg.KNEE_STANCE = 0.40
     wg.KNEE_SWING = 0.80
@@ -728,6 +787,114 @@ def gait_amp_and_dir(report: TickReport) -> tuple[float, int]:
         amp = INPLACE_YAW_AMP * min(1.0, abs(report.applied_yaw_rate) / YAW_RATE_CAP)
         return amp, 1
     return 0.0, 0
+
+
+def style_forward_step(
+    qdes: dict[str, float], gait_t: float, yaw_rate: float,
+) -> None:
+    """Forward-only step look. Does not run on reverse or on stand.
+
+    Knee lift shortens the swing leg. Shoulder scale is the contralateral
+    term already in gait_targets. Hip yaw is 0 on the planted foot and toes
+    the airborne foot into the turn, then holds that angle into touchdown.
+    """
+    qdes["l_sho_pitch"] = qdes.get("l_sho_pitch", 0.0) * LOOK_ARM_SCALE
+    qdes["r_sho_pitch"] = qdes.get("r_sho_pitch", 0.0) * LOOK_ARM_SCALE
+    qdes["l_el_pitch"] = 0.32 + 0.10 * abs(qdes["l_sho_pitch"])
+    qdes["r_el_pitch"] = 0.32 + 0.10 * abs(qdes["r_sho_pitch"])
+    ds_frac = max(0.08, min(0.55, float(wg.DS_S) / max(float(wg.GAIT_T), 1e-3)))
+    ds_end = 0.50 + ds_frac
+    swing_len = max(0.18, 1.0 - ds_end)
+    phi = (gait_t / max(float(wg.GAIT_T), 1e-6)) % 1.0
+    if LOOK_KNEE_LIFT > 0.0:
+        for side, knee_sign, ank_sign in (("L", 1.0, 1.0), ("R", -1.0, -1.0)):
+            leg_phase = wg.phase_leg(phi, side)
+            if leg_phase < ds_end:
+                continue
+            swing_s = _clamp((leg_phase - ds_end) / swing_len, 0.0, 1.0)
+            lift = LOOK_KNEE_LIFT * math.sin(math.pi * (swing_s ** 0.55))
+            pref = "l_" if side == "L" else "r_"
+            qdes[f"{pref}knee"] = _clamp(qdes.get(f"{pref}knee", 0.0) + knee_sign * lift, -2.0, 2.0)
+            qdes[f"{pref}ank_pitch"] = _clamp(
+                qdes.get(f"{pref}ank_pitch", 0.0) + ank_sign * lift, -1.2, 1.2,
+            )
+    if abs(yaw_rate) <= 1e-4:
+        return
+    stick = min(1.0, abs(yaw_rate) / YAW_RATE_CAP)
+    if yaw_rate > 0.0:
+        swing_joint = -LOOK_TOE_LEFT * stick
+    else:
+        swing_joint = LOOK_TOE_RIGHT * stick
+    for side, name in (("L", "l_hip_yaw"), ("R", "r_hip_yaw")):
+        leg_phase = wg.phase_leg(phi, side)
+        if leg_phase < ds_end:
+            qdes[name] = 0.0
+            continue
+        swing_s = _clamp((leg_phase - ds_end) / swing_len, 0.0, 1.0)
+        blend = min(1.0, swing_s / 0.72)
+        blend = blend * blend * (3.0 - 2.0 * blend)
+        qdes[name] = swing_joint * blend
+
+
+def swing_hold_residual(
+    sole_m: float, swing_s: float, flex_q: float, flex_cmd: float,
+) -> float:
+    """Extra flexion (rad) so a low swing sole is not yanked into extension.
+
+    Zero when the sole is already clear, the landing fade has started, or
+    the CPG is still commanding more flexion than the joint has reached.
+    The return value is added in the flexion direction; it does not exceed
+    the gap up to the current joint plus a small margin.
+    """
+    if not USE_SWING_HOLD_RESIDUAL:
+        return 0.0
+    if swing_s < 0.0 or swing_s >= SWING_HOLD_S_MAX:
+        return 0.0
+    if sole_m >= SWING_HOLD_CLEAR_M:
+        return 0.0
+    if flex_cmd >= flex_q + SWING_HOLD_MARGIN:
+        return 0.0
+    fade_at = SWING_HOLD_S_MAX - SWING_HOLD_FADE
+    margin = SWING_HOLD_MARGIN
+    if swing_s > fade_at:
+        # Fade the margin only. Scaling the whole gap left the error negative,
+        # so the knee stayed on the extension clip and the sole did not move.
+        fade = max(0.0, (SWING_HOLD_S_MAX - swing_s) / max(SWING_HOLD_FADE, 1e-6))
+        margin *= fade
+    gap = (flex_q + margin) - flex_cmd
+    return min(SWING_HOLD_CLIP, max(0.0, gap))
+
+
+def swing_preload_residual(leg_phase: float, ds_end: float, in_contact: bool) -> float:
+    """Extra flexion (rad) on a planted foot that is about to swing.
+
+    Ramps from SWING_PRELOAD_PHASE0 to toe-off. Zero once the foot is up
+    or the leg is already in swing.
+    """
+    if not USE_SWING_PRELOAD or not in_contact:
+        return 0.0
+    if leg_phase < SWING_PRELOAD_PHASE0 or leg_phase >= ds_end:
+        return 0.0
+    span = max(ds_end - SWING_PRELOAD_PHASE0, 1e-6)
+    u = max(0.0, min(1.0, (leg_phase - SWING_PRELOAD_PHASE0) / span))
+    u = u * u * (3.0 - 2.0 * u)
+    return SWING_PRELOAD_RAD * u
+
+
+def stance_push_residual(leg_phase: float, in_contact: bool) -> float:
+    """Knee extension (positive rad) on a planted stance leg.
+
+    The caller subtracts this from the flexion command. Zero in swing,
+    in double support, and when the foot is up.
+    """
+    if not USE_STANCE_PUSH or not in_contact:
+        return 0.0
+    if leg_phase < STANCE_PUSH_PHASE0 or leg_phase >= STANCE_PUSH_PHASE1:
+        return 0.0
+    span = max(STANCE_PUSH_PHASE1 - STANCE_PUSH_PHASE0, 1e-6)
+    u = max(0.0, min(1.0, (leg_phase - STANCE_PUSH_PHASE0) / span))
+    # Peak mid-window, off at both ends, so toe-off is not a step in command.
+    return STANCE_PUSH_RAD * math.sin(math.pi * u)
 
 
 def swing_hip_yaw_scale(yaw_rate: float, direction: int, leg_phase: float) -> float:
@@ -882,6 +1049,9 @@ class SteerSession:
         video: bool,
         scene_xml: Path | None = None,
         initial_yaw: float = 0.0,
+        cam_distance: float = 1.25,
+        cam_azimuth: float = 135.0,
+        cam_elevation: float = -18.0,
     ) -> None:
         problems = []
         if not PLANT_XML.is_file():
@@ -932,6 +1102,7 @@ class SteerSession:
         }
         self.q_stand = wg.gait_targets(0.0, False, 0.0)
         self.gait_t = 0.0
+        self._arm_scale = LOOK_ARM_SCALE
         self._gait_live = False
         self._blend = 0.0
         self._q_live: dict[str, float] | None = None
@@ -959,9 +1130,9 @@ class SteerSession:
         self.renderer: mj.Renderer | None = None
         self.cam = mj.MjvCamera()
         mj.mjv_defaultCamera(self.cam)
-        self.cam.distance = 1.25
-        self.cam.azimuth = 135.0
-        self.cam.elevation = -18.0
+        self.cam.distance = float(cam_distance)
+        self.cam.azimuth = float(cam_azimuth)
+        self.cam.elevation = float(cam_elevation)
         if video:
             self.renderer = mj.Renderer(self.model, height=480, width=640)
 
@@ -1051,7 +1222,9 @@ class SteerSession:
                 self.gait_t += CTRL_DT
             qdes = wg.gait_targets(self.gait_t, True, amp)
             step_asym = TURN_STEP_ASYM
-            if yaw_rate > 1e-3 and self.gait_t > ESTABLISHED_GAIT_S:
+            if yaw_rate < -1e-3:
+                step_asym = LOOK_RIGHT_STEP_ASYM
+            elif yaw_rate > 1e-3 and self.gait_t > ESTABLISHED_GAIT_S:
                 step_asym = TURN_STEP_ASYM_ESTABLISHED
             if direction < 0:
                 qdes = mirror_sagittal(qdes, self.q_stand)
@@ -1072,7 +1245,29 @@ class SteerSession:
         for side, name in (("L", "l_hip_yaw"), ("R", "r_hip_yaw")):
             scale = swing_hip_yaw_scale(yaw_rate, direction, wg.phase_leg(phi, side))
             qdes[name] = qdes.get(name, 0.0) + scale * yaw_cmd
+        if direction > 0 and amp > 0.02:
+            style_forward_step(qdes, self.gait_t, yaw_rate)
+            self._slew_arm_scale(qdes, yaw_rate)
+        else:
+            self._arm_scale = LOOK_ARM_SCALE
         return qdes
+
+    def _slew_arm_scale(self, qdes: dict[str, float], yaw_rate: float) -> None:
+        """Larger contralateral swing while going straight. Yaw keeps 3.4.
+
+        style_forward_step already applied LOOK_ARM_SCALE. Undo that, then
+        slew. A step from 11 to 3.4 at the yaw edge is what pushed the
+        post-straight right arc over. The slew is not a torque-limit change.
+        """
+        raw_l = qdes.get("l_sho_pitch", 0.0) / LOOK_ARM_SCALE
+        raw_r = qdes.get("r_sho_pitch", 0.0) / LOOK_ARM_SCALE
+        target = LOOK_ARM_SCALE_STRAIGHT if abs(yaw_rate) < 1e-3 else LOOK_ARM_SCALE
+        step = LOOK_ARM_SLEW * CTRL_DT
+        self._arm_scale += max(-step, min(step, target - self._arm_scale))
+        qdes["l_sho_pitch"] = raw_l * self._arm_scale
+        qdes["r_sho_pitch"] = raw_r * self._arm_scale
+        qdes["l_el_pitch"] = 0.32 + 0.10 * abs(qdes["l_sho_pitch"])
+        qdes["r_el_pitch"] = 0.32 + 0.10 * abs(qdes["r_sho_pitch"])
 
     def _reverse_phase_stands(self) -> bool:
         """Reverse phases where an immediate blend already ends in stand.
@@ -1173,6 +1368,60 @@ class SteerSession:
                 self.model, self.data, self.act_idx, phi, amp,
                 self.bid_lf, self.bid_rf, self.gid_floor,
             )
+        if amp > 0.05 and direction > 0 and (
+            USE_SWING_HOLD_RESIDUAL or USE_SWING_PRELOAD or USE_STANCE_PUSH
+        ):
+            self._apply_swing_residual(phi)
+
+    def _apply_swing_residual(self, phi: float) -> None:
+        """Contact preload, then a swing hold. Forward only. No forcerange edit.
+
+        Preload bends a still-planted foot that is about to swing. The hold
+        keeps a low sole from being pulled straight once the CPG command falls.
+        Both write ``data.ctrl`` after CP swing and stance VIK.
+        """
+        ds_frac = max(0.08, min(0.55, float(wg.DS_S) / max(float(wg.GAIT_T), 1e-3)))
+        ds_end = 0.50 + ds_frac
+        swing_len = max(0.18, 1.0 - ds_end)
+        for side, pref, flex_sign, gid, bid in (
+            ("L", "l_", 1.0, self.gid_lfoot, self.bid_lf),
+            ("R", "r_", -1.0, self.gid_rfoot, self.bid_rf),
+        ):
+            leg_phase = wg.phase_leg(phi, side)
+            knee = f"{pref}knee"
+            knee_act = wg.act_name(knee)
+            if knee_act not in self.act_idx:
+                continue
+            knee_i = self.act_idx[knee_act]
+            in_contact = wg.foot_floor_contact(
+                self.model, self.data, bid, self.gid_floor,
+            )
+            if leg_phase < ds_end:
+                delta = swing_preload_residual(leg_phase, ds_end, in_contact)
+                delta -= stance_push_residual(leg_phase, in_contact)
+            else:
+                jid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, knee)
+                if jid < 0:
+                    continue
+                flex_q = flex_sign * float(self.data.qpos[self.model.jnt_qposadr[jid]])
+                flex_cmd = flex_sign * float(self.data.ctrl[knee_i])
+                sole_m = float(
+                    self.data.geom_xpos[gid][2] - self.model.geom_size[gid][2]
+                )
+                swing_s = (leg_phase - ds_end) / swing_len
+                delta = swing_hold_residual(sole_m, swing_s, flex_q, flex_cmd)
+            if abs(delta) < 1e-6:
+                continue
+            self.data.ctrl[knee_i] = float(_clamp(
+                float(self.data.ctrl[knee_i]) + flex_sign * delta, -2.0, 2.0,
+            ))
+            ank = f"{pref}ank_pitch"
+            ank_act = wg.act_name(ank)
+            if ank_act in self.act_idx:
+                ank_i = self.act_idx[ank_act]
+                self.data.ctrl[ank_i] = float(_clamp(
+                    float(self.data.ctrl[ank_i]) + flex_sign * delta, -1.2, 1.2,
+                ))
 
     def _substep(self, amp: float, direction: int) -> None:
         # Stop already zeroed applied_vx. Hold the stance damper for
@@ -1486,10 +1735,9 @@ def _multi_honesty(stats: tuple[SegmentStat, ...]) -> str:
         text += (
             f" Yaw holds stay at the claimed windows "
             f"(left {CLAIMED_LEFT_ARC_S:.1f} s, then right {CLAIMED_RIGHT_ARC_S:.1f} s). "
-            "Prefer FAIL, not this clip: a second right hold of 11 s tips; "
-            "a second left hold of 12.5 s does not yaw and then tips; "
-            "right-then-left stays upright but the left hold does not yaw left. "
-            "The 14 s left that starts at 15 s is not this path."
+            "Other orders (a second same-sign arc, right-then-left, and a 14 s "
+            "left that starts at 15 s) are not this clip and were not "
+            "re-qualified on this step-cycle basin."
         )
     return text
 
@@ -1594,14 +1842,17 @@ def summarize(session: SteerSession, script: tuple[DemoSegment, ...] = DEMO_SCRI
         f"stick is amplitude {VX_FWD_CAP / GAIT_AMP_VX:.2f} and reverse "
         f"{-VX_BACK_CAP:.3f} m/s stays amplitude {VX_BACK_CAP / GAIT_AMP_VX:.2f} "
         f"with stance damper {REVERSE_PLANT_KD:.0f} N/(m/s). "
-        f"Yaw cap is ±{YAW_RATE_CAP:.2f} rad/s; hip-yaw clip {YAW_HIP_CLIP:.2f} rad "
-        f"plus outside-step scale {TURN_STEP_ASYM:.2f}. "
-        f"Right-turn swing hip yaw keeps {TURN_RIGHT_SWING_YAW_SCALE:.2f} of that "
-        "clip so the foot does not land toed against the turn; stance hip yaw "
-        "and the cold-start left turn are unchanged. "
-        f"After the gait has been walking for {ESTABLISHED_GAIT_S:.0f} s, a left "
-        f"yaw command drops the {TURN_LEFT_BIAS:.2f} rad bias and uses outside-step "
-        f"scale {TURN_STEP_ASYM_ESTABLISHED:.2f}. "
+        f"Yaw cap is ±{YAW_RATE_CAP:.2f} rad/s. Forward yaw is swing-phase only: "
+        f"stance hip yaw is 0, and the airborne foot toes {LOOK_TOE_LEFT:.2f} rad "
+        f"left or {LOOK_TOE_RIGHT:.2f} rad right at full stick (+joint toes right). "
+        f"Outside-step scale stays {TURN_STEP_ASYM:.2f} on a left command "
+        f"({TURN_STEP_ASYM_ESTABLISHED:.2f} after {ESTABLISHED_GAIT_S:.0f} s) "
+        f"and {LOOK_RIGHT_STEP_ASYM:.2f} on a right command. "
+        f"Forward swing adds {LOOK_KNEE_LIFT:.2f} rad of knee flexion at mid-swing "
+        f"and scales contralateral shoulder pitch by {LOOK_ARM_SCALE_STRAIGHT:.1f} "
+        f"while going straight, slewed back to {LOOK_ARM_SCALE:.1f} while yaw is commanded. "
+        f"Lateral COM shift is {LOOK_COM_SHIFT:.2f} rad. "
+        "Reverse does not take the knee lift or the arm scale. "
         f"Measured motion Δx={dx_fwd:+.3f} m, mean body vx={mean_vx:+.3f} m/s "
         f"(not the command). Straight-forward net yaw drift="
         f"{math.degrees(dyaw_fwd):+.2f} deg; yaw during that window "
@@ -1700,9 +1951,17 @@ def run_demo(
     script: tuple[DemoSegment, ...] = DEMO_SCRIPT,
     overlay_title: str = "Day-1 steer",
     overlay_footer: str = "W/S vx  A/D yaw  space stop  |  voice uses the same bus",
+    cam_distance: float = 1.25,
+    cam_azimuth: float = 135.0,
+    cam_elevation: float = -18.0,
 ) -> RunSummary:
     video = out_mp4 is not None
-    session = SteerSession(video=video)
+    session = SteerSession(
+        video=video,
+        cam_distance=cam_distance,
+        cam_azimuth=cam_azimuth,
+        cam_elevation=cam_elevation,
+    )
     segments = _clip_script(script, duration)
     driver = ScriptedDriver(segments)
     print(
@@ -1713,8 +1972,15 @@ def run_demo(
     )
     print(
         "[steer] gait=forward T=0.55 hip=0.24 ds=0.1375 plant_kd=25 "
+        f"com_shift={LOOK_COM_SHIFT:.2f} knee_lift={LOOK_KNEE_LIFT:.2f} "
+        f"arm_scale={LOOK_ARM_SCALE_STRAIGHT:.1f}/{LOOK_ARM_SCALE:.1f} "
+        f"toe_L={LOOK_TOE_LEFT:.2f} toe_R={LOOK_TOE_RIGHT:.2f} "
         f"amp=|vx|/{GAIT_AMP_VX:.3f} "
-        "assist=OFF ankle_cop=ON cp_swing=ON stance_vik=ON residual=OFF door=OFF"
+        "assist=OFF ankle_cop=ON cp_swing=ON stance_vik=ON "
+        f"swing_hold={'ON' if USE_SWING_HOLD_RESIDUAL else 'OFF'} "
+        f"preload={'ON' if USE_SWING_PRELOAD else 'OFF'} "
+        f"stance_push={'ON' if USE_STANCE_PUSH else 'OFF'} "
+        "stance_residual=OFF door=OFF"
     )
     n_ctrl = int(duration * wg.CTRL_HZ)
     last_print = -1.0
@@ -1917,6 +2183,77 @@ def test_bus() -> list[str]:
     _expect(refusal is not None and refusal.startswith("refused: fault"), f"fault vel got {refusal}", failures)
     report = bus2.tick(0.12, CTRL_DT)
     _expect(report.mode == "fault" and report.applied_vx == 0.0, "fault tick not zero", failures)
+    apply_frozen_forward_gait()
+    _expect(wg.COM_SHIFT_AMP == LOOK_COM_SHIFT, "forward COM shift left the look basin", failures)
+    _expect(wg.DS_S == 0.1375 and wg.KNEE_SWING == 0.80, "reverse-safe knee/DS moved", failures)
+    _expect(VX_FWD_CAP == 0.056 and VX_BACK_CAP == 0.032 and YAW_RATE_CAP == 0.25, "caps moved", failures)
+    gait_t = 0.85 * float(wg.GAIT_T)
+    q_plain = wg.gait_targets(gait_t, True, 0.70)
+    q_step = dict(q_plain)
+    style_forward_step(q_step, gait_t, YAW_RATE_CAP)
+    _expect(q_step["l_knee"] > q_plain["l_knee"] + 0.05, "left swing knee did not lift", failures)
+    _expect(abs(q_step["r_knee"] - q_plain["r_knee"]) < 1e-9, "stance knee was lifted", failures)
+    _expect(q_step["l_hip_yaw"] < -0.02, "left swing foot is not toed left", failures)
+    _expect(abs(q_step["r_hip_yaw"]) < 1e-9, "stance foot yawed during a left command", failures)
+    _expect(abs(q_step["l_sho_pitch"]) > abs(q_plain["l_sho_pitch"]) * 2.0, "arm swing stayed frozen", failures)
+    _expect(
+        LOOK_ARM_SCALE_STRAIGHT > LOOK_ARM_SCALE and LOOK_ARM_SLEW > 0.0,
+        "straight arm scale is not above the yaw scale",
+        failures,
+    )
+    q_right = dict(q_plain)
+    style_forward_step(q_right, gait_t, -YAW_RATE_CAP)
+    _expect(q_right["l_hip_yaw"] > 0.02, "left swing foot is not toed right", failures)
+    global USE_SWING_HOLD_RESIDUAL, USE_SWING_PRELOAD, USE_STANCE_PUSH
+    _expect(
+        not USE_SWING_HOLD_RESIDUAL and not USE_SWING_PRELOAD and not USE_STANCE_PUSH,
+        "swing residual shipped on; measured path stays off",
+        failures,
+    )
+    saved_flags = (USE_SWING_HOLD_RESIDUAL, USE_SWING_PRELOAD, USE_STANCE_PUSH)
+    USE_SWING_HOLD_RESIDUAL = True
+    USE_SWING_PRELOAD = True
+    USE_STANCE_PUSH = True
+    try:
+        _expect(
+            swing_hold_residual(0.06, 0.50, 1.0, 0.6) == 0.0,
+            "swing hold fired on a clear sole",
+            failures,
+        )
+        _expect(
+            swing_hold_residual(0.02, 0.50, 0.4, 1.0) == 0.0,
+            "swing hold fired while the CPG was still flexing",
+            failures,
+        )
+        _expect(
+            swing_hold_residual(0.02, 0.95, 1.0, 0.4) == 0.0,
+            "swing hold fired in the landing window",
+            failures,
+        )
+        held = swing_hold_residual(0.02, 0.50, 1.0, 0.55)
+        _expect(
+            abs(held - min(SWING_HOLD_CLIP, 1.0 + SWING_HOLD_MARGIN - 0.55)) < 1e-9,
+            f"swing hold did not cover the extension gap ({held})",
+            failures,
+        )
+        _expect(
+            swing_preload_residual(0.20, 0.75, True) == 0.0,
+            "preload fired in early stance",
+            failures,
+        )
+        _expect(
+            swing_preload_residual(0.60, 0.75, False) == 0.0,
+            "preload fired on an airborne foot",
+            failures,
+        )
+        pre = swing_preload_residual(0.70, 0.75, True)
+        _expect(0.0 < pre <= SWING_PRELOAD_RAD, f"preload ramp {pre}", failures)
+        _expect(stance_push_residual(0.10, True) == 0.0, "stance push fired in early stance", failures)
+        _expect(stance_push_residual(0.35, False) == 0.0, "stance push fired in the air", failures)
+        pushed = stance_push_residual(0.35, True)
+        _expect(0.0 < pushed <= STANCE_PUSH_RAD, f"stance push {pushed}", failures)
+    finally:
+        USE_SWING_HOLD_RESIDUAL, USE_SWING_PRELOAD, USE_STANCE_PUSH = saved_flags
     return failures
 
 
