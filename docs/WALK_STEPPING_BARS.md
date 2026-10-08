@@ -679,4 +679,4 @@ The planned τ for T 0.60 s / vx 0.032 m/s, worst tick of each phase. QP is the 
 | stop | r_ank_pitch | 2.504 | ss | +2.636 | +0.021 | +2.636 | +0.021 | +2.636 | +0.021 | 0.000 |
 | stop | r_ank_roll | 2.672 | ss | -0.393 | -0.012 | -0.393 | -0.012 | -0.393 | -0.012 | 0.000 |
 
-SHA `3434f4b`. Logs from SHA `424b3d0`. Prior goal-ask score SHA `697d53b`.
+SHA `22528e3`. Logs from SHA `424b3d0`. Prior goal-ask score SHA `697d53b`.
