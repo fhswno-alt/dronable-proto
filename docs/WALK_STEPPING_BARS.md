@@ -628,110 +628,55 @@ On the same perturbations the leg match peaks at 4.40e-3 Nm (seed 8). Controls' 
 
 The pass stays the real plant. Armature stays 0.01. Signed applied is ≤ 2.33 Nm on every leg joint on every tick, and the limiter fraction is 0. A row that clears 2.33 only after subtracting armature is an unsourced-armature candidate. It is not a pass. Limiter-active ticks are a fail on their own. A control tick is limiter-active when the `write_clipped` band binds on a non-sagittal leg joint, or `write_force_limited` changes the predicted-force command, or the hip, knee, and ankle pitch slew in `_lipm_substep` shortens the move. The Clip column is still the plant ctrlrange test, which stays 0. The fraction is 0.000–0.149. Three rows are at 0 (T 1.20 s at 0.016, 0.024, and 0.032 m/s). They still fail other bars.
 
-The planned-motion check is separate and does not change the pass. `τ_req` is plain `mj_inverse` on the walker's own `q_des`, with `q̇` and `q̈` the backward differences at 8 ms. Contacts are off. The root force `qfrc_inverse[0:3]` is applied through the planned ZMP, so gravity is not added twice. The ZMP point is the body-link subtree CoM x, the preview's instantaneous ZMP y, and z = 0. In double support the wrench is split two ways: by ZMP position along the foot-to-foot line, and by the min-norm ankle-torque split. Both are reported, with the spread. In single support there is one wrench, so the spread is 0. A root step larger than 5 mm, or a root z step larger than 2 mm, is a foothold relabel. Root velocity is held across that tick. Joint differences stay the raw reference. Those holds are 0–10 per row. The largest root step is 0.122 m, on T 1.20 s at vx 0.056 m/s.
+The planned-motion check is separate and does not change the pass. `τ_req` is plain `mj_inverse` on the walker's own `q_des`, with `q̇` and `q̈` the backward differences at 8 ms. Contacts are off. The root force `qfrc_inverse[0:3]` is applied through the planned ZMP, so gravity is not added twice. The ZMP point is the body-link subtree CoM x, the preview's instantaneous ZMP y, and z = 0. In double support the wrench is split three ways. The first follows ZMP position along the foot-to-foot line. The second is the min-norm ankle-torque split. The third, called QP in the table, minimises the largest |τ| over the 12 leg joints after `armature·q̈_ref` is removed. Its variables are the local forces at the four bottom corners of each 135×76 mm sole. Those forces sum to the planned root force and produce zero moment about the planned ZMP. Each corner stays in the friction cone of μ 1.2: the normal force is non-negative, and the tangential magnitude is at most 1.2 times the normal. Each foot's centre of pressure then stays inside the rectangle. The program is the linear epigraph of that maximum. It is solved first on the containing pyramid `|fx| ≤ μ fz` and `|fy| ≤ μ fz`. When that solution leaves the disk, a second solve puts every corner back on the disk. Among disk optima, within 1e-7 Nm of the minimum, the reported wrench minimises the sum of tangential magnitudes. The wall number is the disk minimum. In single support there is one wrench, so the QP column copies it and the spread is 0. The spread column remains the absolute difference of the foot-line and min-norm torques. A root step larger than 5 mm, or a root z step larger than 2 mm, is a foothold relabel. Root velocity is held across that tick. Joint differences stay the raw reference. Those holds are 0–10 per row. The largest root step is 0.122 m, on T 1.20 s at vx 0.056 m/s.
 
-`τ` is printed with and without `armature·q̈_ref` for every leg joint, worst tick of the start, the walk, and the stop. The table below is the example cell. The phase median, over ticks, of the largest |τ| on that tick is 0.757 Nm in the start, 1.212 Nm in the walk, and 0.802 Nm in the stop. Across the grid those medians are 0.636–0.763 Nm, 1.149–1.265 Nm, and 0.559–0.818 Nm. The cell's root residual after the wrench is removed peaks at 30.5 Nm (3.7–36.1 Nm across the grid). The worst leg torque on the example is the right hip pitch at 1.296 s, −25.250 Nm on both splits. Stripping armature leaves −25.255 Nm, so that tick is not an unsourced-armature candidate. The grid's largest walk sample is the same joint at the same kind of tick: T 0.55 s / vx 0.040 m/s, right hip pitch at 1.296 s, −29.875 Nm with armature and −29.868 Nm without. The stop right knee on the example is −5.329 Nm with armature and −0.183 Nm without, spread 0.033 Nm. That one clears 2.33 only without armature, so it is an unsourced-armature candidate, and the row stays Prefer FAIL. On 66 worst-tick joints the two double-support splits disagree about 2.33 Nm. The largest spread is 4.477 Nm, T 0.70 s / vx 0.024 m/s, stop, left knee: linear +0.351 Nm and min-norm −4.125 Nm. The split is reported. It is not a wall.
+A planned-motion wall is a double-support tick whose QP minimum is above 2.33 Nm without armature. Five ticks on three rows meet it. The largest is T 0.75 s / vx 0.016 m/s, stop, left hip roll at 3.176 s: −2.757 Nm without armature and −3.573 Nm with it. That row has two such ticks. T 0.55 s / vx 0.032 m/s has two as well; the larger is the right hip pitch at 1.888 s in the walk, +2.459 Nm without armature. T 0.50 s / vx 0.040 m/s has the left hip pitch at 1.480 s in the walk, −2.432 Nm without armature. The example cell's largest double-support QP value is 2.080 Nm, left knee at 1.944 s in the walk. Eighty-nine double-support ticks are infeasible and 66 are unsolved, out of 27,642. Those ticks are counted and left blank in a torque column. The foot-line split and the min-norm split stay in the table. On 66 worst-tick joints those two splits disagree about 2.33 Nm. The largest spread is 4.477 Nm, T 0.70 s / vx 0.024 m/s, stop, left knee: linear +0.351 Nm and min-norm −4.125 Nm.
 
-Plant peaks, goal peaks, clip fractions, sums, gait calls, and band counts are the same numbers as the previous score. Twelve rows still carry the note `passes signed, fails sum`. Every row is Prefer FAIL. qvel ≤ 5.82 passes all 54. The DC line and the clamp pass on 13 rows and fail on 41. Two rows are SKATES (T 1.20 s at 0.048 and 0.056 m/s). The other 52 are STEPS.
+Single support above 2.33 Nm without armature is required single-foot torque. The grid's largest is T 0.55 s / vx 0.040 m/s, right hip pitch at 1.296 s, −29.875 Nm with armature and −29.868 Nm without. The example cell's same tick is the right hip pitch at 1.296 s, −25.250 Nm on all three columns and −25.255 Nm without armature. Eight of that cell's 116 single-support ticks are above 2.33 Nm without armature. Across the grid, 295 of 7,290 single-support ticks are.
 
-`>1e-3` and `>1e-2` are control ticks whose match residual exceeds that threshold, over the tick count. A tick over 1e-3 Nm and at or under 1e-2 Nm counts in the first column and can still be bucketed. Band is the maximum per-joint residual band on the row, in Nm. Cap is control ticks whose band exceeds 0.15 Nm. ResFail is control ticks whose passive-inclusive residual exceeds the band. Those two counts are comparison only. Lim is the limiter-active fraction. Knee ID is the peak `data_copy.qfrc_inverse` on either knee, in Nm. A value of 2.450 is the column bug. Raw, Off, and Adj are the signed passive-inclusive residual, the signed implicitfast offset, and the signed adjusted residual at the leg sample with the largest |raw| residual. Ctrl, Arm, and Phys are the bucket fractions on the unclamped samples whose tick match residual is ≤ 1e-2 Nm. They are empty when every over-bar sample is clamped or the row has no over-bar sample. Note is `passes signed, fails sum` when the row passes the plant ask and fails the sum. Per-tick traces and the planned τ for every cell are in `previews/walk_a5a9183_signed_id.json`.
+The plant is a position servo, so the double-support force split is whatever the floor contacts produce. After each physics step the scorer sums the world force on each foot, the contact frame transposed times `mj_contactForce`, with world +z upward, and averages the four 2 ms substeps of the control tick. A tick enters the comparison when the plan is double support, the QP solved, and both realised feet have world-z force above 1 N. The vertical share is the right foot's world-z force divided by the sum of the two feet. On the example cell, 478 ticks are compared. The absolute share difference has median 0.055 and maximum 0.395. The Euclidean norm of the six-force difference has median 6.86 N and maximum 48.1 N. That norm also carries the gap between the planned root wrench and the plant's contact total. Across the 54 cells the per-cell share-difference median is 0.025–0.091 and the per-cell maximum is 0.335–0.659. The per-cell force-gap median is 5.64–8.51 N and the per-cell maximum is 12.8–71.1 N. The pass stays signed applied ≤ 2.33 Nm on the real plant, with armature 0.01 and limiter fraction 0.
 
-| T s | vx | Plant Nm | Joint | Goal Nm | Clip | Lim | Band | Cap | ResFail | >1e-3 | >1e-2 | Knee ID | Raw | Off | Adj | Note | Ctrl | Arm | Phys |
-| ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: |
-| 0.80 | 0.016 | 3.383 | r_knee | 4.560 | 0 | 0.014 | 0.543 | 88/662 | 129/662 | 1/662 | 0/662 | 2.450 | +0.253 | -0.034 | +0.287 | — | 0 | 1 | 0 |
-| 0.80 | 0.024 | 3.259 | r_knee | 4.613 | 0 | 0.017 | 0.756 | 84/662 | 126/662 | 3/662 | 0/662 | 2.450 | +0.245 | -0.042 | +0.288 | — | 0 | 1 | 0 |
-| 0.80 | 0.032 | 3.412 | r_knee | 4.830 | 0 | 0.015 | 0.543 | 83/662 | 127/662 | 4/662 | 1/662 | 2.450 | +0.247 | -0.028 | +0.276 | — | 0 | 1 | 0 |
-| 0.80 | 0.040 | 3.703 | r_knee | 4.934 | 0 | 0.015 | 0.467 | 90/662 | 141/662 | 6/662 | 0/662 | 2.450 | +0.253 | -0.032 | +0.285 | — | — | — | — |
-| 0.80 | 0.048 | 3.726 | r_knee | 5.031 | 0 | 0.011 | 0.454 | 86/662 | 143/662 | 3/662 | 0/662 | 2.450 | +0.237 | -0.034 | +0.271 | — | 0 | 1 | 0 |
-| 0.80 | 0.056 | 3.923 | r_knee | 5.113 | 0 | 0.012 | 0.446 | 92/662 | 151/662 | 2/662 | 0/662 | 2.450 | +0.239 | -0.019 | +0.258 | — | 0 | 1 | 0 |
-| 0.75 | 0.016 | 3.025 | r_knee | 4.857 | 0 | 0.052 | 0.767 | 84/649 | 117/649 | 1/649 | 0/649 | 2.450 | +0.242 | -0.090 | +0.333 | — | 0 | 1 | 0 |
-| 0.75 | 0.024 | 2.802 | r_knee | 4.906 | 0 | 0.048 | 0.767 | 83/649 | 119/649 | 4/649 | 1/649 | 2.450 | +0.243 | -0.053 | +0.296 | — | — | — | — |
-| 0.75 | 0.032 | 2.853 | r_knee | 4.956 | 0 | 0.048 | 0.768 | 86/649 | 124/649 | 5/649 | 1/649 | 2.450 | +0.240 | -0.032 | +0.272 | — | 0 | 1 | 0 |
-| 0.75 | 0.040 | 3.072 | r_knee | 5.032 | 0 | 0.042 | 0.770 | 90/649 | 136/649 | 7/649 | 2/649 | 2.450 | +0.231 | -0.019 | +0.250 | — | — | — | — |
-| 0.75 | 0.048 | 3.434 | r_knee | 5.138 | 0 | 0.039 | 0.771 | 91/649 | 140/649 | 2/649 | 1/649 | 2.450 | +0.229 | -0.045 | +0.274 | — | — | — | — |
-| 0.75 | 0.056 | 3.862 | r_knee | 5.226 | 0 | 0.035 | 0.461 | 90/649 | 153/649 | 3/649 | 0/649 | 2.450 | +0.236 | -0.029 | +0.265 | — | — | — | — |
-| 0.70 | 0.016 | 3.678 | r_knee | 5.055 | 0 | 0.060 | 0.534 | 88/636 | 111/636 | 2/636 | 0/636 | 2.450 | +0.265 | -0.046 | +0.311 | — | 0 | 1 | 0 |
-| 0.70 | 0.024 | 3.408 | r_knee | 5.099 | 0 | 0.061 | 0.768 | 85/636 | 113/636 | 0/636 | 0/636 | 2.450 | +0.259 | -0.055 | +0.314 | — | 0 | 1 | 0 |
-| 0.70 | 0.032 | 3.470 | r_knee | 5.145 | 0 | 0.060 | 0.769 | 83/636 | 111/636 | 4/636 | 0/636 | 2.450 | +0.257 | -0.090 | +0.347 | — | 0 | 1 | 0 |
-| 0.70 | 0.040 | 3.706 | r_knee | 5.190 | 0 | 0.057 | 0.531 | 85/636 | 121/636 | 4/636 | 1/636 | 2.450 | +0.263 | -0.091 | +0.354 | — | — | — | — |
-| 0.70 | 0.048 | 3.919 | r_knee | 5.234 | 0 | 0.055 | 0.516 | 89/636 | 137/636 | 4/636 | 0/636 | 2.450 | +0.270 | -0.039 | +0.310 | — | 0 | 1 | 0 |
-| 0.70 | 0.056 | 4.064 | r_knee | 5.338 | 0 | 0.049 | 0.497 | 88/636 | 146/636 | 2/636 | 2/636 | 2.450 | +0.268 | -0.077 | +0.345 | — | — | — | — |
-| 0.65 | 0.016 | 3.428 | r_knee | 5.248 | 0 | 0.119 | 0.771 | 84/623 | 105/623 | 1/623 | 0/623 | 2.450 | +0.258 | -0.055 | +0.313 | — | 0 | 1 | 0 |
-| 0.65 | 0.024 | 3.575 | r_knee | 5.293 | 0 | 0.125 | 0.772 | 86/623 | 107/623 | 1/623 | 0/623 | 2.450 | +0.262 | -0.057 | +0.319 | — | — | — | — |
-| 0.65 | 0.032 | 3.389 | r_knee | 5.339 | 0 | 0.132 | 0.774 | 83/623 | 111/623 | 3/623 | 0/623 | 2.450 | +0.258 | -0.043 | +0.301 | — | 0 | 1 | 0 |
-| 0.65 | 0.040 | 3.568 | r_knee | 5.387 | 0 | 0.136 | 0.775 | 81/623 | 115/623 | 5/623 | 1/623 | 2.450 | +0.256 | -0.029 | +0.286 | — | — | — | — |
-| 0.65 | 0.048 | 3.991 | r_knee | 5.435 | 0 | 0.140 | 0.537 | 83/623 | 132/623 | 0/623 | 0/623 | 2.450 | +0.266 | -0.015 | +0.281 | — | 0 | 1 | 0 |
-| 0.65 | 0.056 | 4.029 | r_knee | 5.476 | 0 | 0.135 | 0.517 | 83/623 | 143/623 | 4/623 | 1/623 | 2.450 | +0.259 | -0.068 | +0.327 | — | 0 | 1 | 0 |
-| 0.60 | 0.016 | 3.514 | r_knee | 5.737 | 0 | 0.144 | 0.772 | 88/610 | 117/610 | 3/610 | 0/610 | 2.450 | +0.263 | -0.008 | +0.272 | — | 0 | 1 | 0 |
-| 0.60 | 0.024 | 3.846 | r_knee | 5.778 | 0 | 0.144 | 0.716 | 89/610 | 117/610 | 4/610 | 0/610 | 2.450 | +0.268 | -0.001 | +0.269 | — | — | — | — |
-| 0.60 | 0.032 | 3.854 | r_knee | 5.820 | 0 | 0.148 | 0.717 | 87/610 | 120/610 | 4/610 | 0/610 | 2.450 | +0.266 | -0.010 | +0.276 | — | — | — | — |
-| 0.60 | 0.040 | 3.843 | r_knee | 5.860 | 0 | 0.148 | 0.719 | 87/610 | 126/610 | 3/610 | 0/610 | 2.450 | +0.263 | -0.014 | +0.277 | — | 0 | 1 | 0 |
-| 0.60 | 0.048 | 3.806 | r_knee | 5.904 | 0 | 0.149 | 0.749 | 83/610 | 133/610 | 2/610 | 0/610 | 2.450 | +0.264 | -0.018 | +0.282 | — | 0 | 1 | 0 |
-| 0.60 | 0.056 | 3.971 | r_knee | 5.954 | 0 | 0.146 | 0.713 | 84/610 | 138/610 | 3/610 | 1/610 | 2.450 | +0.269 | -0.011 | +0.279 | — | — | — | — |
-| 0.55 | 0.016 | 1.846 | l_knee | 5.932 | 0 | 0.145 | 0.468 | 59/598 | 98/598 | 2/598 | 0/598 | 1.846 | +0.225 | -0.018 | +0.243 | passes signed, fails sum | — | — | — |
-| 0.55 | 0.024 | 1.881 | l_knee | 5.969 | 0 | 0.147 | 0.469 | 62/598 | 99/598 | 5/598 | 3/598 | 1.881 | +0.225 | -0.016 | +0.241 | passes signed, fails sum | — | — | — |
-| 0.55 | 0.032 | 1.917 | l_knee | 6.006 | 0 | 0.147 | 0.470 | 62/598 | 100/598 | 2/598 | 1/598 | 1.917 | +0.226 | -0.014 | +0.240 | passes signed, fails sum | — | — | — |
-| 0.55 | 0.040 | 1.944 | l_knee | 6.041 | 0 | 0.149 | 0.467 | 63/598 | 104/598 | 5/598 | 0/598 | 1.944 | +0.227 | -0.011 | +0.238 | passes signed, fails sum | — | — | — |
-| 0.55 | 0.048 | 1.982 | l_knee | 6.084 | 0 | 0.145 | 0.472 | 66/598 | 112/598 | 2/598 | 1/598 | 1.982 | +0.228 | -0.009 | +0.237 | passes signed, fails sum | — | — | — |
-| 0.55 | 0.056 | 2.023 | l_knee | 6.131 | 0 | 0.145 | 0.473 | 62/598 | 118/598 | 3/598 | 2/598 | 2.023 | +0.229 | -0.008 | +0.237 | passes signed, fails sum | — | — | — |
-| 0.50 | 0.016 | 1.850 | l_knee | 6.012 | 0 | 0.125 | 0.470 | 64/585 | 92/585 | 0/585 | 0/585 | 1.850 | +0.230 | -0.012 | +0.242 | passes signed, fails sum | — | — | — |
-| 0.50 | 0.024 | 1.883 | l_knee | 6.048 | 0 | 0.130 | 0.470 | 65/585 | 91/585 | 4/585 | 0/585 | 1.883 | +0.231 | -0.010 | +0.240 | passes signed, fails sum | — | — | — |
-| 0.50 | 0.032 | 1.915 | l_knee | 6.085 | 0 | 0.135 | 0.502 | 64/585 | 94/585 | 2/585 | 0/585 | 1.915 | +0.231 | -0.003 | +0.234 | passes signed, fails sum | — | — | — |
-| 0.50 | 0.040 | 1.938 | l_knee | 6.117 | 0 | 0.138 | 0.472 | 65/585 | 98/585 | 5/585 | 1/585 | 1.938 | +0.232 | -0.005 | +0.237 | passes signed, fails sum | — | — | — |
-| 0.50 | 0.048 | 1.974 | l_knee | 6.161 | 0 | 0.140 | 0.473 | 66/585 | 104/585 | 3/585 | 0/585 | 1.974 | +0.233 | -0.003 | +0.236 | passes signed, fails sum | — | — | — |
-| 0.50 | 0.056 | 2.012 | l_knee | 6.210 | 0 | 0.140 | 0.473 | 68/585 | 109/585 | 1/585 | 0/585 | 2.012 | +0.234 | -0.003 | +0.237 | passes signed, fails sum | — | — | — |
-| 1.00 | 0.016 | 3.306 | r_knee | 4.121 | 0 | 0.007 | 0.439 | 91/713 | 136/713 | 2/713 | 0/713 | 2.450 | +0.241 | -0.059 | +0.300 | — | 0 | 1 | 0 |
-| 1.00 | 0.024 | 3.346 | r_knee | 4.257 | 0 | 0.007 | 0.439 | 91/713 | 143/713 | 3/713 | 0/713 | 2.450 | +0.247 | -0.005 | +0.253 | — | 0 | 1 | 0 |
-| 1.00 | 0.032 | 3.507 | r_knee | 4.382 | 0 | 0.006 | 0.429 | 91/713 | 143/713 | 6/713 | 2/713 | 2.450 | +0.252 | -0.048 | +0.300 | — | 0 | 1 | 0 |
-| 1.00 | 0.040 | 3.486 | r_knee | 4.513 | 0 | 0.007 | 0.413 | 92/713 | 148/713 | 2/713 | 0/713 | 2.450 | +0.235 | -0.049 | +0.285 | — | 0 | 1 | 0 |
-| 1.00 | 0.048 | 3.636 | r_knee | 4.645 | 0 | 0.010 | 0.399 | 91/713 | 153/713 | 2/713 | 1/713 | 2.450 | +0.226 | -0.027 | +0.253 | — | 0 | 1 | 0 |
-| 1.00 | 0.056 | 3.606 | r_knee | 4.784 | 0 | 0.015 | 0.400 | 103/713 | 146/713 | 2/713 | 0/713 | 2.450 | +0.201 | -0.027 | +0.229 | — | — | — | — |
-| 1.20 | 0.016 | 2.379 | r_knee | 3.810 | 0 | 0.000 | 0.390 | 79/764 | 113/764 | 4/764 | 1/764 | 2.379 | +0.169 | -0.000 | +0.169 | — | 0 | 1 | 0 |
-| 1.20 | 0.024 | 2.568 | r_knee | 3.941 | 0 | 0.000 | 0.397 | 85/764 | 116/764 | 2/764 | 2/764 | 2.450 | +0.186 | -0.002 | +0.188 | — | — | — | — |
-| 1.20 | 0.032 | 2.879 | r_knee | 4.105 | 0 | 0.000 | 0.389 | 90/764 | 120/764 | 3/764 | 1/764 | 2.450 | +0.209 | -0.050 | +0.259 | — | 0 | 1 | 0 |
-| 1.20 | 0.040 | 3.202 | r_knee | 4.342 | 0 | 0.010 | 0.351 | 95/764 | 133/764 | 7/764 | 2/764 | 2.450 | +0.227 | -0.054 | +0.281 | — | 0 | 1 | 0 |
-| 1.20 | 0.048 | 3.491 | r_knee | 4.526 | 0 | 0.017 | 0.319 | 97/764 | 142/764 | 4/764 | 1/764 | 2.450 | +0.224 | -0.019 | +0.243 | — | 0 | 1 | 0 |
-| 1.20 | 0.056 | 3.460 | r_knee | 4.739 | 0 | 0.029 | 0.352 | 119/764 | 153/764 | 4/764 | 3/764 | 2.450 | +0.192 | -0.017 | +0.209 | — | 0 | 1 | 0 |
+`τ` is printed with and without `armature·q̈_ref` for every leg joint, worst tick of the start, the walk, and the stop. The table below is the example cell. The QP columns are the third split on that same tick. The phase median, over ticks, of the largest |τ| of the foot-line and min-norm splits is 0.757 Nm in the start, 1.212 Nm in the walk, and 0.802 Nm in the stop. Across the grid those medians are 0.636–0.763 Nm, 1.149–1.265 Nm, and 0.559–0.818 Nm. The phase median of the QP's largest |τ| without armature is 0.534 Nm in the start, 0.997 Nm in the walk, and 0.495 Nm in the stop on the example cell, and 0.534–0.536 Nm, 0.863–1.134 Nm, and 0.491–0.529 Nm across the grid. The cell's root residual after the wrench is removed peaks at 30.5 Nm (3.7–36.1 Nm across the grid). The stop right knee on the example is −5.329 Nm with armature and −0.183 Nm without on the foot-line split, and −5.362 Nm and −0.216 Nm on the min-norm split, spread 0.033 Nm. The QP on that tick is −4.679 Nm with armature and +0.467 Nm without. The foot-line and min-norm samples clear 2.33 only without armature, so the tick stays an unsourced-armature candidate, and the row stays Prefer FAIL.
 
-The planned τ for T 0.60 s / vx 0.032 m/s, worst tick of each phase. Linear and min-norm are the two double-support splits. In single support they match and the spread is 0. The no-armature columns subtract `dof_armature·q̈_ref` with the plant armature 0.01.
+The planned τ for T 0.60 s / vx 0.032 m/s, worst tick of each phase. QP is the disk minimax on that same tick. In single support the three torque columns match and the spread is 0. The spread is the absolute difference of the foot-line and min-norm torques. The no-armature columns subtract `dof_armature·q̈_ref` with the plant armature 0.01.
 
-| Phase | Joint | t s | Support | Linear Nm | Linear, no armature | Min-norm Nm | Min-norm, no armature | Spread Nm |
-| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |
-| start | l_hip_yaw | 0.312 | ds | -0.021 | -0.021 | -0.008 | -0.008 | 0.013 |
-| start | l_hip_roll | 1.224 | ds | +0.033 | +0.023 | -0.261 | -0.271 | 0.294 |
-| start | l_hip_pitch | 0.264 | ds | +0.469 | +0.468 | -0.013 | -0.013 | 0.481 |
-| start | l_knee | 0.288 | ds | -0.093 | -0.089 | -0.562 | -0.558 | 0.469 |
-| start | l_ank_pitch | 0.400 | ds | -0.117 | -0.128 | +0.332 | +0.322 | 0.450 |
-| start | l_ank_roll | 0.344 | ds | -0.184 | -0.157 | -0.035 | -0.009 | 0.148 |
-| start | r_hip_yaw | 0.312 | ds | -0.022 | -0.022 | -0.008 | -0.008 | 0.014 |
-| start | r_hip_roll | 1.208 | ds | +0.302 | +0.292 | +0.773 | +0.763 | 0.471 |
-| start | r_hip_pitch | 1.240 | ds | -1.159 | -1.162 | -0.403 | -0.406 | 0.756 |
-| start | r_knee | 1.240 | ds | -0.050 | -0.042 | +1.020 | +1.028 | 1.070 |
-| start | r_ank_pitch | 1.240 | ds | +0.317 | +0.319 | -0.680 | -0.679 | 0.997 |
-| start | r_ank_roll | 1.240 | ds | +0.282 | +0.272 | +0.046 | +0.035 | 0.236 |
-| walk | l_hip_yaw | 1.288 | ss | -0.733 | -0.733 | -0.733 | -0.733 | 0.000 |
-| walk | l_hip_roll | 1.704 | ss | -1.401 | -1.375 | -1.401 | -1.375 | 0.000 |
-| walk | l_hip_pitch | 2.464 | ss | +9.736 | +9.714 | +9.736 | +9.714 | 0.000 |
-| walk | l_knee | 2.472 | ss | -9.536 | -9.505 | -9.536 | -9.505 | 0.000 |
-| walk | l_ank_pitch | 2.472 | ss | +3.618 | +3.652 | +3.618 | +3.652 | 0.000 |
-| walk | l_ank_roll | 1.944 | ds | -1.317 | -1.308 | -0.035 | -0.026 | 1.282 |
-| walk | r_hip_yaw | 1.288 | ss | +3.399 | +3.399 | +3.399 | +3.399 | 0.000 |
-| walk | r_hip_roll | 2.072 | ss | +1.279 | +1.279 | +1.279 | +1.279 | 0.000 |
-| walk | r_hip_pitch | 1.296 | ss | -25.250 | -25.255 | -25.250 | -25.255 | 0.000 |
-| walk | r_knee | 1.288 | ss | +13.864 | +13.875 | +13.864 | +13.875 | 0.000 |
-| walk | r_ank_pitch | 2.080 | ss | -3.612 | -3.640 | -3.612 | -3.640 | 0.000 |
-| walk | r_ank_roll | 2.312 | ds | +1.288 | +1.266 | +0.040 | +0.018 | 1.248 |
-| stop | l_hip_yaw | 2.704 | ds | -0.566 | -0.566 | -0.135 | -0.135 | 0.431 |
-| stop | l_hip_roll | 2.704 | ds | -2.647 | -2.436 | -2.116 | -1.904 | 0.532 |
-| stop | l_hip_pitch | 2.920 | ds | +2.547 | +2.548 | +1.726 | +1.726 | 0.822 |
-| stop | l_knee | 2.584 | ss | -1.588 | -1.592 | -1.588 | -1.592 | 0.000 |
-| stop | l_ank_pitch | 2.912 | ds | -1.185 | -0.432 | -0.278 | +0.474 | 0.906 |
-| stop | l_ank_roll | 2.696 | ds | -0.552 | -0.408 | -0.117 | +0.027 | 0.435 |
-| stop | r_hip_yaw | 2.920 | ds | -0.014 | -0.014 | -0.087 | -0.087 | 0.073 |
-| stop | r_hip_roll | 2.696 | ds | +0.466 | +0.260 | +0.807 | +0.600 | 0.341 |
-| stop | r_hip_pitch | 2.696 | ds | +2.643 | +0.223 | +2.967 | +0.547 | 0.324 |
-| stop | r_knee | 2.696 | ds | -5.329 | -0.183 | -5.362 | -0.216 | 0.033 |
-| stop | r_ank_pitch | 2.504 | ss | +2.636 | +0.021 | +2.636 | +0.021 | 0.000 |
-| stop | r_ank_roll | 2.672 | ss | -0.393 | -0.012 | -0.393 | -0.012 | 0.000 |
+| Phase | Joint | t s | Support | Linear Nm | Linear, no armature | Min-norm Nm | Min-norm, no armature | QP Nm | QP, no armature | Spread Nm |
+| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| start | l_hip_yaw | 0.312 | ds | -0.021 | -0.021 | -0.008 | -0.008 | -0.539 | -0.539 | 0.013 |
+| start | l_hip_roll | 1.224 | ds | +0.033 | +0.023 | -0.261 | -0.271 | -0.484 | -0.494 | 0.294 |
+| start | l_hip_pitch | 0.264 | ds | +0.469 | +0.468 | -0.013 | -0.013 | +0.022 | +0.022 | 0.481 |
+| start | l_knee | 0.288 | ds | -0.093 | -0.089 | -0.562 | -0.558 | -0.541 | -0.538 | 0.469 |
+| start | l_ank_pitch | 0.400 | ds | -0.117 | -0.128 | +0.332 | +0.322 | +0.237 | +0.226 | 0.450 |
+| start | l_ank_roll | 0.344 | ds | -0.184 | -0.157 | -0.035 | -0.009 | +0.020 | +0.046 | 0.148 |
+| start | r_hip_yaw | 0.312 | ds | -0.022 | -0.022 | -0.008 | -0.008 | +0.422 | +0.422 | 0.014 |
+| start | r_hip_roll | 1.208 | ds | +0.302 | +0.292 | +0.773 | +0.763 | +0.415 | +0.405 | 0.471 |
+| start | r_hip_pitch | 1.240 | ds | -1.159 | -1.162 | -0.403 | -0.406 | -0.417 | -0.421 | 0.756 |
+| start | r_knee | 1.240 | ds | -0.050 | -0.042 | +1.020 | +1.028 | +0.486 | +0.494 | 1.070 |
+| start | r_ank_pitch | 1.240 | ds | +0.317 | +0.319 | -0.680 | -0.679 | -0.496 | -0.494 | 0.997 |
+| start | r_ank_roll | 1.240 | ds | +0.282 | +0.272 | +0.046 | +0.035 | +0.504 | +0.494 | 0.236 |
+| walk | l_hip_yaw | 1.288 | ss | -0.733 | -0.733 | -0.733 | -0.733 | -0.733 | -0.733 | 0.000 |
+| walk | l_hip_roll | 1.704 | ss | -1.401 | -1.375 | -1.401 | -1.375 | -1.401 | -1.375 | 0.000 |
+| walk | l_hip_pitch | 2.464 | ss | +9.736 | +9.714 | +9.736 | +9.714 | +9.736 | +9.714 | 0.000 |
+| walk | l_knee | 2.472 | ss | -9.536 | -9.505 | -9.536 | -9.505 | -9.536 | -9.505 | 0.000 |
+| walk | l_ank_pitch | 2.472 | ss | +3.618 | +3.652 | +3.618 | +3.652 | +3.618 | +3.652 | 0.000 |
+| walk | l_ank_roll | 1.944 | ds | -1.317 | -1.308 | -0.035 | -0.026 | -2.088 | -2.080 | 1.282 |
+| walk | r_hip_yaw | 1.288 | ss | +3.399 | +3.399 | +3.399 | +3.399 | +3.399 | +3.399 | 0.000 |
+| walk | r_hip_roll | 2.072 | ss | +1.279 | +1.279 | +1.279 | +1.279 | +1.279 | +1.279 | 0.000 |
+| walk | r_hip_pitch | 1.296 | ss | -25.250 | -25.255 | -25.250 | -25.255 | -25.250 | -25.255 | 0.000 |
+| walk | r_knee | 1.288 | ss | +13.864 | +13.875 | +13.864 | +13.875 | +13.864 | +13.875 | 0.000 |
+| walk | r_ank_pitch | 2.080 | ss | -3.612 | -3.640 | -3.612 | -3.640 | -3.612 | -3.640 | 0.000 |
+| walk | r_ank_roll | 2.312 | ds | +1.288 | +1.266 | +0.040 | +0.018 | +2.083 | +2.060 | 1.248 |
+| stop | l_hip_yaw | 2.704 | ds | -0.566 | -0.566 | -0.135 | -0.135 | +0.264 | +0.264 | 0.431 |
+| stop | l_hip_roll | 2.704 | ds | -2.647 | -2.436 | -2.116 | -1.904 | -1.037 | -0.825 | 0.532 |
+| stop | l_hip_pitch | 2.920 | ds | +2.547 | +2.548 | +1.726 | +1.726 | +0.531 | +0.531 | 0.822 |
+| stop | l_knee | 2.584 | ss | -1.588 | -1.592 | -1.588 | -1.592 | -1.588 | -1.592 | 0.000 |
+| stop | l_ank_pitch | 2.912 | ds | -1.185 | -0.432 | -0.278 | +0.474 | -0.490 | +0.263 | 0.906 |
+| stop | l_ank_roll | 2.696 | ds | -0.552 | -0.408 | -0.117 | +0.027 | -0.742 | -0.599 | 0.435 |
+| stop | r_hip_yaw | 2.920 | ds | -0.014 | -0.014 | -0.087 | -0.087 | -0.129 | -0.129 | 0.073 |
+| stop | r_hip_roll | 2.696 | ds | +0.466 | +0.260 | +0.807 | +0.600 | +0.805 | +0.599 | 0.341 |
+| stop | r_hip_pitch | 2.696 | ds | +2.643 | +0.223 | +2.967 | +0.547 | +2.926 | +0.506 | 0.324 |
+| stop | r_knee | 2.696 | ds | -5.329 | -0.183 | -5.362 | -0.216 | -4.679 | +0.467 | 0.033 |
+| stop | r_ank_pitch | 2.504 | ss | +2.636 | +0.021 | +2.636 | +0.021 | +2.636 | +0.021 | 0.000 |
+| stop | r_ank_roll | 2.672 | ss | -0.393 | -0.012 | -0.393 | -0.012 | -0.393 | -0.012 | 0.000 |
 
 SHA `3434f4b`. Logs from SHA `424b3d0`. Prior goal-ask score SHA `697d53b`.
