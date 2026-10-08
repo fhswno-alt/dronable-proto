@@ -1802,6 +1802,12 @@ def _hip_roll_parts(
     if gen_best is not None:
         best_tau = float(full[adr] - gen_best[adr])
         best_bare = best_tau - arm
+    # The swing leg is on the pelvis side of this hip, so it does not
+    # appear in qfrc_bias. It changes the root force the foot has to carry.
+    p_zmp = np.array([float(com[0]), float(zmp_y), 0.0], dtype=np.float64)
+    gen_swingless = _jac_wrench(model, data, p_zmp, foot_id, s_full[0:3], zero_m)
+    tau_swingless = float(s_full[adr] - gen_swingless[adr])
+    swing_wrench = float(tau[adr] - tau_swingless)
     parts = {
         "joint": joint,
         "gravity_nm": float(grav[adr]),
@@ -1812,6 +1818,7 @@ def _hip_roll_parts(
         "swing_gravity_nm": float(grav[adr] - s_grav[adr]),
         "swing_inertial_nm": float(inert[adr] - s_inert[adr]),
         "swing_velocity_nm": float(vel[adr] - s_vel[adr]),
+        "swing_wrench_nm": swing_wrench,
         "body_gravity_nm": float(s_grav[adr]),
         "body_inertial_nm": float(s_inert[adr]),
         "body_velocity_nm": float(s_vel[adr]),
@@ -1936,6 +1943,7 @@ def _print_plan_y(trace: dict[str, object]) -> None:
                 f"swing_grav {parts.get('swing_gravity_nm')} "
                 f"swing_inert {parts.get('swing_inertial_nm')} "
                 f"swing_vel {parts.get('swing_velocity_nm')} "
+                f"swing_wrench {parts.get('swing_wrench_nm')} "
                 f"static {parts.get('static_vertical_nm')} "
                 f"bare_at_best_point {parts.get('tau_bare_at_best_point_nm')} "
                 f"closes {parts.get('closes_nm')}",

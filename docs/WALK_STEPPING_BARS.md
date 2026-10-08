@@ -725,4 +725,29 @@ The planned τ for the stop at armature 0.025, worst tick of each joint. QP is t
 
 The stop left knee clears 2.33 Nm only after the 0.025 armature term is removed. That sample is an unsourced-armature candidate on the planned columns. The plant ask on the same stop is 3.694 Nm, so the row stays Prefer FAIL. Full table: `previews/walk_a5a9183_armature_sensitivity.json`.
 
+Planned-ID check on voice056 at T 1.00 s / vx 0.016 m/s, plant armature 0.01. The plant md5 stayed `207f3d5e9c6a72e16f7aa0c8d224f75e`. A hip-roll torque is not a discard. The only inconsistency flags are a root residual over 1e-2 Nm, or the planned CoM or the planned ZMP outside the support polygon of the feet that are down.
+
+The six root rows are printed for all 711 control ticks. `qfrc` is `mj_inverse` on the reference. `resid` is that column minus the generalized force of the planned ZMP wrench. The three force rows of `resid` are at most 4e-15 N on every tick, so the wrench carries the inverse force. The three moment rows are not at the noise floor. Their peaks are 7.46 Nm, 27.28 Nm, and 2.43 Nm. All 711 ticks exceed 1e-2 Nm. The 27.28 Nm sample is ty at 1.320 s, paired with the next tick at 1.312 s, where the inverse force in x is ±136 N. That is a qacc spike, not the stance. On walk single support with |fx| under 40 N the median peak residual is 0.33 Nm. The root flag is set.
+
+The y trace is the second walk cycle, 2.248 s through 3.240 s. Right stance in that cycle runs 2.504 s to 2.872 s. Preview CoM y, the placed body-link CoM y, the planned ZMP y, and the live CoM y are all negative together on every tick of that stance. The sign is the right foot. It is not flipped. At the zero pose the hip-roll axis is at body y ±0.029 and the sole centre is at ±0.043, so the hip sits 14 mm inboard of the box centre. At 2.592 s the placed hip-roll axis is at −0.0587 m and the stance box centre is at −0.0478 m, so the hip is 11 mm outboard of the box. The sole has moved about 25 mm inboard relative to the hip. That is the preview offset on top of the outboard sole, and it is the same sign as the stance.
+
+| t s | preview CoM y | placed CoM y | planned ZMP y | box centre y | hip-roll axis y | live CoM y | live CoP y | bare r_hip_roll Nm |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2.504 | -0.0208 | -0.0153 | -0.0205 | -0.0478 | -0.0486 | -0.0095 | +0.0130 | +0.351 |
+| 2.592 | -0.0314 | -0.0232 | -0.0229 | -0.0478 | -0.0587 | -0.0217 | -0.0495 | +1.491 |
+| 2.688 | -0.0254 | -0.0189 | -0.0229 | -0.0478 | -0.0531 | -0.0250 | -0.0614 | +0.851 |
+| 2.816 | -0.0116 | -0.0088 | -0.0229 | -0.0478 | -0.0401 | -0.0097 | -0.0217 | +0.419 |
+
+The planned ZMP stays inside the stance sole for the whole bout (0 ticks outside). The placed CoM leaves that sole on 27 ticks, 23 in the walk and 4 in the stop. The support flag is set. The first of those walk ticks in this cycle is 2.816 s, margin −0.2 mm. The stop samples at 3.440–3.464 s put the placed CoM at about +0.023 m while the right box is still at −0.048 m.
+
++2.75 Nm does not occur. The largest walk right-stance bare hip-roll torque is +1.491 Nm at 2.592 s, not a 2.75. The sample-mid of that stance, 2.688 s, is +0.851 Nm. The split at 2.592 s is gravity −0.053 Nm, M·q̈ +0.137 Nm of which the bare inertial part is −0.012 Nm, velocity −0.012 Nm, and contact +1.568 Nm. The swing leg does not appear in `qfrc_bias` at this joint: those three swing differences are 0. It does change the root force. Applying the swing-free root force at the same planned ZMP removes 0.251 Nm, so the swing leg is 0.251 Nm of the contact term. The sum closes. A vertical force anywhere on that sole, plus gravity, spans −0.74 Nm to +1.13 Nm. The contact term +1.57 Nm sits above that span.
+
+The point on z = 0 that minimises the root residual at 2.592 s is (0.012 m, −0.068 m). It is inside the sole, and the root residual there is 0.039 Nm. Bare hip-roll torque at that point is +0.464 Nm, inside the vertical span. The planned ZMP y is −0.023 m, 45 mm inboard of that point, and the root residual of the planned wrench is 1.07 Nm. The +1.03 Nm between +1.491 and +0.464 is that moment. Both points are on the sole. The flag is the root residual, not the torque.
+
+At the sample-mid, 2.688 s, the same split is gravity −0.038, inertia +0.026, velocity +0.051, contact +0.840, swing wrench +0.165. Bare torque is +0.851 Nm. The best point is 4 mm from the planned ZMP and the bare torque there is +0.760 Nm. The vertical span is −0.84 Nm to +1.01 Nm.
+
+The stop tick at 3.448 s reaches bare −4.941 Nm. The placed CoM is outside the right sole by 36 mm. That tick is flagged for the CoM and for the root residual. The torque is not the flag.
+
+On this same bout the live signed ask on r_hip_roll peaks at 0.823 Nm, 0 ticks over 2.33. The DC-motor line fails on r_knee at 3.456 s in the stop, margin −1.697 rad/s. The stop is a lean: min up_z 0.994, contacts 4/4, pitch 8.14° off the stand, roll 0.29° off. The row is Prefer FAIL STEPS. Full tick list: `previews/walk_a5a9183_plan_y.json`.
+
 SHA `71cc092`. Logs from SHA `424b3d0`. Prior goal-ask score SHA `697d53b`.
