@@ -18,8 +18,10 @@ copy of the model carries ``mjENBL_FWDINV``. The live model does not, so the
 forward rollout is unchanged. The copy gets ``mj_forward``, then
 ``mj_compareFwdInv``, then ``mj_inverse`` with that same qacc. A leg joint
 whose raw residual exceeds ``0.05 + dt·(0.08 + kv)·|q̈|`` marks that substep
-``residual-fail, not bucketed``. Only residual-passing substeps are split
-into the three buckets.
+``residual-fail, not bucketed``. A control tick whose band exceeds 0.15 Nm
+is ``unbucketed``: counted, not passed, and not classified. The band decides
+bucketing only. It does not relax the signed applied bar of 2.33 Nm. Only
+substeps that pass both gates are split into the three buckets.
 """
 from __future__ import annotations
 
@@ -64,7 +66,9 @@ QACC_SOURCE = (
 )
 RESIDUAL_FLOOR = 0.05
 JOINT_DAMPING = 0.08
+BAND_CAP_NM = 0.15
 RESIDUAL_FAIL = "residual-fail, not bucketed"
+UNBUCKETED = "unbucketed"
 KNEE_ID_CONTROLS_NM = 2.045
 ROOT_DOFS = 6
 PERIODS = (0.80, 0.75, 0.70, 0.65, 0.60, 0.55, 0.50, 1.00, 1.20)
@@ -85,8 +89,13 @@ CLASS_RULE = (
     "-actuator_biasprm[i,2], and 0.08 is the leg joint damping. "
     "The implicitfast offset dt*(0.08 + kv)*qacc is logged signed, and the "
     "residual is also logged after subtracting that offset. "
+    "A control tick whose maximum per-joint band exceeds 0.15 Nm is unbucketed: "
+    "counted, not passed, and not classified. "
     "A control tick is counted residual-fail when any of its substeps fails. "
-    "The three buckets use residual-passing substeps only. "
+    "The band decides which substeps may be bucketed. It does not relax the "
+    "signed applied bar: |ask| > 2.33 fails that bar on every control tick, "
+    "including an unbucketed tick. "
+    "The three buckets use substeps that pass both gates. "
     "controller fail: |qfrc_inverse| <= 2.33 and |ask| > 2.33. "
     "unsourced-armature candidate: |qfrc_inverse| > 2.33 and "
     "|qfrc_inverse - 0.01*qacc| <= 2.33. Armature 0.01 has no Hiwonder source; "
@@ -738,6 +747,9 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
     limiter_ticks = 0
     residual_fail_ticks = 0
     residual_fail_substeps = 0
+    band_max = 0.0
+    band_cap_ticks = 0
+    band_and_residual_ticks = 0
     fwdinv_ticks: list[list[float]] = []
     root_id_ticks: list[float] = []
     root_id_max = 0.0
@@ -909,6 +921,7 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
                     over_shots.setdefault(si, []).append((leg, ask))
                     setattr(over, "_shot", si)
         tick_fail = False
+        tick_band_max = 0.0
         fwd0 = 0.0
         fwd1 = 0.0
         root_tick = 0.0
@@ -953,6 +966,8 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
                     raw_peak_t = float(shot["time"])
                 adj_max_abs = max(adj_max_abs, abs(adjusted))
                 offset_max_abs = max(offset_max_abs, abs(offset))
+                tick_band_max = max(tick_band_max, band)
+                band_max = max(band_max, band)
                 if resid > band + 1e-9:
                     this_fail = True
                     tick_fail = True
@@ -964,21 +979,33 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
                     knee_id_t = float(shot["time"])
             if this_fail:
                 residual_fail_substeps += 1
-            else:
+            substep_fail.append(this_fail)
+        # Exactly 0.15 stays eligible. A wider band unbuckets the whole tick.
+        tick_capped = tick_band_max > BAND_CAP_NM + 1e-9
+        if tick_capped:
+            band_cap_ticks += 1
+        if tick_capped and tick_fail:
+            band_and_residual_ticks += 1
+        if not tick_capped:
+            for shot, failed in zip(shots, substep_fail):
+                if failed:
+                    continue
+                ident_pass = shot["id"]
                 for leg in legs:
                     joint = str(leg["joint"])
                     if not joint.endswith("knee"):
                         continue
-                    signed_id = float(ident[int(leg["dof"])])
+                    signed_id = float(ident_pass[int(leg["dof"])])
                     if abs(signed_id) > knee_id_pass_peak:
                         knee_id_pass_peak = abs(signed_id)
                         knee_id_pass_signed = signed_id
                         knee_id_pass_joint = joint
                         knee_id_pass_t = float(shot["time"])
-            substep_fail.append(this_fail)
         for over in plant_overs[over_from:]:
             si = getattr(over, "_shot", None)
             setattr(over, "_sub_fail", True if not isinstance(si, int) else substep_fail[si])
+            setattr(over, "_band_cap", tick_capped)
+            setattr(over, "_tick_band_max", tick_band_max)
         if tick_fail:
             residual_fail_ticks += 1
         tick_residual_fail.append(tick_fail)
@@ -1190,6 +1217,11 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         stepping["passes"] = False
     pair_ask_m = sws._pair_matrix(pair_ask, len(sws.LEG_JOINTS))
     pair_sum_m = sws._pair_matrix(pair_sum, len(sws.LEG_JOINTS))
+    # The residual band never drops a tick from this bar.
+    if pair_ask_m.shape[0] != n:
+        raise RuntimeError(
+            f"signed bar saw {pair_ask_m.shape[0]} ticks, bout has {n}"
+        )
     torque_bar = step_bars.signed_torque_bar(sws.LEG_JOINTS, pair_ask_m, pair_sum_m)
     line_t, line_tau, line_w, line_stage = sws._writes_for_line(plant_asks, sws.LEG_JOINTS)
     dc = step_bars.speed_torque_check(
@@ -1284,9 +1316,15 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         )
         hand = HAND_M_KG * G * HAND_L_M * math.sin(abs(rec.q) / 2.0)
         gated = bool(getattr(rec, "_sub_fail", True))
+        capped = bool(getattr(rec, "_band_cap", False))
         if not isinstance(blob, dict):
             kind, term = ("unmeasured", "")
             parts = {name: float("nan") for name in TERMS}
+        elif capped:
+            parts = {name: float(blob["parts"][name]) for name in TERMS}
+            kind, term = UNBUCKETED, ""
+            resid = abs(float(blob["ident_residual_nm"]))
+            max_resid = max(max_resid, resid)
         elif gated:
             parts = {name: float(blob["parts"][name]) for name in TERMS}
             kind, term = RESIDUAL_FAIL, ""
@@ -1334,6 +1372,8 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
             "ident_residual_nm": None if not isinstance(blob, dict) else blob["ident_residual_nm"],
             "solver_fwdinv": None if not isinstance(blob, dict) else blob["solver_fwdinv"],
             "residual_gated": gated,
+            "band_capped": capped,
+            "tick_band_max_nm": float(getattr(rec, "_tick_band_max", float("nan"))),
             "qacc_rad_s2": None if not isinstance(blob, dict) else blob["qacc_rad_s2"],
             "qacc_source": QACC_SOURCE,
             "actuator_nm": None if not isinstance(blob, dict) else blob["actuator_nm"],
@@ -1359,7 +1399,11 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
     counts = {name: 0 for name in CLASS_NAMES}
     term_counts = {name: 0 for name in REMAINING}
     n_residual_over = 0
+    n_unbucketed = 0
     for row in ask_events:
+        if row["class"] == UNBUCKETED:
+            n_unbucketed += 1
+            continue
         if row["class"] == RESIDUAL_FAIL:
             n_residual_over += 1
             continue
@@ -1448,6 +1492,13 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         "residual_fail_ticks": residual_fail_ticks,
         "residual_fail_substeps": residual_fail_substeps,
         "residual_fail_over_bar": n_residual_over,
+        "unbucketed_label": UNBUCKETED,
+        "unbucketed_band_ticks": band_cap_ticks,
+        "unbucketed_residual_ticks": residual_fail_ticks,
+        "unbucketed_both_ticks": band_and_residual_ticks,
+        "unbucketed_over_bar": n_unbucketed,
+        "residual_band_max_nm": band_max,
+        "band_cap_nm": BAND_CAP_NM,
         "residual_floor_nm": RESIDUAL_FLOOR,
         "residual_raw_peak_nm": raw_peak_signed,
         "residual_raw_peak_abs_nm": raw_peak_abs,
@@ -1538,7 +1589,8 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         f"kneeID {knee_id_peak:.3f} {knee_id_joint} "
         f"raw {raw_peak_signed:+.4f} off {raw_peak_offset:+.4f} adj {raw_peak_adjusted:+.4f} "
         f"adjmax {adj_max_abs:.4f} "
-        f"root {root_id_max:.3e} resfail {residual_fail_ticks}/{n} "
+        f"root {root_id_max:.3e} bandmax {band_max:.4f} "
+        f"cap {band_cap_ticks}/{n} resfail {residual_fail_ticks}/{n} "
         f"qdes {row['qdes_peak_nm']:.3f} {row['qdes_peak_joint']} "
         f"over ask/qdes {n_ask_over}/{n_qdes_over} bucketed {n_bucketed} "
         f"note {torque_bar['note'] or '-'} resid {max_resid:.3e} "
@@ -1592,6 +1644,15 @@ def main() -> None:
         ),
         "solver": None if not rows else rows[0]["solver"],
         "residual_floor_nm": RESIDUAL_FLOOR,
+        "band_cap_nm": BAND_CAP_NM,
+        "band_cap_rule": (
+            "A control tick whose maximum per-joint band exceeds 0.15 Nm is "
+            "unbucketed: counted, not passed into a bucket, and not classified. "
+            "A control tick with any leg residual above its own band is counted "
+            "separately as residual-fail, not bucketed. Bucket fractions use the "
+            "over-bar substeps that remain. The band does not relax the signed "
+            "applied bar of 2.33 Nm; that bar still sees every control tick."
+        ),
         "residual_band": "0.05 + dt*(0.08 + kv)*|qacc| per leg joint per 0.002 s step",
         "residual_definition": "signed qfrc_inverse - (qfrc_actuator + qfrc_passive) per leg joint",
         "implicitfast_offset": "signed dt*(0.08 + kv)*qacc; kv = -actuator_biasprm[i,2]; 0.08 is leg joint damping",
