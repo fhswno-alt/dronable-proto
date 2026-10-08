@@ -2,8 +2,9 @@
 """Independent score of Controls' cadence tip a5a9183 on the #102 bar set.
 
 The gait and the plant are loaded from that tip. This file does not edit
-either. Soft-pass stays off. q̈ is ``data.qacc`` from the ``mj_step`` that
-applied this ctrl, not a finite difference of qvel.
+either. Soft-pass stays off. q̈ is the acceleration ``mj_forward`` writes on
+a copy of the pre-step state. It is not ``data.qacc`` after ``mj_step``, and
+it is not a finite difference of qvel.
 
 The 2.33 Nm pass uses the ctrl the plant applies. When ``actuator_ctrllimited``
 is set, that ctrl is ``data.ctrl`` clipped to ``ctrlrange`` (±2.09). The
@@ -12,9 +13,11 @@ A tick with ``|ctrl_raw| > 2.09`` fails the clip bar. ``ctrl_raw`` is the
 writer command before the ctrlrange clip when that command reproduces the
 stored ctrl; otherwise the clip fraction is ``raw ctrl unavailable``.
 
-Inverse dynamics runs on every substep whose plant |ask| exceeds 2.33, at
-the q and q̇ that entered that ``mj_step``, with the plant-clipped ctrl and
-that substep's ``data.qacc``.
+Inverse dynamics runs on every physics substep, before ``mj_step``. The copy
+gets ``mj_forward``, then ``mj_inverse`` with that same qacc. A leg joint
+whose ``|qfrc_inverse - (qfrc_actuator + qfrc_passive)|`` exceeds 0.05 Nm
+marks the control tick ``residual-fail, not bucketed``. Only residual-passing
+ticks are split into the three buckets.
 """
 from __future__ import annotations
 
@@ -53,8 +56,13 @@ HAND_M_KG = 2.2
 HAND_L_M = 0.093
 HAND_LABEL = "hand estimate"
 QACC_SOURCE = (
-    "data.qacc from the mj_step that applied this ctrl; not a finite difference of qvel"
+    "mj_forward qacc on an mj_copyData of the pre-step state; "
+    "mj_inverse uses that same qacc. Not data.qacc after mj_step."
 )
+RESIDUAL_BAR = 0.05
+RESIDUAL_FAIL = "residual-fail, not bucketed"
+KNEE_ID_CONTROLS_NM = 2.045
+ROOT_DOFS = 6
 PERIODS = (0.80, 0.75, 0.70, 0.65, 0.60, 0.55, 0.50, 1.00, 1.20)
 SPEEDS = (0.016, 0.024, 0.032, 0.040, 0.048, 0.056)
 TERMS = ("armature·q̈", "impact/contact", "link inertia", "gravity")
@@ -67,6 +75,10 @@ CLASS_NAMES = (
 CLASS_RULE = (
     "Comparisons use the absolute value of the signed torque. "
     "Exactly 2.33 stays on the low side of each greater-than test. "
+    "A physics substep is residual-fail, not bucketed, when any leg joint has "
+    "|qfrc_inverse - (qfrc_actuator + qfrc_passive)| > 0.05. "
+    "A control tick is counted residual-fail when any of its substeps fails. "
+    "The three buckets use residual-passing substeps only. "
     "controller fail: |qfrc_inverse| <= 2.33 and |ask| > 2.33. "
     "unsourced-armature candidate: |qfrc_inverse| > 2.33 and "
     "|qfrc_inverse - 0.01*qacc| <= 2.33. Armature 0.01 has no Hiwonder source; "
@@ -74,24 +86,56 @@ CLASS_RULE = (
     "physics candidate: |qfrc_inverse - 0.01*qacc| > 2.33, named by the largest "
     "of impact/contact, link inertia, and gravity."
 )
+INTEGRATOR_NAME = {
+    int(mj.mjtIntegrator.mjINT_EULER): "Euler",
+    int(mj.mjtIntegrator.mjINT_RK4): "RK4",
+    int(mj.mjtIntegrator.mjINT_IMPLICIT): "implicit",
+    int(mj.mjtIntegrator.mjINT_IMPLICITFAST): "implicitfast",
+    int(mj.mjtIntegrator.mjINT_DISCRETE): "discrete",
+}
 
 _ORIG_MJ_STEP = mj.mj_step
 _CAPTURE: list[dict[str, np.ndarray]] = []
 _CAPTURE_ON = False
+_ID_COPY: mj.MjData | None = None
 
 
 def _capturing_step(model: mj.MjModel, data: mj.MjData) -> None:
+    """Inverse the pre-step copy, then step the live state.
+
+    ``mj_forward`` on the copy writes the qacc that belongs to this q and
+    q̇. ``mj_inverse`` reuses that qacc. The live ``mj_step`` is not allowed
+    to pair its integrated q and q̇ with this acceleration.
+    """
     if _CAPTURE_ON:
+        if _ID_COPY is None:
+            raise RuntimeError("inverse copy is not allocated")
+        copy = _ID_COPY
+        mj.mj_copyData(copy, model, data)
+        mj.mj_forward(model, copy)
+        qacc = np.array(copy.qacc, dtype=np.float64, copy=True)
+        actuator = np.array(copy.qfrc_actuator, dtype=np.float64, copy=True)
+        passive = np.array(copy.qfrc_passive, dtype=np.float64, copy=True)
+        copy.qacc[:] = qacc
+        mj.mj_inverse(model, copy)
+        if float(np.max(np.abs(copy.qacc - qacc))) > 1e-8:
+            copy.qacc[:] = qacc
+            mj.mj_inverse(model, copy)
         _CAPTURE.append({
             "time": float(data.time),
             "qpos": np.array(data.qpos, dtype=np.float64, copy=True),
             "qvel": np.array(data.qvel, dtype=np.float64, copy=True),
             "ctrl": np.array(data.ctrl, dtype=np.float64, copy=True),
+            "qacc": qacc,
+            "actuator": actuator,
+            "passive": passive,
+            "id": np.array(copy.qfrc_inverse, dtype=np.float64, copy=True),
+            "constraint": np.array(copy.qfrc_constraint, dtype=np.float64, copy=True),
+            "bias": np.array(copy.qfrc_bias, dtype=np.float64, copy=True),
         })
     _ORIG_MJ_STEP(model, data)
     if _CAPTURE_ON and _CAPTURE:
-        _CAPTURE[-1]["qacc"] = np.array(data.qacc, dtype=np.float64, copy=True)
-        _CAPTURE[-1]["actuator"] = np.array(data.qfrc_actuator, dtype=np.float64, copy=True)
+        _CAPTURE[-1]["fwdinv"] = np.array(data.solver_fwdinv[:2], dtype=np.float64, copy=True)
 
 
 mj.mj_step = _capturing_step
@@ -121,6 +165,7 @@ class Write:
     swing_side: str
     swing_frac: float | None
     tick: int
+    limiter_bound: bool
 
 
 @dataclass
@@ -302,6 +347,9 @@ def _install(walker: sws.lipm_gait.LipmWalker, bucket: list[Write], asks: list[s
             e_lo, e_hi = e_hi, e_lo
         return q + min(e_hi, max(e_lo, e_des))
 
+    def _limiter_bound(q_des: float, raw: float | None) -> bool:
+        return raw is not None and abs(float(q_des) - float(raw)) > 1e-9
+
     def _log(jn: str, q_des: float, raw: float | None) -> None:
         if jn not in sws.LEG_JOINTS:
             return
@@ -345,6 +393,7 @@ def _install(walker: sws.lipm_gait.LipmWalker, bucket: list[Write], asks: list[s
             swing_side=side,
             swing_frac=None if frac is None else float(frac),
             tick=int(tick_box[0]),
+            limiter_bound=_limiter_bound(q_des, raw),
         )
         bucket.append(rec)
         asks.append(sws.AskSample(
@@ -387,17 +436,18 @@ def _inverse_split(
     grav_data: mj.MjData,
     shot: dict[str, np.ndarray],
 ) -> dict[str, np.ndarray]:
+    """Split the pre-step inverse already stored on ``shot``.
+
+    Gravity is ``qfrc_bias`` at the same q with qvel 0. The inverse itself
+    is not rerun: ``shot`` came from ``mj_forward`` then ``mj_inverse`` on
+    the pre-step copy.
+    """
+    qacc = np.array(shot["qacc"], dtype=np.float64, copy=True)
+    ident_vec = np.array(shot["id"], dtype=np.float64, copy=True)
     scratch.qpos[:] = shot["qpos"]
     scratch.qvel[:] = shot["qvel"]
-    scratch.qacc[:] = shot["qacc"]
-    scratch.ctrl[:] = shot["ctrl"]
-    scratch.qfrc_applied[:] = 0.0
-    scratch.xfrc_applied[:] = 0.0
-    mj.mj_inverse(model, scratch)
-    qacc = np.array(shot["qacc"], dtype=np.float64, copy=True)
-    # mj_inverse keeps the supplied qacc. Re-read in case a build replaces it.
-    if float(np.max(np.abs(scratch.qacc - qacc))) > 1e-8:
-        qacc = np.array(scratch.qacc, dtype=np.float64, copy=True)
+    scratch.qacc[:] = qacc
+    mj.mj_fwdPosition(model, scratch)
     mqacc = np.zeros(model.nv, dtype=np.float64)
     mj.mj_mulM(model, scratch, mqacc, qacc)
     arm = np.asarray(model.dof_armature, dtype=np.float64) * qacc
@@ -407,13 +457,14 @@ def _inverse_split(
     mj.mj_fwdPosition(model, grav_data)
     mj.mj_fwdVelocity(model, grav_data)
     gravity = np.array(grav_data.qfrc_bias, dtype=np.float64, copy=True)
-    coriolis = np.array(scratch.qfrc_bias, dtype=np.float64, copy=True) - gravity
-    contact = -np.array(scratch.qfrc_constraint, dtype=np.float64, copy=True)
-    passive = -np.array(scratch.qfrc_passive, dtype=np.float64, copy=True)
+    bias = np.array(shot["bias"], dtype=np.float64, copy=True)
+    coriolis = bias - gravity
+    contact = -np.array(shot["constraint"], dtype=np.float64, copy=True)
+    passive = -np.array(shot["passive"], dtype=np.float64, copy=True)
     link = (mqacc - arm) + coriolis
     ident = arm + link + gravity + contact + passive
     return {
-        "id": np.array(scratch.qfrc_inverse, dtype=np.float64, copy=True),
+        "id": ident_vec,
         "arm_model": arm,
         "arm_001": 0.01 * qacc,
         "link": link,
@@ -423,6 +474,7 @@ def _inverse_split(
         "ident": ident,
         "qacc": qacc,
         "actuator": np.array(shot["actuator"], dtype=np.float64, copy=True),
+        "passive_raw": np.array(shot["passive"], dtype=np.float64, copy=True),
     }
 
 
@@ -541,8 +593,13 @@ def _jsonable(value: object) -> object:
     return value
 
 
+def _integrator_name(model: mj.MjModel) -> str:
+    code = int(model.opt.integrator)
+    return INTEGRATOR_NAME.get(code, f"unknown-{code}")
+
+
 def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
-    global _CAPTURE_ON
+    global _CAPTURE_ON, _ID_COPY
     digest_before = _plant_md5()
     if digest_before != PLANT_MD5:
         raise SystemExit(f"plant md5 {digest_before} != {PLANT_MD5}")
@@ -563,6 +620,16 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
     audit = _forcerange_audit(session.model, walker)
     if not audit["all_pm_2_45"]:
         raise RuntimeError("forcerange is not ±2.45 on every leg joint")
+    integrator = _integrator_name(session.model)
+    # Runtime only. The plant XML is not written.
+    session.model.opt.enableflags |= int(mj.mjtEnableBit.mjENBL_FWDINV)
+    _ID_COPY = mj.MjData(session.model)
+    root_jid = int(mj.mj_name2id(session.model, mj.mjtObj.mjOBJ_JOINT, "root"))
+    if root_jid < 0 or int(session.model.jnt_type[root_jid]) != int(mj.mjtJoint.mjJNT_FREE):
+        raise RuntimeError("root is not a free joint")
+    root_adr = int(session.model.jnt_dofadr[root_jid])
+    if root_adr != 0:
+        raise RuntimeError(f"root dof address is {root_adr}, expected 0")
     writes: list[Write] = []
     asks: list[sws.AskSample] = []
     plant_asks: list[sws.AskSample] = []
@@ -577,6 +644,35 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
     plant_substeps = 0
     max_step_abs = 0.0
     max_writer_abs = 0.0
+    limiter_ticks = 0
+    residual_fail_ticks = 0
+    residual_fail_substeps = 0
+    fwdinv_ticks: list[list[float]] = []
+    root_id_ticks: list[float] = []
+    root_id_max = 0.0
+    knee_id_peak = 0.0
+    knee_id_signed = 0.0
+    knee_id_joint: str | None = None
+    knee_id_t: float | None = None
+    knee_id_pass_peak = 0.0
+    knee_id_pass_signed = 0.0
+    knee_id_pass_joint: str | None = None
+    knee_id_pass_t: float | None = None
+    max_id_minus_act = 0.0
+    max_leg_resid = 0.0
+    max_leg_resid_joint: str | None = None
+    max_leg_resid_qvel = 0.0
+    max_leg_resid_passive = 0.0
+    slope_num = 0.0
+    slope_den = 0.0
+    tick_residual_fail: list[bool] = []
+    move_s = max(float(cfg.gm_move_s), float(session.ctrl_dt))
+    slew_frac = min(1.0, float(session.ctrl_dt) / move_s)
+    slew_rad = float(sws.lipm_gait.HX35_SLEW_RAD_S) * float(session.ctrl_dt)
+    move_idx = {
+        str(mj.mj_id2name(session.model, mj.mjtObj.mjOBJ_ACTUATOR, int(idx)) or "").removesuffix("_pos"): int(idx)
+        for idx in session._move_ctrl_idx
+    }
     scratch = mj.MjData(session.model)
     grav_data = mj.MjData(session.model)
     dof = {
@@ -636,6 +732,7 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
             if not stop_sent:
                 session.bus.stop(now)
                 stop_sent = True
+        ctrl_before = np.array(session.data.ctrl, dtype=np.float64, copy=True)
         n_ask = len(asks)
         _CAPTURE.clear()
         _CAPTURE_ON = True
@@ -711,6 +808,81 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
                     plant_overs.append(over)
                     over_shots.setdefault(si, []).append((leg, ask))
                     setattr(over, "_shot", si)
+        tick_fail = False
+        fwd0 = 0.0
+        fwd1 = 0.0
+        root_tick = 0.0
+        substep_fail: list[bool] = []
+        for shot in shots:
+            ident = shot["id"]
+            actuator = shot["actuator"]
+            passive = shot["passive"]
+            qvel = shot["qvel"]
+            fwd = shot["fwdinv"]
+            fwd0 = max(fwd0, abs(float(fwd[0])))
+            fwd1 = max(fwd1, abs(float(fwd[1])))
+            root_abs = float(np.max(np.abs(ident[root_adr:root_adr + ROOT_DOFS])))
+            root_tick = max(root_tick, root_abs)
+            root_id_max = max(root_id_max, root_abs)
+            this_fail = False
+            for leg in legs:
+                adr = int(leg["dof"])
+                joint = str(leg["joint"])
+                resid = abs(float(ident[adr] - (actuator[adr] + passive[adr])))
+                act_gap = abs(float(ident[adr] - actuator[adr]))
+                speed = abs(float(qvel[adr]))
+                max_id_minus_act = max(max_id_minus_act, act_gap)
+                slope_num += resid * speed
+                slope_den += speed * speed
+                if resid > max_leg_resid:
+                    max_leg_resid = resid
+                    max_leg_resid_joint = joint
+                    max_leg_resid_qvel = speed
+                    max_leg_resid_passive = abs(float(passive[adr]))
+                if resid > RESIDUAL_BAR + 1e-9:
+                    this_fail = True
+                    tick_fail = True
+                signed_id = float(ident[adr])
+                if joint.endswith("knee") and abs(signed_id) > knee_id_peak:
+                    knee_id_peak = abs(signed_id)
+                    knee_id_signed = signed_id
+                    knee_id_joint = joint
+                    knee_id_t = float(shot["time"])
+            if this_fail:
+                residual_fail_substeps += 1
+            else:
+                for leg in legs:
+                    joint = str(leg["joint"])
+                    if not joint.endswith("knee"):
+                        continue
+                    signed_id = float(ident[int(leg["dof"])])
+                    if abs(signed_id) > knee_id_pass_peak:
+                        knee_id_pass_peak = abs(signed_id)
+                        knee_id_pass_signed = signed_id
+                        knee_id_pass_joint = joint
+                        knee_id_pass_t = float(shot["time"])
+            substep_fail.append(this_fail)
+        for over in plant_overs[over_from:]:
+            si = getattr(over, "_shot", None)
+            setattr(over, "_sub_fail", True if not isinstance(si, int) else substep_fail[si])
+        if tick_fail:
+            residual_fail_ticks += 1
+        tick_residual_fail.append(tick_fail)
+        fwdinv_ticks.append([fwd0, fwd1])
+        root_id_ticks.append(root_tick)
+        limited = any(
+            rec.limiter_bound and rec.joint in sws.LEG_JOINTS for rec in new_writes
+        )
+        if mode == "move":
+            goal_ctrl = {rec.joint: float(rec.ctrl) for rec in new_writes if rec.joint in move_idx}
+            for joint, idx in move_idx.items():
+                if joint not in goal_ctrl:
+                    continue
+                if abs((goal_ctrl[joint] - float(ctrl_before[idx])) * slew_frac) > slew_rad + 1e-9:
+                    limited = True
+                    break
+        if limited:
+            limiter_ticks += 1
         for rec in new_writes:
             if not rec.raw_ok or rec.ctrl_raw is None:
                 raw_unavailable = True
@@ -802,13 +974,7 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
                 if not isinstance(si, int) or si not in over_shots:
                     continue
                 if si not in split_cache:
-                    shot = dict(shots[si])
-                    clipped_ctrl = np.array(shot["ctrl"], dtype=np.float64, copy=True)
-                    for leg in legs:
-                        idx = int(leg["idx"])
-                        clipped_ctrl[idx] = _plant_ctrl(session.model, idx, float(clipped_ctrl[idx]))
-                    shot["ctrl"] = clipped_ctrl
-                    split_cache[si] = _inverse_split(session.model, scratch, grav_data, shot)
+                    split_cache[si] = _inverse_split(session.model, scratch, grav_data, shots[si])
                 split = split_cache[si]
                 adr = dof[over.joint]
                 scratch.qpos[:] = shots[si]["qpos"]
@@ -830,16 +996,23 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
                 }
                 ident = float(split["ident"][adr])
                 id_nm = float(split["id"][adr])
+                actuator_nm = float(split["actuator"][adr])
+                qfrc_passive = float(split["passive_raw"][adr])
+                force_resid = abs(id_nm - (actuator_nm + qfrc_passive))
+                fwd = shots[si]["fwdinv"]
                 over.id_blob = {
                     "id_nm": id_nm,
                     "id_abs_nm": abs(id_nm),
                     "parts": parts,
                     "passive_nm": float(split["passive"][adr]),
+                    "qfrc_passive_nm": qfrc_passive,
                     "ident_nm": ident,
                     "ident_residual_nm": id_nm - ident,
+                    "force_residual_nm": force_resid,
                     "armature_model_qacc_nm": float(split["arm_model"][adr]),
                     "qacc_rad_s2": float(split["qacc"][adr]),
-                    "actuator_nm": float(split["actuator"][adr]),
+                    "actuator_nm": actuator_nm,
+                    "solver_fwdinv": [float(fwd[0]), float(fwd[1])],
                     "substep": si,
                     "n_substeps": len(shots),
                     "cop_x_mm": cop_x,
@@ -987,9 +1160,15 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
             None if src is None else src.swing_frac,
         )
         hand = HAND_M_KG * G * HAND_L_M * math.sin(abs(rec.q) / 2.0)
+        gated = bool(getattr(rec, "_sub_fail", True))
         if not isinstance(blob, dict):
             kind, term = ("unmeasured", "")
             parts = {name: float("nan") for name in TERMS}
+        elif gated:
+            parts = {name: float(blob["parts"][name]) for name in TERMS}
+            kind, term = RESIDUAL_FAIL, ""
+            resid = abs(float(blob["ident_residual_nm"]))
+            max_resid = max(max_resid, resid)
         else:
             parts = {name: float(blob["parts"][name]) for name in TERMS}
             kind, term = _classify(
@@ -1023,7 +1202,11 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
             "link_inertia_nm": None if not isinstance(blob, dict) else parts["link inertia"],
             "gravity_nm": None if not isinstance(blob, dict) else parts["gravity"],
             "passive_nm": None if not isinstance(blob, dict) else blob["passive_nm"],
+            "qfrc_passive_nm": None if not isinstance(blob, dict) else blob["qfrc_passive_nm"],
+            "force_residual_nm": None if not isinstance(blob, dict) else blob["force_residual_nm"],
             "ident_residual_nm": None if not isinstance(blob, dict) else blob["ident_residual_nm"],
+            "solver_fwdinv": None if not isinstance(blob, dict) else blob["solver_fwdinv"],
+            "residual_gated": gated,
             "qacc_rad_s2": None if not isinstance(blob, dict) else blob["qacc_rad_s2"],
             "qacc_source": QACC_SOURCE,
             "actuator_nm": None if not isinstance(blob, dict) else blob["actuator_nm"],
@@ -1048,16 +1231,22 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
     ask_times = {round(float(row["t_s"]), 6) for row in ask_events}
     counts = {name: 0 for name in CLASS_NAMES}
     term_counts = {name: 0 for name in REMAINING}
+    n_residual_over = 0
     for row in ask_events:
-        counts[str(row["class"])] = counts.get(str(row["class"]), 0) + 1
+        if row["class"] == RESIDUAL_FAIL:
+            n_residual_over += 1
+            continue
+        if row["class"] in counts:
+            counts[str(row["class"])] += 1
         if row["class"] == "physics candidate" and row["dominant_term"] in term_counts:
             term_counts[str(row["dominant_term"])] += 1
+    n_bucketed = sum(counts.values())
     bucket_worst = {name: _worst_tick(ask_events, name) for name in CLASS_NAMES}
     worst = bucket_worst["unsourced-armature candidate"] or bucket_worst["physics candidate"] or bucket_worst["controller fail"]
     def _frac(count: int) -> float | None:
-        if n_ask_over <= 0:
+        if n_bucketed <= 0:
             return None
-        return count / n_ask_over
+        return count / n_bucketed
 
     qdes_peak = max(writes, key=lambda rec: abs(rec.signed_nm)) if writes else None
     goal_peak = max(writes, key=lambda rec: abs(rec.ask_nm)) if writes else None
@@ -1117,6 +1306,48 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         "goal_ask_peak_nm": None if goal_peak is None else abs(goal_peak.ask_nm),
         "goal_ask_peak_joint": None if goal_peak is None else goal_peak.joint,
         "goal_ask_peak_t_s": None if goal_peak is None else goal_peak.t_s,
+        "integrator": integrator,
+        "limiter_active_fraction": (limiter_ticks / n) if n else 0.0,
+        "limiter_active_ticks": limiter_ticks,
+        "limiter": (
+            "controller-side clip: write_clipped band on non-sagittal joints, "
+            "write_force_limited predicted-force clip, and the hip/knee/ankle "
+            "pitch slew in _lipm_substep"
+        ),
+        "residual_fail_label": RESIDUAL_FAIL,
+        "residual_fail_ticks": residual_fail_ticks,
+        "residual_fail_substeps": residual_fail_substeps,
+        "residual_fail_over_bar": n_residual_over,
+        "residual_bar_nm": RESIDUAL_BAR,
+        "n_bucketed": n_bucketed,
+        "root_id_max_nm": root_id_max,
+        "root_id_per_tick_nm": root_id_ticks,
+        "solver_fwdinv_per_tick": fwdinv_ticks,
+        "solver_fwdinv_max": [
+            max((row[0] for row in fwdinv_ticks), default=0.0),
+            max((row[1] for row in fwdinv_ticks), default=0.0),
+        ],
+        "knee_id_peak_nm": knee_id_peak,
+        "knee_id_peak_signed_nm": knee_id_signed,
+        "knee_id_peak_joint": knee_id_joint,
+        "knee_id_peak_t_s": knee_id_t,
+        "knee_id_controls_nm": KNEE_ID_CONTROLS_NM,
+        "knee_id_matches_controls": abs(knee_id_peak - KNEE_ID_CONTROLS_NM) <= 5e-4,
+        "knee_id_pass_peak_nm": knee_id_pass_peak,
+        "knee_id_pass_signed_nm": knee_id_pass_signed,
+        "knee_id_pass_joint": knee_id_pass_joint,
+        "knee_id_pass_t_s": knee_id_pass_t,
+        "knee_id_pass_matches_controls": abs(knee_id_pass_peak - KNEE_ID_CONTROLS_NM) <= 5e-4,
+        "implicit_offset": {
+            "integrator": integrator,
+            "damping_implicit": integrator in ("implicit", "implicitfast"),
+            "max_abs_id_minus_actuator_nm": max_id_minus_act,
+            "max_leg_residual_nm": max_leg_resid,
+            "max_leg_residual_joint": max_leg_resid_joint,
+            "max_leg_residual_qvel_rad_s": max_leg_resid_qvel,
+            "max_leg_residual_passive_nm": max_leg_resid_passive,
+            "residual_per_speed_nm_per_rad_s": (slope_num / slope_den) if slope_den > 0.0 else None,
+        },
         "ctrl_clip_fraction": clip_fraction,
         "ctrl_clip_ticks": clip_ticks,
         "ctrl_clip_substeps": clip_substeps,
@@ -1139,7 +1370,7 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         "class_fraction": {name: _frac(counts[name]) for name in counts},
         "physics_term_counts": term_counts,
         "physics_term_fraction": {
-            name: (term_counts[name] / n_ask_over) if n_ask_over else None for name in REMAINING
+            name: (term_counts[name] / n_bucketed) if n_bucketed else None for name in REMAINING
         },
         "bucket_worst": bucket_worst,
         "worst_id": worst,
@@ -1157,9 +1388,11 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         f"T {period_s:.2f} vx {vx:.3f} {verdict} {gait} "
         f"ask {row['ask_peak_nm']:.3f} {row['ask_peak_joint']} "
         f"goal {row['goal_ask_peak_nm']:.3f} "
-        f"clip {clip_fraction} "
+        f"clip {clip_fraction} lim {row['limiter_active_fraction']:.3f} "
+        f"kneeID {knee_id_peak:.3f} {knee_id_joint} "
+        f"root {root_id_max:.3e} resfail {residual_fail_ticks}/{n} "
         f"qdes {row['qdes_peak_nm']:.3f} {row['qdes_peak_joint']} "
-        f"over ask/qdes {n_ask_over}/{n_qdes_over} "
+        f"over ask/qdes {n_ask_over}/{n_qdes_over} bucketed {n_bucketed} "
         f"note {torque_bar['note'] or '-'} resid {max_resid:.3e} "
         f"class {counts}",
         flush=True,
@@ -1201,6 +1434,15 @@ def main() -> None:
         "plant_md5": PLANT_MD5,
         "runtime_only": True,
         "qacc_source": QACC_SOURCE,
+        "integrator_note": (
+            "implicit and implicitfast treat damping implicitly, so "
+            "|qfrc_inverse - (qfrc_actuator + qfrc_passive)| can carry an "
+            "offset that grows with speed. qfrc_inverse itself matches "
+            "qfrc_actuator when the pre-step forward and inverse see the same qacc."
+        ),
+        "residual_bar_nm": RESIDUAL_BAR,
+        "residual_definition": "|qfrc_inverse - (qfrc_actuator + qfrc_passive)| per leg joint",
+        "fwdinv": "model.opt.enableflags |= mjENBL_FWDINV at runtime; solver_fwdinv[0] is the constraint-force norm and [1] is the applied-force norm",
         "ask_bar_nm": ASK_BAR,
         "ask_definition": "|kp*(ctrl_plant-q) - kv*qvel|, ctrl_plant = clip(data.ctrl, ctrlrange) when actuator_ctrllimited",
         "ctrl_clip": "|ctrl_raw| > 2.09 on a control tick is a fail. ctrl_raw is the writer command before the ctrlrange clip when that command reproduces the stored ctrl, and data.ctrl entering mj_step.",
@@ -1216,7 +1458,7 @@ def main() -> None:
             "g": G,
         },
         "id_split": {
-            "id": "qfrc_inverse on the realised q, qvel, qacc with contacts",
+            "id": "qfrc_inverse from mj_inverse on an mj_copyData of the pre-step state after mj_forward, using that forward qacc",
             "armature_qacc": "0.01 * qacc",
             "impact_contact": "-qfrc_constraint",
             "link_inertia": "(M*qacc - dof_armature*qacc) + (qfrc_bias(q,v) - qfrc_bias(q,0))",
