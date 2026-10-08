@@ -135,6 +135,11 @@ BEST_ROW = (0.50, 0.016)
 KNEE_ID_CONTROLS_NM = 2.045
 KNEE_ID_CONTROLS_DISCRETE_NM = (0.934, 1.087)
 ROOT_DOFS = 6
+# A planned wrench is consistent when these six root residuals are at the
+# noise floor. 1e-2 Nm is the same edge the live match already treats as a
+# real miss. A large hip-roll τ is not this flag.
+ROOT_CONSIST_NM = 1e-2
+SUPPORT_OUT_M = 1e-4
 PERIODS = (0.80, 0.75, 0.70, 0.65, 0.60, 0.55, 0.50, 1.00, 1.20)
 SPEEDS = (0.016, 0.024, 0.032, 0.040, 0.048, 0.056)
 TERMS = ("armature·q̈", "impact/contact", "link inertia", "gravity")
@@ -921,6 +926,34 @@ def _skew(v: np.ndarray) -> np.ndarray:
     )
 
 
+def _foot_box(model: mj.MjModel, data: mj.MjData, side: str) -> dict[str, object]:
+    """Bottom face of the contact box. Centre matches ``_sole_point``."""
+    gid = int(mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, f"{side}_foot_contact"))
+    if gid < 0:
+        raise RuntimeError(f"missing {side}_foot_contact")
+    centre = np.array(data.geom_xpos[gid], dtype=np.float64)
+    rot = np.array(data.geom_xmat[gid], dtype=np.float64).reshape(3, 3)
+    half = np.array(model.geom_size[gid], dtype=np.float64)
+    sole = centre - rot[:, 2] * float(half[2])
+    corners = []
+    for sx in (-1.0, 1.0):
+        for sy in (-1.0, 1.0):
+            corners.append(sole + rot[:, 0] * sx * float(half[0]) + rot[:, 1] * sy * float(half[1]))
+    pts = np.stack(corners, axis=0)
+    return {
+        "centre": sole,
+        "corners": pts,
+        "y_m": float(sole[1]),
+        "y_lo_m": float(np.min(pts[:, 1])),
+        "y_hi_m": float(np.max(pts[:, 1])),
+    }
+
+
+def _support_margin(point_xy: np.ndarray, corners: np.ndarray) -> float:
+    hull = sws.steer_walk.convex_hull_xy(np.asarray(corners, dtype=np.float64)[:, :2])
+    return float(sws.steer_walk.support_margin(np.asarray(point_xy, dtype=np.float64), hull))
+
+
 def _sole_point(model: mj.MjModel, data: mj.MjData, side: str) -> np.ndarray:
     """World point at the bottom centre of the foot contact box."""
     gid = int(mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, f"{side}_foot_contact"))
@@ -1616,11 +1649,307 @@ def _contact_copy(model: mj.MjModel) -> mj.MjModel:
     return copied
 
 
+def _clone_model(model: mj.MjModel) -> mj.MjModel:
+    fd, path = tempfile.mkstemp(prefix="a5-swing-", suffix=".mjb")
+    os.close(fd)
+    try:
+        mj.mj_saveModel(model, path)
+        return mj.MjModel.from_binary_path(path)
+    finally:
+        os.unlink(path)
+
+
+def _qfrc_at(
+    model: mj.MjModel,
+    data: mj.MjData,
+    pose: np.ndarray,
+    qvel: np.ndarray,
+    qacc: np.ndarray,
+) -> np.ndarray:
+    data.qpos[:] = pose
+    data.qvel[:] = qvel
+    data.qacc[:] = qacc
+    mj.mj_inverse(model, data)
+    return np.array(data.qfrc_inverse, dtype=np.float64, copy=True)
+
+
+def _zero_swing_links(model: mj.MjModel, swing: str) -> list[str]:
+    """Drop the swing leg's link mass and inertia. Armature stays on the dof."""
+    names: list[str] = []
+    prefix = f"{swing}_"
+    for bid in range(int(model.nbody)):
+        name = mj.mj_id2name(model, mj.mjtObj.mjOBJ_BODY, bid) or ""
+        if not name.startswith(prefix):
+            continue
+        if not any(tok in name for tok in ("hip", "knee", "ank")):
+            continue
+        model.body_mass[bid] = 0.0
+        model.body_inertia[bid, :] = 0.0
+        names.append(name)
+    if not names:
+        raise RuntimeError(f"swing leg {swing} has no links to drop")
+    mj.mj_setConst(model, mj.MjData(model))
+    return names
+
+
+def _best_force_point(
+    model: mj.MjModel,
+    data: mj.MjData,
+    body_id: int,
+    force: np.ndarray,
+    ident: np.ndarray,
+    centre: np.ndarray,
+) -> dict[str, object]:
+    """Point on z = 0 whose pure force leaves the smallest root residual."""
+    mj.mj_fwdPosition(model, data)
+    zero = np.zeros(3, dtype=np.float64)
+    best = None
+    # Coarse, then a 1 mm patch. The map is the moment arm of one force.
+    for step, span in ((0.004, 0.08),):
+        xs = np.arange(float(centre[0]) - span, float(centre[0]) + span + 0.5 * step, step)
+        ys = np.arange(float(centre[1]) - span, float(centre[1]) + span + 0.5 * step, step)
+        for x in xs:
+            for y in ys:
+                point = np.array([float(x), float(y), 0.0], dtype=np.float64)
+                gen = _jac_wrench(model, data, point, body_id, force, zero)
+                resid = ident - gen
+                score = float(np.max(np.abs(resid[:ROOT_DOFS])))
+                if best is None or score < float(best["root_max_nm"]):
+                    best = {
+                        "point_m": [float(x), float(y), 0.0],
+                        "root_max_nm": score,
+                        "resid_nm": [float(v) for v in resid[:ROOT_DOFS]],
+                        "gen": gen,
+                    }
+    assert best is not None
+    px, py, _ = best["point_m"]
+    for x in np.arange(px - 0.004, px + 0.004 + 1e-9, 0.001):
+        for y in np.arange(py - 0.004, py + 0.004 + 1e-9, 0.001):
+            point = np.array([float(x), float(y), 0.0], dtype=np.float64)
+            gen = _jac_wrench(model, data, point, body_id, force, zero)
+            resid = ident - gen
+            score = float(np.max(np.abs(resid[:ROOT_DOFS])))
+            if score < float(best["root_max_nm"]):
+                best = {
+                    "point_m": [float(x), float(y), 0.0],
+                    "root_max_nm": score,
+                    "resid_nm": [float(v) for v in resid[:ROOT_DOFS]],
+                    "gen": gen,
+                }
+    return best
+
+
+def _hip_roll_parts(
+    model: mj.MjModel,
+    pose: np.ndarray,
+    qvel: np.ndarray,
+    qacc: np.ndarray,
+    stance: str,
+    force: np.ndarray,
+    gen_planned: np.ndarray,
+    gen_best: np.ndarray | None,
+    dofadr: dict[str, int],
+    com: np.ndarray,
+    zmp_y: float,
+    box: dict[str, object],
+) -> dict[str, object]:
+    """Stance hip-roll τ = gravity + M·q̈ + velocity + contact.
+
+    Gravity is ``qfrc_inverse`` at q̇ = 0, q̈ = 0. Inertial is the same
+    call with the planned q̈, minus gravity, so it is M·q̈ including
+    armature. Velocity is the remainder of the full inverse. Contact is
+    minus the generalized force of the planned wrench. Swing-leg is the
+    change in those three when the swing links' mass and inertia are
+    zero. τ magnitude is not a discard.
+    """
+    joint = f"{stance}_hip_roll"
+    adr = int(dofadr[joint])
+    data = mj.MjData(model)
+    zeros = np.zeros_like(qvel)
+    full = _qfrc_at(model, data, pose, qvel, qacc)
+    grav = _qfrc_at(model, data, pose, zeros, zeros)
+    inert_and_grav = _qfrc_at(model, data, pose, zeros, qacc)
+    inert = inert_and_grav - grav
+    vel = full - inert_and_grav
+    contact = -np.asarray(gen_planned, dtype=np.float64)
+    tau = full + contact
+    arm = float(model.dof_armature[adr]) * float(qacc[adr])
+    swing = "l" if stance == "r" else "r"
+    swung = _clone_model(model)
+    dropped = _zero_swing_links(swung, swing)
+    sdata = mj.MjData(swung)
+    s_full = _qfrc_at(swung, sdata, pose, qvel, qacc)
+    s_grav = _qfrc_at(swung, sdata, pose, zeros, zeros)
+    s_ig = _qfrc_at(swung, sdata, pose, zeros, qacc)
+    s_inert = s_ig - s_grav
+    s_vel = s_full - s_ig
+    # Vertical support anywhere on the sole. The joint axis at this pose
+    # dots the moment, so the range is what a pure fz can do.
+    mj.mj_fwdPosition(model, data)
+    jid = int(mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, joint))
+    hip = np.array(data.xanchor[jid], dtype=np.float64)
+    foot_id = int(model.geom_bodyid[int(mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, f"{stance}_foot_contact"))])
+    fz = float(force[2])
+    vertical = np.array([0.0, 0.0, fz], dtype=np.float64)
+    zero_m = np.zeros(3, dtype=np.float64)
+    static_tau = []
+    corners = np.asarray(box["corners"], dtype=np.float64)
+    for corner in corners:
+        gen_c = _jac_wrench(model, data, corner, foot_id, vertical, zero_m)
+        static_tau.append(float(grav[adr] - gen_c[adr]))
+    best_tau = None
+    best_bare = None
+    if gen_best is not None:
+        best_tau = float(full[adr] - gen_best[adr])
+        best_bare = best_tau - arm
+    parts = {
+        "joint": joint,
+        "gravity_nm": float(grav[adr]),
+        "inertial_nm": float(inert[adr]),
+        "inertial_bare_nm": float(inert[adr] - arm),
+        "velocity_nm": float(vel[adr]),
+        "contact_nm": float(contact[adr]),
+        "swing_gravity_nm": float(grav[adr] - s_grav[adr]),
+        "swing_inertial_nm": float(inert[adr] - s_inert[adr]),
+        "swing_velocity_nm": float(vel[adr] - s_vel[adr]),
+        "body_gravity_nm": float(s_grav[adr]),
+        "body_inertial_nm": float(s_inert[adr]),
+        "body_velocity_nm": float(s_vel[adr]),
+        "tau_nm": float(tau[adr]),
+        "tau_bare_nm": float(tau[adr] - arm),
+        "armature_qdd_nm": arm,
+        "sum_nm": float(grav[adr] + inert[adr] + vel[adr] + contact[adr]),
+        "hip_axis_y_m": float(hip[1]),
+        "box_centre_y_m": float(box["y_m"]),
+        "box_y_lo_m": float(box["y_lo_m"]),
+        "box_y_hi_m": float(box["y_hi_m"]),
+        "planned_com_y_m": float(com[1]),
+        "planned_zmp_y_m": float(zmp_y),
+        "static_vertical_nm": [float(min(static_tau)), float(max(static_tau))],
+        "tau_at_best_point_nm": best_tau,
+        "tau_bare_at_best_point_nm": best_bare,
+        "swing_links_dropped": dropped,
+        "q_hip_roll_rad": float(pose[int(model.jnt_qposadr[jid])]),
+    }
+    parts["closes_nm"] = float(parts["sum_nm"] - parts["tau_nm"])
+    return parts
+
+
+def _cycle_rows(rows: list[dict[str, object]], period_s: float) -> list[dict[str, object]]:
+    """Second walk cycle when the bout has one. Otherwise the first period of walk."""
+    walk = [row for row in rows if row.get("phase") == "walk"]
+    if len(walk) < 4:
+        return rows
+    t0 = float(walk[0]["t_s"])
+    period = float(period_s)
+    second = [
+        row for row in walk
+        if t0 + period - 1e-9 <= float(row["t_s"]) < t0 + 2.0 * period - 1e-9
+    ]
+    if len(second) >= 8:
+        return second
+    return [
+        row for row in walk
+        if t0 - 1e-9 <= float(row["t_s"]) < t0 + period - 1e-9
+    ]
+
+
+def _print_plan_y(trace: dict[str, object]) -> None:
+    """Root rows for every tick, then one cycle of the y channels."""
+    ticks = trace.get("ticks")
+    if not isinstance(ticks, list):
+        return
+    print(
+        "planned root rows: qfrc is mj_inverse on the reference; "
+        "resid is qfrc_inverse - J^T f at the planned ZMP. resid should be ~0",
+        flush=True,
+    )
+    print(
+        "t phase support stance "
+        "qfrc_fx qfrc_fy qfrc_fz qfrc_tx qfrc_ty qfrc_tz "
+        "resid_fx resid_fy resid_fz resid_tx resid_ty resid_tz",
+        flush=True,
+    )
+    for row in ticks:
+        qf = row["qfrc_root_nm"]
+        rs = row["resid_root_nm"]
+        if not isinstance(qf, list) or not isinstance(rs, list):
+            continue
+        print(
+            f"{float(row['t_s']):.3f} {row['phase']} {row['support']} {row['stance'] or '-'} "
+            + " ".join(f"{float(v):+.4f}" for v in qf)
+            + " "
+            + " ".join(f"{float(v):+.4f}" for v in rs),
+            flush=True,
+        )
+    cycle = trace.get("cycle")
+    print(
+        "one cycle: preview_com_y planned_com_y planned_zmp_y "
+        "stance_box_y hip_roll_axis_y live_com_y live_cop_y",
+        flush=True,
+    )
+    if isinstance(cycle, list):
+        for row in cycle:
+            box_y = row.get("stance_box_y_m")
+            hip_y = row.get("stance_hip_y_m")
+            live_cop = row.get("live_cop_y_m")
+            preview = row.get("preview_com_y_m")
+            print(
+                f"{float(row['t_s']):.3f} {row['support']} {row['stance'] or '-'} "
+                f"preview {float(preview) if preview is not None else float('nan'):+.4f} "
+                f"com {float(row['planned_com_y_m']):+.4f} "
+                f"zmp {float(row['planned_zmp_y_m']):+.4f} "
+                f"box {float(box_y) if box_y is not None else float('nan'):+.4f} "
+                f"hip {float(hip_y) if hip_y is not None else float('nan'):+.4f} "
+                f"live_com {float(row['live_com_y_m']) if row.get('live_com_y_m') is not None else float('nan'):+.4f} "
+                f"live_cop {float(live_cop) if live_cop is not None else float('nan'):+.4f} "
+                f"out {int(bool(row['com_outside']))}/{int(bool(row['zmp_outside']))}",
+                flush=True,
+            )
+    summary = trace.get("summary")
+    if isinstance(summary, dict):
+        print(
+            "plan-y "
+            f"root_max {summary.get('root_resid_max_nm')} "
+            f"root_inconsistent {summary.get('root_inconsistent')} "
+            f"support_inconsistent {summary.get('support_inconsistent')} "
+            f"inconsistent {summary.get('inconsistent')} "
+            f"tau_not_a_discard {summary.get('tau_is_not_a_discard')}",
+            flush=True,
+        )
+    mid = trace.get("stance_mid")
+    if isinstance(mid, dict):
+        parts = mid.get("parts")
+        print(
+            "stance mid "
+            f"t {mid.get('t_s')} joint {mid.get('joint')} "
+            f"bare {mid.get('tau_bare_nm')} tau {mid.get('tau_nm')}",
+            flush=True,
+        )
+        if isinstance(parts, dict):
+            print(
+                "decompose "
+                f"grav {parts.get('gravity_nm')} "
+                f"inert {parts.get('inertial_nm')} "
+                f"vel {parts.get('velocity_nm')} "
+                f"contact {parts.get('contact_nm')} "
+                f"swing_grav {parts.get('swing_gravity_nm')} "
+                f"swing_inert {parts.get('swing_inertial_nm')} "
+                f"swing_vel {parts.get('swing_velocity_nm')} "
+                f"static {parts.get('static_vertical_nm')} "
+                f"bare_at_best_point {parts.get('tau_bare_at_best_point_nm')} "
+                f"closes {parts.get('closes_nm')}",
+                flush=True,
+            )
+
+
 def _planned_tau(
     model: mj.MjModel,
     samples: list[dict[str, object]],
     qadr: dict[str, int],
     dofadr: dict[str, int],
+    trace: bool = False,
+    trace_period_s: float | None = None,
 ) -> dict[str, object]:
     """τ_req from the walker's reference, contacts replaced by the ZMP wrench.
 
@@ -1652,6 +1981,12 @@ def _planned_tau(
     ankles: list[dict[str, np.ndarray]] = []
     ankle_ids: dict[str, int] = {}
     foot_ids: dict[str, int] = {}
+    trace_rows: list[dict[str, object]] = []
+    trace_aux: list[dict[str, object]] = []
+    hip_jnt = {
+        side: int(mj.mj_name2id(plan, mj.mjtObj.mjOBJ_JOINT, f"{side}_hip_roll"))
+        for side in ("l", "r")
+    }
     for side, body in (("l", "l_ank_roll_link"), ("r", "r_ank_roll_link")):
         ankle_ids[side], _ = _body_point(plan, data, body)
         gid = int(mj.mj_name2id(plan, mj.mjtObj.mjOBJ_GEOM, f"{side}_foot_contact"))
@@ -1851,6 +2186,71 @@ def _planned_tau(
             else:
                 gen_min += _jac_wrench(plan, data, soles[k][side], foot_ids[side], f_min[side], m_min[side])
         tau_lin = ident - gen_lin
+        if trace:
+            boxes = {side: _foot_box(plan, data, side) for side in ("l", "r")}
+            if support == "ss" and stance in ("l", "r"):
+                corners = np.asarray(boxes[stance]["corners"], dtype=np.float64)
+                stance_box_y = float(boxes[stance]["y_m"])
+                stance_hip_y = float(data.xanchor[hip_jnt[stance], 1])
+            else:
+                corners = np.vstack([
+                    np.asarray(boxes["l"]["corners"], dtype=np.float64),
+                    np.asarray(boxes["r"]["corners"], dtype=np.float64),
+                ])
+                stance_box_y = None
+                stance_hip_y = None
+            com_m = _support_margin(com[:2], corners)
+            zmp_m = _support_margin(p_zmp[:2], corners)
+            hip_tau = {}
+            for side in ("l", "r"):
+                hadr = int(dofadr[f"{side}_hip_roll"])
+                hip_tau[side] = float(tau_lin[hadr])
+                hip_tau[side + "_bare"] = float(tau_lin[hadr] - float(arm[hadr]) * float(qacc[k][hadr]))
+            preview_y = sample.get("preview_com_y")
+            if preview_y is None:
+                preview_y = sample.get("com_y")
+            tick_row = {
+                "k": k,
+                "t_s": float(sample["t"]),
+                "phase": str(sample["phase"]),
+                "support": support,
+                "stance": stance if stance in ("l", "r") else "",
+                "qfrc_root_nm": [float(v) for v in ident[:ROOT_DOFS]],
+                "resid_root_nm": [float(v) for v in tau_lin[:ROOT_DOFS]],
+                "planned_com_y_m": float(com[1]),
+                "preview_com_y_m": None if preview_y is None else float(preview_y),
+                "planned_zmp_y_m": float(zmp_y),
+                "planned_zmp_x_m": float(p_zmp[0]),
+                "root_y_m": float(poses[k][1]),
+                "box_l_y_m": float(boxes["l"]["y_m"]),
+                "box_r_y_m": float(boxes["r"]["y_m"]),
+                "hip_l_y_m": float(data.xanchor[hip_jnt["l"], 1]),
+                "hip_r_y_m": float(data.xanchor[hip_jnt["r"], 1]),
+                "stance_box_y_m": stance_box_y,
+                "stance_hip_y_m": stance_hip_y,
+                "live_com_y_m": sample.get("live_com_y"),
+                "live_cop_y_m": sample.get("live_cop_y"),
+                "preview_y_m": sample.get("preview_y"),
+                "com_margin_m": com_m,
+                "zmp_margin_m": zmp_m,
+                "com_outside": com_m < -SUPPORT_OUT_M,
+                "zmp_outside": zmp_m < -SUPPORT_OUT_M,
+                "r_hip_roll_nm": hip_tau["r"],
+                "r_hip_roll_bare_nm": hip_tau["r_bare"],
+                "l_hip_roll_nm": hip_tau["l"],
+                "l_hip_roll_bare_nm": hip_tau["l_bare"],
+            }
+            trace_rows.append(tick_row)
+            trace_aux.append({
+                "pose": np.array(poses[k], dtype=np.float64, copy=True),
+                "qvel": np.array(qvel[k], dtype=np.float64, copy=True),
+                "qacc": np.array(qacc[k], dtype=np.float64, copy=True),
+                "force": np.array(force, dtype=np.float64, copy=True),
+                "gen": np.array(gen_lin, dtype=np.float64, copy=True),
+                "com": np.array(com, dtype=np.float64, copy=True),
+                "box": boxes[stance] if stance in boxes else boxes["r"],
+                "stance": stance if stance in ("l", "r") else "",
+            })
         tau_min = ident - gen_min
         b_no_arm = ident - arm * qacc[k]
         qp_status = "single-support"
@@ -2078,7 +2478,123 @@ def _planned_tau(
             return None
         return float(np.median(np.asarray(vals, dtype=np.float64)))
 
-    return {
+    y_trace: dict[str, object] | None = None
+    if trace and trace_rows:
+        resid = np.asarray([row["resid_root_nm"] for row in trace_rows], dtype=np.float64)
+        root_abs = np.max(np.abs(resid), axis=1)
+        root_max_here = float(np.max(root_abs)) if root_abs.size else 0.0
+        period = float(trace_period_s) if trace_period_s is not None else 1.0
+        cycle = _cycle_rows(trace_rows, period)
+        right = [
+            row for row in cycle
+            if row["support"] == "ss" and row["stance"] == "r"
+        ]
+        mid_row = right[len(right) // 2] if right else None
+        nearest = None
+        nearest_gap = None
+        for row in trace_rows:
+            if row["phase"] != "walk" or row["support"] != "ss" or row["stance"] != "r":
+                continue
+            gap = abs(float(row["r_hip_roll_bare_nm"]) - 2.75)
+            if nearest_gap is None or gap < nearest_gap:
+                nearest_gap = gap
+                nearest = row
+
+        # index identity: trace_aux[i] belongs to trace_rows[i], and k = i + 2.
+        for i, row in enumerate(trace_rows):
+            if int(row["k"]) != i + 2:
+                raise RuntimeError(f"plan-y k {row['k']} != {i + 2}")
+
+        def _parts_at(row: dict[str, object] | None) -> dict[str, object] | None:
+            if row is None or row.get("stance") not in ("l", "r"):
+                return None
+            aux = trace_aux[int(row["k"]) - 2]
+            stance_side = str(row["stance"])
+            pose = np.asarray(aux["pose"], dtype=np.float64)
+            qvel_k = np.asarray(aux["qvel"], dtype=np.float64)
+            qacc_k = np.asarray(aux["qacc"], dtype=np.float64)
+            force_k = np.asarray(aux["force"], dtype=np.float64)
+            data.qpos[:] = pose
+            mj.mj_fwdPosition(plan, data)
+            ident_k = _qfrc_at(plan, data, pose, qvel_k, qacc_k)
+            box = aux["box"] if isinstance(aux["box"], dict) else {}
+            best = _best_force_point(
+                plan, data, foot_ids[stance_side], force_k, ident_k,
+                np.asarray(box["centre"], dtype=np.float64),
+            )
+            parts = _hip_roll_parts(
+                plan, pose, qvel_k, qacc_k, stance_side, force_k,
+                np.asarray(aux["gen"], dtype=np.float64),
+                np.asarray(best["gen"], dtype=np.float64),
+                dofadr,
+                np.asarray(aux["com"], dtype=np.float64),
+                float(row["planned_zmp_y_m"]),
+                box,
+            )
+            corners = np.asarray(box["corners"], dtype=np.float64)
+            best_xy = np.asarray(best["point_m"], dtype=np.float64)[:2]
+            return {
+                "t_s": float(row["t_s"]),
+                "phase": row["phase"],
+                "support": row["support"],
+                "stance": stance_side,
+                "joint": parts["joint"],
+                "tau_nm": parts["tau_nm"],
+                "tau_bare_nm": parts["tau_bare_nm"],
+                "parts": parts,
+                "best_point_m": best["point_m"],
+                "best_root_max_nm": best["root_max_nm"],
+                "best_resid_nm": best["resid_nm"],
+                "best_inside_box": _support_margin(best_xy, corners) >= -SUPPORT_OUT_M,
+                "planned_resid_nm": row["resid_root_nm"],
+                "planned_zmp_y_m": row["planned_zmp_y_m"],
+                "planned_com_y_m": row["planned_com_y_m"],
+                "preview_com_y_m": row["preview_com_y_m"],
+                "live_com_y_m": row["live_com_y_m"],
+                "live_cop_y_m": row["live_cop_y_m"],
+            }
+
+        stance_mid = _parts_at(mid_row)
+        nearest_parts = None
+        if nearest is not None and (mid_row is None or int(nearest["k"]) != int(mid_row["k"])):
+            nearest_parts = _parts_at(nearest)
+        support_bad = any(bool(row["com_outside"]) or bool(row["zmp_outside"]) for row in trace_rows)
+        root_bad = root_max_here > ROOT_CONSIST_NM
+        comp_max = [float(v) for v in np.max(np.abs(resid), axis=0)] if resid.size else []
+        y_trace = {
+            "period_s": period,
+            "root_consist_nm": ROOT_CONSIST_NM,
+            "support_out_m": SUPPORT_OUT_M,
+            "summary": {
+                "n_ticks": len(trace_rows),
+                "root_resid_max_nm": root_max_here,
+                "root_resid_component_max_nm": comp_max,
+                "n_root_over_1e-3": int(np.sum(root_abs > 1e-3)),
+                "n_root_over_1e-2": int(np.sum(root_abs > ROOT_CONSIST_NM)),
+                "root_inconsistent": root_bad,
+                "n_com_outside": int(sum(bool(row["com_outside"]) for row in trace_rows)),
+                "n_zmp_outside": int(sum(bool(row["zmp_outside"]) for row in trace_rows)),
+                "support_inconsistent": support_bad,
+                "inconsistent": bool(root_bad or support_bad),
+                "tau_is_not_a_discard": True,
+                "cycle_t0_s": float(cycle[0]["t_s"]) if cycle else None,
+                "cycle_t1_s": float(cycle[-1]["t_s"]) if cycle else None,
+                "right_stance_n": len(right),
+            },
+            "ticks": [
+                {key: row[key] for key in row if key != "k"}
+                for row in trace_rows
+            ],
+            "cycle": [
+                {key: row[key] for key in row if key != "k"}
+                for row in cycle
+            ],
+            "stance_mid": stance_mid,
+            "nearest_bare_2_75": nearest_parts,
+        }
+        _print_plan_y(y_trace)
+
+    out = {
         "phases": worst,
         "candidates": list(candidate_best.values()),
         "n_candidate_samples": candidate_n,
@@ -2160,6 +2676,9 @@ def _planned_tau(
             "not a pass."
         ),
     }
+    if y_trace is not None:
+        out["y_trace"] = y_trace
+    return out
 
 
 def score_cell(
@@ -2168,6 +2687,7 @@ def score_cell(
     amp: float,
     perturb: sws.Perturb | None = None,
     leg_armature: float | None = None,
+    plan_y: bool = False,
 ) -> dict[str, object]:
     global _CAPTURE_ON, _ID_COPY, _ID_MODEL, _FOOT_SINK, _FOOT_SPEC
     digest_before = _plant_md5()
@@ -2800,7 +3320,7 @@ def score_cell(
                 else:
                     mean_l = np.zeros(3, dtype=np.float64)
                     mean_r = np.zeros(3, dtype=np.float64)
-                plan_samples.append({
+                sample_row = {
                     "t": now,
                     "phase": _plan_phase(stage_name),
                     "support": support,
@@ -2810,7 +3330,26 @@ def score_cell(
                     "com_y": float(getattr(walker, "preview_com_y", 0.0)),
                     "foot_f_l": [float(v) for v in mean_l],
                     "foot_f_r": [float(v) for v in mean_r],
-                })
+                }
+                if plan_y:
+                    body_id = int(mj.mj_name2id(session.model, mj.mjtObj.mjOBJ_BODY, "body_link"))
+                    sample_row["live_com_y"] = float(session.data.subtree_com[body_id, 1])
+                    sample_row["preview_y"] = float(walker.op3.preview_y)
+                    num = np.zeros(3, dtype=np.float64)
+                    den = 0.0
+                    grounds = tuple(int(gid) for gid in _FOOT_SPEC["grounds"])
+                    for side_key in ("L", "R"):
+                        got = sws.foot_floor_cop(
+                            session.model, session.data,
+                            int(walker.gid[side_key]), int(walker.gid_floor), grounds,
+                        )
+                        if got is None:
+                            continue
+                        world, fn = got
+                        num += float(fn) * np.asarray(world, dtype=np.float64)
+                        den += float(fn)
+                    sample_row["live_cop_y"] = float(num[1] / den) if den > 1e-6 else None
+                plan_samples.append(sample_row)
             tick_box[0] += 1
             if session.bus.fault:
                 break
@@ -2821,7 +3360,10 @@ def score_cell(
     session.assert_plant_unchanged()
     if int(session.model.opt.enableflags) != 0:
         raise RuntimeError("live enableflags were set during the bout")
-    planned = _planned_tau(session.model, plan_samples, qadr, dof)
+    planned = _planned_tau(
+        session.model, plan_samples, qadr, dof,
+        trace=plan_y, trace_period_s=float(period_s),
+    )
     if int(session.model.opt.enableflags) != 0:
         raise RuntimeError("planned-motion copy changed the live enableflags")
     digest_after = _plant_md5()
@@ -3478,6 +4020,10 @@ def main() -> None:
         "--sensitivity", action="store_true",
         help="Score the best row and its stop at armature 0.01 and 0.025.",
     )
+    parser.add_argument(
+        "--plan-y", action="store_true",
+        help="voice056 T 1.0 s vx 0.016: root residual and the stance hip-roll split.",
+    )
     args = parser.parse_args()
     if sws.SOFT_PASS:
         raise SystemExit("soft-pass is on")
@@ -3537,6 +4083,57 @@ def main() -> None:
             "lock_gate": comparison["lock_gate"],
             "comparison": comparison,
             "rows": [_slim_row(plant_row), _slim_row(sens_row)],
+        }
+        if args.out:
+            path = Path(args.out)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(_jsonable(payload), indent=2) + "\n", encoding="utf-8")
+            print(f"wrote {path}", flush=True)
+        return
+    if args.plan_y:
+        if args.sensitivity or args.rug or args.seed >= 0 or abs(args.mass_scale - 1.0) > 1e-12:
+            raise SystemExit("plan-y is the nominal voice056 cell")
+        if abs(float(args.armature) - PLANT_ARMATURE) > 1e-12:
+            raise SystemExit("plan-y stays on the plant armature 0.01")
+        cache = {}
+        period_s, vx = 1.0, 0.016
+        row = score_cell(period_s, vx, _amp(period_s, cache), None, plan_y=True)
+        if _plant_md5() != PLANT_MD5:
+            raise SystemExit("plant md5 changed")
+        planned = row.get("planned") if isinstance(row.get("planned"), dict) else {}
+        trace = planned.get("y_trace") if isinstance(planned, dict) else None
+        joints = row.get("torque_bar")
+        hip = None
+        if isinstance(joints, dict):
+            for item in joints.get("joints", []):
+                if isinstance(item, dict) and item.get("joint") == "r_hip_roll":
+                    hip = item
+        dc = row.get("dc")
+        print(
+            f"T {period_s:.2f} vx {vx:.3f} {row.get('verdict')} {row.get('gait')} "
+            f"r_hip_roll signed {None if hip is None else hip.get('peak_ask_nm')} "
+            f"dc {dc.get('passes') if isinstance(dc, dict) else None}",
+            flush=True,
+        )
+        payload = {
+            "tip": TIP_SHA,
+            "soft_pass": False,
+            "plant_md5": _plant_md5(),
+            "plant_armature_kgm2": PLANT_ARMATURE,
+            "T_s": period_s,
+            "vx_m_s": vx,
+            "verdict": row.get("verdict"),
+            "gait": row.get("gait"),
+            "fail_reasons": row.get("fail_reasons"),
+            "r_hip_roll_signed": hip,
+            "dc": row.get("dc"),
+            "stop": row.get("stop"),
+            "y_trace": trace,
+            "note": (
+                "Root residual is qfrc_inverse minus the planned ZMP wrench. "
+                "A hip-roll torque is not a discard. Inconsistency is the root "
+                "residual or CoM/ZMP outside the support polygon."
+            ),
         }
         if args.out:
             path = Path(args.out)
