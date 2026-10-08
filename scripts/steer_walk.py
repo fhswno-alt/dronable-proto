@@ -1948,6 +1948,16 @@ class SteerSession:
             and self.lipm.phase == "stand"
             and self.lipm.cfg.schedule == "gait_manager"
         )
+        # The feedforward ctrl is already the torque command. Blending it
+        # back toward the previous position target would apply that
+        # target's ask for part of the tick.
+        if (
+            self.lipm is not None
+            and self.lipm.cfg.gm_id_ff
+            and not hold
+        ):
+            ctrl_from = ctrl_to
+            end = ctrl_to.copy()
         for i in range(n):
             alpha = (i + 1) / float(n)
             self.data.ctrl[:] = ctrl_from + (end - ctrl_from) * alpha

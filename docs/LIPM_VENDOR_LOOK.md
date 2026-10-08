@@ -2675,3 +2675,148 @@ The spring limit on the T 6 s / 0.012 m/s quintic keeps signed at 1.47 Nm and th
 Putting the spring limit on that same 18 mm hold drops the signed peak to 1.25 Nm, clamp 0, DC excess −3.53 rad/s, and the foot still reaches 10.4 mm inside the window. The window minimum is −0.003 mm. The rise is legal and it is not finished when the 20% sample opens. A lead quintic at 18 mm splits the same way: 4.73 Nm on the left hip pitch with the limit off, or 1.41 Nm and a −0.40 mm window minimum with the limit on.
 
 This is a wall. No period from 1.6 s to 10 s, and not the 20 s / 18 mm gait, clears every bar even at the smallest vx. On the 8 mm command the binding bar is the lowest sole corner through 20–80% of the swing, and the signed force is already under 2.33 Nm. On the 18 mm command that does clear, the binding joint is the left hip pitch at the start of the step, 4.74 Nm, because the sole has to be up before the window opens. Spreading that rise to stay under 2.33 Nm puts the sole back on the floor at 20%. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0.
+
+## Inverse dynamics on every over-2.33 tick
+
+The flat 20–80% rows above, T 0.60 s at 0.032 m/s, T 1.00 s at 0.016 m/s, and T 1.20 s at 0.024 m/s. Every leg write whose signed ask exceeds 2.33 Nm is in the table. One hundred and one ticks, all of them knees: left 56, right 45. The phases are the swing lift (41), the descent (37), the stop (11), the held swing (6), and the touchdown (6). Stance mid and double-support transfer still have none.
+
+`mj_inverse` is run on the realised post-step q, q̇, and q̈, and it keeps the contacts of that q. The ID column is that torque on the joint that asked too much. Arm is `0.01·q̈`. The 0.01 is the armature used for the column. It is not a measured motor inertia. Static is `2.2·9.81·0.093·sin(θ/2)` with θ the knee flexion. CoP x and CoP y are millimetres from the ankle-roll anchor, in that ankle's body frame. When the joint's own foot is unloaded the CoP is the stance foot's, and the ankle column says so. Eighteen ticks are stance. Their horizontal offset is 23–43 mm. On a loaded foot the repeated `x = +97.5` mm is the toe edge of the 135 mm contact box, and `|y| = 52` mm is the lateral edge.
+
+Every one of the 101 is a controller problem. The inverse stays inside ±2.045 Nm while the signed ask is 2.92–5.82 Nm. The other eleven leg joints on those ticks stay at or under 1.06 Nm of inverse. There is no tick in this set whose inverse dynamics itself exceeds 2.33 Nm, so there is no dynamics-class joint, phase, or dominant term here. The closest inverse is +2.045 Nm on the right knee at 2.680 s of the 0.60 s row, in the stop, while the signed ask on that tick is +3.85 Nm.
+
+The largest ask is +5.820 Nm on the left knee at 1.328 s, swing lift, error +0.164 rad. Inverse +1.874 Nm, armature +1.270 Nm, static 0.889 Nm, CoP at the left toe (`x +97.5` mm, `y −1.8` mm, 3.1 N). The 1.00 s peak is −4.121 Nm on the left knee in descent, inverse −1.658 Nm, armature −0.626 Nm, static 1.074 Nm. The 1.20 s peak is +3.941 Nm on the right knee in descent, inverse +1.756 Nm, armature +0.508 Nm, static 1.078 Nm. Static across the set is 0.87–1.10 Nm.
+
+| T | t | joint | phase | signed | ID | arm | static | CoP x | CoP y | ankle | class |
+| ---: | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| 0.60 | 1.312 | l_knee | swing lift ramp | +2.92 | +0.963 | +0.593 | 0.872 | +87.6 | -18.6 | l foot | controller |
+| 0.60 | 1.320 | l_knee | swing lift ramp | +5.05 | +1.661 | +1.159 | 0.878 | +97.5 | -8.9 | l foot | controller |
+| 0.60 | 1.328 | l_knee | swing lift ramp | +5.82 | +1.874 | +1.270 | 0.889 | +97.5 | -1.8 | l foot | controller |
+| 0.60 | 1.336 | l_knee | held swing | +4.84 | +1.495 | +0.854 | 0.906 | +97.5 | +2.4 | l foot | controller |
+| 0.60 | 1.344 | l_knee | held swing | +3.24 | +0.881 | +0.267 | 0.925 | +97.5 | +5.6 | l foot | controller |
+| 0.60 | 1.496 | l_knee | swing descent | -2.44 | -0.737 | -0.752 | 1.073 | +23.3 | -2.3 | r stance | controller |
+| 0.60 | 1.504 | l_knee | swing descent | -4.19 | -1.211 | -1.167 | 1.070 | +24.0 | -1.3 | r stance | controller |
+| 0.60 | 1.512 | l_knee | swing descent | -4.58 | -1.249 | -1.166 | 1.061 | +24.3 | -0.4 | r stance | controller |
+| 0.60 | 1.520 | l_knee | touchdown impact | -3.32 | -0.754 | -0.675 | 1.049 | +24.4 | +0.5 | r stance | controller |
+| 0.60 | 1.736 | r_knee | swing lift ramp | -4.05 | -1.414 | -1.100 | 0.934 | +97.5 | -36.3 | r foot | controller |
+| 0.60 | 1.744 | r_knee | swing lift ramp | -4.89 | -1.618 | -1.252 | 0.939 | +97.5 | -38.6 | r foot | controller |
+| 0.60 | 1.752 | r_knee | held swing | -3.98 | -1.282 | -0.870 | 0.949 | +97.5 | -52.0 | r foot | controller |
+| 0.60 | 1.760 | r_knee | held swing | -2.45 | -0.587 | -0.303 | 0.963 | +97.5 | -52.0 | r foot | controller |
+| 0.60 | 1.920 | r_knee | swing descent | +4.03 | +1.168 | +1.157 | 1.063 | +22.3 | +36.6 | l stance | controller |
+| 0.60 | 1.928 | r_knee | swing descent | +4.47 | +1.241 | +1.169 | 1.056 | +22.6 | +34.9 | l stance | controller |
+| 0.60 | 1.936 | r_knee | touchdown impact | +3.25 | +0.771 | +0.691 | 1.044 | +22.8 | +32.5 | l stance | controller |
+| 0.60 | 2.104 | l_knee | swing lift ramp | +4.22 | +1.457 | +1.118 | 0.949 | +97.5 | +52.0 | l foot | controller |
+| 0.60 | 2.112 | l_knee | swing lift ramp | +4.90 | +1.605 | +1.197 | 0.956 | +97.5 | +52.0 | l foot | controller |
+| 0.60 | 2.120 | l_knee | held swing | +3.93 | +1.214 | +0.792 | 0.967 | +97.5 | +52.0 | l foot | controller |
+| 0.60 | 2.128 | l_knee | held swing | +2.37 | +0.609 | +0.230 | 0.982 | +97.5 | +52.0 | l foot | controller |
+| 0.60 | 2.288 | l_knee | swing descent | -4.09 | -1.155 | -1.138 | 1.068 | +18.1 | -19.4 | r stance | controller |
+| 0.60 | 2.296 | l_knee | swing descent | -4.52 | -1.227 | -1.150 | 1.060 | +18.6 | -19.1 | r stance | controller |
+| 0.60 | 2.304 | l_knee | touchdown impact | -3.29 | -0.757 | -0.672 | 1.048 | +19.3 | -18.3 | r stance | controller |
+| 0.60 | 2.496 | r_knee | stop | -3.15 | -1.320 | -0.947 | 0.951 | +97.5 | -52.0 | r foot | controller |
+| 0.60 | 2.504 | r_knee | stop | -2.63 | -0.948 | -0.513 | 0.966 | +97.5 | -52.0 | r foot | controller |
+| 0.60 | 2.672 | r_knee | stop | +2.73 | +1.327 | +0.683 | 0.982 | -37.5 | -52.0 | r foot | controller |
+| 0.60 | 2.680 | r_knee | stop | +3.85 | +2.045 | +0.855 | 0.967 | -37.5 | -52.0 | r foot | controller |
+| 0.60 | 2.688 | r_knee | stop | +3.63 | +1.832 | +0.505 | 0.946 | -37.5 | -52.0 | r foot | controller |
+| 1.00 | 1.352 | l_knee | swing lift ramp | +2.61 | +0.849 | +0.528 | 0.942 | +89.2 | -11.0 | l foot | controller |
+| 1.00 | 1.360 | l_knee | swing lift ramp | +3.57 | +1.185 | +0.772 | 0.947 | +97.5 | -2.4 | l foot | controller |
+| 1.00 | 1.368 | l_knee | swing lift ramp | +4.00 | +1.291 | +0.803 | 0.956 | +97.5 | +6.0 | l foot | controller |
+| 1.00 | 1.376 | l_knee | swing lift ramp | +3.79 | +1.165 | +0.636 | 0.968 | +97.5 | +16.5 | l foot | controller |
+| 1.00 | 1.384 | l_knee | swing lift ramp | +3.04 | +0.867 | +0.332 | 0.982 | +97.5 | +23.0 | l foot | controller |
+| 1.00 | 1.656 | l_knee | swing descent | -3.26 | -1.266 | -0.643 | 1.089 | -37.5 | +52.0 | l foot | controller |
+| 1.00 | 1.664 | l_knee | swing descent | -3.95 | -1.551 | -0.694 | 1.083 | -2.4 | +52.0 | l foot | controller |
+| 1.00 | 1.672 | l_knee | swing descent | -4.12 | -1.658 | -0.626 | 1.074 | -4.0 | +52.0 | l foot | controller |
+| 1.00 | 1.680 | l_knee | swing descent | -3.70 | -1.536 | -0.431 | 1.063 | -2.8 | +52.0 | l foot | controller |
+| 1.00 | 1.688 | l_knee | touchdown impact | -2.82 | -1.225 | -0.154 | 1.051 | +0.6 | +52.0 | l foot | controller |
+| 1.00 | 1.960 | r_knee | swing lift ramp | -2.95 | -1.070 | -0.795 | 0.932 | +46.0 | -33.1 | r foot | controller |
+| 1.00 | 1.968 | r_knee | swing lift ramp | -3.46 | -1.165 | -0.889 | 0.936 | -37.5 | -52.0 | r foot | controller |
+| 1.00 | 1.976 | r_knee | swing lift ramp | -3.30 | -1.015 | -0.728 | 0.944 | +24.5 | +15.7 | l stance | controller |
+| 1.00 | 1.984 | r_knee | swing lift ramp | -2.59 | -0.694 | -0.419 | 0.955 | +23.8 | +17.4 | l stance | controller |
+| 1.00 | 2.256 | r_knee | swing descent | +2.80 | +0.864 | +0.365 | 1.086 | -37.5 | -52.0 | r foot | controller |
+| 1.00 | 2.264 | r_knee | swing descent | +3.67 | +1.292 | +0.530 | 1.081 | +5.6 | -52.0 | r foot | controller |
+| 1.00 | 2.272 | r_knee | swing descent | +4.10 | +1.718 | +0.610 | 1.074 | +12.6 | -52.0 | r foot | controller |
+| 1.00 | 2.280 | r_knee | swing descent | +3.83 | +1.713 | +0.482 | 1.065 | +11.6 | -52.0 | r foot | controller |
+| 1.00 | 2.288 | r_knee | touchdown impact | +3.02 | +1.433 | +0.228 | 1.053 | +11.8 | -52.0 | r foot | controller |
+| 1.00 | 2.552 | l_knee | swing lift ramp | +3.00 | +1.080 | +0.789 | 0.939 | +97.5 | +43.3 | l foot | controller |
+| 1.00 | 2.560 | l_knee | swing lift ramp | +3.49 | +1.191 | +0.846 | 0.944 | +97.5 | +52.0 | l foot | controller |
+| 1.00 | 2.568 | l_knee | swing lift ramp | +3.33 | +0.946 | +0.692 | 0.952 | +97.5 | +52.0 | l foot | controller |
+| 1.00 | 2.576 | l_knee | swing lift ramp | +2.64 | +0.726 | +0.425 | 0.964 | +25.4 | -13.8 | r stance | controller |
+| 1.00 | 2.848 | l_knee | swing descent | -2.80 | -0.952 | -0.441 | 1.085 | -37.5 | +52.0 | l foot | controller |
+| 1.00 | 2.856 | l_knee | swing descent | -3.70 | -1.353 | -0.561 | 1.081 | +3.8 | +52.0 | l foot | controller |
+| 1.00 | 2.864 | l_knee | swing descent | -4.08 | -1.681 | -0.615 | 1.073 | +9.9 | +52.0 | l foot | controller |
+| 1.00 | 2.872 | l_knee | swing descent | -3.78 | -1.678 | -0.474 | 1.064 | +10.6 | +52.0 | l foot | controller |
+| 1.00 | 2.880 | l_knee | touchdown impact | -2.97 | -1.390 | -0.216 | 1.053 | +11.0 | +52.0 | l foot | controller |
+| 1.00 | 3.144 | r_knee | swing lift ramp | -2.99 | -1.095 | -0.803 | 0.934 | +97.5 | -39.2 | r foot | controller |
+| 1.00 | 3.152 | r_knee | swing lift ramp | -3.48 | -1.205 | -0.861 | 0.939 | +97.5 | -52.0 | r foot | controller |
+| 1.00 | 3.160 | r_knee | swing lift ramp | -3.33 | -1.062 | -0.758 | 0.947 | +26.2 | +14.1 | l stance | controller |
+| 1.00 | 3.168 | r_knee | swing lift ramp | -2.62 | -0.717 | -0.427 | 0.958 | +25.1 | +15.7 | l stance | controller |
+| 1.00 | 3.432 | r_knee | stop | +2.51 | +1.505 | +0.459 | 1.057 | +15.2 | -52.0 | r foot | controller |
+| 1.00 | 3.440 | r_knee | stop | +3.10 | +1.823 | +0.534 | 1.045 | +8.3 | -51.9 | r foot | controller |
+| 1.00 | 3.448 | r_knee | stop | +3.31 | +1.901 | +0.499 | 1.029 | +1.1 | -51.9 | r foot | controller |
+| 1.00 | 3.456 | r_knee | stop | +2.99 | +1.571 | +0.194 | 1.010 | -4.4 | -51.9 | r foot | controller |
+| 1.20 | 1.376 | l_knee | swing lift ramp | +2.95 | +1.034 | +0.581 | 0.949 | +97.5 | -11.1 | l foot | controller |
+| 1.20 | 1.384 | l_knee | swing lift ramp | +3.48 | +1.192 | +0.680 | 0.956 | +97.5 | -5.2 | l foot | controller |
+| 1.20 | 1.392 | l_knee | swing lift ramp | +3.57 | +1.175 | +0.619 | 0.966 | +97.5 | +1.7 | l foot | controller |
+| 1.20 | 1.400 | l_knee | swing lift ramp | +3.25 | +1.008 | +0.440 | 0.979 | +97.5 | +10.5 | l foot | controller |
+| 1.20 | 1.408 | l_knee | swing lift ramp | +2.61 | +0.753 | +0.193 | 0.993 | +97.5 | +18.5 | l foot | controller |
+| 1.20 | 1.728 | l_knee | swing descent | -2.62 | -1.090 | -0.486 | 1.094 | -37.5 | +52.0 | l foot | controller |
+| 1.20 | 1.736 | l_knee | swing descent | -3.26 | -1.249 | -0.551 | 1.089 | +20.6 | +52.0 | l foot | controller |
+| 1.20 | 1.744 | l_knee | swing descent | -3.64 | -1.453 | -0.547 | 1.081 | +14.3 | +52.0 | l foot | controller |
+| 1.20 | 1.752 | l_knee | swing descent | -3.68 | -1.520 | -0.435 | 1.072 | +10.3 | +52.0 | l foot | controller |
+| 1.20 | 1.760 | l_knee | swing descent | -3.36 | -1.403 | -0.272 | 1.060 | +7.8 | +52.0 | l foot | controller |
+| 1.20 | 1.768 | l_knee | swing descent | -2.74 | -1.187 | -0.085 | 1.048 | +8.1 | +52.0 | l foot | controller |
+| 1.20 | 2.064 | r_knee | swing lift ramp | -2.33 | -0.888 | -0.603 | 0.932 | +23.5 | -9.7 | r foot | controller |
+| 1.20 | 2.072 | r_knee | swing lift ramp | -2.91 | -0.911 | -0.703 | 0.935 | +80.3 | -42.8 | r foot | controller |
+| 1.20 | 2.080 | r_knee | swing lift ramp | -3.09 | -0.976 | -0.709 | 0.941 | -37.5 | -52.0 | r foot | controller |
+| 1.20 | 2.088 | r_knee | swing lift ramp | -2.79 | -0.818 | -0.530 | 0.950 | +23.5 | +13.7 | l stance | controller |
+| 1.20 | 2.416 | r_knee | swing descent | +2.74 | +1.267 | +0.490 | 1.098 | +42.9 | -52.0 | r foot | controller |
+| 1.20 | 2.424 | r_knee | swing descent | +3.42 | +1.538 | +0.561 | 1.094 | +34.3 | -52.0 | r foot | controller |
+| 1.20 | 2.432 | r_knee | swing descent | +3.86 | +1.710 | +0.571 | 1.087 | +26.4 | -52.0 | r foot | controller |
+| 1.20 | 2.440 | r_knee | swing descent | +3.94 | +1.756 | +0.508 | 1.078 | +20.5 | -52.0 | r foot | controller |
+| 1.20 | 2.448 | r_knee | swing descent | +3.62 | +1.641 | +0.355 | 1.067 | +16.5 | -52.0 | r foot | controller |
+| 1.20 | 2.456 | r_knee | swing descent | +2.97 | +1.390 | +0.138 | 1.055 | +14.9 | -52.0 | r foot | controller |
+| 1.20 | 2.744 | l_knee | swing lift ramp | +2.41 | +0.886 | +0.617 | 0.940 | +45.9 | +30.4 | l foot | controller |
+| 1.20 | 2.752 | l_knee | swing lift ramp | +2.93 | +1.037 | +0.696 | 0.944 | +97.5 | +52.0 | l foot | controller |
+| 1.20 | 2.760 | l_knee | swing lift ramp | +3.06 | +0.969 | +0.694 | 0.951 | -37.5 | +52.0 | l foot | controller |
+| 1.20 | 2.768 | l_knee | swing lift ramp | +2.76 | +0.783 | +0.497 | 0.960 | +22.9 | -11.3 | r stance | controller |
+| 1.20 | 3.096 | l_knee | swing descent | -2.65 | -1.180 | -0.480 | 1.096 | +49.1 | +52.0 | l foot | controller |
+| 1.20 | 3.104 | l_knee | swing descent | -3.33 | -1.461 | -0.548 | 1.092 | +38.1 | +52.0 | l foot | controller |
+| 1.20 | 3.112 | l_knee | swing descent | -3.77 | -1.651 | -0.548 | 1.085 | +28.2 | +52.0 | l foot | controller |
+| 1.20 | 3.120 | l_knee | swing descent | -3.86 | -1.691 | -0.481 | 1.076 | +21.1 | +52.0 | l foot | controller |
+| 1.20 | 3.128 | l_knee | swing descent | -3.57 | -1.607 | -0.342 | 1.065 | +16.9 | +52.0 | l foot | controller |
+| 1.20 | 3.136 | l_knee | swing descent | -2.94 | -1.376 | -0.134 | 1.053 | +15.3 | +52.0 | l foot | controller |
+| 1.20 | 3.424 | r_knee | swing lift ramp | -2.38 | -0.906 | -0.621 | 0.935 | +43.7 | -25.7 | r foot | controller |
+| 1.20 | 3.432 | r_knee | swing lift ramp | -2.93 | -1.069 | -0.708 | 0.939 | +97.5 | -52.0 | r foot | controller |
+| 1.20 | 3.440 | r_knee | swing lift ramp | -3.07 | -0.994 | -0.717 | 0.945 | -37.5 | -52.0 | r foot | controller |
+| 1.20 | 3.448 | r_knee | swing lift ramp | -2.78 | -0.809 | -0.519 | 0.954 | +23.0 | +12.4 | l stance | controller |
+| 1.20 | 3.784 | r_knee | stop | +2.56 | +1.554 | +0.348 | 1.078 | +22.3 | -52.0 | r foot | controller |
+| 1.20 | 3.792 | r_knee | stop | +2.57 | +1.502 | +0.225 | 1.065 | +15.7 | -51.9 | r foot | controller |
+
+
+## Inverse-dynamics feedforward
+
+The position servo applies `kp·(ctrl−q) − kv·ω`. kp is the plant actuator gain and stays in the XML (knee and hip pitch 45, hip roll 40, ankle 35). The torque command is the position
+
+`ctrl = q + (τ + kv·ω) / kp`
+
+so the applied ask equals τ. τ is `mj_inverse` of the current q and q̇. The leg q̈ tracks the IK velocity over 80 ms. That q̈ is scaled until the inverse fits in ±2.33 Nm and on the DC line `|qvel| ≤ 5.82·(1 − |τ|/3.43)`. Feedback is `8·(q_ref−q)`, reduced before the inverse is reduced. The 0.01 armature is not the reflected inertia — a planted hip pitch is about 0.2 kg·m² — so the reference q̈ is not capped at 2.33/0.01. The 20 ms position blend is not applied to this ctrl: that blend would spend the tick on the previous position target. The plant forcerange is not edited, and this is not a post-hoc force clamp. The construction can be written. `id_ff_broke` and `id_ff_impossible` are 0 on every row below. The measured signed peak sits on the 2.33 Nm rail, clamp fraction is 0, and the DC excess is ≤ 0.
+
+The bar on these rows is that applied ask. The conservative sum `|kp·e| + |kv·ω|` still fails, and it is the Ask column, not the pass.
+
+When the inverse itself exceeds 2.33 Nm the dominant piece is named. q̈ is the inertia excluding armature, plus the velocity product. Armature is `0.01·q̈`. Impact is the contact torque at touchdown. CoP is the contact torque when that foot's centre of pressure is at least 15 mm from the ankle. Any other contact is counted with gravity. The peaks below are taken while the torso up component is at least 0.92, so a fallen pose does not supply the name.
+
+| Row | signed | clamp | DC ex | clear | cmax | slip | off | up_z | hold ID | joint | phase | term |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |
+| T 0.60 / 0.032, flat 8 mm | 2.33 | 0 | 0.00 | — | — | — | — | 0.846 | +4.47 | r_hip_roll | stop | CoP |
+| T 1.00 / 0.016, flat 8 mm | 2.33 | 0 | −0.47 | −0.81 | 12.74 | 1.18 | 0.64 | 0.952 | +4.06 | l_hip_pitch | stance mid | CoP |
+| T 1.20 / 0.024, flat 8 mm | 2.33 | 0 | −0.06 | −1.76 | 13.09 | 4.48 | 0.52 | 0.955 | −4.94 | l_ank_roll | stop | CoP |
+| T 4 / 0.016, flat 8 mm | 2.33 | 0 | −1.25 | −4.25 | 19.00 | 13.76 | 0.60 | 0.932 | −4.65 | l_knee | stance mid | CoP |
+| T 20 / 0.0042, flat 18 mm | 2.33 | 0 | −0.75 | 12.45 | 14.73 | 0.67 | 0.96 | 0.891 | −5.10 | r_hip_pitch | DS transfer | CoP |
+
+T 0.60 s leaves the support. The fault is the centre of mass outside the polygon, margin −56 mm, and the clearance window is empty. The signed peak is −2.33 Nm on the right hip pitch at 1.328 s. The zero-acceleration inverse, while the torso is still at or above 0.92, reaches +4.47 Nm on the right hip roll in the stop. The contact term is the largest piece.
+
+T 1.00 s and T 1.20 s stay up (min up_z 0.952 and 0.955). The sole does rise — the highest corner inside the window is 12.7 mm and 13.1 mm — and the 20–80% minimum stays on the floor. The zero-acceleration inverse exceeds 2.33 Nm on both. At T 1.00 s the peak is +4.06 Nm on the left hip pitch in stance mid, CoP, at 3.112 s, 15 such ticks. At T 1.20 s it is −4.94 Nm on the left ankle roll in the stop, CoP, at 3.864 s.
+
+T 4 s at 0.016 m/s, the flat 8 mm hold, passes the signed bar, the clamp, and the DC line, and the window minimum is −4.25 mm. The zero-acceleration inverse peaks at −4.65 Nm on the left knee in stance mid, CoP, at 8.464 s.
+
+The 20 s / 18 mm gait (dsp 0.35, x_amp 21 mm, preview 0.043 m, arm 2.40 s, stand 0.40 s, walk 22 s) passes the applied-ask bar: signed peak +2.33 Nm on the left hip pitch at 1.888 s, clamp fraction 0, DC excess −0.75 rad/s. The 20–80% window is 12.45 mm, the window peak is 14.73 mm, slip is 0.67 mm, and the contact-off fraction is 0.96, on two steps. Trunk ratio is 0.76. Min up_z is 0.891, so the 0.90 upright check fails and the fault string is empty. The zero-acceleration inverse exceeds 2.33 Nm on 10 upright ticks. The largest is −5.10 Nm on the right hip pitch during double-support transfer, at 3.536 s, and the dominant term is CoP. The tracking acceleration's inverse is larger still, −5.89 Nm on that same joint and phase, on 800 upright ticks, because that q̈ does not fit and is scaled down before the write.
+
+The 8 mm command still does not clear 8 mm through 20–80% of the swing. The 18 mm command does, with the applied ask held at 2.33 Nm, and the inverse dynamics of the upright pose is over 2.33 Nm at the hip pitch because of where the contact sits. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0.

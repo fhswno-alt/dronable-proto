@@ -43,6 +43,19 @@ SAT_FRAC = 0.98
 # HX-35H knee budget at about 10.5 V. The plant forcerange stays ±2.45.
 # A knee past this is a Prefer FAIL. Not a forcerange edit.
 KNEE_SAG_NM = 2.33
+# Feedback on (q_ref − q) when the inverse-dynamics feedforward is on.
+# This is not the plant actuator kp. The XML gain stays 45 / 40 / 35.
+ID_FF_KP = 8.0
+# Not a measured motor inertia. The same 0.01 sits on the plant joints.
+# It is the diagnosis column. It is not the reflected inertia: a planted
+# hip pitch is about 0.2 kg·m², so 2.33/0.01 is not a legal q̈.
+ID_FF_ARMATURE = 0.01
+# IK velocity is tracked over this horizon. The resulting q̈ is scaled
+# until mj_inverse fits in the sag bar and on the DC-motor line.
+ID_FF_QDD_HORIZON_S = 0.080
+# DC-motor model line, not a datasheet. |qvel| ≤ 5.82·(1 − |τ|/3.43).
+DC_QVEL_LIM = 5.82
+DC_STALL_NM = 3.43
 # Stop/silence command budget for every leg joint. Hip yaw, hip roll,
 # hip pitch, knee, ankle pitch, and ankle roll share the HX-35H class.
 # The sag bar stays 2.33. Sitting the prediction on that bar measured
@@ -233,6 +246,13 @@ class LipmConfig:
     # the budget. ω is not part of that projection: this is not a signed
     # torque clamp.
     gm_spring_nm: float = 0.0
+    # Inverse-dynamics feedforward through the position servo. Off leaves
+    # the IK target. On, every leg ctrl is q + (τ + kv·ω) / kp so the
+    # applied ask kp·(ctrl−q) − kv·ω equals τ. τ is the inverse-dynamics
+    # torque of a capped reference acceleration plus a low-gain position
+    # error, and it is built inside ±KNEE_SAG_NM before the write. The
+    # plant actuator kp is not edited.
+    gm_id_ff: bool = False
 
 
 @dataclass
@@ -269,6 +289,29 @@ class LipmTrace:
     knee_band: list[float] = field(default_factory=list)
     sho_l: list[float] = field(default_factory=list)
     sho_r: list[float] = field(default_factory=list)
+
+
+def _leg_joint(name: str) -> bool:
+    return name.endswith((
+        "hip_yaw", "hip_roll", "hip_pitch", "knee", "ank_pitch", "ank_roll",
+    ))
+
+
+def _torque_scale(inertial: float, bias: float, room: float) -> float:
+    """Largest scale in [0, 1] with |scale·inertial + bias| ≤ room."""
+    if room <= 1e-12:
+        return 0.0
+    if abs(inertial) < 1e-12:
+        return 1.0 if abs(bias) <= room + 1e-9 else 0.0
+    roots = sorted((
+        (room - bias) / inertial,
+        (-room - bias) / inertial,
+    ))
+    lo = max(0.0, roots[0])
+    hi = min(1.0, roots[1])
+    if lo <= hi + 1e-12:
+        return hi
+    return 0.0
 
 
 def bezier_foot(s: float, p0: np.ndarray, p3: np.ndarray, clear_m: float) -> np.ndarray:
@@ -435,6 +478,29 @@ class LipmWalker:
         # torque projection.
         self._shape_pos: dict[str, float] = {}
         self._shape_vel: dict[str, float] = {}
+        # Inverse-dynamics feedforward. Scratch data, reference velocity,
+        # and the largest unsaturated inverse torque.
+        self._id_data: mj.MjData | None = None
+        self._ff_q: dict[str, float] = {}
+        self._ff_qd: dict[str, float] = {}
+        self._leg_dof: dict[str, int] = {}
+        self.id_ff_peak_abs = 0.0
+        self.id_ff_peak_joint = ""
+        self.id_ff_peak_phase = ""
+        self.id_ff_peak_term = ""
+        self.id_ff_peak_t = 0.0
+        self.id_ff_peak_tau = 0.0
+        self.id_ff_over_n = 0
+        self.id_ff_hold_abs = 0.0
+        self.id_ff_hold_joint = ""
+        self.id_ff_hold_phase = ""
+        self.id_ff_hold_term = ""
+        self.id_ff_hold_tau = 0.0
+        self.id_ff_hold_t = 0.0
+        self.id_ff_hold_over_n = 0
+        self._id_split_residual = 0.0
+        self.id_ff_impossible = 0
+        self.id_ff_broke = 0
 
     def other(self, side: Side) -> Side:
         return "R" if side == "L" else "L"
@@ -461,7 +527,11 @@ class LipmWalker:
         idx = self.act_idx.get(act)
         if idx is None:
             return
-        if jn.endswith(("knee", "hip_pitch", "ank_pitch")):
+        # Feedforward writes a torque-sized ctrl on every leg joint.
+        # The 0.98·τ/kp band would clip the spring term that cancels
+        # kv·ω and the applied ask would no longer equal τ.
+        leg_torque = bool(self.cfg.gm_id_ff) and _leg_joint(jn)
+        if jn.endswith(("knee", "hip_pitch", "ank_pitch")) or leg_torque:
             cmd = q_des
         else:
             q = self.q(jn)
@@ -685,6 +755,13 @@ class LipmWalker:
         pitch = min(0.12, max(-0.12, 4.0 * self._sole_pitch_rad(side)))
         return sign * pitch * fade
 
+    def _accumulate_stab_hip(self) -> None:
+        """Rate-limit the capture-point hip-roll offset. Does not write."""
+        err = self._dcm_error_y()
+        dead = max(0.0, abs(err) - 0.020)
+        hip_t = 0.0 if self.preview_stage == "stop" else math.copysign(0.005 * math.tanh(dead / 0.025), err)
+        self._stab_hip = self._slew(self._stab_hip, hip_t, 0.15)
+
     def _stabilize_contacts(self) -> None:
         """Hip roll from the capture point.
 
@@ -693,16 +770,326 @@ class LipmWalker:
         ankle command. It does not solve q_des so the signed ask equals
         ±2.33 Nm.
         """
-        err = self._dcm_error_y()
-        dead = max(0.0, abs(err) - 0.020)
-        hip_t = 0.0 if self.preview_stage == "stop" else math.copysign(0.005 * math.tanh(dead / 0.025), err)
-        self._stab_hip = self._slew(self._stab_hip, hip_t, 0.15)
+        self._accumulate_stab_hip()
         for name in ("l_hip_roll", "r_hip_roll"):
             idx = self.act_idx.get(name + "_pos")
             if idx is None:
                 continue
             if abs(self._stab_hip) > 1e-6:
                 self.write_clipped(name, float(self.data.ctrl[idx]) + self._stab_hip)
+
+    def _ff_phase(self, joint: str) -> str:
+        """Clock phase of one leg joint. Declared phase is not an input."""
+        walker = self.op3
+        stage = str(self.preview_stage)
+        if stage != "walk" or walker is None or walker.period <= 1e-9:
+            return stage or "unset"
+        tt = float(walker.time) % float(walker.period)
+        windows = (
+            ("L", float(walker.l_ssp_start), float(walker.l_ssp_end)),
+            ("R", float(walker.r_ssp_start), float(walker.r_ssp_end)),
+        )
+        swing = None
+        frac = float("nan")
+        for side, a, b in windows:
+            if a < tt <= b and b > a:
+                swing = side
+                frac = (tt - a) / (b - a)
+                break
+        if swing is None:
+            for _side, _a, b in windows:
+                if 0.0 <= (tt - b) % walker.period <= 0.040:
+                    return "touchdown impact"
+            return "DS transfer"
+        own = "L" if joint.startswith("l_") else "R"
+        if own == swing:
+            if frac <= 0.20:
+                return "swing lift ramp"
+            if frac >= 0.80:
+                return "swing descent"
+            return "held swing"
+        if 0.20 <= frac <= 0.80:
+            return "stance mid"
+        return "stance edge"
+
+    def _ankle_cop_mm(self, side: str) -> tuple[float, float, float] | None:
+        """Contact CoP relative to the ankle-roll anchor, in that body frame.
+
+        Returns x mm, y mm, and the horizontal distance in mm. None when
+        that foot has no contact force.
+        """
+        gid = int(mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_GEOM, f"{side}_foot_contact"))
+        jid = int(mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, f"{side}_ank_roll"))
+        bid = int(mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_BODY, f"{side}_ank_roll_link"))
+        if gid < 0 or jid < 0 or bid < 0:
+            return None
+        fn = 0.0
+        acc = np.zeros(3)
+        for i in range(self.data.ncon):
+            con = self.data.contact[i]
+            if int(con.geom1) != gid and int(con.geom2) != gid:
+                continue
+            force = np.zeros(6)
+            mj.mj_contactForce(self.model, self.data, i, force)
+            fn_i = abs(float(force[0]))
+            if fn_i < 1e-4:
+                continue
+            fn += fn_i
+            acc += np.array(con.pos, dtype=np.float64) * fn_i
+        if fn < 1e-3:
+            return None
+        cop = acc / fn
+        anchor = np.array(self.data.xanchor[jid], dtype=np.float64)
+        rot = np.array(self.data.xmat[bid], dtype=np.float64).reshape(3, 3)
+        rel = rot.T @ (cop - anchor)
+        return float(rel[0]) * 1000.0, float(rel[1]) * 1000.0, float(math.hypot(rel[0], rel[1])) * 1000.0
+
+    def _id_dominant(
+        self,
+        scratch: mj.MjData,
+        adr: int,
+        phase: str,
+        cop_h: float | None,
+    ) -> str:
+        """Largest piece of qfrc_inverse. q̈ includes the velocity product.
+
+        Armature is ID_FF_ARMATURE·q̈ and is not folded into q̈. A contact
+        at touchdown is impact. A contact whose CoP is at least 15 mm
+        from the ankle is CoP. Any other contact is counted with gravity.
+        """
+        nv = int(self.model.nv)
+        con = np.array(scratch.qfrc_constraint, dtype=np.float64, copy=True)
+        pas = np.array(scratch.qfrc_passive, dtype=np.float64, copy=True)
+        qacc = np.array(scratch.qacc, dtype=np.float64, copy=True)
+        qvel = np.array(scratch.qvel, dtype=np.float64, copy=True)
+        inv = float(scratch.qfrc_inverse[adr])
+        full = np.zeros(nv)
+        bias = np.zeros(nv)
+        mj.mj_rne(self.model, scratch, 1, full)
+        scratch.qacc[:] = 0.0
+        mj.mj_rne(self.model, scratch, 0, bias)
+        scratch.qvel[:] = 0.0
+        mj.mj_fwdVelocity(self.model, scratch)
+        scratch.qacc[:] = 0.0
+        grav_v = np.zeros(nv)
+        mj.mj_rne(self.model, scratch, 0, grav_v)
+        scratch.qvel[:] = qvel
+        scratch.qacc[:] = qacc
+        inertial = float(full[adr] - bias[adr])
+        arm = ID_FF_ARMATURE * float(qacc[adr])
+        qdd = inertial - arm
+        cor = float(bias[adr] - grav_v[adr])
+        contact = -float(con[adr])
+        ident = inertial + float(bias[adr]) - float(pas[adr]) - float(con[adr])
+        self._id_split_residual = abs(ident - inv)
+        scores = {
+            "q̈": abs(qdd) + abs(cor),
+            "armature": abs(arm),
+            "gravity": abs(float(grav_v[adr])),
+        }
+        if phase == "touchdown impact":
+            scores["impact"] = abs(contact)
+        elif cop_h is not None and cop_h >= 15.0:
+            scores["CoP"] = abs(contact)
+        else:
+            scores["gravity"] += abs(contact)
+        # A tenth of a newton-metre is the RNE residual seen on this plant.
+        # It does not pick the label when one term is clearly larger.
+        if self._id_split_residual > 0.30 and self._id_split_residual > 0.15 * max(abs(inv), 1e-6):
+            return "unsplit"
+        return max(scores, key=lambda name: scores[name])
+
+    def _note_id_peak(self, inv: np.ndarray, names: dict[str, float], hold: bool) -> None:
+        """Remember the largest inverse torque. ``hold`` is the zero-q̈ case."""
+        sag = float(KNEE_SAG_NM)
+        worst_abs = 0.0
+        worst_name = ""
+        worst_tau = 0.0
+        for name, adr in self._leg_dof.items():
+            if name not in names:
+                continue
+            tau = float(inv[adr])
+            if abs(tau) > worst_abs:
+                worst_abs = abs(tau)
+                worst_name = name
+                worst_tau = tau
+        rot = np.array(self.data.xmat[self.bid_body], dtype=np.float64).reshape(3, 3)
+        upright = float(rot[2, 2]) >= 0.92
+        if not upright:
+            return
+        if worst_abs > sag + 1e-9:
+            if hold:
+                self.id_ff_hold_over_n += 1
+            else:
+                self.id_ff_over_n += 1
+        stored = self.id_ff_hold_abs if hold else self.id_ff_peak_abs
+        if not worst_name or worst_abs <= stored:
+            return
+        phase = self._ff_phase(worst_name)
+        term = ""
+        if worst_abs > sag + 1e-9 and self._id_data is not None:
+            side = "l" if worst_name.startswith("l_") else "r"
+            other = "r" if side == "l" else "l"
+            cop = self._ankle_cop_mm(side)
+            if cop is None:
+                cop = self._ankle_cop_mm(other)
+            cop_h = None if cop is None else cop[2]
+            term = self._id_dominant(self._id_data, self._leg_dof[worst_name], phase, cop_h)
+        if hold:
+            self.id_ff_hold_abs = worst_abs
+            self.id_ff_hold_joint = worst_name
+            self.id_ff_hold_phase = phase
+            self.id_ff_hold_term = term
+            self.id_ff_hold_tau = worst_tau
+            self.id_ff_hold_t = float(self.data.time)
+        else:
+            self.id_ff_peak_abs = worst_abs
+            self.id_ff_peak_joint = worst_name
+            self.id_ff_peak_phase = phase
+            self.id_ff_peak_term = term
+            self.id_ff_peak_tau = worst_tau
+            self.id_ff_peak_t = float(self.data.time)
+
+    def _id_feedforward(self, joints: dict[str, float]) -> None:
+        """Replace each leg target with the ctrl that applies τ.
+
+        A position actuator applies kp·(ctrl−q) − kv·ω. The plant kp
+        stays in the XML, so the torque command is the position
+
+            ctrl = q + (τ + kv·ω) / kp
+
+        τ is mj_inverse at the current q and q̇. Leg q̈ tracks the IK
+        velocity over ID_FF_QDD_HORIZON_S and is scaled until that
+        inverse fits in ±2.33 Nm and on the DC line. The 0.01 armature
+        is not used as the inertia. Feedback is ID_FF_KP·(q_ref−q),
+        reduced first. This is not write_force_limited and it does not
+        edit forcerange.
+        """
+        if not self.cfg.gm_id_ff:
+            return
+        if self._id_data is None:
+            self._id_data = mj.MjData(self.model)
+        if not self._leg_dof:
+            for name in joints:
+                if not _leg_joint(name):
+                    continue
+                jid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, name)
+                if jid < 0:
+                    continue
+                self._leg_dof[name] = int(self.model.jnt_dofadr[jid])
+        scratch = self._id_data
+        scratch.qpos[:] = self.data.qpos
+        scratch.qvel[:] = self.data.qvel
+        scratch.qacc[:] = self.data.qacc
+        scratch.qfrc_applied[:] = 0.0
+        scratch.xfrc_applied[:] = 0.0
+        dt = float(op3_walk.OP3_CTRL_S)
+        qd_cap = DC_QVEL_LIM * (1.0 - KNEE_SAG_NM / DC_STALL_NM)
+        q_ref: dict[str, float] = {}
+        qdd_des: dict[str, float] = {}
+        rooms: dict[str, float] = {}
+        for name, adr in self._leg_dof.items():
+            if name not in joints:
+                continue
+            ref = float(joints[name])
+            q_ref[name] = ref
+            prev_q = self._ff_q.get(name)
+            if prev_q is None:
+                qd_ik = 0.0
+            else:
+                qd_ik = (ref - prev_q) / dt
+            if qd_ik > qd_cap:
+                qd_ik = qd_cap
+            elif qd_ik < -qd_cap:
+                qd_ik = -qd_cap
+            omega = float(self.data.qvel[adr])
+            qdd = (qd_ik - omega) / ID_FF_QDD_HORIZON_S
+            qdd_des[name] = qdd
+            self._ff_q[name] = ref
+            self._ff_qd[name] = qd_ik
+            speed_room = DC_STALL_NM * (1.0 - abs(omega) / DC_QVEL_LIM)
+            if speed_room < 0.0:
+                speed_room = 0.0
+            rooms[name] = min(float(KNEE_SAG_NM), speed_room)
+
+        def _inverse(scale: float) -> np.ndarray:
+            scratch.qpos[:] = self.data.qpos
+            scratch.qvel[:] = self.data.qvel
+            scratch.qacc[:] = 0.0
+            scratch.qfrc_applied[:] = 0.0
+            scratch.xfrc_applied[:] = 0.0
+            for name, adr in self._leg_dof.items():
+                if name in qdd_des:
+                    scratch.qacc[adr] = scale * qdd_des[name]
+            mj.mj_inverse(self.model, scratch)
+            return np.array(scratch.qfrc_inverse, dtype=np.float64, copy=True)
+
+        inv0 = _inverse(0.0)
+        self._note_id_peak(inv0, q_ref, hold=True)
+        inv1 = _inverse(1.0)
+        self._note_id_peak(inv1, q_ref, hold=False)
+        scale = 1.0
+        for name, adr in self._leg_dof.items():
+            if name not in rooms:
+                continue
+            scale = min(scale, _torque_scale(
+                float(inv1[adr] - inv0[adr]), float(inv0[adr]), rooms[name],
+            ))
+        if scale < 0.999:
+            inv = _inverse(scale)
+        else:
+            inv = inv1
+        sag = float(KNEE_SAG_NM)
+        for name, adr in self._leg_dof.items():
+            if name not in q_ref:
+                continue
+            act = name + "_pos"
+            idx = self.act_idx.get(act)
+            if idx is None:
+                continue
+            kp = float(self.model.actuator_gainprm[idx, 0])
+            kv = -float(self.model.actuator_biasprm[idx, 2])
+            if kp < 1e-6:
+                self.id_ff_impossible += 1
+                continue
+            q = self.q(name)
+            omega = float(self.data.qvel[adr])
+            room = rooms[name]
+            tau_ff = float(inv[adr])
+            fb = ID_FF_KP * (q_ref[name] - q)
+            if room <= 1e-9:
+                tau = 0.0
+            elif abs(tau_ff) >= room:
+                tau = math.copysign(room, tau_ff)
+            else:
+                tau = tau_ff + fb
+                if tau > room:
+                    tau = room
+                elif tau < -room:
+                    tau = -room
+            ctrl = q + (tau + kv * omega) / kp
+            lo = q + (-room + kv * omega) / kp
+            hi = q + (room + kv * omega) / kp
+            # The sag window, so a DC-loose tick still cannot ask past 2.33.
+            sag_lo = q + (-sag + kv * omega) / kp
+            sag_hi = q + (sag + kv * omega) / kp
+            lo = max(lo, sag_lo, float(self.model.actuator_ctrlrange[idx, 0]))
+            hi = min(hi, sag_hi, float(self.model.actuator_ctrlrange[idx, 1]))
+            if lo <= hi:
+                if ctrl > hi:
+                    ctrl = hi
+                elif ctrl < lo:
+                    ctrl = lo
+            else:
+                self.id_ff_impossible += 1
+                ctrl = min(
+                    float(self.model.actuator_ctrlrange[idx, 1]),
+                    max(float(self.model.actuator_ctrlrange[idx, 0]), q),
+                )
+            signed = kp * (ctrl - q) - kv * omega
+            if abs(signed) > sag + 1e-6 or abs(signed) > room + 1e-4:
+                self.id_ff_broke += 1
+            joints[name] = ctrl
 
     def _shape_sagittal(self, joints: dict[str, float]) -> None:
         """Rate- and accel-limit hip pitch, knee, and ankle pitch.
@@ -797,19 +1184,34 @@ class LipmWalker:
             # The 16 mrad band keeps a late swing gap off the ankle.
             # The stop blend's pitch null is already slewed; clamping it
             # leaves the light foot on the toe face.
-            if self._stand_u <= 0.0:
+            # The 16 mrad band keeps a late swing gap off the position
+            # servo. Feedforward already builds the ankle torque inside
+            # ±2.33 Nm, so the band would replace the gait reference.
+            if self._stand_u <= 0.0 and not self.cfg.gm_id_ff:
                 gap = want - q
                 if abs(gap) > 0.016:
                     want = q + math.copysign(0.016, gap)
             if abs(want - gait) > 1e-6:
                 joints[jn] = want
-        self._shape_sagittal(joints)
+        if self.cfg.gm_id_ff:
+            # The hip-roll offset is part of the reference the torque
+            # command tracks. A second write after the feedforward would
+            # log the unshaped ask.
+            self._accumulate_stab_hip()
+            for name in ("l_hip_roll", "r_hip_roll"):
+                if name in joints and abs(self._stab_hip) > 1e-6:
+                    joints[name] = float(joints[name]) + self._stab_hip
+            self._id_feedforward(joints)
+        else:
+            self._shape_sagittal(joints)
         for name, val in joints.items():
             # Straight preview walk. No yaw budget, no ±2.33 solve.
             # write_clipped still keeps non-sagittal joints inside the
-            # existing 0.98·τ/kp band. It does not edit forcerange.
+            # existing 0.98·τ/kp band, except when the feedforward has
+            # already built a torque command. It does not edit forcerange.
             self.write_clipped(name, float(val))
-        self._stabilize_contacts()
+        if not self.cfg.gm_id_ff:
+            self._stabilize_contacts()
         self._write_unused()
 
     def _preview_pose(self, walker: op3_walk.Op3Walker) -> dict[str, float] | None:

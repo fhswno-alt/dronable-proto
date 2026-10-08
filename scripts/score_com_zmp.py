@@ -1052,6 +1052,7 @@ def run_attempt(
     z_lead: bool = False,
     spring_nm: float = 0.0,
     honor_vx: bool = False,
+    id_ff: bool = False,
 ) -> dict[str, object]:
     md5_before = _plant_md5()
     if md5_before != sw.PLANT_MD5:
@@ -1101,6 +1102,7 @@ def run_attempt(
             gm_z_quintic=bool(z_quintic),
             gm_z_lead=bool(z_lead),
             gm_spring_nm=float(spring_nm),
+            gm_id_ff=bool(id_ff),
         )
     scene = None
     if perturb is not None and perturb.rug:
@@ -1605,6 +1607,23 @@ def run_attempt(
         "sum_ok": sum_ok,
         "signed_pass_sum_fail": signed_pass_sum_fail,
         "mfg_ok": mfg_ok,
+        "id_ff": bool(getattr(cfg, "gm_id_ff", False)),
+        "id_ff_peak": float(getattr(lipm, "id_ff_peak_abs", 0.0)),
+        "id_ff_tau": float(getattr(lipm, "id_ff_peak_tau", 0.0)),
+        "id_ff_joint": str(getattr(lipm, "id_ff_peak_joint", "")),
+        "id_ff_phase": str(getattr(lipm, "id_ff_peak_phase", "")),
+        "id_ff_term": str(getattr(lipm, "id_ff_peak_term", "")),
+        "id_ff_t": float(getattr(lipm, "id_ff_peak_t", 0.0)),
+        "id_ff_over_n": int(getattr(lipm, "id_ff_over_n", 0)),
+        "id_ff_hold": float(getattr(lipm, "id_ff_hold_abs", 0.0)),
+        "id_ff_hold_tau": float(getattr(lipm, "id_ff_hold_tau", 0.0)),
+        "id_ff_hold_joint": str(getattr(lipm, "id_ff_hold_joint", "")),
+        "id_ff_hold_phase": str(getattr(lipm, "id_ff_hold_phase", "")),
+        "id_ff_hold_term": str(getattr(lipm, "id_ff_hold_term", "")),
+        "id_ff_hold_t": float(getattr(lipm, "id_ff_hold_t", 0.0)),
+        "id_ff_hold_over_n": int(getattr(lipm, "id_ff_hold_over_n", 0)),
+        "id_ff_impossible": int(getattr(lipm, "id_ff_impossible", 0)),
+        "id_ff_broke": int(getattr(lipm, "id_ff_broke", 0)),
         "clamp_frac": clamp_frac,
         "clamp_max": clamp_max,
         "clamp_joint": clamp_joint,
