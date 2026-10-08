@@ -750,4 +750,4 @@ The stop tick at 3.448 s reaches bare −4.941 Nm. The placed CoM is outside the
 
 On this same bout the live signed ask on r_hip_roll peaks at 0.823 Nm, 0 ticks over 2.33. The DC-motor line fails on r_knee at 3.456 s in the stop, margin −1.697 rad/s. The stop is a lean: min up_z 0.994, contacts 4/4, pitch 8.14° off the stand, roll 0.29° off. The row is Prefer FAIL STEPS. Full tick list: `previews/walk_a5a9183_plan_y.json`.
 
-SHA `71cc092`. Logs from SHA `424b3d0`. Prior goal-ask score SHA `697d53b`.
+SHA `ffc4d68`. Logs from SHA `424b3d0`. Prior goal-ask score SHA `697d53b`.
