@@ -2805,25 +2805,23 @@ The signed ask on these rows is `kp·(ctrl−q) − kv·q̇` with ctrl after the
 
 A tick whose `mj_inverse` is over 2.33 Nm only because of armature·q̈ — `mj_inverse − 0.01·q̈` still inside ±2.33 — is an unsourced-armature candidate. The 0.01 has no source and is not changed. A wall is only a tick where `mj_inverse − 0.01·q̈` is still over 2.33 Nm. On a wall the dominant piece is named. q̈ is the inertia excluding armature, plus the velocity product. Armature is `0.01·q̈`. Impact is the contact torque at touchdown. CoP is the contact torque when that foot's centre of pressure is at least 15 mm from the ankle. Any other contact is counted with gravity. The peak is taken while the torso up component is at least 0.92, so a fallen pose does not supply the name.
 
-The inverse is taken on a copy of the data after the forward and before `mj_implicit`. The free joint is `qfrc_inverse[0:6]`. Nothing actuates it, so that wrench is the contact check and is reported before the leg residual. The leg residual is `|qfrc_inverse − (qfrc_actuator + qfrc_passive + qfrc_applied)|`. `qfrc_passive` includes the damper `0.08·q̇`. Armature is already inside `M·q̈` and is not added again on the forward side. A tick with a root wrench or a leg residual above 0.05 Nm is not bucketed.
+The inverse copy is taken before `mj_step`. `mjENBL_FWDINV` is set on that copy only and cleared before the live step, so the plant XML is untouched. The copy runs `mj_forward`, then `mj_inverse`. `solver_fwdinv` is the forward/inverse norm from that copy: component 0 is the constraint difference and component 1 is the force difference. The integrator is implicitfast at 0.002 s. Joint damping 0.08 and each leg actuator's kv enter the implicit velocity derivative, so the logged offset is `dt·(0.08 + kv)·|q̈|`. The band on a leg joint is `0.05 + offset`. A joint outside that band is counted and not bucketed.
 
-The root wrench stays under 5.2×10⁻⁴ Nm on the eight rows and under 7.8×10⁻⁴ Nm on the mass sweep. The count of physics steps above 0.05 Nm is 0. That is not a contact mismatch, and it is not the source of a hip spike.
+Root rows first. `max |qfrc_inverse[0:6]|` stays under 6.8×10⁻⁴ Nm. No physics step is over 0.05 Nm. `solver_fwdinv[0]` stays under 8×10⁻¹⁴ and `solver_fwdinv[1]` under 8.1×10⁻⁴.
 
-The leg residual equals `|qfrc_passive|` within 1.6×10⁻⁴ Nm. It crosses 0.05 Nm when `|q̇|` crosses 0.625 rad/s. Those physics steps are not bucketed. On the three knee rows the fail counts are 637, 851, and 845.
+| Row | root max | root t | root dof | fwdinv0 | fwdinv1 | impl offset | resid | band at resid | outside | knee ID |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| T 0.60 / 0.032, feedforward | 4.7e-4 | 0.886 | x | 4.5e-14 | 5.7e-4 | 1.046 | 0.805 | 0.264 | 346 | −2.45 |
+| T 1.00 / 0.016, feedforward | 6.7e-4 | 0.760 | x | 7.1e-14 | 8.1e-4 | 1.227 | 0.840 | 0.154 | 521 | −2.45 |
+| T 1.20 / 0.024, feedforward | 5.1e-4 | 0.318 | x | 4.4e-14 | 6.0e-4 | 1.286 | 0.890 | 0.173 | 388 | −2.45 |
+| T 4 / 0.016, feedforward | 5.3e-14 | 3.438 | z | 4.6e-14 | 5.6e-14 | 1.476 | 0.976 | 0.230 | 712 | +2.45 |
+| T 20 / 0.0042, feedforward | 2.2e-4 | 0.456 | x | 6.5e-14 | 2.7e-4 | 1.501 | 0.848 | 0.130 | 807 | +2.45 |
+| T 0.60 / 0.032, knee gait | 4.4e-4 | 4.656 | y | 1.9e-14 | 5.3e-4 | 0.667 | 0.266 | 0.060 | 424 | +2.45 |
+| T 1.00 / 0.016, knee gait | 1.5e-4 | 1.860 | x | 2.2e-14 | 1.7e-4 | 0.389 | 0.241 | 0.109 | 469 | +2.45 |
+| T 1.20 / 0.024, knee gait | 5.2e-4 | 5.416 | y | 1.5e-14 | 6.4e-4 | 0.347 | 0.186 | 0.052 | 402 | +2.45 |
 
-| Row | root max | root t | root dof | resid max | resid joint | resid fails | knee ID | knee t |
-| --- | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: |
-| T 0.60 / 0.032, feedforward | 2.3e-4 | 0.294 | y | 1.002 | l_knee | 468 | +2.45 | 1.712 |
-| T 1.00 / 0.016, feedforward | 7.5e-14 | 1.460 | z | 0.958 | l_ank_pitch | 460 | −2.45 | 1.536 |
-| T 1.20 / 0.024, feedforward | 5.1e-4 | 0.318 | x | 1.009 | l_ank_pitch | 594 | +2.45 | 1.730 |
-| T 4 / 0.016, feedforward | 7.1e-14 | 1.530 | z | 1.166 | r_knee | 835 | +2.45 | 2.164 |
-| T 20 / 0.0042, feedforward | 3.1e-4 | 1.584 | y | 0.892 | l_ank_pitch | 409 | +2.45 | 2.296 |
-| T 0.60 / 0.032, knee gait | 4.4e-4 | 4.656 | y | 0.266 | r_knee | 637 | −2.45 | 2.496 |
-| T 1.00 / 0.016, knee gait | 1.5e-4 | 1.860 | x | 0.241 | r_knee | 851 | +1.59 | 3.424 |
-| T 1.20 / 0.024, knee gait | 5.2e-4 | 5.416 | y | 0.186 | r_knee | 845 | +2.26 | 3.776 |
+`impl offset` is the largest `dt·(0.08 + kv)·|q̈|` on that row. The residual and the band beside it are the leg joint where the residual itself is largest. Outside is the number of physics steps with a leg joint over its own band. Those steps are not bucketed. Knee ID is the largest knee inverse on a step inside the band.
 
-Knee ID is the largest `|qfrc_inverse|` on a knee whose residual on that step is ≤ 0.05 Nm. The feedforward rows leave the support: τ_des is updated only on a step whose residual passes, so the fast steps run on feedback alone and the signed ask reaches 7 Nm. The build decision uses the knee gait, which stays up. On that T 0.60 row the residual-passing knee inverse is the plant rail, −2.45 Nm, at 2.496 s.
-
-The same T 0.60 knee gait, mass scaled on the body inertias at load, ten hinge seeds at +5% and ten at −5%, plus the entrance rug. Every residual-passing knee sample is included. The root wrench stays under 7.8×10⁻⁴ Nm. The worst knee ID is 2.450 Nm, on the right knee near 2.50 s, at both mass scales and on every seed. The rug peaks are 1.698 Nm and 1.716 Nm. 2.450 Nm is over 2.33 Nm, so the feedforward path is not worth building.
+The knee gaits stay up. On each of them the in-band knee inverse reaches the plant rail, +2.45 Nm. The T 0.60 knee gait, with mass scaled ±5% on the body inertias, ten hinge seeds at each scale, and the entrance rug, has the same worst case: 2.450 Nm on the right knee. The rug peaks are 1.860 Nm and 1.861 Nm. The root wrench on that sweep stays under 7.8×10⁻⁴ Nm, with no step over 0.05 Nm. 2.450 Nm is over 2.33 Nm, so the feedforward path is not worth building.
 
 Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0.

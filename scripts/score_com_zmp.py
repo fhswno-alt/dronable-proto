@@ -1314,10 +1314,11 @@ def run_attempt(
             # The inverse is the pre-integration forward of this command.
             tau_id = lipm.id_tick_tau.get(row.joint)
             resid_id = float(lipm.id_tick_resid.get(row.joint, float("inf")))
+            band_id = float(lipm.id_tick_band.get(row.joint, lipm_gait.ID_RESID_NM))
             ok_id = bool(lipm.id_tick_ok.get(row.joint, False)) and tau_id is not None
             if abs(row.signed_nm) > ASK_NM + 1e-9:
                 id_over_signed += 1
-            if not ok_id or resid_id > lipm_gait.ID_RESID_NM:
+            if not ok_id or resid_id > band_id:
                 id_skip_n += 1
             else:
                 stripped_id = float(lipm.id_tick_stripped.get(row.joint, float(tau_id)))
@@ -1730,6 +1731,12 @@ def run_attempt(
         "id_root_t": float(getattr(lipm, "id_root_t", 0.0)),
         "id_root_dof": int(getattr(lipm, "id_root_dof", -1)),
         "id_root_fail_n": int(getattr(lipm, "id_root_fail_n", 0)),
+        "id_fwdinv0_max": float(getattr(lipm, "id_fwdinv0_max", 0.0)),
+        "id_fwdinv1_max": float(getattr(lipm, "id_fwdinv1_max", 0.0)),
+        "id_fwdinv_t": float(getattr(lipm, "id_fwdinv_t", 0.0)),
+        "id_impl_max": float(getattr(lipm, "id_impl_max", 0.0)),
+        "id_impl_at_resid": float(getattr(lipm, "id_impl_at_resid", 0.0)),
+        "id_band_at_resid": float(getattr(lipm, "id_band_at_resid", 0.0)),
         "id_resid_max": float(getattr(lipm, "id_resid_max", 0.0)),
         "id_resid_joint": str(getattr(lipm, "id_resid_joint", "")),
         "id_resid_pas_max": float(getattr(lipm, "id_resid_pas_max", 0.0)),

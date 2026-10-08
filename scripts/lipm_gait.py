@@ -506,6 +506,17 @@ class LipmWalker:
         self.id_root_dof = -1
         self.id_root_fail_n = 0
         self.id_tick_root = 0.0
+        self.id_fwdinv0_max = 0.0
+        self.id_fwdinv1_max = 0.0
+        self.id_fwdinv_t = 0.0
+        self.id_tick_fwdinv0 = 0.0
+        self.id_tick_fwdinv1 = 0.0
+        self.id_impl_max = 0.0
+        self.id_impl_at_resid = 0.0
+        self.id_band_at_resid = ID_RESID_NM
+        self.id_tick_offset: dict[str, float] = {}
+        self.id_tick_band: dict[str, float] = {}
+        self._leg_kv: dict[str, float] = {}
         self.id_knee_ok_abs = 0.0
         self.id_knee_ok_tau = 0.0
         self.id_knee_ok_joint = ""
@@ -1059,6 +1070,12 @@ class LipmWalker:
             if jid < 0:
                 continue
             self._leg_dof[name] = int(self.model.jnt_dofadr[jid])
+            act = name + "_pos"
+            idx = self.act_idx.get(act)
+            kv = 0.0
+            if idx is not None:
+                kv = -float(self.model.actuator_biasprm[idx, 2])
+            self._leg_kv[name] = kv
 
     def begin_id_tick(self) -> None:
         """Clear the per-command inverse record. Physics fills it."""
@@ -1070,6 +1087,10 @@ class LipmWalker:
         self.id_tick_resid_pas = {}
         self.id_tick_ok = {name: True for name in self._leg_dof}
         self.id_tick_root = 0.0
+        self.id_tick_fwdinv0 = 0.0
+        self.id_tick_fwdinv1 = 0.0
+        self.id_tick_offset = {}
+        self.id_tick_band = {}
         self._limit_this_tick = False
 
     def finish_id_tick(self) -> None:
@@ -1078,29 +1099,50 @@ class LipmWalker:
             self.limit_ticks += 1
 
     def audit_forward_inverse(self) -> None:
-        """Inverse of this forward, before integration.
+        """Inverse on a copy taken before mj_step.
 
-        q, q̇, q̈, contacts, and the actuator force are the ones
-        mj_forward just wrote. mj_inverse on a copy of that data keeps
-        the same configuration. The free joint is qfrc_inverse[0:6].
-        Nothing actuates it, so that wrench is the contact check and
-        is recorded before the leg residual. The leg residual is
+        mjENBL_FWDINV is set only for this copy, then cleared. The
+        plant XML is not edited. mj_forward runs on the copy, then
+        mj_inverse. solver_fwdinv is MuJoCo's forward/inverse norm.
+        The free-joint wrench qfrc_inverse[0:6] is recorded first.
+        The leg residual is
         |qfrc_inverse − (qfrc_actuator + qfrc_passive + qfrc_applied)|.
-        qfrc_passive includes the 0.08·q̇ damper. Armature is already
-        inside M·q̈. A leg residual above ID_RESID_NM is not bucketed.
+        implicitfast folds joint damping and actuator kv into the
+        velocity derivative, so the band is
+        0.05 + dt·(damping + kv)·|q̈|. The offset is logged on its
+        own. A joint outside that band is counted and not bucketed.
         """
         self._ensure_leg_dof()
         if self._id_data is None:
             self._id_data = mj.MjData(self.model)
-        act = np.array(self.data.qfrc_actuator, dtype=np.float64, copy=True)
-        app = np.array(self.data.qfrc_applied, dtype=np.float64, copy=True)
-        pas = np.array(self.data.qfrc_passive, dtype=np.float64, copy=True)
-        qacc = np.array(self.data.qacc, dtype=np.float64, copy=True)
         scratch = self._id_data
-        mj.mj_copyData(scratch, self.model, self.data)
-        mj.mj_inverse(self.model, scratch)
-        inv = np.array(scratch.qfrc_inverse, dtype=np.float64, copy=True)
+        saved = int(self.model.opt.enableflags)
+        self.model.opt.enableflags = saved | int(mj.mjtEnableBit.mjENBL_FWDINV)
+        try:
+            mj.mj_copyData(scratch, self.model, self.data)
+            mj.mj_forward(self.model, scratch)
+            act = np.array(scratch.qfrc_actuator, dtype=np.float64, copy=True)
+            app = np.array(scratch.qfrc_applied, dtype=np.float64, copy=True)
+            pas = np.array(scratch.qfrc_passive, dtype=np.float64, copy=True)
+            qacc = np.array(scratch.qacc, dtype=np.float64, copy=True)
+            mj.mj_compareFwdInv(self.model, scratch)
+            fwd0 = float(scratch.solver_fwdinv[0])
+            fwd1 = float(scratch.solver_fwdinv[1])
+            mj.mj_inverse(self.model, scratch)
+            inv = np.array(scratch.qfrc_inverse, dtype=np.float64, copy=True)
+        finally:
+            self.model.opt.enableflags = saved
         self.id_phys_n += 1
+        if fwd0 > self.id_tick_fwdinv0:
+            self.id_tick_fwdinv0 = fwd0
+        if fwd1 > self.id_tick_fwdinv1:
+            self.id_tick_fwdinv1 = fwd1
+        if fwd0 > self.id_fwdinv0_max:
+            self.id_fwdinv0_max = fwd0
+        if fwd1 > self.id_fwdinv1_max:
+            self.id_fwdinv1_max = fwd1
+            self.id_fwdinv_t = float(self.data.time)
+        dt = float(self.model.opt.timestep)
         root_abs = np.abs(inv[:6])
         root = float(np.max(root_abs)) if root_abs.size else 0.0
         if root > self.id_tick_root:
@@ -1122,21 +1164,28 @@ class LipmWalker:
             stripped = tau - arm
             forward = float(act[adr]) + float(pas[adr]) + float(app[adr])
             resid = abs(tau - forward)
-            resid_pas = resid
+            damp = float(self.model.dof_damping[adr])
+            kv = float(self._leg_kv.get(name, 0.0))
+            offset = dt * (damp + kv) * abs(float(qacc[adr]))
+            band = ID_RESID_NM + offset
+            prev_off = float(self.id_tick_offset.get(name, -1.0))
+            if offset > prev_off:
+                self.id_tick_offset[name] = offset
+                self.id_tick_band[name] = band
+            if offset > self.id_impl_max:
+                self.id_impl_max = offset
             prev_resid = float(self.id_tick_resid.get(name, -1.0))
             if resid > prev_resid:
                 self.id_tick_resid[name] = resid
-            prev_pas = float(self.id_tick_resid_pas.get(name, -1.0))
-            if resid_pas > prev_pas:
-                self.id_tick_resid_pas[name] = resid_pas
-            if resid > ID_RESID_NM:
+            outside = resid > band
+            if outside:
                 self.id_tick_ok[name] = False
                 step_fail = True
             elif abs(tau) >= abs(float(self.id_tick_tau.get(name, 0.0))):
                 self.id_tick_tau[name] = tau
                 self.id_tick_arm[name] = arm
                 self.id_tick_stripped[name] = stripped
-            if resid <= ID_RESID_NM and not root_bad:
+            if not outside and not root_bad:
                 self._consistent_tau[name] = tau
                 if name.endswith("knee"):
                     self.id_knee_ok_n += 1
@@ -1148,12 +1197,9 @@ class LipmWalker:
             if resid > self.id_resid_max:
                 self.id_resid_max = resid
                 self.id_resid_joint = name
-            if resid_pas > self.id_resid_pas_max:
-                self.id_resid_pas_max = resid_pas
-            gap = abs(resid - abs(float(pas[adr])))
-            if gap > self.id_resid_vs_pas:
-                self.id_resid_vs_pas = gap
-            if root_bad or resid > ID_RESID_NM or not upright:
+                self.id_impl_at_resid = offset
+                self.id_band_at_resid = band
+            if root_bad or outside or not upright:
                 continue
             if abs(stripped) > sag + 1e-9:
                 self.id_wall_phys_n += 1
