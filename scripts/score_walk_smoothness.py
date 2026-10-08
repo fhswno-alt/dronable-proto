@@ -2187,7 +2187,18 @@ def run_preview_row(
         period_s=spec.period_s,
         vx_cmd_m_s=vx_cmd,
     )
-    verdict: Literal["CLEAR", "Prefer FAIL"] = "CLEAR" if not fail_reasons else "Prefer FAIL"
+    signed_peak, sum_peak = step_bars.torque_column_peaks(torque_bar)
+    gate = step_bars.clear_gate(
+        full_bars_pass=not fail_reasons,
+        step_pass=bool(stepping.get("passes")),
+        signed_peak_nm=signed_peak,
+        sum_peak_nm=sum_peak,
+    )
+    for reason in gate["block_reasons"]:
+        text = str(reason)
+        if text not in fail_reasons:
+            fail_reasons.append(text)
+    verdict: Literal["CLEAR", "Prefer FAIL"] = "CLEAR" if gate["may_clear"] else "Prefer FAIL"
     knee_peak = None if joint_jerk is None else joint_jerk.axis_peak.get("r_knee")
     knee_rms = None if joint_jerk is None else joint_jerk.axis_rms.get("r_knee")
     phase_rows = [phases[name] for name in ("stand", "ds", "ss_L", "ss_R")]
@@ -2209,6 +2220,10 @@ def run_preview_row(
         "soft_pass": SOFT_PASS,
         "verdict": verdict,
         "fail_reasons": fail_reasons,
+        "signed_peak_nm": gate["signed_peak_nm"],
+        "sum_peak_nm": gate["sum_peak_nm"],
+        "sum_signed_ratio": gate["sum_signed_ratio"],
+        "flag": gate["flag"],
         "plant_notes": notes,
         "period_s": spec.period_s,
         "dsp": spec.dsp,

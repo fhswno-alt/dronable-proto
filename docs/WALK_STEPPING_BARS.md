@@ -2,6 +2,17 @@
 
 Soft-pass is off. A row is CLEAR only when the existing jerk, declared-stance
 ZMP/CoM, and unclamped-torque bars pass and the stepping bars pass.
+Step fraction is one of those bars. A bout that stays upright and skates
+is not a walk.
+
+Every scored row carries a sum/signed ratio, the sum peak divided by the
+signed peak. A row whose sum peak is greater than twice its signed peak
+is `latency-test-first`. That row cannot be CLEAR until the signed bar
+and the full bars pass at control latency −1 tick and +1 tick, and on
+the 5× bus stop rows. Exactly twice does not set the flag. A manifest
+this scorer attaches, because `run_live_row.py` did not write
+`compiled_md5`, `xml_md5`, `perturbation`, and `cmd`, is
+`wrapper-attached` until the runner writes those four fields on the row.
 Plant file md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` is checked before and after every bout.
 Mass, friction, latency, and the entrance mat are applied on the loaded model.
 The plant file is not written.
@@ -766,6 +777,13 @@ Both hashes are keyed by the exact `mujoco.__version__` in `previews/compiled_re
 
 PR #103 entry point `scripts/run_live_row.py` at `6bae07e` ran both configs with those same arguments. Armature 0.01 goes through `MjSpec` before kv. The baseline sets feedforward 0 and knee q̈ cap none. The other row sets feedforward 1 and knee q̈ cap 40. On the baseline the live r_hip_roll ask peaks at +5.645 Nm at 3.208 s, 30 ticks over 2.33, and the bout tips: min up_z 0.849, pitch −30.0°, fault `COM outside support and tipping margin=-0.068`. Signed, sum, DC, clamp, margins, and stepping all fail. Ctrl-clip is 0. The run stops at 562 ticks. The feedforward row aborts at 0.256 s in the start, planned root residual over 0.01 Nm, so it has no live r_hip_roll and no tip call. Plant md5 held. `6bae07e` shadows the ask-over list with the loop variable `over`, and the unpatched baseline raises TypeError after the rollout. The baseline JSON renamed that variable to `tick_over` in the checkout. The gait was not edited. Files: `previews/run_live_row_voice056_pair.json`, `previews/run_live_row_a5a9183_baseline.json`, `previews/run_live_row_ff_cap.json`.
 
-The same entry point at `4f1d027` reran both configs with those arguments. `compile_plant` hashes to `03ed33386178ab8d05db76a7307f1c1d` at armature 0.01 and `f4fb2b70b5312a851e16316a38a88283` at 0.025. Both match `previews/compiled_refs.json` on MuJoCo `3.14.0`. Plant md5 held. The ask-over list is intact, so the baseline no longer raises TypeError. On the baseline the live r_hip_roll ask peaks at +6.016 Nm at 3.224 s, 34 ticks over 2.33, and the bout tips: min up_z 0.844, pitch −30.49°, fault `COM outside support and tipping margin=-0.069`, 567 ticks. Signed, sum, DC, clamp, margins, and stepping fail. Ctrl-clip is 0. The feedforward row finishes. r_hip_roll peaks at 0.935 Nm, 0 ticks over. Signed ask peaks at 1.710 Nm on r_ank_roll, 0 over, and the sum peaks at 4.165 Nm, 210 over, so the note is `passes signed, fails sum`. tip_ok is true (min up_z 0.976, pitch 4.22°). `cleared` is false: margins, the sum, and the step bars fail. The runner JSON has tip_sha, plant_md5, mujoco_version, and seed null inside args. It does not emit compiled_md5, xml_md5, perturbation, or cmd. Those are attached after the refs check, perturbation `none`. Files: `previews/run_live_row_4f1d027_baseline.json`, `previews/run_live_row_4f1d027_ff_cap.json`.
+The same entry point at `4f1d027` reran both configs with those arguments. `compile_plant` hashes to `03ed33386178ab8d05db76a7307f1c1d` at armature 0.01 and `f4fb2b70b5312a851e16316a38a88283` at 0.025. Both match `previews/compiled_refs.json` on MuJoCo `3.14.0`. Plant md5 held. The ask-over list is intact, so the baseline no longer raises TypeError. On the baseline the live r_hip_roll ask peaks at +6.016 Nm at 3.224 s, 34 ticks over 2.33, and the bout tips: min up_z 0.844, pitch −30.49°, fault `COM outside support and tipping margin=-0.069`, 567 ticks. Signed, sum, DC, clamp, margins, and stepping fail. Ctrl-clip is 0. The feedforward row finishes. r_hip_roll peaks at 0.935 Nm, 0 ticks over. Signed ask peaks at 1.710 Nm on r_ank_roll, 0 over, and the sum peaks at 4.165 Nm, 210 over, so the note is `passes signed, fails sum`. tip_ok is true (min up_z 0.976, pitch 4.22°). `cleared` is false: margins, the sum, and the step bars fail. Step fraction is 0.
+
+| Row | Signed peak Nm | Sum peak Nm | Sum/signed | Flag | Step frac | Manifest |
+| --- | ---: | ---: | ---: | --- | ---: | --- |
+| baseline, ff 0 | 6.016 | 10.106 | 1.680 | | 0.385 | `wrapper-attached` |
+| feedforward, knee q̈ cap 40 | 1.710 | 4.165 | 2.435 | `latency-test-first` | 0.000 | `wrapper-attached` |
+
+The baseline ratio is under 2, so it does not take the flag. It still fails the signed bar and the stepping bars. The feedforward row is `latency-test-first`. It cannot be CLEAR until the signed bar and the full bars pass at control latency −1 and +1 and on the 5× bus stop rows. The runner JSON has tip_sha, plant_md5, mujoco_version, and seed null inside args. It does not emit compiled_md5, xml_md5, perturbation, or cmd. Those are attached after the refs check, perturbation `none`. The manifest source is `wrapper-attached`. Files: `previews/run_live_row_4f1d027_baseline.json`, `previews/run_live_row_4f1d027_ff_cap.json`.
 
 SHA `d4a38cc`. Logs from SHA `424b3d0`. Prior goal-ask score SHA `697d53b`.

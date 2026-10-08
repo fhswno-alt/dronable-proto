@@ -56,6 +56,18 @@ CLAMP_ASK_NM = 2.45
 # joint on every tick. The sum |kp·e| + |kv·ω| is a column, not this bar.
 TORQUE_ASK_NM = 2.33
 SIGNED_SUM_NOTE = "passes signed, fails sum"
+# A row whose sum peak is more than twice its signed peak is not CLEAR
+# from the nominal bout. It stays `latency-test-first` until the signed
+# bar and the full bars pass at control latency −1 and +1, and on the
+# 5× CommandBus stop rows. Exactly twice does not set the flag.
+SUM_SIGNED_RATIO_BAR = 2.0
+LATENCY_TEST_FIRST = "latency-test-first"
+WRAPPER_ATTACHED = "wrapper-attached"
+RUNNER_MANIFEST = "runner"
+# Fields `run_live_row.py` did not write. This scorer attaches them.
+WRAPPER_MANIFEST_FIELDS = ("compiled_md5", "xml_md5", "perturbation", "cmd")
+LATENCY_TICKS_REQUIRED = (-1, 1)
+BUS_STOP_REPEATS = 5
 
 
 def hinge_speed_report(
@@ -479,6 +491,125 @@ def signed_torque_bar(
         "passes": passes,
         "sum_passes": sum_passes,
     }
+
+
+def torque_column_peaks(torque_bar: dict[str, object]) -> tuple[float | None, float | None]:
+    """Row peaks of the signed ask and the sum column.
+
+    Each peak is the largest magnitude on that column, across the leg
+    joints. The two peaks may sit on different joints.
+    """
+    joints = torque_bar.get("joints")
+    if not isinstance(joints, list):
+        return None, None
+    signed: list[float] = []
+    summed: list[float] = []
+    for row in joints:
+        if not isinstance(row, dict):
+            continue
+        ask = row.get("peak_ask_nm")
+        total = row.get("peak_sum_nm")
+        if ask is not None:
+            signed.append(abs(float(ask)))
+        if total is not None:
+            summed.append(abs(float(total)))
+    return (max(signed) if signed else None, max(summed) if summed else None)
+
+
+def sum_signed_column(
+    signed_peak_nm: float | None,
+    sum_peak_nm: float | None,
+) -> dict[str, object]:
+    """Sum/signed ratio and the `latency-test-first` flag.
+
+    The flag is set when the sum peak is greater than twice the signed
+    peak. An unmeasured peak leaves the ratio empty and does not set the
+    flag. A signed peak of 0 with a positive sum sets the flag and leaves
+    the ratio empty.
+    """
+    if signed_peak_nm is None or sum_peak_nm is None:
+        return {
+            "signed_peak_nm": signed_peak_nm,
+            "sum_peak_nm": sum_peak_nm,
+            "sum_signed_ratio": None,
+            "flag": "",
+        }
+    signed = abs(float(signed_peak_nm))
+    total = abs(float(sum_peak_nm))
+    if signed == 0.0:
+        ratio = None
+        flagged = total > 0.0
+    else:
+        ratio = total / signed
+        flagged = total > SUM_SIGNED_RATIO_BAR * signed
+    return {
+        "signed_peak_nm": signed,
+        "sum_peak_nm": total,
+        "sum_signed_ratio": ratio,
+        "flag": LATENCY_TEST_FIRST if flagged else "",
+    }
+
+
+def clear_gate(
+    *,
+    full_bars_pass: bool,
+    step_pass: bool,
+    signed_peak_nm: float | None,
+    sum_peak_nm: float | None,
+    latency_passes: dict[str, bool] | None = None,
+    bus_stop_passes: bool | None = None,
+) -> dict[str, object]:
+    """Whether this row may be marked CLEAR.
+
+    The full bars include the signed ask. The stepping bars, including
+    step fraction, are required on their own: a bout that stays upright
+    and skates is not a walk. A `latency-test-first` row also needs the
+    signed bar and the full bars at control latency −1 and +1, and on
+    the 5× bus stop rows. Missing evidence is not a pass.
+    """
+    column = sum_signed_column(signed_peak_nm, sum_peak_nm)
+    blocks: list[str] = []
+    if not step_pass:
+        blocks.append(
+            "step fraction / stepping bars fail; a non-tipping skate is not a walk"
+        )
+    if column["flag"] == LATENCY_TEST_FIRST:
+        got = latency_passes or {}
+        for tick in LATENCY_TICKS_REQUIRED:
+            key = f"{tick:+d}"
+            if got.get(key) is not True:
+                blocks.append(
+                    f"{LATENCY_TEST_FIRST}: control latency {key} tick has not passed "
+                    "the signed bar and the full bars"
+                )
+        if bus_stop_passes is not True:
+            blocks.append(
+                f"{LATENCY_TEST_FIRST}: the {BUS_STOP_REPEATS}× bus stop rows have not "
+                "passed the signed bar and the full bars"
+            )
+    may_clear = bool(full_bars_pass and step_pass and not blocks)
+    return {
+        **column,
+        "may_clear": may_clear,
+        "block_reasons": blocks,
+        "step_required": True,
+    }
+
+
+def manifest_source(payload: dict[str, object]) -> str:
+    """`wrapper-attached` until `run_live_row.py` writes its own manifest.
+
+    The runner's own manifest is the four fields on the row itself.
+    The same fields nested only under the object this scorer adds stay
+    `wrapper-attached`.
+    """
+    top_has = all(
+        key in payload and payload[key] not in (None, "")
+        for key in WRAPPER_MANIFEST_FIELDS
+    )
+    if top_has:
+        return RUNNER_MANIFEST
+    return WRAPPER_ATTACHED
 
 
 def trunk_speed_line(
@@ -1066,6 +1197,57 @@ def self_test() -> int:
     ank = [row for row in over_ask["joints"] if row["joint"] == "l_ank_roll"][0]
     expect(ank["note"] == SIGNED_SUM_NOTE, "the ankle that passes signed and fails sum is flagged")
     expect(any("l_hip_roll" in str(item) for item in over_ask["fail_reasons"]), "the 2.33 fail names the joint")
+    wide = sum_signed_column(1.710454974454931, 4.164848919770975)
+    expect(wide["flag"] == LATENCY_TEST_FIRST, "sum above twice the signed peak is latency-test-first")
+    expect(abs(float(wide["sum_signed_ratio"]) - (4.164848919770975 / 1.710454974454931)) < 1e-12, "the ratio is sum/signed")
+    close = sum_signed_column(6.0163777812014505, 10.105977838562447)
+    expect(close["flag"] == "", "1.68× does not set the flag")
+    expect(sum_signed_column(1.0, 2.0)["flag"] == "", "exactly twice does not set the flag")
+    expect(sum_signed_column(1.0, 2.0 + 1e-9)["flag"] == LATENCY_TEST_FIRST, "just over twice sets the flag")
+    zero = sum_signed_column(0.0, 1.0)
+    expect(zero["flag"] == LATENCY_TEST_FIRST and zero["sum_signed_ratio"] is None, "a zero signed peak with a positive sum is flagged")
+    missing = sum_signed_column(None, 1.0)
+    expect(missing["flag"] == "" and missing["sum_signed_ratio"] is None, "an unmeasured peak does not set the flag")
+    skate_clear = clear_gate(
+        full_bars_pass=True, step_pass=False, signed_peak_nm=1.0, sum_peak_nm=1.5,
+    )
+    expect(skate_clear["may_clear"] is False, "a non-tipping skate is not CLEAR")
+    expect(any("skate" in str(item) for item in skate_clear["block_reasons"]), "the block names the skate")
+    held = clear_gate(
+        full_bars_pass=True, step_pass=True, signed_peak_nm=1.0, sum_peak_nm=2.5,
+    )
+    expect(held["may_clear"] is False, "latency-test-first blocks CLEAR without the extra rows")
+    expect(any("control latency -1" in str(item) for item in held["block_reasons"]), "−1 tick is required")
+    expect(any("control latency +1" in str(item) for item in held["block_reasons"]), "+1 tick is required")
+    expect(any("5× bus stop" in str(item) for item in held["block_reasons"]), "the 5× bus stop rows are required")
+    released = clear_gate(
+        full_bars_pass=True,
+        step_pass=True,
+        signed_peak_nm=1.0,
+        sum_peak_nm=2.5,
+        latency_passes={"-1": True, "+1": True},
+        bus_stop_passes=True,
+    )
+    expect(released["may_clear"] is True, "the extra rows release a latency-test-first CLEAR")
+    one_side = clear_gate(
+        full_bars_pass=True,
+        step_pass=True,
+        signed_peak_nm=1.0,
+        sum_peak_nm=2.5,
+        latency_passes={"+1": True},
+        bus_stop_passes=True,
+    )
+    expect(one_side["may_clear"] is False, "one latency sign does not release the row")
+    plain = clear_gate(
+        full_bars_pass=True, step_pass=True, signed_peak_nm=2.0, sum_peak_nm=3.0,
+    )
+    expect(plain["may_clear"] is True and plain["flag"] == "", "a row under twice may CLEAR")
+    wrapped = manifest_source({"manifest": {"compiled_md5": "abc", "xml_md5": "def", "perturbation": "none", "cmd": "x"}})
+    expect(wrapped == WRAPPER_ATTACHED, "fields nested by this scorer stay wrapper-attached")
+    own = manifest_source({
+        "compiled_md5": "abc", "xml_md5": "def", "perturbation": "none", "cmd": "x",
+    })
+    expect(own == RUNNER_MANIFEST, "the runner's own four fields are its manifest")
     if failures:
         for msg in failures:
             print(f"FAIL {msg}")

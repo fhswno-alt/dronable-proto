@@ -3663,7 +3663,18 @@ def score_cell(
     goal_peak = max(writes, key=lambda rec: abs(rec.ask_nm)) if writes else None
     ask_peak = max(plant_asks, key=lambda rec: abs(rec.ask_nm)) if plant_asks else None
     sum_peak = max(writes, key=lambda rec: rec.sum_nm) if writes else None
-    verdict = "CLEAR" if not fail_reasons else "Prefer FAIL"
+    signed_peak, sum_peak = step_bars.torque_column_peaks(torque_bar)
+    gate = step_bars.clear_gate(
+        full_bars_pass=not fail_reasons,
+        step_pass=bool(stepping.get("passes")),
+        signed_peak_nm=signed_peak,
+        sum_peak_nm=sum_peak,
+    )
+    for reason in gate["block_reasons"]:
+        text = str(reason)
+        if text not in fail_reasons:
+            fail_reasons.append(text)
+    verdict = "CLEAR" if gate["may_clear"] else "Prefer FAIL"
     gait = "STEPS" if int(stepping["n_scored_swings"]) > 0 and float(stepping["step_fraction"]) >= 0.50 else "SKATES"
     body_mean = (body_vx_sum / body_vx_n) if body_vx_n else None
     body_ratio = (body_mean / vx_cmd) if body_mean is not None and abs(vx_cmd) > 1e-9 else None
@@ -3686,6 +3697,10 @@ def score_cell(
         "leg_kv": kv_of,
         "verdict": verdict,
         "gait": gait,
+        "signed_peak_nm": gate["signed_peak_nm"],
+        "sum_peak_nm": gate["sum_peak_nm"],
+        "sum_signed_ratio": gate["sum_signed_ratio"],
+        "flag": gate["flag"],
         "fail_reasons": fail_reasons,
         "signed_pass": bool(torque_bar["passes"]),
         "sum_pass": bool(torque_bar["sum_passes"]),

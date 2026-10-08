@@ -24,6 +24,7 @@
       "scorer_sha",
       "seed"
     ],
+    "manifest_source": "wrapper-attached",
     "seed_in_args": null,
     "baseline_json": "previews/run_live_row_4f1d027_baseline.json",
     "feedforward_json": "previews/run_live_row_4f1d027_ff_cap.json",
@@ -38,7 +39,11 @@
       "fault": "COM outside support and tipping margin=-0.069",
       "tip_ok": false,
       "cleared": false,
-      "ctrl_clip_frac": 0.0
+      "ctrl_clip_frac": 0.0,
+      "signed_peak_nm": 6.0163777812014505,
+      "sum_peak_nm": 10.105977838562447,
+      "sum_signed_ratio": 1.6797445582854202,
+      "flag": ""
     },
     "feedforward": {
       "abort": null,
@@ -48,6 +53,8 @@
       "signed_joint": "r_ank_roll",
       "sum_peak_nm": 4.164848919770975,
       "sum_over": 210,
+      "sum_signed_ratio": 2.4349363075740613,
+      "flag": "latency-test-first",
       "note": "passes signed, fails sum",
       "tip_ok": true,
       "cleared": false,

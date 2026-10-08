@@ -13,7 +13,8 @@
     "perturbation": "none",
     "tip_sha": "4f1d02705d5b4f79285d20e91e92afb52ed4d40b",
     "seed": null,
-    "cmd": "cd /tmp/pr103-4f1d027 && MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/run_live_row.py --t 1.0 --vx 0.016 --clearance 0.008 --dsp 0.25 --armature 0.01 --seed none --latency 0 --mass-scale 1 --mu none --arm-s 1.0 --stand-s 0.25 --stop-s 2.40 --preview-shape 0 --preview-r 1e-4 --z-quintic 0 --z-lead 0 --honor-vx 0 --crouch 0.025 --hip-pitch-deg 15 --gait voice056 --ff 0 --knee-qdd-cap none --out /tmp/pr103-live/baseline.json"
+    "cmd": "cd /tmp/pr103-4f1d027 && MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/run_live_row.py --t 1.0 --vx 0.016 --clearance 0.008 --dsp 0.25 --armature 0.01 --seed none --latency 0 --mass-scale 1 --mu none --arm-s 1.0 --stand-s 0.25 --stop-s 2.40 --preview-shape 0 --preview-r 1e-4 --z-quintic 0 --z-lead 0 --honor-vx 0 --crouch 0.025 --hip-pitch-deg 15 --gait voice056 --ff 0 --knee-qdd-cap none --out /tmp/pr103-live/baseline.json",
+    "manifest_source": "wrapper-attached"
   },
   "tip_sha": "4f1d02705d5b4f79285d20e91e92afb52ed4d40b",
   "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
@@ -66,6 +67,8 @@
   "dc_t": 3.2239999999998665,
   "score": {
     "cleared": false,
+    "sum_signed_ratio": 1.6797445582854202,
+    "flag": "",
     "margins_ok": false,
     "ask_ok": false,
     "jerk_ok": true,
