@@ -41,12 +41,15 @@ An independent planned-motion inverse reads the walker's own reference
 Double support is split three ways: ZMP position along the foot-to-foot
 line, a min-norm ankle-torque split, and a minimax split (called QP below)
 that minimises the largest |τ| over the leg joints with armature removed.
-The QP keeps each foot's centre of pressure inside its 135×76 mm box and
+The QP keeps each foot's centre of pressure inside its 135×76 mm box
+shrunk by ``step_bars.EDGE_DWELL_M`` (the #102 edge-dwell margin) and
 each corner force inside a friction cone of μ 1.2. The three splits are
 reported. A planned-motion wall is only a double-support tick where even
 that QP still needs more than 2.33 Nm without armature. The realised
 double-support contact split is compared with the QP split. Neither
-comparison changes the pass. ``τ_req`` is printed with and without
+comparison changes the pass. The per-foot QP CoP margin is logged, and a
+tick whose reported CoP lies on that shrunk edge is flagged. The flag
+does not change the pass. ``τ_req`` is printed with and without
 ``armature·q̈_ref``. A joint that is over 2.33 only before that subtraction
 is an unsourced-armature candidate. It is not a pass.
 """
@@ -110,6 +113,14 @@ QP_MU = 1.2
 QP_HALF_X_M = 0.0675
 QP_HALF_Y_M = 0.038
 QP_DS_FZ_N = 1.0
+# Inner margin the #102 scorer already uses for edge dwell. A single-support
+# CoP closer to the sole edge than this is not clearly inside. The QP box
+# is the 135×76 mm sole shrunk by this value on every side. Do not replace
+# it with a new literal.
+QP_COP_INSET_M = float(step_bars.EDGE_DWELL_M)
+# A reported CoP is on the shrunk edge when its margin to the sole matches
+# the inset within this tolerance. Same 0.1 mm the full-box check already uses.
+QP_COP_BOUND_TOL_M = 1e-4
 KNEE_ID_CONTROLS_NM = 2.045
 KNEE_ID_CONTROLS_DISCRETE_NM = (0.934, 1.087)
 ROOT_DOFS = 6
@@ -962,6 +973,54 @@ def _foot_corners(model: mj.MjModel, data: mj.MjData, side: str) -> tuple[np.nda
     return rot, points
 
 
+def _corner_locals() -> list[tuple[float, float]]:
+    """Local xy of the eight sole corners, left foot then right.
+
+    Order matches ``_foot_corners``: sx outer, sy inner.
+    """
+    hx = QP_HALF_X_M
+    hy = QP_HALF_Y_M
+    one = ((-hx, -hy), (-hx, hy), (hx, -hy), (hx, hy))
+    return list(one) + list(one)
+
+
+def _cop_inset_limits() -> tuple[float, float, float]:
+    """Inset and the shrunk half-extents, both in metres.
+
+    The inset is ``step_bars.EDGE_DWELL_M``. A non-positive shrunk box is
+    a scorer error, not a silent fallback to the full sole.
+    """
+    inset = float(step_bars.EDGE_DWELL_M)
+    if inset != QP_COP_INSET_M:
+        raise RuntimeError(
+            f"QP CoP inset {QP_COP_INSET_M} m drifted from step_bars.EDGE_DWELL_M {inset} m"
+        )
+    hx_in = QP_HALF_X_M - inset
+    hy_in = QP_HALF_Y_M - inset
+    if hx_in <= 1e-6 or hy_in <= 1e-6:
+        raise RuntimeError(
+            f"CoP inset {inset} m does not fit inside the 135×76 mm sole"
+        )
+    return inset, hx_in, hy_in
+
+
+def _add_cop_inset_rows(n_var: int, add) -> None:
+    """Linear inequalities that keep each foot's CoP inside the shrunk box."""
+    _inset, hx_in, hy_in = _cop_inset_limits()
+    xy = _corner_locals()
+    for start in (0, 4):
+        for sign, axis, limit in (
+            (1.0, 0, hx_in),
+            (-1.0, 0, hx_in),
+            (1.0, 1, hy_in),
+            (-1.0, 1, hy_in),
+        ):
+            row = np.zeros(n_var, dtype=np.float64)
+            for c in range(start, start + 4):
+                row[3 * c + 2] = sign * xy[c][axis] - limit
+            add(row, 0.0)
+
+
 def _qp_solve_minmax(
     rotations: list[np.ndarray],
     points: list[np.ndarray],
@@ -973,13 +1032,13 @@ def _qp_solve_minmax(
     """Minimise the largest |leg torque| with armature already removed.
 
     Corner forces of both feet are the variables. The summed wrench equals
-    ``force`` at ``p_zmp`` with zero moment about that point.     Each corner
-    stays in the friction cone μ = 1.2, so each foot's centre of pressure
-    stays inside the convex hull of its 135×76 mm sole. The program is the
-    linear epigraph of that maximum on the containing pyramid. A solution
-    that leaves the disk is resolved on the disk. Among those optima, a
-    further solve minimises the sum of tangential magnitudes so the reported
-    split is one torque-optimal wrench.
+    ``force`` at ``p_zmp`` with zero moment about that point. Each corner
+    stays in the friction cone μ = 1.2. Each foot's centre of pressure stays
+    inside the 135×76 mm sole shrunk by ``step_bars.EDGE_DWELL_M`` on every
+    side. The program is the linear epigraph of that maximum on the
+    containing pyramid. A solution that leaves the disk is resolved on the
+    disk. Among those optima, a further solve minimises the sum of tangential
+    magnitudes so the reported split is one torque-optimal wrench.
     """
     n_c = 8
     n_leg = int(b_leg.shape[0])
@@ -1029,6 +1088,7 @@ def _qp_solve_minmax(
             neg[base + axis] = -1.0
             neg[u_idx] = -1.0
             _add(neg, 0.0)
+    _add_cop_inset_rows(n_var, _add)
     for j in range(n_leg):
         pos = np.zeros(n_var, dtype=np.float64)
         neg = np.zeros(n_var, dtype=np.float64)
@@ -1137,6 +1197,7 @@ def _cone_refine(
     The disk is a subset of the pyramid, so the minimax can only rise.
     The returned ``t_star`` is that disk minimum. The forces minimise the
     sum of tangential magnitudes among disk solutions within 1e-7 Nm of it.
+    The shrunk CoP box stays in the constraint set.
     """
     n_c = 8
     n_leg = int(b_leg.shape[0])
@@ -1210,10 +1271,40 @@ def _cone_refine(
     def _eq_jac(x: np.ndarray) -> np.ndarray:
         return a_eq
 
+    _inset, hx_in, hy_in = _cop_inset_limits()
+    xy = _corner_locals()
+    cop_coef = np.zeros((8, n_c), dtype=np.float64)
+    cop_row = 0
+    for start in (0, 4):
+        for sign, axis, limit in (
+            (1.0, 0, hx_in),
+            (-1.0, 0, hx_in),
+            (1.0, 1, hy_in),
+            (-1.0, 1, hy_in),
+        ):
+            for c in range(start, start + 4):
+                cop_coef[cop_row, c] = limit - sign * xy[c][axis]
+            cop_row += 1
+
+    def _cop(x: np.ndarray) -> np.ndarray:
+        out = np.zeros(8, dtype=np.float64)
+        for row in range(8):
+            for c in range(n_c):
+                out[row] += cop_coef[row, c] * float(x[3 * c + 2])
+        return out
+
+    def _cop_jac(x: np.ndarray) -> np.ndarray:
+        jac = np.zeros((8, n), dtype=np.float64)
+        for row in range(8):
+            for c in range(n_c):
+                jac[row, 3 * c + 2] = cop_coef[row, c]
+        return jac
+
     cons = (
         {"type": "eq", "fun": _eq, "jac": _eq_jac},
         {"type": "ineq", "fun": _torque, "jac": _torque_jac},
         {"type": "ineq", "fun": _friction, "jac": _friction_jac},
+        {"type": "ineq", "fun": _cop, "jac": _cop_jac},
     )
 
     def _obj(x: np.ndarray) -> float:
@@ -1233,6 +1324,8 @@ def _cone_refine(
         if float(np.min(_friction(x))) < -5e-4:
             return None
         if float(np.min(_torque(x))) < -1e-5:
+            return None
+        if float(np.min(_cop(x))) < -1e-4:
             return None
         if float(x[-1]) + 1e-5 < float(t_lp):
             return None
@@ -1287,7 +1380,11 @@ def _cone_refine(
             scale = limit / hyp
             x[3 * c] *= scale
             x[3 * c + 1] *= scale
-    if float(np.max(np.abs(_eq(x)))) > 1e-4 or float(np.min(_torque(x))) < -1e-4:
+    if (
+        float(np.max(np.abs(_eq(x)))) > 1e-4
+        or float(np.min(_torque(x))) < -1e-4
+        or float(np.min(_cop(x))) < -1e-4
+    ):
         return None
     forces = x[:n_f].reshape(n_c, 3)
     excess = 0.0
@@ -1344,7 +1441,11 @@ def _qp_foot_split(
     forces = np.asarray(solved["forces"], dtype=np.float64)
     gen = np.zeros(model.nv, dtype=np.float64)
     world = {"l": np.zeros(3, dtype=np.float64), "r": np.zeros(3, dtype=np.float64)}
+    inset, hx_in, hy_in = _cop_inset_limits()
     cop_ok = True
+    cop_margin: dict[str, float | None] = {}
+    cop_xy: dict[str, list[float] | None] = {}
+    cop_on: dict[str, bool] = {}
     for side, start in (("l", 0), ("r", 4)):
         fz = 0.0
         cop_x = 0.0
@@ -1358,8 +1459,18 @@ def _qp_foot_split(
             cop_x += locals_xy[c][0] * weight
             cop_y += locals_xy[c][1] * weight
         if fz > 1e-6:
-            if abs(cop_x / fz) > QP_HALF_X_M + 1e-4 or abs(cop_y / fz) > QP_HALF_Y_M + 1e-4:
+            cx = cop_x / fz
+            cy = cop_y / fz
+            margin = min(QP_HALF_X_M - abs(cx), QP_HALF_Y_M - abs(cy))
+            cop_margin[side] = float(margin)
+            cop_xy[side] = [float(cx), float(cy)]
+            cop_on[side] = abs(float(margin) - inset) <= QP_COP_BOUND_TOL_M
+            if abs(cx) > hx_in + 1e-4 or abs(cy) > hy_in + 1e-4:
                 cop_ok = False
+        else:
+            cop_margin[side] = None
+            cop_xy[side] = None
+            cop_on[side] = False
     if not cop_ok:
         return {"status": "unsolved"}
     return {
@@ -1369,6 +1480,12 @@ def _qp_foot_split(
         "t_star": float(solved["t_star"]),
         "cone_excess_n": float(solved.get("cone_excess_n", 0.0)),
         "cone_resolved": bool(solved.get("cone_resolved")),
+        "cop": {
+            "margin_m": cop_margin,
+            "xy_m": cop_xy,
+            "on_boundary": cop_on,
+            "inset_m": inset,
+        },
     }
 
 
@@ -1569,6 +1686,12 @@ def _planned_tau(
     gap_force: list[float] = []
     gap_worst: dict[str, object] | None = None
     n_compared = 0
+    cop_ticks: list[dict[str, object]] = []
+    cop_margins: list[float] = []
+    n_boundary_ticks = 0
+    n_boundary_feet = 0
+    n_cop_feet = 0
+    cop_inset = float(step_bars.EDGE_DWELL_M)
     for k in range(2, n):
         sample = samples[k]
         data.qpos[:] = poses[k]
@@ -1642,6 +1765,34 @@ def _planned_tau(
                 cone_excess_max = max(cone_excess_max, float(solved.get("cone_excess_n", 0.0)))
                 if solved.get("cone_resolved"):
                     cone_resolved_n += 1
+                cop = solved.get("cop")
+                if isinstance(cop, dict):
+                    margins = cop.get("margin_m")
+                    xys = cop.get("xy_m")
+                    ons = cop.get("on_boundary")
+                    if isinstance(margins, dict) and isinstance(xys, dict) and isinstance(ons, dict):
+                        flagged = False
+                        tick_row: dict[str, object] = {
+                            "t_s": float(sample["t"]),
+                            "phase": str(sample["phase"]),
+                        }
+                        for side in ("l", "r"):
+                            margin = margins.get(side)
+                            tick_row[f"margin_{side}_m"] = (
+                                None if margin is None else float(margin)
+                            )
+                            tick_row[f"cop_{side}_m"] = xys.get(side)
+                            on = bool(ons.get(side))
+                            tick_row[f"boundary_{side}"] = on
+                            if margin is not None:
+                                n_cop_feet += 1
+                                cop_margins.append(float(margin))
+                                if on:
+                                    n_boundary_feet += 1
+                                    flagged = True
+                        if flagged:
+                            n_boundary_ticks += 1
+                        cop_ticks.append(tick_row)
             else:
                 if qp_status == "infeasible":
                     qp_infeasible += 1
@@ -1841,7 +1992,21 @@ def _planned_tau(
             "bar_nm": ASK_BAR,
             "mu": QP_MU,
             "box_mm": [135.0, 76.0],
+            "cop_inset_m": cop_inset,
+            "cop_inset_name": "step_bars.EDGE_DWELL_M",
             "worst": qp_worst,
+        },
+        "qp_cop": {
+            "inset_m": cop_inset,
+            "inset_name": "step_bars.EDGE_DWELL_M",
+            "bound_tol_m": QP_COP_BOUND_TOL_M,
+            "n_ticks": len(cop_ticks),
+            "n_feet": n_cop_feet,
+            "n_boundary_ticks": n_boundary_ticks,
+            "n_boundary_feet": n_boundary_feet,
+            "margin_min_m": (min(cop_margins) if cop_margins else None),
+            "margin_median_m": _median(cop_margins),
+            "ticks": cop_ticks,
         },
         "ss_over_no_armature": {
             "n_ss": ss_n,
@@ -1874,14 +2039,18 @@ def _planned_tau(
             "split, the min-norm ankle split, and a linear program that "
             "minimises the largest |τ| over the leg joints with armature "
             "removed. That program keeps each foot's centre of pressure "
-            "inside the 135×76 mm box and each corner force inside a friction "
-            "cone of μ 1.2. A wall is only a double-support tick where this split "
-            "still needs more than 2.33 Nm without armature. Linear and "
-            "min-norm exceeding 2.33 are not a wall. Single support above "
-            "2.33 without armature is required single-foot torque. The "
-            "realised contact split is compared with this split and does "
-            "not change the pass. clears-only-without-armature is an "
-            "unsourced-armature candidate, not a pass."
+            "inside the 135×76 mm box shrunk on every side by "
+            "step_bars.EDGE_DWELL_M and each corner force inside a friction "
+            "cone of μ 1.2. The per-foot CoP margin is logged, and a tick "
+            "whose reported CoP lies on that shrunk edge is flagged. A wall "
+            "is only a double-support tick where this split still needs more "
+            "than 2.33 Nm without armature. Linear and min-norm exceeding "
+            "2.33 are not a wall. Single support above 2.33 without armature "
+            "is required single-foot torque. The realised contact split is "
+            "compared with this split and does not change the pass. The "
+            "boundary flag does not change the pass. "
+            "clears-only-without-armature is an unsourced-armature candidate, "
+            "not a pass."
         ),
     }
 
@@ -3056,6 +3225,9 @@ def score_cell(
     ss_block = planned.get("ss_over_no_armature") if isinstance(planned, dict) else None
     if not isinstance(ss_block, dict):
         ss_block = {}
+    cop_block = planned.get("qp_cop") if isinstance(planned, dict) else None
+    if not isinstance(cop_block, dict):
+        cop_block = {}
 
     def _opt(block: dict[str, object], key: str, spec: str) -> str:
         val = block.get(key)
@@ -3085,6 +3257,9 @@ def score_cell(
         f"qpW {_opt(qp_block, 'n_wall', '.0f')}/{_opt(qp_block, 'n_feasible', '.0f')} "
         f"qpInf {_opt(qp_block, 'n_infeasible', '.0f')} "
         f"ssOver {_opt(ss_block, 'n_over', '.0f')} "
+        f"copInset {_opt(cop_block, 'inset_m', '.6f')} "
+        f"copB {_opt(cop_block, 'n_boundary_ticks', '.0f')}/{_opt(cop_block, 'n_ticks', '.0f')} "
+        f"copM {_opt(cop_block, 'margin_min_m', '.4f')}/{_opt(cop_block, 'margin_median_m', '.4f')} "
         f"share {_opt(real_block, 'share_abs_median', '.3f')}/{_opt(real_block, 'share_abs_max', '.3f')} "
         f"fgap {_opt(real_block, 'force_gap_median_n', '.2f')}/{_opt(real_block, 'force_gap_max_n', '.2f')} "
         f"note {torque_bar['note'] or '-'} resid {max_resid:.3e} "
@@ -3116,6 +3291,14 @@ def main() -> None:
     args = parser.parse_args()
     if sws.SOFT_PASS:
         raise SystemExit("soft-pass is on")
+    if float(step_bars.EDGE_DWELL_M) != QP_COP_INSET_M:
+        raise SystemExit(
+            f"QP CoP inset {QP_COP_INSET_M} != step_bars.EDGE_DWELL_M {step_bars.EDGE_DWELL_M}"
+        )
+    print(
+        f"QP CoP inset {step_bars.EDGE_DWELL_M!r} m from step_bars.EDGE_DWELL_M",
+        flush=True,
+    )
     if _plant_md5() != PLANT_MD5:
         raise SystemExit(f"plant md5 {_plant_md5()} != {PLANT_MD5}")
     cells = _parse_cells(args.cells) if args.cells else [
@@ -3191,7 +3374,9 @@ def main() -> None:
             "The planned-motion τ_req does not change the pass, including a "
             "double-support tick where the QP split still needs more than "
             "2.33 Nm without armature. The realised contact split versus "
-            "that QP does not change the pass. A joint that clears 2.33 only "
+            "that QP does not change the pass. A QP CoP that sits on the "
+            "box shrunk by step_bars.EDGE_DWELL_M is logged and does not "
+            "change the pass. A joint that clears 2.33 only "
             "after subtracting armature·q̈_ref is an unsourced-armature candidate."
         ),
         "planned_motion": (
@@ -3200,14 +3385,18 @@ def main() -> None:
             "Double support reports the foot-line split, the min-norm ankle "
             "split, and a linear program that minimises the largest |τ| over "
             "the leg joints with armature removed. The program keeps each "
-            "foot's centre of pressure inside the 135×76 mm box and each "
-            "corner force inside a friction cone of μ 1.2. A wall is only "
-            "a double-support tick where that program still needs more than "
-            "2.33 Nm without armature. Linear and min-norm exceeding 2.33 "
-            "are not a wall. Single support above 2.33 without armature is "
-            "required single-foot torque. The realised double-support contact "
-            "split is compared with the QP split. A position servo does not "
-            "command the split. Neither comparison changes the pass."
+            "foot's centre of pressure inside the 135×76 mm box shrunk on "
+            "every side by step_bars.EDGE_DWELL_M and each corner force inside "
+            "a friction cone of μ 1.2. The per-foot CoP margin is logged on "
+            "every feasible double-support tick. A tick whose reported CoP "
+            "lies on that shrunk edge is flagged. The flag does not change "
+            "the pass. A wall is only a double-support tick where that "
+            "program still needs more than 2.33 Nm without armature. Linear "
+            "and min-norm exceeding 2.33 are not a wall. Single support above "
+            "2.33 without armature is required single-foot torque. The "
+            "realised double-support contact split is compared with the QP "
+            "split. A position servo does not command the split. Neither "
+            "comparison changes the pass."
         ),
         "band_cap_nm": BAND_CAP_NM,
         "band_cap_rule": (
