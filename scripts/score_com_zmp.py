@@ -60,6 +60,8 @@ DS_FOOT_M = 0.050
 FOOT_HALF_X_M = 0.0675
 COP_P5_MM = 5.0
 AIR_N = 1.0
+# HX-35H no-load speed. The plant has no velocity rail, so this is a score.
+QVEL_LIM = 5.82
 LEG_JOINTS: tuple[str, ...] = (
     "l_hip_yaw", "l_hip_roll", "l_hip_pitch", "l_knee", "l_ank_pitch", "l_ank_roll",
     "r_hip_yaw", "r_hip_roll", "r_hip_pitch", "r_knee", "r_ank_pitch", "r_ank_roll",
@@ -716,12 +718,18 @@ def _step_honesty(
             clear_z, peak_z = _swing_window_z(iv, side)
             air = 0.0
             con = 0.0
+            off = 0.0
+            on = 0.0
             n_air = 0
+            n_off = 0
             air_x0 = 0.0
             air_x1 = 0.0
             for a, b in zip(iv, iv[1:]):
                 d = float(b[side + "x"]) - float(a[side + "x"])
                 airborne = _airborne(b, side)
+                contact_off = int(b[side + "n"]) == 0
+                if contact_off:
+                    n_off += 1
                 if airborne:
                     if n_air == 0:
                         air_x0 = float(b[side + "x"])
@@ -733,6 +741,10 @@ def _step_honesty(
                         air += d
                     else:
                         con += d
+                    if contact_off:
+                        off += d
+                    else:
+                        on += d
             landed = int(iv[-1][side + "n"]) > 0 or float(iv[-1][side + "fn"]) >= AIR_N
             if not landed:
                 continue
@@ -743,6 +755,11 @@ def _step_honesty(
                 float(iv[-1][other + "y"]) - float(iv[0][other + "y"]),
             )
             frac = air / (air + con) if (air + con) > 1e-6 else 0.0
+            # Contact-off window: forward travel while the swing foot has
+            # zero floor contacts. Clearance is not an input. The AI
+            # tiebreak scores the step on this window.
+            off_frac = off / (off + on) if (off + on) > 1e-6 else 0.0
+            off_time = n_off / max(1, len(iv) - 1)
             done = n_air > 10 and clear_z >= STEP_CLEAR_M
             t0 = float(iv[0]["t"])
             t1 = float(iv[-1]["t"])
@@ -797,6 +814,8 @@ def _step_honesty(
                 "peak_mm": peak_z * 1000.0,
                 "slip_mm": slip * 1000.0,
                 "frac": frac,
+                "off_frac": off_frac,
+                "off_time": off_time,
                 "air_mm": air_adv * 1000.0,
                 "place_mm": place * 1000.0,
                 "fore_mm": float(iv[-1][side + "fore"]) * 1000.0,
@@ -864,6 +883,8 @@ def _step_honesty(
         "slip_sum_mm": (sum(float(s["slip_mm"]) for s in scored)) if scored else float("nan"),
         "sep_mm": sep_air * 1000.0,
         "step_frac": (min(float(s["frac"]) for s in scored)) if scored else float("nan"),
+        "off_frac": (min(float(s["off_frac"]) for s in scored)) if scored else float("nan"),
+        "off_time": (min(float(s["off_time"]) for s in scored)) if scored else float("nan"),
         "adv_mm": (min(float(s["net_mm"]) for s in scored)) if scored else float("nan"),
         "air_mm": (min(air_report)) if air_report else float("nan"),
         "place_mm": (min(float(s["place_mm"]) for s in swings)) if swings else float("nan"),
@@ -1023,6 +1044,13 @@ def run_attempt(
     rug_peak = 0.0
     foot_rows: list[dict[str, float | str]] = []
     x_amp_seen = 0.0
+    qvel_adr = {
+        jn: int(session.model.jnt_dofadr[mj.mj_name2id(session.model, mj.mjtObj.mjOBJ_JOINT, jn)])
+        for jn in LEG_JOINTS
+    }
+    qvel_peak = 0.0
+    qvel_joint = ""
+    qvel_t = 0.0
 
     def _body_id(name: str) -> int:
         bid = int(mj.mj_name2id(session.model, mj.mjtObj.mjOBJ_BODY, name))
@@ -1148,6 +1176,12 @@ def run_attempt(
             tau_peak = tau_now
             tau_joint = tau_name
             tau_t = now
+        for jn, adr in qvel_adr.items():
+            spd = abs(float(session.data.qvel[adr]))
+            if spd > qvel_peak:
+                qvel_peak = spd
+                qvel_joint = jn
+                qvel_t = now
         preview_peak = max(preview_peak, abs(float(lipm.preview_com_y)))
         if not kit_baseline and lipm.op3 is not None:
             if stage == "walk":
@@ -1351,6 +1385,14 @@ def run_attempt(
         "slip_sum_mm": honesty["slip_sum_mm"],
         "sep_mm": honesty["sep_mm"],
         "step_frac": honesty["step_frac"],
+        "off_frac": honesty["off_frac"],
+        "off_time": honesty["off_time"],
+        "qvel_peak": qvel_peak,
+        "qvel_joint": qvel_joint,
+        "qvel_t": qvel_t,
+        "qvel_ok": qvel_peak <= QVEL_LIM + 1e-9,
+        "ask_joint": "" if ask_all is None else str(ask_all.joint),
+        "ask_t": 0.0 if ask_all is None else float(ask_all.t),
         "adv_mm": honesty["adv_mm"],
         "air_mm": honesty["air_mm"],
         "place_mm": honesty["place_mm"],
@@ -1687,20 +1729,49 @@ def render_side_front(
     stand_s: float = 3.0,
     walk_s: float = 11.0,
     stop_s: float = 6.0,
+    period_s: float | None = None,
+    vx_m_s: float | None = None,
 ) -> None:
     """Side, front, and a sole-height close-up of the voice bout.
 
     30 fps. Each frame is the mjData just stepped, the same objects the
     scorer reads. The render does not call mj_forward and does not
-    interpolate a pose.
+    interpolate a pose. ``period_s`` renders that cadence instead of the
+    wired voice period. The step is still x_amp = vx·T/4.
     """
     import tempfile
 
     import imageio.v2 as imageio
 
     import walk_gait_ainex as wg
+    import zmp_preview
 
-    cfg = sw.gait_for_command(sw.VOICE_VX_M_S, 0.0)
+    vx = sw.VOICE_VX_M_S if vx_m_s is None else float(vx_m_s)
+    if period_s is None:
+        cfg = sw.gait_for_command(sw.VOICE_VX_M_S, 0.0)
+    else:
+        amp = zmp_preview.sway_zmp_amp(float(period_s), 0.25, 0.18, 0.016, 0.043, 0.0, 1.0e-4)
+        cfg = lipm_gait.LipmConfig(
+            name="voice056",
+            clear_m=0.008,
+            arms=True,
+            schedule="gait_manager",
+            gm_period_s=float(period_s),
+            gm_dsp=0.25,
+            gm_y_swap_m=0.0,
+            gm_x_m=abs(vx) * float(period_s) / 4.0,
+            gm_z_m=0.008,
+            gm_z_swap_m=0.0,
+            gm_pelvis_deg=0.0,
+            gm_hip_pitch_deg=15.0,
+            gm_start_lead="L",
+            gm_crouch_m=0.025,
+            gm_move_s=0.020,
+            preview_amp_m=amp,
+            preview_arm_s=1.0,
+            preview_r=1.0e-4,
+            preview_shape=0.0,
+        )
     if cfg.preview_amp_m <= 1e-6 or cfg.gm_y_swap_m != 0.0:
         raise SystemExit("voice command did not select the preview gait")
     session = sw.SteerSession(
@@ -1713,7 +1784,7 @@ def render_side_front(
     session.foot_trace = []
     if session.lipm is None or session.lipm.op3 is None or session.lipm.op3.y_swap_cmd != 0.0:
         raise SystemExit("preview walker is not the voice gait")
-    script = sw.voice_bus_script(stand_s, walk_s, stop_s, 0.0)
+    script = sw.voice_bus_script(stand_s, walk_s, stop_s, 0.0, vx_m_s=vx)
     driver = sw.ScriptedDriver(script)
     t_end = float(script[-1].t_end)
     next_frame = 0.0

@@ -645,15 +645,15 @@ class LipmWalker:
         return math.atan2(-float(rot[2, 0]), math.hypot(float(rot[0, 0]), float(rot[1, 0])))
 
     def _swing_toe_bias(self, side: Side) -> float:
-        """No toe-up through the swing.
+        """No toe-up through the swing. The stop blend nulls sole pitch.
 
         A clocked 0.040 rad toe-up held the lowest sole corner on the
         floor, so the foot slid instead of stepping. The swing ankle
         stays on the IK target. During the stop blend the just-landed
-        sole rocks onto its heel (about −3°). A fixed toe-up makes that
-        worse. This asks the ankle to take that pitch back out, then
-        fades as the upright stand arrives. +pitch raises the left toe.
-        The right ankle is the opposite sign.
+        sole rocks onto its heel. A fixed toe-up makes that worse. This
+        asks the ankle to take that pitch back out, then fades as the
+        upright stand arrives. +pitch raises the left toe. The right
+        ankle is the opposite sign.
         """
         if self._stand_q1 is None or self._stand_u <= 0.0 or self._stand_u >= 2.0:
             return 0.0
@@ -714,7 +714,7 @@ class LipmWalker:
             self._stab_pitch[side] = self._slew(self._stab_pitch[side], self._swing_toe_bias(side), rate)
             want = gait + self._stab_pitch[side]
             # The 16 mrad band keeps a late swing gap off the ankle.
-            # The stop blend's toe-up is already slewed; clamping it
+            # The stop blend's pitch null is already slewed; clamping it
             # leaves the light foot on the toe face.
             if self._stand_u <= 0.0:
                 gap = want - q
@@ -816,7 +816,8 @@ class LipmWalker:
             self.preview_com_y = com
             # Voice spreads the step during the arm. A full x_amp on the
             # first walk tick is a hip-pitch step of several Nm. The kit
-            # path still starts from zero.
+            # path still starts from zero. z_flat holds the swing peak
+            # across 20–80% of single support.
             if self.cfg.name == "voice056" and abs(self.cmd_vx) > 1e-4:
                 walker.z_flat = True
                 x_full = self._voice_x_amp()

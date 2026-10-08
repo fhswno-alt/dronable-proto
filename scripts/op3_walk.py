@@ -695,73 +695,34 @@ class Op3Walker:
         return wsin(t_z, self.z_move_period, z_phase, self._z_move, self._z_move_shift)
 
     def _swing_z(self, t: float, start: float, end: float, phase_t: float) -> float:
-        """OP3 sine, or a flat peak across the scored part of the swing.
+        """OP3 sine, or a flat peak across 20–80% of single support.
 
         The sine gap is z·sin(πf)². At 20% and 80% of the swing that is
         35% of the peak, so a 4 mm peak is 1.4 mm and an 18 mm peak is
         6 mm. The loaded sole does not clear either. The voice walk
-        holds the peak from the start of single support through 90%.
-        Kit leaves ``z_flat`` off and keeps the sine.
+        rises with a smootherstep over the first 20% and holds the peak
+        until 80%. Kit leaves ``z_flat`` off and keeps the sine.
         """
         if not self.z_flat or end <= start + 1e-9:
             return self._z_at(t, phase_t)
-        return self._flat_z(t, start, end, phase_t, 0.0)
-
-    def _flat_z(self, t: float, start: float, end: float, phase_t: float, lead: float) -> float:
-        """Hold the sine peak from the start of single support through 90%.
-
-        ``lead`` starts the rise in the double support before the swing,
-        so a short cycle is not asked to climb the whole sole inside
-        single support. The foot is at the peak when the swing is scored.
-        The rise and the drop are a raised cosine. Peak slope is pi/2
-        times the mean, and the ends are flat.
-        """
         z_lo = self._z_at(start, phase_t)
         z_hi = self._z_at(start + 0.5 * (end - start), phase_t)
-        span = end - start
-        if span <= 1e-9:
-            return z_lo
-        # Peak as single support starts, still up through 90%. The
-        # servo lags the command, and the scored window is 20–80%.
-        rise_end = start
-        hold_end = start + 0.90 * span
-        rise_begin = start - max(0.0, float(lead))
+        frac = (float(t) - start) / (end - start)
+        rise = 0.20
 
         def smoother(u: float) -> float:
-            # Raised cosine. Peak slope is pi/2 times the mean, below the
-            # smootherstep's 1.875, and the ends are flat so the knee
-            # does not take the corner of a linear ramp.
             u = min(1.0, max(0.0, u))
-            return 0.5 - 0.5 * math.cos(math.pi * u)
+            return u * u * u * (u * (u * 6.0 - 15.0) + 10.0)
 
-        tt = float(t)
-        if rise_begin < -1e-9 and tt > end:
-            tt -= self.period
-        if tt < rise_begin - 1e-12 or tt > end + 1e-12:
-            return z_lo
-        if tt < rise_end:
-            dur = rise_end - rise_begin
-            scale = smoother((tt - rise_begin) / dur) if dur > 1e-9 else 1.0
-        elif tt < hold_end:
-            scale = 1.0
+        if frac <= rise:
+            scale = smoother(frac / rise)
+        elif frac >= 1.0 - rise:
+            scale = smoother((1.0 - frac) / rise)
         else:
-            dur = end - hold_end
-            scale = smoother((end - tt) / dur) if dur > 1e-9 else 0.0
+            scale = 1.0
         return z_lo + (z_hi - z_lo) * scale
 
-    def _z_lead(self) -> float:
-        """Double support before a swing. The rise uses that whole window."""
-        return float(self.dsp_cmd) * float(self.period) / 2.0
-
     def _right_z(self, t: float) -> float:
-        if self.z_flat:
-            # Rise starts when the left swing ends, through the middle
-            # double support, and the peak is held across 20–80%.
-            if self.l_ssp_end < t <= self.r_ssp_end:
-                return self._flat_z(
-                    t, self.r_ssp_start, self.r_ssp_end, self.r_ssp_start, self._z_lead(),
-                )
-            return self._z_at(self.r_ssp_start, self.r_ssp_start)
         if t <= self.r_ssp_start:
             return self._z_at(self.r_ssp_start, self.r_ssp_start)
         if t <= self.r_ssp_end:
@@ -769,15 +730,6 @@ class Op3Walker:
         return self._z_at(self.r_ssp_end, self.r_ssp_start)
 
     def _left_z(self, t: float) -> float:
-        if self.z_flat:
-            # The opening double support and the wrap after the right
-            # swing are the same lead. During the right swing this foot
-            # stays down.
-            if t <= self.l_ssp_end or t > self.r_ssp_end:
-                return self._flat_z(
-                    t, self.l_ssp_start, self.l_ssp_end, self.l_ssp_start, self._z_lead(),
-                )
-            return self._z_at(self.l_ssp_end, self.l_ssp_start)
         if t <= self.l_ssp_start:
             return self._z_at(self.l_ssp_start, self.l_ssp_start)
         if t <= self.l_ssp_end:

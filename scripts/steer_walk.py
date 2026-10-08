@@ -812,8 +812,9 @@ def voice_preview_config() -> LipmConfig:
 
     y_swap stays 0. The sway is preview_y. The hip-frame step is
     x_amp = vx·T/4, and gm_x_m is that amplitude at the bus speed.
-    The swing sole rises through the double support before the swing
-    and holds the peak across single support. Stand before the first
+    The swing sole rises over the first 20% of single support and
+    holds that peak until 80%. The stop blend nulls measured sole pitch.
+    Stand before the first
     step is the level sole. The stop blends back to that stand.
     Crouch stays 25 mm. A shallower drop fails stand IK or asks more
     on the knee, because the lift rate, not the crouch moment, binds.
@@ -862,17 +863,20 @@ def voice_bus_script(
     walk_s: float,
     stop_s: float,
     yaw_rate: float = 0.0,
+    vx_m_s: float | None = None,
 ) -> tuple[DemoSegment, ...]:
-    """stand, then 10 Hz vel(0.056, yaw), then one stop.
+    """stand, then 10 Hz vel, then one stop.
 
     Walk duration is what sets the gait phase at the stop. A longer
     quiet stand or a longer settled stop does not move that phase.
+    ``vx_m_s`` defaults to the bus speed.
     """
     t_vel = float(stand_s) + float(walk_s)
     t_stop = t_vel + float(stop_s)
+    vx = VOICE_VX_M_S if vx_m_s is None else float(vx_m_s)
     return (
         DemoSegment(float(stand_s), "stand", 0.0, 0.0, "stand"),
-        DemoSegment(t_vel, "vel", VOICE_VX_M_S, float(yaw_rate), "forward"),
+        DemoSegment(t_vel, "vel", vx, float(yaw_rate), "forward"),
         DemoSegment(t_stop, "stop", 0.0, 0.0, "stop"),
     )
 

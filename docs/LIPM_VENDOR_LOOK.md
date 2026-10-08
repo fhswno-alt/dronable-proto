@@ -2429,3 +2429,80 @@ The sole panel draws that box. For the frame only, the two group-0 contact geoms
 Every render from this tree writes three panels of the mjData just stepped: side at 1.70 m, front at 1.70 m, and the sole camera. The sole camera is 0.15 m to the side of whichever foot has the higher lowest-corner, azimuth 90, elevation −18°, lookat 10 mm above that foot's contact-box centre. The camera height is about 6–8 cm. Elevation 0 puts the sole on the horizon, so the gap has no pixels, and at 0.15 m the foot also leaves the frame. The plant's stereo separation is 68 mm. At 0.15 m that offset walks the foot out of the frame, so the picture is drawn with ipd 0 and `vis.map.znear` 0.0002. Both are restored after the frames. Neither is a plant edit. The render does not call `mj_forward` and does not interpolate a pose. After the three views it checks that `data.time` and `qpos` are the values the step left. The overlay on every panel, every frame, is per foot: lowest-corner clearance in mm, contact count, and normal force in N, from `sole_clearance`, the ground-contact count, and `foot_normal` on that mjData.
 
 `docs/media/voice_d6e8b5e_feet.mp4` is the reviewed timing of `d6e8b5e`, stand 2.00 s, walk 22.00 s, stop 6.00 s, with that camera. It was rendered before the contact-box tint and the floor line. The cycles clip above is the one that draws both. Add 1.60 s to the score times above. The left lift in the clip is about 6.8–11.9 s and the right lift is about 16.8–21.9 s, which is the review's 2–13 s and 13–23 s once the stand and the slide are what the wide shot showed. At 8.00 s of that clip the overlay reads L 10.63 mm, n 0, 0.0 N and R −1.28 mm, n 4, 22.4 N, and the sole panel shows the left sole clear of the floor. At 18.00 s it reads R 10.73 mm, n 0, 0.0 N and L −1.29 mm, n 4, 22.3 N, with the right sole clear. At 1.00 s, still in the stand, both read −1.31 mm, n 4, about 11 N, and both soles sit on the plane. The sole panel is there so the gap is a vertical opening, and the overlay is the same number the scorer stores. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0. The cadence grid still has no cell under 2.33 Nm and no completed step. Not kit-safe. Not go-anywhere.
+
+## Cadence sweep, flat 20–80%
+
+The contact-off window is the step the AI tiebreak scored on `d6e8b5e`: clearance 8.41 mm and 8.60 mm, slip 0.27 mm, step fraction 0.794. That gait steps. The 0.5 s kit walker also steps, fraction 0.93–0.96, and misses the rest of the bars: lowest corner 2.0 mm, slip 3.2–3.4 mm, two stance contacts, phase mismatch 0.31–0.39, and a 16° stop lean. This sweep asks whether a shorter period can hold the three hard bars together. The 42-cell table above is the earlier raised-cosine shape. It was not re-scored.
+
+The grid starts at T 0.80 s and steps down: 0.80, 0.75, 0.70, 0.65, 0.60, 0.55, 0.50. T 0.80 misses the three bars, so the grid adds 1.00 s and 1.20 s. vx is 0.016, 0.024, 0.032, 0.040, 0.048, 0.056. Fifty-four cells. `x_amp = vx·T/4`. The swing command is 8 mm. On the voice path the sole rises with a smootherstep over the first 20% of single support and holds the sine peak until 80%. Kit still uses the sine. The walk ankle stays on the IK target. The stop is the 2 s blend to the spawn stand, and during that blend the ankle nulls measured sole pitch: sign +1 on the left and −1 on the right, `clamp(4·sole_pitch, ±0.12 rad)`, held until 80% of the blend and then faded. Slew is 1.20 rad/s during the blend. A copy of that null through the walk tipped short steps and the longer steps at higher vx, so this grid keeps the null inside the stop. Sway is `sway_zmp_amp` with a 16 mm CoM target and a 43 mm cap. dsp 0.25, crouch 25 mm, hip pitch 15°, arm 1.00 s, preview shape 0, preview r 1e-4. y_swap stays 0.
+
+The pick is the shortest T with unclamped ask ≤ 2.33 Nm, peak leg `|qvel|` ≤ 5.82 rad/s, and a 20–80% lowest corner ≥ 8 mm, then the fastest vx at that T. 5.82 rad/s is the HX-35H no-load limit. The plant applies no velocity cap. The peak is the maximum `|data.qvel|` on the leg joints. Off is the share of forward travel on ticks where the swing foot has zero floor contacts. Clearance stays out of that fraction. A dash is a swing shorter than 20 ticks. n is the minimum stance-contact count in the 20–80% window. CoM is the declared-box minimum. CoP min is the declared contact-CoP minimum, which the non-kit scorer stores in `zmp_min_m`. CoP p5 is the 5th percentile of that contact CoP. Pitch is the trunk change at the stop. Stand 0.25 s, arm 1.00 s, walk `1.00 + 2.05·T`, stop 2.40 s. Soft-pass off. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`.
+
+Zero cells pass the three bars. `n_steps` is 0 on every row. Ask is 8.01–11.81 Nm, and every peak is a knee. `|qvel|` is 2.09–3.36 rad/s, and every peak is a knee, all under 5.82. The 20–80% corner is positive on one cell. CoP p5 peaks at +4.8 mm. The fault string is empty. Every stop is flat: trunk pitch +0.2° to +0.5°, sole pitch 0.27° to 0.37°, corner spread 0.89–1.02 mm, min up_z 0.947–0.962.
+
+| T s | vx | x mm | Ask Nm | Joint | Clear mm | Peak mm | qvel | qvel joint | Off | Slip mm | n | Phase | CoM mm | CoP min | CoP p5 | Pitch ° |
+| ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.80 | 0.016 | 3.20 | 11.10 | r_knee | -0.65 | -0.29 | 3.15 | r_knee | 0.000 | 0.33 | 4 | 1.000 | -4.6 | -79.7 | 0.0 | 0.4 |
+| 0.80 | 0.024 | 4.80 | 10.83 | r_knee | -0.61 | 1.82 | 3.05 | r_knee | 0.506 | 0.33 | 4 | 0.571 | -5.3 | -44.9 | 0.0 | 0.4 |
+| 0.80 | 0.032 | 6.40 | 10.93 | r_knee | -0.55 | 1.72 | 3.07 | r_knee | 0.537 | 0.32 | 3 | 0.500 | -5.6 | -75.2 | 0.0 | 0.4 |
+| 0.80 | 0.040 | 8.00 | 11.17 | r_knee | -0.61 | 2.12 | 3.15 | r_knee | 0.481 | 0.39 | 3 | 0.429 | -6.0 | -45.8 | 0.0 | 0.4 |
+| 0.80 | 0.048 | 9.60 | 10.80 | r_knee | -0.90 | 5.65 | 2.94 | r_knee | 0.396 | 0.68 | 3 | 0.317 | -6.1 | -44.7 | 0.0 | 0.4 |
+| 0.80 | 0.056 | 11.20 | 11.05 | r_knee | -0.89 | 5.27 | 2.98 | r_knee | 0.442 | 0.66 | 3 | 0.317 | -6.2 | -42.5 | 0.0 | 0.4 |
+| 0.75 | 0.016 | 3.00 | 10.75 | r_knee | -0.62 | 2.60 | 2.99 | r_knee | 0.000 | 0.35 | 4 | 0.571 | -3.2 | -19.2 | 0.0 | 0.4 |
+| 0.75 | 0.024 | 4.50 | 10.75 | r_knee | -0.62 | 1.60 | 2.96 | r_knee | 0.575 | 0.27 | 4 | 0.619 | -3.9 | -37.2 | 0.0 | 0.4 |
+| 0.75 | 0.032 | 6.00 | 10.77 | r_knee | -0.65 | 1.54 | 2.94 | r_knee | 0.590 | 0.26 | 4 | 0.548 | -4.3 | -46.9 | 0.0 | 0.4 |
+| 0.75 | 0.040 | 7.50 | 10.52 | r_knee | -0.71 | 1.80 | 2.84 | r_knee | 0.618 | 0.26 | 4 | 0.500 | -4.6 | -46.6 | 0.0 | 0.4 |
+| 0.75 | 0.048 | 9.00 | 10.56 | r_knee | -0.79 | 1.88 | 2.84 | r_knee | 0.594 | 0.25 | 4 | 0.476 | -26.8 | -68.3 | 0.0 | 0.4 |
+| 0.75 | 0.056 | 10.50 | 10.86 | r_knee | -0.87 | 5.95 | 2.93 | r_knee | 0.487 | 0.79 | 4 | 0.317 | -4.9 | -44.7 | 0.0 | 0.4 |
+| 0.70 | 0.016 | 2.80 | 11.50 | r_knee | -0.61 | -0.23 | 3.29 | r_knee | 0.000 | 0.18 | 4 | 1.000 | -2.1 | -12.6 | 0.0 | 0.4 |
+| 0.70 | 0.024 | 4.20 | 11.24 | r_knee | -0.47 | 2.05 | 3.21 | r_knee | 0.956 | 0.29 | 4 | 0.211 | -2.7 | -18.1 | 0.0 | 0.4 |
+| 0.70 | 0.032 | 5.60 | 11.23 | r_knee | -0.59 | 2.03 | 3.17 | r_knee | 0.630 | 0.25 | 4 | 0.579 | -3.3 | -42.8 | 0.0 | 0.4 |
+| 0.70 | 0.040 | 7.00 | 11.43 | r_knee | -0.64 | 2.23 | 3.24 | r_knee | 0.661 | 0.26 | 4 | 0.474 | -3.6 | -48.7 | 0.0 | 0.4 |
+| 0.70 | 0.048 | 8.40 | 11.74 | r_knee | -0.70 | 2.48 | 3.36 | r_knee | 0.661 | 0.30 | 4 | 0.421 | -3.8 | -47.7 | 0.0 | 0.4 |
+| 0.70 | 0.056 | 9.80 | 11.81 | r_knee | -0.78 | 3.05 | 3.32 | r_knee | 0.563 | 0.35 | 4 | 0.395 | -3.9 | -46.4 | 0.0 | 0.4 |
+| 0.65 | 0.016 | 2.60 | 11.27 | r_knee | -0.57 | -0.21 | 3.20 | r_knee | 0.000 | 0.12 | 4 | 1.000 | 0.1 | -10.0 | 1.2 | 0.4 |
+| 0.65 | 0.024 | 3.90 | 11.39 | r_knee | -0.57 | -0.18 | 3.25 | r_knee | 0.000 | 0.14 | 4 | 1.000 | -0.3 | -8.8 | 3.5 | 0.4 |
+| 0.65 | 0.032 | 5.20 | 11.26 | r_knee | -0.61 | 3.44 | 3.15 | r_knee | 0.666 | 0.34 | 4 | 0.528 | -0.9 | -20.0 | 0.0 | 0.4 |
+| 0.65 | 0.040 | 6.50 | 11.28 | r_knee | -0.66 | 3.47 | 3.14 | r_knee | 0.755 | 0.37 | 4 | 0.444 | -1.3 | -41.2 | 0.0 | 0.4 |
+| 0.65 | 0.048 | 7.80 | 11.58 | r_knee | -0.71 | 3.58 | 3.27 | r_knee | 0.798 | 0.38 | 4 | 0.389 | -1.5 | -45.5 | 0.0 | 0.4 |
+| 0.65 | 0.056 | 9.10 | 11.56 | r_knee | -0.78 | 4.09 | 3.20 | r_knee | 0.699 | 0.46 | 4 | 0.333 | -1.6 | -45.8 | 0.0 | 0.4 |
+| 0.60 | 0.016 | 2.40 | 11.26 | r_knee | -0.59 | -0.18 | 3.25 | r_knee | 0.000 | 0.09 | 4 | 1.000 | 2.3 | -4.1 | 0.0 | 0.4 |
+| 0.60 | 0.024 | 3.60 | 11.47 | r_knee | -0.61 | -0.14 | 3.32 | r_knee | 0.000 | 0.10 | 4 | 1.000 | 2.0 | -6.2 | 2.3 | 0.4 |
+| 0.60 | 0.032 | 4.80 | 11.37 | r_knee | 0.37 | 2.18 | 3.28 | r_knee | 0.921 | 0.05 | 4 | 0.000 | 1.4 | -6.8 | 0.0 | 0.3 |
+| 0.60 | 0.040 | 6.00 | 11.21 | r_knee | -0.69 | 0.71 | 3.21 | r_knee | 0.821 | 0.23 | 4 | 0.765 | 0.9 | -16.7 | 0.0 | 0.3 |
+| 0.60 | 0.048 | 7.20 | 11.29 | r_knee | -0.74 | 1.51 | 3.22 | r_knee | 0.894 | 0.27 | 4 | 0.647 | 0.6 | -36.4 | 0.0 | 0.3 |
+| 0.60 | 0.056 | 8.40 | 11.57 | r_knee | -0.79 | 2.38 | 3.29 | r_knee | 0.858 | 0.30 | 4 | 0.588 | 0.5 | -42.7 | 0.0 | 0.3 |
+| 0.55 | 0.016 | 2.20 | 10.56 | l_knee | -0.62 | -0.16 | 2.80 | l_knee | 0.000 | 0.04 | 4 | 1.000 | 2.2 | -9.9 | 4.8 | 0.2 |
+| 0.55 | 0.024 | 3.30 | 10.60 | l_knee | -0.65 | -0.13 | 2.81 | l_knee | 0.000 | 0.06 | 4 | 1.000 | 3.2 | -9.2 | 4.0 | 0.2 |
+| 0.55 | 0.032 | 4.40 | 10.64 | l_knee | — | — | 2.82 | l_knee | — | — | 0 | 1.000 | 1.8 | -9.4 | 3.3 | 0.2 |
+| 0.55 | 0.040 | 5.50 | 10.69 | l_knee | — | — | 2.83 | l_knee | — | — | 0 | 1.000 | 1.7 | -9.4 | 1.8 | 0.2 |
+| 0.55 | 0.048 | 6.60 | 10.75 | l_knee | — | — | 2.84 | l_knee | — | — | 0 | 1.000 | 1.7 | -9.9 | 0.0 | 0.2 |
+| 0.55 | 0.056 | 7.70 | 10.82 | l_knee | — | — | 2.86 | l_knee | — | — | 0 | 1.000 | 1.6 | -4.0 | 0.0 | 0.2 |
+| 0.50 | 0.016 | 2.00 | 10.69 | l_knee | -0.65 | -0.17 | 2.88 | l_knee | 0.000 | 0.05 | 4 | 1.000 | 2.5 | -16.3 | 4.4 | 0.2 |
+| 0.50 | 0.024 | 3.00 | 10.72 | l_knee | -0.68 | -0.14 | 2.88 | l_knee | 0.000 | 0.07 | 4 | 1.000 | 2.4 | -16.9 | 3.4 | 0.2 |
+| 0.50 | 0.032 | 4.00 | 10.77 | l_knee | — | — | 2.89 | l_knee | — | — | 0 | 1.000 | 2.2 | -16.2 | 2.7 | 0.2 |
+| 0.50 | 0.040 | 5.00 | 10.81 | l_knee | — | — | 2.90 | l_knee | — | — | 0 | 1.000 | 1.7 | -17.0 | 0.6 | 0.2 |
+| 0.50 | 0.048 | 6.00 | 10.88 | l_knee | — | — | 2.91 | l_knee | — | — | 0 | 1.000 | 1.6 | -15.7 | 0.1 | 0.2 |
+| 0.50 | 0.056 | 7.00 | 10.95 | l_knee | — | — | 2.93 | l_knee | — | — | 0 | 1.000 | 1.6 | -12.4 | 0.0 | 0.2 |
+| 1.00 | 0.016 | 4.00 | 10.50 | r_knee | -0.69 | 6.48 | 2.98 | r_knee | 0.162 | 0.59 | 3 | 0.333 | -18.0 | -86.0 | -1.7 | 0.4 |
+| 1.00 | 0.024 | 6.00 | 10.73 | r_knee | -0.68 | 6.63 | 3.06 | r_knee | 0.173 | 0.71 | 3 | 0.309 | -19.5 | -86.5 | -2.6 | 0.4 |
+| 1.00 | 0.032 | 8.00 | 11.00 | r_knee | -0.77 | 6.60 | 3.13 | r_knee | 0.163 | 0.81 | 3 | 0.309 | -19.9 | -86.1 | -5.8 | 0.4 |
+| 1.00 | 0.040 | 10.00 | 10.57 | r_knee | -0.86 | 6.37 | 2.92 | r_knee | 0.145 | 0.90 | 3 | 0.309 | -18.7 | -69.0 | -10.0 | 0.4 |
+| 1.00 | 0.048 | 12.00 | 10.38 | r_knee | -1.01 | 6.00 | 2.81 | r_knee | 0.170 | 0.95 | 3 | 0.358 | -9.5 | -74.7 | -12.0 | 0.5 |
+| 1.00 | 0.056 | 14.00 | 9.53 | r_knee | -1.20 | 5.68 | 2.50 | r_knee | 0.226 | 1.03 | 3 | 0.543 | -9.1 | -64.2 | -10.6 | 0.4 |
+| 1.20 | 0.016 | 4.80 | 8.01 | l_knee | -0.80 | 5.79 | 2.09 | r_knee | 0.000 | 0.90 | 2 | 0.339 | -13.3 | -82.1 | -10.5 | 0.3 |
+| 1.20 | 0.024 | 7.20 | 8.28 | r_knee | -0.95 | 6.15 | 2.30 | r_knee | 0.107 | 0.87 | 2 | 0.354 | -14.6 | -83.7 | -10.3 | 0.4 |
+| 1.20 | 0.032 | 9.60 | 9.21 | r_knee | -0.90 | 6.02 | 2.59 | r_knee | 0.000 | 0.91 | 2 | 0.461 | -15.6 | -82.5 | -13.4 | 0.4 |
+| 1.20 | 0.040 | 12.00 | 9.93 | r_knee | -0.98 | 6.11 | 2.81 | r_knee | 0.048 | 1.01 | 2 | 0.480 | -17.0 | -79.4 | -15.0 | 0.5 |
+| 1.20 | 0.048 | 14.40 | 10.04 | r_knee | -1.09 | 5.97 | 2.79 | r_knee | 0.023 | 1.11 | 2 | 0.529 | -16.8 | -63.2 | -15.9 | 0.5 |
+| 1.20 | 0.056 | 16.80 | 9.20 | r_knee | -1.16 | 8.60 | 2.39 | r_knee | 0.172 | 1.68 | 2 | 0.592 | -16.7 | -60.4 | -16.2 | 0.5 |
+
+The highest window is T 0.60 s, vx 0.032 m/s, x_amp 4.80 mm, preview amplitude 42.94 mm. Unclamped ask 11.365 Nm, right knee, t 2.696 s. Lowest corner over 20–80% is +0.368 mm, peak 2.176 mm. Peak leg rate 3.284 rad/s, right knee. Contact-off fraction 0.921, and 0.85 of the swing ticks are contact-off. Stance slip 0.05 mm. Stance contacts stay at 4. Phase mismatch 0.000. Declared CoM minimum +1.37 mm. Contact-CoP minimum −6.80 mm. CoP p5 +0.04 mm. One scored swing, `n_steps` 0. Stop is flat: corner spread 0.96 mm, sole pitch 0.31°, trunk +0.32°, min up_z 0.958. At T 0.60 s single support is 0.225 s, so the 20% rise is 45 ms. The scored window opens as the command reaches the peak, and the corner on that window is +0.37 mm.
+
+The lowest ask is T 1.20 s, vx 0.016 m/s, 8.014 Nm, left knee, t 1.408 s. Window −0.796 mm, peak 5.790 mm. qvel 2.090 rad/s, right knee. Off 0.000. Slip 0.90 mm. Stance contacts 2. Phase mismatch 0.339. Declared CoM −13.3 mm. Contact-CoP minimum −82.1 mm. CoP p5 −10.5 mm. Stop flat, trunk +0.34°. The highest swing peak is T 1.20 s, vx 0.056 m/s, 8.60 mm, and that window minimum is −1.16 mm. The bar is the minimum. The highest rate is 3.356 rad/s, T 0.70 s, vx 0.048 m/s, right knee, ask 11.74 Nm, window −0.70 mm. The highest contact-off fraction is T 0.70 s, vx 0.024 m/s, 0.956, window −0.47 mm.
+
+The eight dashes are T 0.55 s at vx 0.032–0.056 and T 0.50 s at vx 0.032–0.056. Single support at T 0.50 s is 0.1875 s, about 23 ticks, and some clocks never collect 20 samples. Those rows still ask 10.64–10.95 Nm and stop flat. T 0.50 s at 0.016 and 0.024 m/s does score: windows −0.65 mm and −0.68 mm, Off 0.000, stance contacts 4, phase mismatch 1.000. The foot stays loaded while x advances. On the scored short rows the stance count is 4 and the slip is under 1 mm. At T 1.00 s the stance count is 3. At T 1.20 s it is 2, which is the edge-roll the 0.5 s kit walker showed, on a longer period and with an upright stop.
+
+The sweep has no passing T, so it has no fastest vx on a passing T. The wired command stays period 0.50 s and 0.056 m/s. The clip is the highest window.
+
+`docs/media/voice_t060_vx032_feet.mp4` is T 0.60 s, vx 0.032 m/s, from the same live session. Stand 0.40 s, walk 3.00 s (five cycles), stop 2.40 s so the 2 s blend finishes. Side, front, and the sole camera, 1920×480, 30 fps, 174 frames, 5.80 s, fault none. The sole panel tints the group-0 contact boxes, left cyan and right orange, and paints the yellow floor line. At 0.20 s, still in the stand, both feet read −1.21 mm, n 4, 10.9 N, and the line crosses the box. At 1.60 s the right reads +1.67 mm, n 0, 0.0 N, and the left reads −0.98 mm, n 2, 10.4 N, with the right box above the line. At 1.90 s the left reads +1.97 mm, n 0, 0.0 N, and the right reads −1.15 mm, n 4, 22.1 N. At 2.20 s the right reads +1.35 mm, n 0, and the left reads −1.17 mm, n 4, 21.7 N. At 2.50 s the left reads +1.69 mm, n 0, and the right reads −1.17 mm, n 4, 21.5 N. At 3.00 s the right reads +0.89 mm, n 0, and the left reads −1.17 mm, n 4, 21.7 N. Those overlay peaks sit next to the scored peak of 2.18 mm. The 20–80% minimum on the cell is +0.37 mm. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0. Not kit-safe. Not go-anywhere.
