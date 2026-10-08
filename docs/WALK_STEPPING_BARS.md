@@ -725,4 +725,4 @@ The planned τ for the stop at armature 0.025, worst tick of each joint. QP is t
 
 The stop left knee clears 2.33 Nm only after the 0.025 armature term is removed. That sample is an unsourced-armature candidate on the planned columns. The plant ask on the same stop is 3.694 Nm, so the row stays Prefer FAIL. Full table: `previews/walk_a5a9183_armature_sensitivity.json`.
 
-SHA `e180454`. Logs from SHA `424b3d0`. Prior goal-ask score SHA `697d53b`.
+SHA `71cc092`. Logs from SHA `424b3d0`. Prior goal-ask score SHA `697d53b`.
