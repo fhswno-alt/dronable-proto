@@ -3855,3 +3855,30 @@ The reference hashes are keyed by `mujoco_version`. On MuJoCo 3.14.0 the plain p
 `scripts/run_live_row.py` writes the full manifest on each row. The leading fields are `xml_md5`, `compiled_md5`, `dof_armature`, `kv`, `kp`, `forcerange`, `actfrcrange`, `ctrlrange`, `mujoco_version`, `tip_sha`, `scorer_sha`, `seed`, `args`, `cmd`, then `perturbation`. `cmd` is the exact argv the entry point received. The reference hashes are read from `previews/compiled_refs.json`, the file from `13a9af6`. Before any scored row the entry point asserts `03ed33386178ab8d05db76a7307f1c1d` at armature 0.01 and `f4fb2b70b5312a851e16316a38a88283` at 0.025, on the cold plant and on the load-time 0.01 and 0.025 compiles. A miss names the compiled field at rtol 1e-9 and does not score. Actuator 0 is `l_hip_yaw_pos`. `compiled_order` is the right leg, then the left. kv comes from the `<joint>_pos` actuator by name. Knee kv rounds to 1.45734 and 2.19633. Between those two compiles only `dof_armature` and `kv` differ.
 
 Each row also records `signed_peak`, `sum_peak` (`|kp·e| + |kv·q̇|`), and `sum_over`. `clear` is false when the signed bar fails, the stepping bars fail, or the sum peak is more than twice the signed peak. The last case needs separate ±1 tick latency rows and five bus-stop rows on the signed bar, run as their own entry-point invocations. Step fraction 0 is a skate. A walk needs the stepping bars at armature 0.01 and at 0.025. Soft-pass stays off. The plant XML is not edited.
+
+## Stand-to-shift residual
+
+The `6bae07e` abort at t = 0.256 s was the force row `fz` at +0.336 N. The moments on that tick were inside 1e-2. The bucket stays 1e-2. On the current plan, tip `29552c1`, both armatures, t = 0.256 s is phase `start` and the six planned root rows are fx 0, fy 0, fz 0, with moments at most 2.6e-7 Nm. No tick from t = 0 through the short window exceeds 1e-2. The full-bar worst is still 4.23e-4 Nm of pitch (`ty`) at t = 1.256 s on armature 0.01, and 7.21e-4 Nm of roll (`tx`) at t = 1.216 s on armature 0.025.
+
+## Full bar and perturbations
+
+Scored through `scripts/run_live_row.py` at tip `29552c1c97e774d3665cca4d837522c7c315cd58`. Seed none. Soft-pass off. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Each path below is the row the runner wrote. `clear` is false on every row. Nothing here is a walk.
+
+| row | manifest | signed peak | sum peak | sum over | step frac | tip | notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| full 0.01 | `previews/live_rows/full_a010.json` | +1.872 r_knee t=3.544 | 6.359 | 282 | 0 | holds, up 0.974 | signed holds, limiter 0, clamp 0, DC holds, vx ratio −0.154 |
+| full 0.025 | `previews/live_rows/full_a025.json` | +2.449 r_knee t=4.368 | 8.463 | 875 | 0 | holds, up 0.990 | 21 signed ticks over, transfer risk, vx ratio −0.345 |
+| mass +5% 0.01 | `previews/live_rows/mass_p5_a010.json` | +2.047 r_knee | 4.799 | 310 | 0 | tips, up 0.846 | fields `body_mass`, `body_inertia` |
+| mass +5% 0.025 | `previews/live_rows/mass_p5_a025.json` | −2.536 l_knee | 8.496 | 929 | 0 | holds | 45 signed ticks over, clamp fails |
+| mass −5% 0.01 | `previews/live_rows/mass_m5_a010.json` | +1.809 r_knee | 5.804 | 229 | 0 | holds | signed holds |
+| mass −5% 0.025 | `previews/live_rows/mass_m5_a025.json` | +2.427 r_knee | 8.562 | 871 | 0.059 | holds | 7 signed ticks over |
+| μ 1.2 0.01 | `previews/live_rows/mu_1_2_a010.json` | −1.881 l_knee | 4.661 | 318 | 0.205 | holds | signed holds, 0 steps |
+| μ 1.2 0.025 | `previews/live_rows/mu_1_2_a025.json` | abort t=1.168 |  |  |  |  | moments tx −0.0180, ty +0.0128 Nm; fields `dof_armature`, `kv`, `geom_friction` |
+| μ 1.4 0.01 | `previews/live_rows/mu_1_4_a010.json` | +1.931 r_knee | 5.107 | 298 | 0 | holds | signed holds |
+| μ 1.4 0.025 | `previews/live_rows/mu_1_4_a025.json` | −2.112 l_knee | 6.478 | 183 | 1 | tips, up 0.847 | signed holds, 0 steps, vx ratio −4.20 |
+| latency +1 0.01 | `previews/live_rows/lat_p1_a010.json` | −1.724 l_knee | 2.994 | 61 | 0 | holds | signed holds; sum is under 2× signed |
+| latency +1 0.025 | `previews/live_rows/lat_p1_a025.json` | −2.397 l_knee | 5.394 | 437 | 0 | holds | 22 signed ticks over |
+| latency −1 0.01 | `previews/live_rows/lat_m1_a010.json` | −6.075 r_knee | 49.214 | 342 |  | collapsed | signed fails, 4 ticks over |
+| latency −1 0.025 | `previews/live_rows/lat_m1_a025.json` | abort t=1.056 |  |  |  |  | moments tx −0.0582, ty −0.0157, tz +0.0405 Nm |
+
+Five bus-stop rows are `previews/live_rows/busstop1_a010.json` through `busstop5_a010.json`, and the same names with `a025`. Walk lengths are 1.00, 1.25, 1.50, 1.75, and 2.00 s, then the bus stop. At 0.01 the first four pass the signed bar (+1.358, +1.583, −1.540, −1.684) and the fifth aborts at t = 2.824 s because the planned ZMP is 0.2 mm outside the support box. At 0.025 the first three pass signed and the last two miss it (l_knee −2.381, 3 ticks). The ±1 latency pair does not both pass the signed bar. A row whose sum peak is more than twice its signed peak is not CLEAR. The full bars are in that set, and their step fraction is 0. That is a skate. A walk still needs the stepping bars at both armatures. There is no video.
