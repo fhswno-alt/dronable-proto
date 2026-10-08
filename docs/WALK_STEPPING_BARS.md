@@ -677,3 +677,5 @@ Lim is the limiter-active fraction. ResFail is residual-fail control ticks over 
 | 1.20 | 0.048 | 3.491 | r_knee | 4.526 | 0 | 0.017 | 142/764 | 2.450 | +0.224 | -0.019 | +0.243 | — | 0.00 | 1.00 | 0.00 |
 | 1.20 | 0.056 | 3.460 | r_knee | 4.739 | 0 | 0.029 | 153/764 | 2.450 | +0.192 | -0.017 | +0.209 | — | 0.00 | 1.00 | 0.00 |
 
+SHA `aec3d45`. Logs from SHA `424b3d0`. Prior goal-ask score SHA `697d53b`.
+
