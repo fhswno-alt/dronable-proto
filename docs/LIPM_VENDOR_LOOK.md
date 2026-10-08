@@ -3501,3 +3501,42 @@ The live rows tip in the first transfer, so the scheduled stop does not produce 
 Limiter fraction is 0 on every row. Clamp fraction is 0 on every row. Latency −1 is the applied-force failure, signed +2.441 Nm on the right hip roll, min up 0.385. The other rows keep the applied force inside 2.33 Nm and the torso tips, so none pass. There is no side, front, or foot video.
 
 Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0. The plant XML is not edited.
+
+## Inset CoP and the realised split
+
+The QP rectangle is the declared 135×76 mm box with 5 mm taken off every side, 125×66 mm, half-sizes 0.0625×0.033 m. Splits (b) and (c) place their corner forces on that inset. Split (a) stays on the full box. The margin below is the distance from the QP centre of pressure to the declared edge, logged on every solved tick for each foot whose vertical force is above 1 N. The minimum on every row is 5.00 mm, which is the inset itself. A loaded foot does not sit in the outer rim.
+
+The position servo does not command the double-support load split. The contact solver does. After the step, with both feet above 5 N, the realised normal share α = Fz_L / (Fz_L + Fz_R) and each sole-frame centre of pressure are compared with the QP sample from that tick. Rug contacts count. The ZMP plan then steps toward the foot the QP is under-loaded on, 0.25 of the barycentric correction per tick, at most 1.5 mm, and the stored shift is capped at 20 mm and clamped into the inset support of the feet that are loaded. The stop CoM takes the same shift as the ZMP, so the planned lateral acceleration stays the quintic's.
+
+The gap is large. The feedforward does not hold the split.
+
+Every row drives the shift to the 20 mm cap. On the fixed upright root the mean normal share then matches: T 1.00 is 0.443 against 0.444, gap mean 0.020, and T 0.60 is 0.433 against 0.425, gap mean 0.022. The worst tick on those two is still 0.194 and 0.282. The centre of pressure does not follow. Mean gaps are 38 mm and 19 mm on T 1.00, 42 mm and 22 mm on T 0.60, and the worst foot is 52–75 mm off the QP point, an order past the 5 mm inset. On the live rows the mean split gap stays 0.065–0.199 and the max is 0.234–0.665. At the T 1.00 worst tick the QP asked for 0.769 on the left and the contacts put 0.191 there. The right-foot CoP on T 4 is 121 mm off the QP point. The QP's own share already leaves the line split by 0.06–0.16 on average, up to 0.41. Moving the ZMP moves that program and the line share together. It does not hand the contact solver the corner forces.
+
+No solved (c) tick needs more than 2.33 Nm without armature. The largest live (c) bare is 1.382 Nm, left hip roll, latency +1. The walls in the table are the single-support wrench, right hip roll, 2.437–2.931 Nm bare, in stance or at touchdown. The 20 mm shift is in that plan. The upright stop still solves: 562 ticks at T 1.00 and 558 at T 0.60, pyramid rejects none, and (c) on those stop ticks stays inside 0.60 Nm with the armature included. The T 0.60 stop that previously left the ZMP off the tilted soles is inside once the shift is on.
+
+Applied signed force, limiter fraction, and clamp fraction are the pass rule, and the torso still has to stay up. None pass. There is no side, front, or foot video.
+
+| Row | margin min L/R mm | split max | split mean | QP α | contact α | CoP mean L/R mm | signed | wall bare | up |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| T 0.60 / 0.032 | 5.00 / 5.00 | 0.234 | 0.129 | 0.469 | 0.594 | 14 / 13 | +3.677 | +2.437 touchdown | 0.567 |
+| T 1.00 / 0.016 | 5.00 / 5.00 | 0.578 | 0.120 | 0.487 | 0.569 | 17 / 18 | +2.496 | +2.742 stance mid | 0.536 |
+| T 1.20 / 0.024 | 5.00 / 5.00 | 0.641 | 0.103 | 0.541 | 0.597 | 15 / 16 | +2.546 | +2.814 stance mid | 0.501 |
+| T 4 / 0.016 | 5.00 / 5.00 | 0.652 | 0.108 | 0.577 | 0.615 | 15 / 16 | +2.342 | none | 0.602 |
+| mass +5% s0 | 5.00 / 5.00 | 0.593 | 0.126 | 0.485 | 0.560 | 17 / 20 | +2.716 | +2.931 stance mid | 0.519 |
+| mass +5% s1 | 5.00 / 5.00 | 0.501 | 0.125 | 0.484 | 0.561 | 17 / 19 | +2.717 | +2.922 stance mid | 0.527 |
+| mass +5% s2 | 5.00 / 5.00 | 0.558 | 0.126 | 0.484 | 0.561 | 18 / 20 | +2.715 | +2.931 stance mid | 0.522 |
+| mass −5% s0 | 5.00 / 5.00 | 0.540 | 0.125 | 0.465 | 0.557 | 16 / 18 | +2.369 | +2.676 stance edge | 0.528 |
+| mass −5% s1 | 5.00 / 5.00 | 0.547 | 0.122 | 0.467 | 0.560 | 16 / 18 | +2.389 | +2.703 stance edge | 0.517 |
+| mass −5% s2 | 5.00 / 5.00 | 0.547 | 0.122 | 0.468 | 0.560 | 16 / 18 | +2.392 | +2.709 stance edge | 0.516 |
+| μ = 1.0 | 5.00 / 5.00 | 0.665 | 0.172 | 0.500 | 0.484 | 24 / 23 | +2.272 | +2.651 stance mid | 0.555 |
+| μ = 0.8 | 5.00 / 5.00 | 0.624 | 0.123 | 0.512 | 0.451 | 27 / 19 | +2.420 | +2.804 stance mid | 0.532 |
+| latency −1 | 5.00 / 5.00 | 0.295 | 0.065 | 0.445 | 0.482 | 7 / 16 | +2.346 | none | 0.757 |
+| latency +1 | 5.00 / 5.00 | 0.345 | 0.199 | 0.419 | 0.609 | 20 / 16 | −2.152 | none | 0.686 |
+| rug | 5.00 / 5.00 | 0.578 | 0.120 | 0.487 | 0.569 | 17 / 18 | +2.496 | +2.742 stance mid | 0.536 |
+| rug, mass +5% | 5.00 / 5.00 | 0.593 | 0.126 | 0.485 | 0.560 | 17 / 20 | +2.716 | +2.931 stance mid | 0.519 |
+| upright T 1.00 | 5.00 / 5.00 | 0.194 | 0.020 | 0.443 | 0.444 | 38 / 19 | −1.624 | none | 1.000 |
+| upright T 0.60 | 5.00 / 5.00 | 0.282 | 0.022 | 0.433 | 0.425 | 42 / 22 | −2.319 | none | 1.000 |
+
+Mean margins to the declared edge, left then right, are 20/12 mm at T 0.60, 22/13 mm at T 1.00, 18/10 mm at T 1.20, 14/8 mm at T 4, and 18/13 mm and 18/11 mm on the two upright rows. Clamp fraction is not 0 on T 0.60, T 1.00, T 1.20, every mass +5% row, and both rug rows. Limiter fraction is 0 except latency −1 at 0.061. Latency −1 applies +2.346 Nm on the left hip roll. The binding live plan is the T 1.20 single-support right hip roll, +2.814 Nm bare at stance mid, with the applied force at +2.546 Nm and min up 0.501.
+
+Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0. The plant XML is not edited.
