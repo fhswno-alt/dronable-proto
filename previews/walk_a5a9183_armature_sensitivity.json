@@ -114,6 +114,23 @@
   },
   "rows": [
     {
+      "manifest": {
+        "xml_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+        "compiled_md5": "03ed33386178ab8d05db76a7307f1c1d",
+        "compiled_md5_check": {
+          "refs": "previews/compiled_refs.json",
+          "mujoco_version": "3.14.0",
+          "ref_key": "armature_0.01",
+          "ref_md5": "03ed33386178ab8d05db76a7307f1c1d",
+          "match": true
+        },
+        "perturbation": "none",
+        "tip_sha": "a5a9183461105016211bebbf110051c2bb8f9df2",
+        "seed": null,
+        "cmd": "A5_TIP_SCRIPTS=/tmp/tip-a5a9183/scripts MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/score_a5a9183_signed_id.py --sensitivity --out previews/walk_a5a9183_armature_sensitivity.json",
+        "transfer_risk": false,
+        "bout": "T 0.50 vx 0.016 and its stop"
+      },
       "T_s": 0.5,
       "vx_m_s": 0.016,
       "x_amp_m": 0.002,
@@ -1627,6 +1644,23 @@
       "n_scored_swings": 2
     },
     {
+      "manifest": {
+        "xml_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+        "compiled_md5": "f4fb2b70b5312a851e16316a38a88283",
+        "compiled_md5_check": {
+          "refs": "previews/compiled_refs.json",
+          "mujoco_version": "3.14.0",
+          "ref_key": "armature_0.025",
+          "ref_md5": "f4fb2b70b5312a851e16316a38a88283",
+          "match": true
+        },
+        "perturbation": "armature_0.025",
+        "tip_sha": "a5a9183461105016211bebbf110051c2bb8f9df2",
+        "seed": null,
+        "cmd": "A5_TIP_SCRIPTS=/tmp/tip-a5a9183/scripts MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/score_a5a9183_signed_id.py --sensitivity --out previews/walk_a5a9183_armature_sensitivity.json",
+        "transfer_risk": false,
+        "bout": "T 0.50 vx 0.016 and its stop"
+      },
       "T_s": 0.5,
       "vx_m_s": 0.016,
       "x_amp_m": 0.002,
