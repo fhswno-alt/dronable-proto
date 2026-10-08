@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -80,13 +81,137 @@ _RUN_KEYS = IDENTITY_KEYS[9:]
 # μ 1.2 and 1.4 are the low-friction perturbations.
 NOMINAL_MU = 1.6
 
-# Reference hashes keyed by mujoco.__version__. PR #102 at 76b8164.
-COMPILED_MD5_REF = {
+# Locked hashes. The file is the source the runner reads. These two
+# strings are the assert, not a second copy of the JSON.
+_LOCKED_REFS = {
     "3.14.0": {
         "armature_0.01": REF_MD5_ARMATURE_0_01,
         "armature_0.025": REF_MD5_ARMATURE_0_025,
     }
 }
+# Full arrays, used only when a hash misses, so the exit names the field.
+_PINNED_MANIFEST = {
+    "armature_0.01": "13a9af63b8d17862edbed1b313f59385ec01dadc:previews/run_manifest_a5a9183_voice056.json",
+    "armature_0.025": "13a9af63b8d17862edbed1b313f59385ec01dadc:previews/compiled_md5_armature_0.025.json",
+}
+
+
+def refs_path() -> Path:
+    return sw.ROOT / "previews" / "compiled_refs.json"
+
+
+def load_refs() -> dict:
+    """The vendored ``previews/compiled_refs.json``. Not a retyped table."""
+    path = refs_path()
+    if not path.is_file():
+        raise SystemExit(f"missing {path}")
+    data = json.loads(path.read_text())
+    if not isinstance(data, dict):
+        raise SystemExit(f"{path} is not an object")
+    return data
+
+
+COMPILED_MD5_REF = load_refs()
+
+
+def _pinned_manifest(ref_key: str) -> dict:
+    spec = _PINNED_MANIFEST[ref_key]
+    raw = subprocess.check_output(
+        ["git", "show", spec], cwd=sw.ROOT,
+    )
+    data = json.loads(raw)
+    if not isinstance(data, dict):
+        raise SystemExit(f"{spec} is not an object")
+    return data
+
+
+def _hash_mismatch(manifest: dict, ref_key: str) -> str:
+    """Name each compiled_order field that misses the locked hash at rtol 1e-9."""
+    expect = str(COMPILED_MD5_REF["3.14.0"][ref_key])
+    got = str(manifest.get("compiled_md5", ""))
+    pinned = _pinned_manifest(ref_key)
+    fields = changed_fields(manifest, pinned)
+    named = ", ".join(fields) if fields else "(no field at rtol 1e-9)"
+    return f"{ref_key} compiled_md5 {got} != {expect}; fields {named} (rtol 1e-9)"
+
+
+def assert_locked_refs() -> None:
+    """Refuse a scored row unless both locked hashes compile on this plant.
+
+    Actuator 0 in the XML is ``l_hip_yaw_pos``. ``compiled_order`` is the
+    right leg, then the left. kv is read from ``<joint>_pos`` by name.
+    """
+    refs = load_refs()
+    version = mj.__version__
+    if version != "3.14.0":
+        raise SystemExit(f"mujoco_version {version} is not 3.14.0")
+    table = refs.get(version)
+    if table != _LOCKED_REFS[version]:
+        locked = _LOCKED_REFS[version]
+        if not isinstance(table, dict):
+            raise SystemExit(f"compiled_refs.json has no {version} object")
+        for key, expect in locked.items():
+            got = table.get(key)
+            if got != expect:
+                raise SystemExit(
+                    f"compiled_refs.json {version} {key} is {got}; locked {expect}"
+                )
+        extra = [key for key in table if key not in locked]
+        raise SystemExit(f"compiled_refs.json {version} extra keys {extra}")
+    if COMPILED_MD5_REF != refs:
+        raise SystemExit("COMPILED_MD5_REF is not previews/compiled_refs.json")
+    xml_md5 = hashlib.md5(sw.PLANT_XML.read_bytes()).hexdigest()
+    if xml_md5 != sw.PLANT_MD5:
+        raise SystemExit(f"plant md5 {xml_md5} != {sw.PLANT_MD5}")
+    file_model = mj.MjModel.from_xml_path(str(sw.PLANT_XML))
+    act0 = mj.mj_id2name(file_model, mj.mjtObj.mjOBJ_ACTUATOR, 0)
+    if act0 != "l_hip_yaw_pos":
+        raise SystemExit(f"actuator 0 is {act0}; XML order is left leg first")
+    knee_act = int(mj.mj_name2id(file_model, mj.mjtObj.mjOBJ_ACTUATOR, "r_knee_pos"))
+    yaw_act = int(mj.mj_name2id(file_model, mj.mjtObj.mjOBJ_ACTUATOR, "r_hip_yaw_pos"))
+    if knee_act < 0 or yaw_act < 0:
+        raise SystemExit("missing r_knee_pos or r_hip_yaw_pos")
+    if knee_act == 0 or yaw_act == 0:
+        raise SystemExit("right-leg _pos resolved to actuator index 0")
+    file_manifest = compiled_manifest(
+        file_model, xml_md5=xml_md5, compile=COMPILE_XML, perturbation="none",
+    )
+    spec_01 = compiled_manifest(
+        sw.compile_plant(sw.PLANT_XML, 0.01),
+        xml_md5=xml_md5,
+        compile=compile_note(0.01),
+        perturbation=perturbation_note(0.01, None),
+    )
+    spec_25 = compiled_manifest(
+        sw.compile_plant(sw.PLANT_XML, 0.025),
+        xml_md5=xml_md5,
+        compile=compile_note(0.025),
+        perturbation=perturbation_note(0.025, None),
+    )
+    for label, manifest, ref_key in (
+        ("from_xml_path", file_manifest, "armature_0.01"),
+        ("MjSpec 0.01", spec_01, "armature_0.01"),
+        ("MjSpec 0.025", spec_25, "armature_0.025"),
+    ):
+        expect = _LOCKED_REFS["3.14.0"][ref_key]
+        if manifest["compiled_md5"] != expect:
+            raise SystemExit(f"{label} {_hash_mismatch(manifest, ref_key)}")
+    joints = list(file_manifest["compiled_order"]["joints"])
+    if len(joints) < 7 or joints[0] != "r_hip_yaw" or joints[6] != "l_hip_yaw":
+        raise SystemExit(f"compiled_order joints {joints}")
+    named_knee = float(-file_model.actuator_biasprm[knee_act, 2])
+    named_yaw = float(-file_model.actuator_biasprm[yaw_act, 2])
+    if file_manifest["kv"]["r_knee"] != named_knee:
+        raise SystemExit("r_knee kv was not read from r_knee_pos")
+    if file_manifest["kv"]["r_hip_yaw"] != named_yaw:
+        raise SystemExit("r_hip_yaw kv was not read from r_hip_yaw_pos")
+    if round(float(file_manifest["kv"]["r_knee"]), 5) != 1.45734:
+        raise SystemExit(f"0.01 r_knee kv {file_manifest['kv']['r_knee']}")
+    if round(float(spec_25["kv"]["r_knee"]), 5) != 2.19633:
+        raise SystemExit(f"0.025 r_knee kv {spec_25['kv']['r_knee']}")
+    diff = changed_fields(spec_25, file_manifest)
+    if diff != ["dof_armature", "kv"]:
+        raise SystemExit(f"0.025 vs 0.01 fields {diff}")
 
 
 def compile_note(leg_armature: float | None) -> str:
@@ -439,6 +564,7 @@ def manifest_from_traceback(exc: BaseException) -> dict | None:
 
 
 def _self_check() -> None:
+    assert_locked_refs()
     xml_md5 = hashlib.md5(sw.PLANT_XML.read_bytes()).hexdigest()
     if xml_md5 != sw.PLANT_MD5:
         raise SystemExit(f"plant md5 {xml_md5} != {sw.PLANT_MD5}")
@@ -484,7 +610,6 @@ def _self_check() -> None:
         raise SystemExit(spec_25["compiled_order"]["compile"])
     if spec_25["perturbation"] != "armature_0.025" or spec_01["perturbation"] != "none":
         raise SystemExit("perturbation labels")
-    import subprocess
     pinned = json.loads(subprocess.check_output(
         ["git", "show", "76b8164:previews/run_manifest_a5a9183_voice056.json"],
     ))
@@ -545,7 +670,7 @@ def _self_check() -> None:
         "scorer_sha": "scorer",
         "seed": None,
         "args": {"armature": 0.01},
-        "cmd": "python3 scripts/run_live_row.py --armature 0.01",
+        "cmd": ["--armature", "0.01"],
         "plant_md5": xml_md5,
         "mujoco_version": mj.__version__,
         "soft_pass": 0,
@@ -555,6 +680,10 @@ def _self_check() -> None:
         raise SystemExit("merge overwrote the tip or dropped the hash")
     if list(payload)[:len(IDENTITY_KEYS)] != list(IDENTITY_KEYS):
         raise SystemExit(f"field order {list(payload)[:len(IDENTITY_KEYS)]}")
+    if payload["cmd"] != ["--armature", "0.01"]:
+        raise SystemExit(f"cmd {payload['cmd']!r}")
+    if list(payload)[len(IDENTITY_KEYS)] != "perturbation":
+        raise SystemExit(f"perturbation is not next {list(payload)[len(IDENTITY_KEYS)]}")
     if payload["perturbation"] != "none":
         raise SystemExit("plain row perturbation")
     refs = payload["compiled_md5_ref"]["3.14.0"]

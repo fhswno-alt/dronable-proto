@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """One live voice056 row. The arguments are the whole rollout.
 
-Writes JSON with the git tip, the plant md5, the MuJoCo version, every
-argument, the compiled plant (leg armature, kv, kp, force and control
-ranges, and compiled_md5), the right hip-roll signed force, the tip,
-and the DC line.
+Writes the full compiled manifest itself: xml_md5, compiled_md5, the
+leg arrays, mujoco_version, tip_sha, scorer_sha, seed, args, the exact
+argv, and the perturbation label. A scored row starts only after both
+locked compiled hashes match.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
-import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -40,11 +39,55 @@ def _plant_md5() -> str:
     return digest.hexdigest()
 
 
-def _cmd(argv: list[str] | None) -> str:
-    parts = ["python3", "scripts/run_live_row.py"]
-    raw = list(sys.argv[1:] if argv is None else argv)
-    parts.extend(shlex.quote(part) for part in raw)
-    return " ".join(parts)
+def _cmd(argv: list[str] | None) -> list[str]:
+    """The argv this entry point received. Not a reconstructed command."""
+    raw = list(sys.argv if argv is None else argv)
+    return [str(part) for part in raw]
+
+
+def _verdict(result: dict | None, abort: str | None) -> dict[str, object]:
+    """Signed peak and the sum peak. CLEAR stays false when the sum gate trips.
+
+    The sum is |kp·e| + |kv·q̇|. A row whose sum peak is more than twice
+    the signed peak is not CLEAR in this process: the ±1 tick latency
+    rows and the five bus-stop rows are separate entry-point runs.
+    """
+    signed = None if not isinstance(result, dict) else result.get("signed_value")
+    sum_peak = None if not isinstance(result, dict) else result.get("ask_nm")
+    sum_over = None if not isinstance(result, dict) else result.get("sum_over")
+    reasons: list[str] = []
+    if abort:
+        reasons.append(str(abort))
+    if not isinstance(result, dict) or not result.get("signed_ok"):
+        reasons.append("signed bar")
+    step_frac = None if not isinstance(result, dict) else result.get("step_frac")
+    if not isinstance(result, dict) or not result.get("step_ok"):
+        reasons.append(f"stepping bars step_frac {step_frac}")
+    ratio = False
+    try:
+        signed_abs = abs(float(signed))
+        sum_f = float(sum_peak)
+    except (TypeError, ValueError):
+        signed_abs = None
+        sum_f = None
+    if (
+        signed_abs is not None
+        and sum_f is not None
+        and sum_f > 2.0 * signed_abs + 1e-12
+    ):
+        ratio = True
+        reasons.append(
+            "sum peak exceeds 2× signed peak; "
+            "±1 tick latency rows and 5 bus-stop rows must pass the signed bar before CLEAR"
+        )
+    return {
+        "signed_peak": signed,
+        "sum_peak": sum_peak,
+        "sum_over": sum_over,
+        "sum_over_2x_signed": ratio,
+        "clear": not reasons,
+        "clear_reason": "; ".join(reasons),
+    }
 
 
 def _note_diff(payload: dict[str, object]) -> None:
@@ -116,6 +159,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    plant_manifest.assert_locked_refs()
     cap = _opt_float(args.knee_qdd_cap)
     seed = _opt_int(args.seed)
     mu = _opt_float(args.mu)
@@ -206,6 +250,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     except lipm_gait.PlanInconsistent as exc:
         payload["abort"] = str(exc)
+        payload.update(_verdict(None, str(exc)))
         payload["r_hip_roll_signed"] = None
         payload["tip_ok"] = None
         payload["dc_ok"] = None
@@ -215,7 +260,9 @@ def main(argv: list[str] | None = None) -> int:
         args.out.write_text(json.dumps(payload, indent=2, default=str) + "\n")
         print(
             f"tip {payload['tip_sha']} scorer {payload['scorer_sha']} "
-            f"abort {exc} {_report(payload)}",
+            f"abort {exc} signed_peak {payload.get('signed_peak')} "
+            f"sum_peak {payload.get('sum_peak')} clear {payload.get('clear')} "
+            f"{_report(payload)}",
             flush=True,
         )
         return 2
@@ -225,6 +272,7 @@ def main(argv: list[str] | None = None) -> int:
     joint = result.get("joint_signed") or {}
     hip = joint.get("r_hip_roll") if isinstance(joint, dict) else None
     payload["abort"] = None
+    payload.update(_verdict(result if isinstance(result, dict) else None, None))
     payload["r_hip_roll_signed"] = None if not isinstance(hip, dict) else hip.get("value")
     payload["r_hip_roll_signed_t"] = None if not isinstance(hip, dict) else hip.get("t")
     payload["r_hip_roll_over"] = None if not isinstance(hip, dict) else hip.get("over")
@@ -249,9 +297,15 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"tip {payload['tip_sha']} seed {seed} "
         f"r_hip_roll {payload['r_hip_roll_signed']} over {payload['r_hip_roll_over']} "
+        f"signed_peak {payload.get('signed_peak')} sum_peak {payload.get('sum_peak')} "
+        f"sum_over {payload.get('sum_over')} clear {payload.get('clear')} "
+        f"step_frac {result.get('step_frac') if isinstance(result, dict) else None} "
         f"signed_over {payload['signed_over']} tip_ok {payload['tip_ok']} "
         f"dc_ok {payload['dc_ok']} dc {payload['dc_joint']} "
         f"{payload['dc_excess']} fault {payload['fault']!r} "
+        f"root {result.get('id_plan_root_max') if isinstance(result, dict) else None} "
+        f"at {result.get('id_plan_root_t') if isinstance(result, dict) else None} "
+        f"row {result.get('id_plan_root_i') if isinstance(result, dict) else None} "
         f"{_report(payload)}",
         flush=True,
     )
