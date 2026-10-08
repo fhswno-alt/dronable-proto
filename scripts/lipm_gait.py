@@ -86,11 +86,6 @@ STOP_KNEE_QDD_MAX = 25.0
 # and that row is a transfer risk. The same cap covers the other leg
 # joints: a hip-pitch corner near −100 rad/s² does not fit at 0.025.
 WALK_KNEE_QDD_MAX = 40.0
-# Stance hip roll at armature 0.025. A planned 28 rad/s² on top of the
-# contact moment is about 1.4 Nm, past the 1.3 Nm guard, while the CoM
-# is still inside the box. 18 rad/s² leaves that moment inside the guard.
-# The knee cap stays 40. This is the planned acceleration, not a torque clip.
-HIP_ROLL_QDD_MAX = 18.0
 # Single-support stance hip roll. The whole 2.347 kg on one foot is
 # 23.0 N times the CoP offset from the hip axis: −0.55 to +1.2 Nm across
 # the foot, 0.32 Nm at the box centre. 1.3 Nm is just past the outer edge.
@@ -778,6 +773,10 @@ class LipmWalker:
         self._swing_z_full = False
         self._dcm_step = 0.0
         self._dcm_err_f = 0.0
+        # Last three planned hip-roll accelerations. A one-tick wiggle of
+        # about 0.002 rad is 28 rad/s², and at armature 0.025 that is the
+        # 0.7 Nm that pushes a 0.7 Nm contact moment past the 1.3 Nm guard.
+        self._hip_qdd_med: dict[str, list[float]] = {}
         self.id_plan_root_max = 0.0
         self.id_plan_root_t = 0.0
         self.id_plan_root_i = -1
@@ -2511,13 +2510,30 @@ class LipmWalker:
                 continue
             vadr = int(self.model.jnt_dofadr[jid])
             cmd = float(qdd.get(name, 0.0))
-            lim = HIP_ROLL_QDD_MAX if name.endswith("hip_roll") else cap
-            if cmd > lim:
-                cmd = lim
-            elif cmd < -lim:
-                cmd = -lim
+            if name.endswith("hip_roll"):
+                cmd = self._median_hip_qdd(name, cmd)
+            if cmd > cap:
+                cmd = cap
+            elif cmd < -cap:
+                cmd = -cap
             scratch.qacc[vadr] = cmd
             qdd[name] = cmd
+
+    def _median_hip_qdd(self, name: str, cmd: float) -> float:
+        """Drop a one-tick hip-roll acceleration spike.
+
+        The central difference of a 0.002 rad wiggle is tens of rad/s²
+        for a single sample, then the opposite sign is not required: the
+        neighbours are the sway. The middle of the last three samples is
+        that sway. A real acceleration that lasts is unchanged.
+        """
+        hist = self._hip_qdd_med.setdefault(name, [])
+        hist.append(float(cmd))
+        if len(hist) > 3:
+            del hist[0]
+        if len(hist) < 3:
+            return float(cmd)
+        return float(sorted(hist)[1])
 
     def _planned_stance(self) -> str | None:
         if self.phase == "swing" and self.stance in ("L", "R"):
@@ -2816,12 +2832,25 @@ class LipmWalker:
             walker.foot_bias_r = 0.0
             self._latch_foot_y()
             return
+        # The return brings the pelvis back between the two planted feet.
+        # A swing bias left on from the walk holds one sole out and the
+        # stop rolls over that foot.
+        if self.preview_stage == "stop":
+            walker.foot_bias_l = 0.0
+            walker.foot_bias_r = 0.0
+            return
         swing = self._clock_swing_side(walker)
         for side in ("L", "R"):
             if side == swing:
                 continue
             if self.foot_normal(side) >= 5.0:
-                self._foot_y_latch[side] = float(self.data.geom_xpos[int(self.gid[side])][1])
+                y = float(self.data.geom_xpos[int(self.gid[side])][1])
+                prev = self._foot_y_latch.get(side)
+                # The sole slides out from under a reference that is already
+                # on the latch. Adopting that slide walks the next target
+                # out with it, and the planned CoM ends past the inner edge.
+                if prev is None or abs(y) <= abs(prev) + 1.0e-4:
+                    self._foot_y_latch[side] = y
         walker.foot_bias_l = 0.0
         walker.foot_bias_r = 0.0
         if swing not in self._foot_y_latch:
@@ -3233,7 +3262,39 @@ class LipmWalker:
         else:
             self._com_v0 = 0.0
         self._stop_span = self._stop_blend_span()
+        # A hip-roll reference at 1.3 rad/s into a 0.55 s blend overshoots
+        # by 0.14 rad and the swing sole leaves the box. Cut only the part
+        # of v0 the quintic cannot finish inside the endpoints.
+        self._stand_v0 = {
+            name: self._bounded_stop_velocity(
+                float(q0.get(name, 0.0)),
+                float(self._stand_q1.get(name, q0.get(name, 0.0))),
+                float(vel),
+                self._stop_span,
+            )
+            for name, vel in self._stand_v0.items()
+        }
         return True
+
+    def _bounded_stop_velocity(
+        self, q0: float, q1: float, v0: float, span: float,
+    ) -> float:
+        """Largest fraction of v0 whose quintic stays near the chord."""
+        margin = 0.02
+        lo = min(q0, q1) - margin
+        hi = max(q0, q1) + margin
+        vel = float(v0)
+        for _ in range(12):
+            outside = False
+            for i in range(33):
+                q, _qd, _qdd = _quintic_sample(q0, q1, vel, span, (i / 32.0) * span)
+                if q < lo or q > hi:
+                    outside = True
+                    break
+            if not outside:
+                return vel
+            vel *= 0.5
+        return vel
 
     def _stop_blend_span(self) -> float:
         """At least 0.5 s, or one double-support interval, whichever is longer.

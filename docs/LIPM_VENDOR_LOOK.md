@@ -3707,3 +3707,57 @@ Stepping bars fail at both armatures. Clearance over 20–80% of the declared sw
 The 0.010 row holds signed force, limiter, clamp, the DC line, and the upright flat stop. It misses the stepping bars and the vx ratio sits at 0.48. The 0.025 row holds the torso, the DC line, limiter 0, and the flat stop, and misses signed force, clamp, and the stepping bars. The gait is not locked. There is no video.
 
 Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. The plant XML is not edited.
+
+## Stance hip guard
+
+HW's lever on this plant: the contact box centre is 14 mm outboard of the ankle-roll origin, and the hip-roll axis is on that ankle. With the whole 2.347 kg on one foot the static stance hip roll is 23.0 N times the CoP offset, −0.55 to +1.2 Nm across the foot and 0.32 Nm at the box centre. A planned single-support stance hip |τ| above 1.3 Nm, or a planned CoM more than 5 mm outside that stance box, raises `PlanInconsistent` and the plan is not commanded.
+
+The 2.75 Nm sample is not a swing-leg term. `preview_y` was added on feet that already sit at the box centres. The live centres are about ±0.048 m, the ±0.043 m geom plus the 5 mm kit offset. The swing sole then left the world y it had been standing on. The clock swing foot is now biased so its forward kinematics stay on the latched world y. The stance foot bias stays 0, so the pelvis sway still runs through the planted sole. The latch does not adopt a later outward slide.
+
+A separate one-tick wiggle of about 0.002 rad in the hip-roll reference is 28 rad/s². At armature 0.025 that is 0.7 Nm on top of a 0.7 Nm contact moment, and the guard saw +1.387 Nm while the CoM was still 20 mm inside the box. The planned hip-roll acceleration is the middle of the last three samples, so that wiggle is not a stance moment. The knee cap stays 40 rad/s². Capture-point error is averaged for 80 ms before the 0.015 m/s step slew.
+
+One walk cycle at armature 0.010, after the arm. Planned CoM y, open-loop ZMP y, stance box centre, stance hip, live CoM. Hip τ is the planned stance hip roll.
+
+| t | phase | stance | pCom | ZMP | box | hip | live | hip τ |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1.520 | swing | R | −0.033 | −0.043 | −0.048 | −0.069 | −0.035 | +0.81 |
+| 1.760 | shift | R | +0.000 | +0.004 | −0.048 | −0.031 | −0.002 | +0.11 |
+| 2.040 | swing | L | +0.028 | +0.043 | +0.046 | +0.060 | +0.027 | −0.69 |
+| 2.240 | shift | L | +0.002 | +0.005 | +0.046 | +0.039 | +0.005 | +0.40 |
+
+Through that cycle the planned CoM stays inside the stance box, and the stance hip stays under 1.3 Nm. The right sole is still on −0.048 m while it is the stance foot. It later slides to about −0.054 m during the next swing; the latch stays at the earlier plant.
+
+The stop blend was a second frame error. It took a hip-roll reference of −1.30 rad/s into a 0.55 s quintic whose endpoints were both −0.03 rad. The curve overshot to −0.17 rad, the left sole walked out to +0.10 m, and the 0.010 stop tipped (up_z 0.70, CoM margin −0.054 m). The blend now keeps only the incoming velocity whose quintic stays within 0.02 rad of the endpoints. That sample becomes −0.16 rad/s. The stop also clears the swing-foot bias, so the return is between the two planted feet.
+
+Free-root rescore with the guard in the loop. Same window as the table above. The guard did not fire. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off.
+
+| | armature 0.010 | armature 0.025 |
+| --- | --- | --- |
+| signed | −2.116 l_knee, t = 3.120 | −2.666 l_knee, t = 3.928 |
+| signed ≤ 2.33 | yes | no, over by 0.336 |
+| limiter | 0 | 0 |
+| clamp | 0 | l_knee 0.0154, r_knee 0.0062 |
+| DC | held, l_knee excess −1.37, t = 3.136 | held, l_knee excess −0.35, t = 1.920 |
+| torso / stop | 0.987, flat, spread 0.94 mm | 0.998, flat, spread 0.95 mm |
+| steps | fail, clear −0.37 mm, 3 swings | fail, clear −1.27 mm, 5 swings |
+| vx ratio | 0.306 | 0.101 |
+| bare over 2.33 | none | none |
+
+The 0.010 DC sample is l_knee, τ 2.115 Nm, |ω| 0.859 rad/s, limit 2.231 rad/s. At 0.025 it is l_knee, τ 2.440 Nm, |ω| 1.324 rad/s, limit 1.679 rad/s.
+
+Largest planned |τ|, and the bare torque of that same sample. Single-support hip roll in the traced cycle is +0.81 Nm and −0.69 Nm. The peaks below are double support or the stop, which the 1.3 Nm guard does not cover.
+
+| joint | 0.010 τ | 0.010 bare | 0.025 τ | 0.025 bare |
+| --- | ---: | ---: | ---: | ---: |
+| l_hip_roll | +1.162 | +1.195 | −1.352 | −1.283 |
+| r_hip_roll | −1.278 | −1.397 | −1.407 | −1.320 |
+| l_knee | −2.090 | −1.690 | −2.542 | −1.542 |
+| r_knee | +1.844 | +1.444 | +2.468 | +1.468 |
+
+At 0.025 the left knee plan at the stance edge is −2.542 Nm, bare −1.542 Nm, q̈ −40 rad/s², t = 3.928 s. That is the applied −2.666 Nm tick. The piece above the bare term is the armature at the cap. The torso stays up. Signed force and the knee clamp miss. This row is a transfer risk.
+
+Largest planned root residual: 2.70 N fore-aft at t = 2.088 s on 0.010, vector [+2.704, +0.549, +0.329, +0.072, −0.296, +0.104]. On 0.025 it is 3.37 N fore-aft at t = 3.264 s, vector [+3.372, −0.171, +0.626, +0.015, −0.636, −0.053]. The roll component is +0.07 Nm and +0.02 Nm.
+
+Stepping bars still fail. Clearance over 20–80% of the declared swing is −0.37 mm at 0.010 and −1.27 mm at 0.025. The highest sole in those windows is 1.01 mm and 2.28 mm. Placement is −10.9 mm and −7.2 mm against an 8 mm command. Slip is 0.55 mm and 1.05 mm. vx over the window, including the 1.0 s arm, is 0.0049 m/s and 0.0016 m/s. That is slower than the previous free-root row (0.48 and 0.53). The swing sole is being held on its latched y, and the foot still does not clear.
+
+The 0.010 row holds signed force, limiter, clamp, the DC line, and the upright flat stop. It misses the stepping bars. The 0.025 row holds the torso, the DC line, limiter 0, and the flat stop, and misses signed force, clamp, and the stepping bars. The gait is not locked. There is no video.
