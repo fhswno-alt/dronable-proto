@@ -3710,7 +3710,7 @@ Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. The plant XML is no
 
 ## Stance hip guard
 
-HW's lever on this plant: the contact box centre is 14 mm outboard of the ankle-roll origin, and the hip-roll axis is on that ankle. With the whole 2.347 kg on one foot the static stance hip roll is 23.0 N times the CoP offset, −0.55 to +1.2 Nm across the foot and 0.32 Nm at the box centre. A planned single-support stance hip |τ| above 1.3 Nm, or a planned CoM more than 5 mm outside that stance box, raises `PlanInconsistent` and the plan is not commanded.
+HW's lever on this plant: the contact box centre is 14 mm outboard of the ankle-roll origin, and the hip-roll axis is on that ankle. With the whole 2.347 kg on one foot the static stance hip roll is 23.0 N times the CoP offset, −0.55 to +1.2 Nm across the foot and 0.32 Nm at the box centre. A stance hip-roll |τ_req| above 1.3 Nm is a flag. It is reported with the tick, the phase, and the gravity, inertial, swing-leg, and contact parts. It does not discard the plan. A plan is aborted only when a planned root row, inverse minus the planned wrench, is outside 1e-2 N or 1e-2 Nm, or when the planned CoM or ZMP leaves the support box.
 
 The 2.75 Nm sample is not a swing-leg term. `preview_y` was added on feet that already sit at the box centres. The live centres are about ±0.048 m, the ±0.043 m geom plus the 5 mm kit offset. The swing sole then left the world y it had been standing on. The clock swing foot is now biased so its forward kinematics stay on the latched world y. The stance foot bias stays 0, so the pelvis sway still runs through the planted sole. The latch does not adopt a later outward slide.
 
@@ -3745,7 +3745,7 @@ Free-root rescore with the guard in the loop. Same window as the table above. Th
 
 The 0.010 DC sample is l_knee, τ 2.115 Nm, |ω| 0.859 rad/s, limit 2.231 rad/s. At 0.025 it is l_knee, τ 2.440 Nm, |ω| 1.324 rad/s, limit 1.679 rad/s.
 
-Largest planned |τ|, and the bare torque of that same sample. Single-support hip roll in the traced cycle is +0.81 Nm and −0.69 Nm. The peaks below are double support or the stop, which the 1.3 Nm guard does not cover.
+Largest planned |τ|, and the bare torque of that same sample. Single-support hip roll in the traced cycle is +0.81 Nm and −0.69 Nm. The peaks below are double support or the stop. A stance hip above 1.3 Nm on those phases is flagged. The flag does not discard it.
 
 | joint | 0.010 τ | 0.010 bare | 0.025 τ | 0.025 bare |
 | --- | ---: | ---: | ---: | ---: |

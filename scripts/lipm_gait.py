@@ -86,13 +86,12 @@ STOP_KNEE_QDD_MAX = 25.0
 # and that row is a transfer risk. The same cap covers the other leg
 # joints: a hip-pitch corner near −100 rad/s² does not fit at 0.025.
 WALK_KNEE_QDD_MAX = 40.0
-# Single-support stance hip roll. The whole 2.347 kg on one foot is
-# 23.0 N times the CoP offset from the hip axis: −0.55 to +1.2 Nm across
-# the foot, 0.32 Nm at the box centre. 1.3 Nm is just past the outer edge.
-# A plan past that, or a planned CoM more than 5 mm outside the stance
-# box, is a frame error and is not commanded.
+# Stance hip roll. The whole 2.347 kg on one foot is 23.0 N times the
+# CoP offset from the hip axis: −0.55 to +1.2 Nm across the foot, 0.32 Nm
+# at the box centre. Above 1.3 Nm is reported with the tick, the phase,
+# and the gravity / inertial / swing-leg / contact split. It does not
+# abort the plan.
 SS_HIP_TAU_MAX = 1.3
-SS_COM_OUT_M = 0.005
 STOP_BLEND_MIN_S = 0.5
 # The position servo does not command the double-support load split.
 # Each tick both feet are loaded, move the ZMP/CoM plan by a fraction of
@@ -775,8 +774,9 @@ class LipmWalker:
         self._dcm_err_f = 0.0
         # Last three planned hip-roll accelerations. A one-tick wiggle of
         # about 0.002 rad is 28 rad/s², and at armature 0.025 that is the
-        # 0.7 Nm that pushes a 0.7 Nm contact moment past the 1.3 Nm guard.
+        # 0.7 Nm that pushes a 0.7 Nm contact moment past 1.3 Nm.
         self._hip_qdd_med: dict[str, list[float]] = {}
+        self.hip_tau_flags: list[dict[str, float | str]] = []
         self.id_plan_root_max = 0.0
         self.id_plan_root_t = 0.0
         self.id_plan_root_i = -1
@@ -2086,7 +2086,7 @@ class LipmWalker:
         if worst_name:
             self._plan_term_name = self._planned_term(scratch, self._leg_dof[worst_name])
             self._plan_term_phase = phase_of.get(worst_name, "")
-        self._guard_ss_plan(scratch, out)
+        self._guard_plan(scratch, out, applied, resid_root, float(zmp_y))
         return out
 
     def _note_planned_req(
@@ -2866,33 +2866,268 @@ class LipmWalker:
                 break
             prev = abs(err)
 
-    def _guard_ss_plan(self, scratch: mj.MjData, tau: dict[str, float]) -> None:
-        """Abort a single-support plan the foot cannot hold."""
+    def _leg_bodies(self, side: str) -> list[int]:
+        """Body ids of one leg, from the hip yaw down through the foot."""
+        root = int(mj.mj_name2id(
+            self.model, mj.mjtObj.mjOBJ_BODY, f"{side.lower()}_hip_yaw_link",
+        ))
+        if root < 0:
+            return []
+        out: list[int] = []
+        for bid in range(int(self.model.nbody)):
+            parent = bid
+            while parent != 0:
+                if parent == root:
+                    out.append(bid)
+                    break
+                parent = int(self.model.body_parentid[parent])
+        return out
+
+    def _rne_grav_full(self, scratch: mj.MjData) -> tuple[np.ndarray, np.ndarray]:
+        """Gravity, and RNE with acceleration, at the scratch state.
+
+        Restores qpos-independent qvel and qacc. RNE does not include
+        armature. ``full − grav`` is the inertial term plus coriolis.
+        """
+        nv = int(self.model.nv)
+        qacc = np.array(scratch.qacc, dtype=np.float64, copy=True)
+        qvel = np.array(scratch.qvel, dtype=np.float64, copy=True)
+        full = np.zeros(nv)
+        mj.mj_rne(self.model, scratch, 1, full)
+        scratch.qvel[:] = 0.0
+        scratch.qacc[:] = 0.0
+        mj.mj_fwdVelocity(self.model, scratch)
+        grav = np.zeros(nv)
+        mj.mj_rne(self.model, scratch, 0, grav)
+        scratch.qvel[:] = qvel
+        scratch.qacc[:] = qacc
+        return grav, full
+
+    def _hip_tau_parts(
+        self,
+        scratch: mj.MjData,
+        adr: int,
+        swing: str | None,
+        applied: float,
+    ) -> tuple[float, float, float, float]:
+        """Gravity, inertial, swing-leg, and contact shares of one hip τ.
+
+        Contact is −qfrc_applied on that dof: the planned wrench's share
+        of τ_req. Inertial includes coriolis, the compiled armature times
+        q̈, and minus passive. The swing-leg share is the RNE difference
+        when that leg's mass and inertia are removed. The four parts add
+        to τ_req when the constraint force on the dof is zero.
+        """
+        passive = float(scratch.qfrc_passive[adr])
+        arm = self.leg_armature * float(scratch.qacc[adr])
+        grav, full = self._rne_grav_full(scratch)
+        gravity = float(grav[adr])
+        inertial = float(full[adr] - grav[adr])
+        swing_term = 0.0
+        if swing in ("L", "R"):
+            saved_m = np.array(self.model.body_mass, dtype=np.float64, copy=True)
+            saved_i = np.array(self.model.body_inertia, dtype=np.float64, copy=True)
+            try:
+                for bid in self._leg_bodies(swing):
+                    self.model.body_mass[bid] = 0.0
+                    self.model.body_inertia[bid, :] = 0.0
+                mj.mj_crb(self.model, scratch)
+                grav_r, full_r = self._rne_grav_full(scratch)
+            finally:
+                self.model.body_mass[:] = saved_m
+                self.model.body_inertia[:] = saved_i
+                mj.mj_crb(self.model, scratch)
+            swing_term = float(full[adr] - full_r[adr])
+            gravity = float(grav_r[adr])
+            inertial = float(full_r[adr] - grav_r[adr])
+        inertial += arm - passive
+        contact = -float(applied)
+        return gravity, inertial, swing_term, contact
+
+    def _stance_hip_names(self) -> tuple[str, ...]:
+        """Hip rolls of the feet that carry the plan.
+
+        Single support is the planted hip. Double support, stand, and the
+        stop are both hips. The airborne hip is not a stance hip.
+        """
+        stance = self._planned_stance()
+        if stance in ("L", "R"):
+            return (f"{stance.lower()}_hip_roll",)
+        return ("l_hip_roll", "r_hip_roll")
+
+    def _flag_stance_hip(
+        self,
+        scratch: mj.MjData,
+        name: str,
+        hip_tau: float,
+        applied: np.ndarray,
+    ) -> None:
+        """Record a stance hip |τ_req| above 1.3 Nm. Does not abort."""
+        adr = int(self._leg_dof[name])
+        stance = self._planned_stance()
+        swing = None
+        if stance == "L":
+            swing = "R"
+        elif stance == "R":
+            swing = "L"
+        gravity, inertial, swing_term, contact = self._hip_tau_parts(
+            scratch, adr, swing, float(applied[adr]),
+        )
+        phase = self._ff_phase(name)
+        t = float(self.data.time)
+        self.hip_tau_flags.append({
+            "t": t,
+            "phase": phase,
+            "joint": name,
+            "tau": float(hip_tau),
+            "gravity": gravity,
+            "inertial": inertial,
+            "swing": swing_term,
+            "contact": contact,
+        })
+        print(
+            f"FLAG t={t:.3f} phase={phase} {name} "
+            f"τ={hip_tau:+.3f} Nm "
+            f"gravity={gravity:+.3f} inertial={inertial:+.3f} "
+            f"swing={swing_term:+.3f} contact={contact:+.3f}",
+            flush=True,
+        )
+
+    def _support_corners(
+        self, scratch: mj.MjData, sides: tuple[str, ...],
+    ) -> list[tuple[float, float]]:
+        """World xy corners of the full contact boxes. No inset."""
+        pts: list[tuple[float, float]] = []
+        for side in sides:
+            center, rot, half = self._sole_frame(scratch, side)
+            for sx in (-1.0, 1.0):
+                for sy in (-1.0, 1.0):
+                    corner = center + rot @ np.array(
+                        [sx * float(half[0]), sy * float(half[1]), -float(half[2])],
+                        dtype=np.float64,
+                    )
+                    pts.append((float(corner[0]), float(corner[1])))
+        return pts
+
+    def _support_hull(
+        self, corners: list[tuple[float, float]],
+    ) -> list[tuple[float, float]]:
+        uniq = sorted(set(corners))
+        if len(uniq) <= 2:
+            return uniq
+
+        def cross(
+            o: tuple[float, float],
+            a: tuple[float, float],
+            b: tuple[float, float],
+        ) -> float:
+            return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+        lower: list[tuple[float, float]] = []
+        for pt in uniq:
+            while len(lower) >= 2 and cross(lower[-2], lower[-1], pt) <= 0.0:
+                lower.pop()
+            lower.append(pt)
+        upper: list[tuple[float, float]] = []
+        for pt in reversed(uniq):
+            while len(upper) >= 2 and cross(upper[-2], upper[-1], pt) <= 0.0:
+                upper.pop()
+            upper.append(pt)
+        return lower[:-1] + upper[:-1]
+
+    def _outside_support_m(
+        self, scratch: mj.MjData, x: float, y: float, sides: tuple[str, ...],
+    ) -> float:
+        """Metres outside the support polygon. Zero when the point is inside.
+
+        A tenth of a millimetre on the boundary stays inside.
+        """
+        hull = self._support_hull(self._support_corners(scratch, sides))
+        if len(hull) < 3:
+            return 0.0
+        outside = 0.0
+        n = len(hull)
+        for i in range(n):
+            x0, y0 = hull[i]
+            x1, y1 = hull[(i + 1) % n]
+            cross = (x1 - x0) * (y - y0) - (y1 - y0) * (x - x0)
+            if cross >= -1.0e-12:
+                continue
+            length = math.hypot(x1 - x0, y1 - y0)
+            dist = abs(cross) / length if length > 1.0e-12 else math.hypot(x - x0, y - y0)
+            outside = max(outside, dist)
+        if outside <= 1.0e-4:
+            return 0.0
+        return float(outside)
+
+    def _guard_plan(
+        self,
+        scratch: mj.MjData,
+        tau: dict[str, float],
+        applied: np.ndarray,
+        resid_root: np.ndarray,
+        zmp_y: float,
+    ) -> None:
+        """Abort an inconsistent plan. A large stance hip torque is a flag.
+
+        mj_inverse does not subtract qfrc_applied, so the raw root inverse
+        on a standing robot is the weight, about 23 N. The planned root
+        rows are inverse minus the planned wrench. A row above 1e-2 N or
+        1e-2 Nm aborts. So does a planned CoM or ZMP outside the support
+        box of the feet the plan is using. |τ_req| above 1.3 Nm on a
+        stance hip roll is printed and stored. It does not abort.
+        """
         if not self.cfg.gm_id_ff:
             return
+        for name in self._stance_hip_names():
+            hip_tau = float(tau.get(name, 0.0))
+            if abs(hip_tau) > SS_HIP_TAU_MAX + 1e-9:
+                self._flag_stance_hip(scratch, name, hip_tau, applied)
+        reasons: list[str] = []
+        labels = ("fx", "fy", "fz", "tx", "ty", "tz")
+        units = ("N", "N", "N", "Nm", "Nm", "Nm")
+        over = False
+        shown: list[str] = []
+        for i, label in enumerate(labels):
+            val = float(resid_root[i]) if i < len(resid_root) else 0.0
+            if abs(val) > ID_RESID_BUCKET_NM:
+                over = True
+            shown.append(f"{label} {val:+.4f} {units[i]}")
+        if over:
+            reasons.append(
+                "planned root rows " + " ".join(shown)
+                + f" exceed {ID_RESID_BUCKET_NM:g}"
+            )
         stance = self._planned_stance()
-        if stance not in ("L", "R"):
-            return
-        name = f"{stance.lower()}_hip_roll"
-        hip_tau = float(tau.get(name, 0.0))
-        gid = int(self.gid[stance])
-        box = float(scratch.geom_xpos[gid][1])
-        half = float(self.model.geom_size[gid][1])
-        com = float(self.preview_com_y)
-        hid = int(mj.mj_name2id(
-            self.model, mj.mjtObj.mjOBJ_BODY, f"{stance.lower()}_hip_roll_link",
-        ))
-        hip = float(scratch.xpos[hid][1])
-        live = float(self.data.subtree_com[self.bid_body][1])
-        outside = abs(com - box) - half
-        if abs(hip_tau) <= SS_HIP_TAU_MAX + 1e-9 and outside <= SS_COM_OUT_M:
-            return
-        raise PlanInconsistent(
-            f"SS plan inconsistent stance {stance} hip τ {hip_tau:+.3f} Nm "
-            f"planned CoM {com:+.4f} ZMP {float(self._zmp_cmd):+.4f} "
-            f"box {box:+.4f} hip {hip:+.4f} live CoM {live:+.4f} "
-            f"outside {outside * 1000.0:+.1f} mm"
-        )
+        sides = (stance,) if stance in ("L", "R") else ("L", "R")
+        com_x = float(scratch.subtree_com[self.bid_body, 0])
+        com_y = float(self.preview_com_y)
+        com_out = self._outside_support_m(scratch, com_x, com_y, sides)
+        if com_out > 0.0:
+            reasons.append(
+                f"planned CoM ({com_x:+.4f}, {com_y:+.4f}) is "
+                f"{com_out * 1000.0:.1f} mm outside the support box"
+            )
+        zmp_x = float(self._zmp_x)
+        zmp_out = self._outside_support_m(scratch, zmp_x, float(zmp_y), sides)
+        if zmp_out > 0.0:
+            reasons.append(
+                f"planned ZMP ({zmp_x:+.4f}, {float(zmp_y):+.4f}) is "
+                f"{zmp_out * 1000.0:.1f} mm outside the support box"
+            )
+        ref_y = float(self._zmp_cmd)
+        if abs(ref_y - float(zmp_y)) > 1.0e-6:
+            ref_out = self._outside_support_m(scratch, zmp_x, ref_y, sides)
+            if ref_out > 0.0:
+                reasons.append(
+                    f"planned ZMP reference ({zmp_x:+.4f}, {ref_y:+.4f}) is "
+                    f"{ref_out * 1000.0:.1f} mm outside the support box"
+                )
+        if reasons:
+            raise PlanInconsistent(
+                f"plan inconsistent t={float(self.data.time):.3f} "
+                f"phase={self._ff_phase('l_hip_roll')}: " + "; ".join(reasons)
+            )
 
     def _tick_preview_gait(self, walker: op3_walk.Op3Walker, walking: bool) -> None:
         """Shift CoM over the stance foot, then walk, then return in double support.

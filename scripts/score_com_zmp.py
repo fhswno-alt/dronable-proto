@@ -1787,6 +1787,7 @@ def run_attempt(
         "id_plan_root_vec": [
             float(v) for v in getattr(lipm, "id_plan_root_vec", [])
         ],
+        "hip_tau_flags": list(getattr(lipm, "hip_tau_flags", [])),
         "id_req_with": dict(getattr(lipm, "id_req_with", {})),
         "id_req_bare": dict(getattr(lipm, "id_req_bare", {})),
         "id_req_stop_with": dict(getattr(lipm, "id_req_stop_with", {})),
