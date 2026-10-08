@@ -1222,9 +1222,10 @@ class LipmWalker:
 
         ``hold`` is the unused zero-q̈ record. On the data.qacc path a
         tick with |mj_inverse| > 2.33 Nm is an unsourced-armature
-        candidate when |mj_inverse − 0.01·q̈| is still inside ±2.33.
-        The 0.01 is not a sourced inertia and is not changed. A wall
-        is only a tick where |mj_inverse − 0.01·q̈| is still over 2.33.
+        candidate when |mj_inverse − armature·q̈| is still inside ±2.33.
+        Armature is the compiled leg value, 0.01 in the file or the
+        load-time override. A wall is only a tick where that bare
+        torque is still over 2.33.
         """
         sag = float(KNEE_SAG_NM)
         rot = np.array(self.data.xmat[self.bid_body], dtype=np.float64).reshape(3, 3)
@@ -1627,8 +1628,9 @@ class LipmWalker:
         """Name the largest piece of the exact step force at each leg joint.
 
         q̈ is the inertia excluding armature, plus the velocity product.
-        Armature is 0.01·q̈. Contact is the forward constraint. The label
-        does not use qfrc_inverse, which re-solves that constraint.
+        Armature is the compiled leg value times q̈. Contact is the
+        forward constraint. The label does not use qfrc_inverse, which
+        re-solves that constraint.
         """
         nv = int(self.model.nv)
         qvel = np.array(scratch.qvel, dtype=np.float64, copy=True)
@@ -1820,7 +1822,7 @@ class LipmWalker:
         for name, adr in self._leg_dof.items():
             # mj_inverse does not subtract qfrc_applied. With contacts
             # off, the actuator that realises the plan is inverse − wrench.
-            # The plant armature is 0.01, so tau includes 0.01·q̈_ref.
+            # tau includes the compiled leg armature times q̈_ref.
             tau = float(inv[adr] - applied[adr])
             out[name] = tau
             qdd_i = float(qdd.get(name, 0.0))
@@ -1844,7 +1846,8 @@ class LipmWalker:
     ) -> None:
         """Per-joint peaks of the planned inverse, with and without armature.
 
-        ``tau`` already includes 0.01·q̈_ref. ``bare`` is tau − 0.01·q̈_ref.
+        ``tau`` already includes the compiled leg armature times q̈_ref.
+        ``bare`` is tau minus that term.
         On double support this tau is split (c), the min-max share. A wall
         is |bare| > 2.33 on that share, or on the single-support wrench.
         Splits (a) and (b) do not name a wall. |tau| > 2.33 with |bare| ≤

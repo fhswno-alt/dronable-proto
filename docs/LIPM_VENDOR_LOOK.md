@@ -3540,3 +3540,107 @@ Applied signed force, limiter fraction, and clamp fraction are the pass rule, an
 Mean margins to the declared edge, left then right, are 20/12 mm at T 0.60, 22/13 mm at T 1.00, 18/10 mm at T 1.20, 14/8 mm at T 4, and 18/13 mm and 18/11 mm on the two upright rows. Clamp fraction is not 0 on T 0.60, T 1.00, T 1.20, every mass +5% row, and both rug rows. Limiter fraction is 0 except latency −1 at 0.061. Latency −1 applies +2.346 Nm on the left hip roll. The binding live plan is the T 1.20 single-support right hip roll, +2.814 Nm bare at stance mid, with the applied force at +2.546 Nm and min up 0.501.
 
 Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0. The plant XML is not edited.
+
+## Leg armature 0.01 and 0.025
+
+Nothing is locked. The full bar is signed force at or under 2.33 Nm on every tick, limiter fraction 0, clamp fraction 0, the DC line, the stepping bars, and an upright stop, and the same row has to clear that bar at leg armature 0.01 and at 0.025. There is no winning gait. The row under test is voice056 at T 1.00 s and 0.016 m/s. The stop row is that reference with the root pinned.
+
+The override is load-time only. MjSpec sets armature on the twelve leg joints and the model is compiled from that spec, so a position actuator with dampratio=1 stores kv from the inertia that includes the new armature. Arms and the head stay at the file value. The XML is not written. HW's cited range is 0.0012–0.045. The STS3215 SysID band is 0.022–0.026, and the second row is 0.025.
+
+Compiled kv is −actuator_biasprm[:, 2]. Left leg below. The right leg matches within 1e-6. Each scored model matches the column it was compiled with. The file compile at 0.010 is still hip roll 1.7027 and knee 1.4573.
+
+| joint | kv at 0.010 | kv at 0.025 |
+| --- | ---: | ---: |
+| hip yaw | 1.2919 | 2.0172 |
+| hip roll | 1.7027 | 2.3020 |
+| hip pitch | 1.8102 | 2.4447 |
+| knee | 1.4573 | 2.1963 |
+| ank pitch | 1.1980 | 1.8802 |
+| ank roll | 1.1876 | 1.8736 |
+
+Planned τ is mj_inverse of the reference, so it already includes armature·q̈. Bare is that torque minus the compiled armature times q̈.
+
+On the build before the walk knee acceleration was capped, the upright playback cleared the force bars only at 0.01. At t = 1.360 s, double-support transfer, the left knee reference acceleration was −109 rad/s². At 0.01 the plan was −1.657 Nm, bare about −0.56 Nm, and the applied signed force was −1.624 Nm, with clamp fraction 0, limiter fraction 0, and the DC line held. At 0.025 the same kink planned −3.300 Nm, bare −0.564 Nm, and applied −3.272 Nm. Clamp fraction was 0.0018 and the DC line failed on that knee. The bare term was inside 2.33 Nm. The extra was the armature. That was a transfer risk.
+
+The walk knee reference is now limited to 40 rad/s² before inverse dynamics. At 0.025 that cap is 1.0 Nm of armature torque. It binds. On both upright rows the left knee second difference at t = 1.384 s is −40.0 rad/s², planned −0.994 Nm at 0.010 (bare −0.594) and −1.594 Nm at 0.025 (bare −0.594).
+
+The upright playback after the cap keeps the torso up and holds the force bars at both armatures. The root is pinned, so the stepping bars stay failed and the soles are not a flat walk: spread 154 mm at 0.010 and 53 mm at 0.025. These rows are the stop measurement.
+
+| | armature 0.010 | armature 0.025 |
+| --- | --- | --- |
+| signed | +1.423 r_knee, t = 1.496 | +1.916 l_ank_pitch, t = 1.264 |
+| signed ≤ 2.33 | yes | yes |
+| limiter | 0 | 0 |
+| clamp | 0 | 0 |
+| DC | held | held |
+| torso / stop | 1.000 / 1.000 | 1.000 / 1.000 |
+| wall | none | none |
+| stop ticks | 554, span 0.5 s, knee q̈ 8.76 | 524, span 0.5 s, knee q̈ 8.35 |
+
+Planned peaks on that upright playback. τ is the largest |τ| on the joint, and bare on the same line is the bare torque of that same sample.
+
+| joint | 0.010 τ | 0.010 bare | 0.025 τ | 0.025 bare |
+| --- | ---: | ---: | ---: | ---: |
+| l_hip_yaw | −0.572 | −0.572 | −0.549 | −0.549 |
+| l_hip_roll | −0.890 | −0.590 | −1.005 | −0.711 |
+| l_hip_pitch | −0.870 | −0.380 | −1.576 | −0.374 |
+| l_knee | −0.994 | −0.594 | −1.594 | −0.594 |
+| l_ank_pitch | +0.973 | +0.527 | +1.641 | +0.529 |
+| l_ank_roll | −0.394 | −0.158 | −0.801 | −0.160 |
+| r_hip_yaw | +0.572 | +0.572 | +0.543 | +0.543 |
+| r_hip_roll | −0.792 | −0.629 | −1.089 | −0.608 |
+| r_hip_pitch | −0.774 | −0.711 | −0.869 | −0.711 |
+| r_knee | +1.337 | +1.152 | +1.690 | +1.153 |
+| r_ank_pitch | −0.893 | −0.887 | −1.873 | −0.671 |
+| r_ank_roll | +1.354 | +1.297 | +1.765 | +1.223 |
+
+The largest bare torque on the upright bout is +1.297 Nm at 0.010 and +1.314 Nm at 0.025, both right ankle roll. Ankle pitch still reaches about 45–49 rad/s². At 0.025 the planned ankle peak is −1.873 Nm on the stop, bare −0.671 Nm, and the applied peak is the +1.916 Nm above. Both are inside 2.33 Nm.
+
+Stop-phase peaks, same pairing. The largest stop bare is +1.219 Nm at 0.010 and +1.257 Nm at 0.025, both right knee.
+
+| joint | 0.010 τ | 0.010 bare | 0.025 τ | 0.025 bare |
+| --- | ---: | ---: | ---: | ---: |
+| l_hip_yaw | −0.572 | −0.572 | −0.546 | −0.546 |
+| l_hip_roll | −0.890 | −0.590 | +0.543 | +0.543 |
+| l_hip_pitch | −0.589 | −0.590 | −0.513 | −0.538 |
+| l_knee | −0.583 | −0.572 | −0.565 | −0.538 |
+| l_ank_pitch | +0.890 | +0.445 | +1.097 | −0.015 |
+| l_ank_roll | −0.311 | −0.311 | −0.299 | −0.299 |
+| r_hip_yaw | +0.572 | +0.572 | +0.543 | +0.543 |
+| r_hip_roll | −0.588 | −0.572 | −0.618 | −0.538 |
+| r_hip_pitch | −0.583 | −0.558 | −0.617 | −0.536 |
+| r_knee | +1.266 | +1.216 | +1.361 | +1.200 |
+| r_ank_pitch | −0.738 | −0.440 | −1.873 | −0.671 |
+| r_ank_roll | +0.587 | +0.590 | +0.485 | +0.487 |
+
+The live gait fails the full bar at both armatures. It tips before the stop, so there is no stop plan on these rows. The knee cap binds on the 0.025 live row (left knee q̈ +40 rad/s², planned +1.109 Nm, bare +0.109 Nm) and stays slack on the 0.010 live row (left knee q̈ −38.1 rad/s²). The failure is the right hip roll.
+
+| | armature 0.010 | armature 0.025 |
+| --- | --- | --- |
+| signed | +2.508 r_hip_roll, t = 1.576 | +2.477 r_hip_roll, t = 1.648 |
+| limiter | 0 | 0 |
+| clamp fraction | 0.00307 | 0.00867 |
+| DC | fail, r_hip_roll excess 3.51 | fail, r_hip_roll excess 1.20 |
+| steps / torso | fail / 0.533 | fail / 0.553 |
+| wall bare | +2.754 stance mid, 6 ticks | +2.330 touchdown, 1 tick |
+
+Live planned peaks, τ and the bare torque of that same sample. The hip-roll wall is that sample: bare +2.754 Nm at 0.010 and +2.330 Nm at 0.025, and |bare| over 2.33 is the wall. The 0.025 applied force on that joint is +2.477 Nm.
+
+| joint | 0.010 τ | 0.010 bare | 0.025 τ | 0.025 bare |
+| --- | ---: | ---: | ---: | ---: |
+| l_hip_yaw | −0.569 | −0.569 | +0.945 | +0.945 |
+| l_hip_roll | +0.569 | +0.569 | +1.068 | +1.070 |
+| l_hip_pitch | −0.522 | −0.528 | +0.766 | +0.762 |
+| l_knee | −0.733 | −0.351 | +1.109 | +0.109 |
+| l_ank_pitch | +0.538 | +0.051 | +1.173 | −0.064 |
+| l_ank_roll | −0.453 | −0.469 | −0.509 | −0.399 |
+| r_hip_yaw | +1.072 | +1.072 | +0.894 | +0.894 |
+| r_hip_roll | +2.755 | +2.754 | +2.361 | +2.330 |
+| r_hip_pitch | −0.593 | −0.556 | +1.031 | +0.947 |
+| r_knee | +0.852 | +0.805 | +0.790 | +0.762 |
+| r_ank_pitch | −0.568 | −0.555 | −0.593 | −0.518 |
+| r_ank_roll | −0.793 | −0.746 | +0.736 | +0.518 |
+
+The upright force bars, which cleared only at 0.01 before the knee cap, now hold at 0.025 as well. The live row does not clear at either armature. The gait is not locked. There is no video.
+
+Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. The plant XML is not edited.
