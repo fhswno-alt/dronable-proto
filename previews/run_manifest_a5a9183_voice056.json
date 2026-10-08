@@ -1,0 +1,117 @@
+{
+  "name": "voice056 T 1.00 s vx 0.016 planned-y",
+  "walker_tip_sha": "a5a9183461105016211bebbf110051c2bb8f9df2",
+  "scorer_sha": "d4a38cc13e9ef406fc5d85841a873bc6db8260c4",
+  "scorer_file": "scripts/score_a5a9183_signed_id.py",
+  "scorer_blob": "9185cf929379d4dc66a3362527a4d3af96f3543b",
+  "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+  "plant_xml": "mujoco/ainex_hiwonder/ainex_controls_m2_145.xml",
+  "plant_loaded_from": "walker tip checkout, mujoco/ainex_hiwonder/ainex_controls_m2_145.xml",
+  "mujoco_version": "3.14.0",
+  "mujoco_version_source": "mujoco.__version__",
+  "seed": null,
+  "soft_pass": false,
+  "command_line": "A5_TIP_SCRIPTS=/tmp/tip-a5a9183/scripts MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/score_a5a9183_signed_id.py --plan-y --out /tmp/a5-plan-y/plan_y.json",
+  "argv": [
+    "scripts/score_a5a9183_signed_id.py",
+    "--plan-y",
+    "--out",
+    "/tmp/a5-plan-y/plan_y.json"
+  ],
+  "cwd": "repository root",
+  "requires": {
+    "A5_TIP_SCRIPTS": "/tmp/tip-a5a9183/scripts",
+    "tip_checkout": "a5a9183461105016211bebbf110051c2bb8f9df2",
+    "note": "The scorer sets WALK_GAIT_SCRIPTS to A5_TIP_SCRIPTS before importing score_walk_smoothness. That puts the tip's steer_walk, lipm_gait, op3_walk, and zmp_preview on sys.path. The default A5_TIP_SCRIPTS is /tmp/tip-a5a9183/scripts. The scorer sets MUJOCO_GL=glfw and DISPLAY=:1 when those are unset."
+  },
+  "args": {
+    "plan_y": true,
+    "out": "/tmp/a5-plan-y/plan_y.json",
+    "committed_copy": "previews/walk_a5a9183_plan_y.json",
+    "cells": "",
+    "mass_scale": 1.0,
+    "seed_flag": -1,
+    "rug": false,
+    "compact": false,
+    "armature_flag": 0.01,
+    "sensitivity": false,
+    "plan_y_refuses": "sensitivity, rug, seed >= 0, mass_scale != 1, armature != 0.01"
+  },
+  "flags": {
+    "feedforward": "off",
+    "feedforward_detail": "The live command is a position target. Planned-ID torque is a scorer column on q_des. It is not added to data.ctrl.",
+    "knee_qdd_cap_rad_s2": null,
+    "qdd_cap_detail": "No knee q̈ cap. Planned q̈ is the backward difference of q_des at 8 ms. Realised qacc is (qvel_next - qvel) / dt.",
+    "armature_kgm2": 0.01,
+    "armature_source": "plant XML joint attribute armature=\"0.01\", loaded by MjModel.from_xml_path. MjSpec is not used. model.dof_armature is not written after compile.",
+    "ctrl_source": "Position servo. write_clipped stores q_des on knee, hip_pitch, and ank_pitch. Other joints are band-limited by e_sat first. The command is then clipped to ctrlrange ±2.09. On the gait_manager schedule the session slews hip, knee, and ankle pitch from the previous ctrl toward that target over gm_move_s 0.020 s, and not faster than 5.5 rad/s. The plant ask is |kp·(clip(data.ctrl, ±2.09)−q) − kv·q̇| at each 2 ms substep. During preview_stage stand the phase is stand, so each substep rewrites legs with write_force_limited at LEG_STOP_NM 2.28. The stop blend sets phase shift, so that stand rewrite stays off during the blend.",
+    "stop_blend": {
+      "bus": "CommandBus.stop calls stand and snaps applied vx and yaw rate to 0.",
+      "gait": "preview path _tick_preview_stop. Finish the swing already in the air. Hold 0.20 s once both soles are under 3 mm and the clock is in double support, then plant. ZMP returns to 0 by a smootherstep over 1.50 s. Joints smootherstep from the frozen walk pose to q_stand over 2.0 s. Phase stays shift.",
+      "sole_pitch_null": "During the 2 s blend, ankle pitch adds 4× measured sole pitch, capped at ±0.12 rad, faded over the last 20% of the blend. The swing ankle stays on the IK target."
+    },
+    "duration": {
+      "stand_s": 0.25,
+      "walk_s": 3.05,
+      "walk_rule": "1.00 + 2.05*T",
+      "stop_s": 2.40,
+      "t_end_s": 5.70,
+      "ctrl_dt_s": 0.008,
+      "physics_dt_s": 0.002,
+      "substeps_per_ctrl": 4,
+      "n_ticks": 713,
+      "bus": "vel(0.016, 0.0) resent while walking; one bus.stop at t_stop"
+    }
+  },
+  "lipm_config": {
+    "name": "voice056",
+    "clear_m": 0.008,
+    "arms": true,
+    "schedule": "gait_manager",
+    "gm_period_s": 1.0,
+    "gm_dsp": 0.25,
+    "gm_y_swap_m": 0.0,
+    "gm_x_m": 0.004,
+    "gm_x_rule": "abs(vx)*T/4",
+    "gm_z_m": 0.008,
+    "gm_z_swap_m": 0.0,
+    "gm_pelvis_deg": 0.0,
+    "gm_hip_pitch_deg": 15.0,
+    "gm_start_lead": "L",
+    "gm_crouch_m": 0.025,
+    "gm_move_s": 0.02,
+    "preview_amp_m": 0.022851623535156247,
+    "preview_amp_call": "sway_zmp_amp(1.0, 0.25, 0.18, 0.016, 0.043, 0.0, 1e-4)",
+    "preview_arm_s": 1.0,
+    "preview_r": 0.0001,
+    "preview_shape": 0.0,
+    "wired_voice_preview_config": false,
+    "wired_voice_preview_config_differs": {
+      "gm_period_s": 0.5,
+      "vx_m_s": 0.056,
+      "gm_x_m": 0.007,
+      "preview_amp_m": 0.043
+    }
+  },
+  "recorded_outcome": {
+    "artifact": "previews/walk_a5a9183_plan_y.json",
+    "verdict": "Prefer FAIL",
+    "gait": "STEPS",
+    "r_hip_roll_peak_ask_nm": 0.8228916757405761,
+    "r_hip_roll_n_over_2_33": 0,
+    "r_hip_roll_n_ticks": 713,
+    "r_hip_roll_peak_sum_nm": 4.4813263198278666,
+    "r_hip_roll_n_sum_over": 157,
+    "r_hip_roll_note": "passes signed, fails sum",
+    "tip": false,
+    "tip_rule": "A tip is a stop that unloads a foot (contacts under 3), rolls more than 5° off the stand, or drops up_z under 0.90. Pitch off the stand is the lean column.",
+    "stop": {
+      "pose": "freezes in a lean",
+      "min_up_z": 0.9935110318010113,
+      "contacts_l": 4,
+      "contacts_r": 4,
+      "pitch_off_deg": 8.14,
+      "roll_off_deg": 0.29
+    }
+  }
+}

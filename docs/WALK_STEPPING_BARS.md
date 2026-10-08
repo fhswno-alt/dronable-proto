@@ -750,4 +750,6 @@ The stop tick at 3.448 s reaches bare −4.941 Nm. The placed CoM is outside the
 
 On this same bout the live signed ask on r_hip_roll peaks at 0.823 Nm, 0 ticks over 2.33. The DC-motor line fails on r_knee at 3.456 s in the stop, margin −1.697 rad/s. The stop is a lean: min up_z 0.994, contacts 4/4, pitch 8.14° off the stand, roll 0.29° off. The row is Prefer FAIL STEPS. Full tick list: `previews/walk_a5a9183_plan_y.json`.
 
+That rollout is pinned in `previews/run_manifest_a5a9183_voice056.json`. Walker tip `a5a9183461105016211bebbf110051c2bb8f9df2`. Scorer `d4a38cc`. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. MuJoCo `3.14.0`. Seed is unset. Planned-ID feedforward is off. There is no knee q̈ cap. Armature 0.01 is the plant XML at compile. Ctrl is the position target after the 20 ms sagittal slew and the ±2.09 clip. The stop is the preview blend: finish the airborne swing, hold 0.20 s in double support, return the ZMP over 1.50 s, and smootherstep the joints to the stand over 2.0 s, with the sole-pitch null capped at ±0.12 rad. Duration is stand 0.25 s, walk 3.05 s, stop 2.40 s. Both feet stay loaded and the roll offset is 0.29°, so this bout does not tip.
+
 SHA `d4a38cc`. Logs from SHA `424b3d0`. Prior goal-ask score SHA `697d53b`.
