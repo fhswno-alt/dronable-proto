@@ -2895,3 +2895,45 @@ The T 1.00 / 0.016 row is the one whose torque bars pass and whose inside-residu
 The binding joint is the right hip roll, in double-support transfer. The inside-residual term is CoP. On that nominal tick the planned wrench's largest piece is the contact wrench, `τ_ff` +1.639 Nm, and the applied ask is +1.280 Nm. The implicit step force at the same write was +0.912 Nm, inside a residual of 4×10⁻¹⁵ Nm. That +0.912 Nm is the step force. The knee table above is the `qfrc_inverse` reprint.
 
 Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0. The plant XML is not edited.
+
+## Planned τ_req, and the stop quintic
+
+The bucket gate is 1×10⁻² Nm. The 1×10⁻³ Nm target stays a Prefer FAIL: nominal max 1.476×10⁻³ Nm, 4 of 2440 ticks; the worst of the ±5% and rug set is 5.242×10⁻³ Nm. A tick inside 1×10⁻² Nm is bucketed. That does not relax 2.33 Nm.
+
+A wall is only `|τ_req − 0.01·q̈_ref| > 2.33` on the planned motion. `τ_req` is `ID(q_ref, q̇_ref, q̈_ref)` with the LIPM wrench inside the declared stance box, split in double support. The with-armature column is `|τ_req|`. The without column subtracts `0.01·q̈_ref`. The realised inverse on a clamped tick returns the clamp. The right knee +2.450 Nm at 2.690 s, stripped +1.302 Nm, is armature times about 115 rad/s² from the old frozen stop. It is a violent transition, not a wall.
+
+The stop no longer holds the pose for 0.20 s. On the first double-support tick with both soles down, the blend takes its position and velocity from the last two references. The CoM y is a quintic from that preview state into the centre of double support, and the ZMP command is `com − (z_c/g)·a`, clamped into the two contact boxes. The joints are the same quintic from the walk reference to the upright stand. The first sample is one 8 ms step along the curve, initial acceleration is zero, and the end velocity and acceleration are zero. The span is at least 0.5 s, or one double-support interval when that is longer, and it grows until both knees' quintic `|q̈|` is inside 25 rad/s². The measured spans are 0.50 s at T 0.60 and T 1.00, and 1.60 s at T 4. The knee quintic peaks are 4.0, 5.7, and 0.4 rad/s².
+
+Those stop numbers are the reference played on a fixed upright root, so a tip does not replace the free joint before the blend. That playback is not a bar score. On it the planned knee `|τ_req|`, armature included, is 1.910 Nm at T 0.60, 1.376 Nm at T 1.00, and 1.301 Nm at T 4. All three are under 2.0 Nm. The T 0.60 knee peak is the walk's double-support kink, `q̈_ref` about −195 rad/s², bare +0.044 Nm, not the quintic. The largest bare torque on that upright playback is +1.143 Nm, right knee, start. There is no wall.
+
+The live bouts still tip in the first transfer, before the scheduled stop, so their stop span stays 0 and the table below is the live bar set. Limiter fraction 0 and clip fraction 0 on every nominal row. `K_fb` stays 1. None pass, so there is no side, front, or foot video.
+
+| Row | signed Nm | joint | signed | clamp | DC | min up | steps | vx ratio | planned τ_req | bare | phase |
+| --- | ---: | --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| T 0.60 / 0.032 | +1.624 | r_knee | pass | 0 | pass | 0.655 | 0 | 0.68 | +1.784 r_knee | −0.072 | DS transfer |
+| T 1.00 / 0.016 | +1.280 | r_hip_roll | pass | 0 | pass | 0.646 | 0 | 1.06 | +1.639 r_hip_roll | +1.643 | DS transfer |
+| T 1.20 / 0.024 | +1.145 | r_hip_roll | pass | 0 | pass | 0.654 | 0 | 0.73 | +1.479 r_hip_roll | +1.491 | DS transfer |
+| T 4 / 0.016 | −2.267 | r_hip_roll | pass | 0 | fail | 0.591 | 0 | −0.48 | −2.650 r_hip_roll | −2.657 | stance edge |
+
+The T 4 bare value is the live scratch, whose free joint is the falling trunk (min up 0.591). The upright playback of that same reference does not reproduce it. The binding failure on the three shorter rows is the tip, in double-support transfer. On T 1.00 the planned torque there is the right hip roll, `τ_req` +1.639 Nm, bare +1.643 Nm. The knee's live peak on T 0.60 is +1.784 Nm with `q̈_ref` +186 rad/s² and bare −0.072 Nm, so it is the reference kink's armature and it is under 2.0 Nm. It is not a wall.
+
+The perturbations are T 1.00 / 0.016. Mass ±5% uses seeds 0, 1, and 2. All of them tip. Limiter fraction 0 and clip fraction 0. The planned column is the largest `|τ_req|`. On the mass +5% and μ rows the signed joint is the left knee, about +1.21 to +1.24 Nm, and that knee's planned torque stays about +1.21 to +1.23 Nm.
+
+| Case | signed Nm | joint | min up | vx ratio | planned τ_req | bare | phase |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | --- |
+| mass +5%, seed 0 | +1.240 | l_knee | 0.646 | 1.11 | +1.488 r_hip_roll | +1.505 | DS transfer |
+| mass +5%, seed 1 | +1.240 | l_knee | 0.644 | 1.11 | +1.512 r_hip_roll | +1.529 | DS transfer |
+| mass +5%, seed 2 | +1.256 | r_hip_roll | 0.637 | 1.10 | +1.567 r_hip_roll | +1.584 | DS transfer |
+| mass −5%, seed 0 | +1.314 | r_hip_roll | 0.657 | 1.03 | +1.736 r_hip_roll | +1.732 | DS transfer |
+| mass −5%, seed 1 | +1.217 | r_hip_roll | 0.665 | 1.04 | +1.620 r_hip_roll | +1.617 | DS transfer |
+| mass −5%, seed 2 | +1.283 | r_hip_roll | 0.657 | 1.03 | +1.692 r_hip_roll | +1.690 | DS transfer |
+| μ = 1.0 | +1.217 | l_knee | 0.650 | 1.05 | +1.344 r_hip_roll | +1.358 | DS transfer |
+| μ = 0.8 | +1.218 | l_knee | 0.646 | 1.04 | +1.316 r_hip_roll | +1.333 | DS transfer |
+| latency −1 | +2.501 | r_hip_roll | 0.262 | 10.7 | +3.277 r_hip_roll | +3.275 | start |
+| latency +1 | +2.540 | r_hip_roll | 0.626 | 1.11 | +2.894 r_hip_roll | +2.889 | stop |
+| rug | +1.280 | r_hip_roll | 0.646 | 1.06 | +1.639 r_hip_roll | +1.643 | DS transfer |
+| rug, mass +5% | +1.239 | l_knee | 0.648 | 1.11 | +1.468 r_hip_roll | +1.485 | DS transfer |
+
+Latency −1 fails the signed bar, the clamp, and the DC line during the start, with the torso already down. Latency +1 fails the same three during the stop, stop up 0.626, and the planned column on that fallen pose is over 2.33 Nm without armature. The upright playback does not show that hip-roll bare peak. The rug reproduces the nominal tip before the mat. No row passes.
+
+Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0. The plant XML is not edited.

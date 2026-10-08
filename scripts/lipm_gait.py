@@ -1906,7 +1906,14 @@ class LipmWalker:
                 continue
             gait = float(joints[jn])
             q = self.q(jn)
-            rate = 1.20 if self._stand_u > 0.0 else 0.35
+            # The stop blend used to slew this at 1.20 rad/s. The first
+            # 8 ms sample is then a 150 rad/s² kink, and 0.01·q̈ is 1.5 Nm
+            # on the ankle of an otherwise smooth quintic. 0.16 rad/s keeps
+            # that corner near 20 rad/s². The walk slew is unchanged.
+            if self.cfg.gm_id_ff and self._stand_u > 0.0:
+                rate = 0.16
+            else:
+                rate = 1.20 if self._stand_u > 0.0 else 0.35
             self._stab_pitch[side] = self._slew(self._stab_pitch[side], self._swing_toe_bias(side), rate)
             want = gait + self._stab_pitch[side]
             # The 16 mrad band keeps a late swing gap off the ankle.
