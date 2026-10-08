@@ -1636,15 +1636,15 @@ def run_attempt(
     joint_signed: dict[str, dict[str, float | int]] = {}
     for row in asks:
         rec = joint_signed.get(row.joint)
-        over = 1 if abs(row.signed_nm) > ASK_NM + 1e-9 else 0
+        tick_over = 1 if abs(row.signed_nm) > ASK_NM + 1e-9 else 0
         if rec is None:
             joint_signed[row.joint] = {
                 "value": float(row.signed_nm),
                 "t": float(row.t),
-                "over": over,
+                "over": tick_over,
             }
             continue
-        rec["over"] = int(rec["over"]) + over
+        rec["over"] = int(rec["over"]) + tick_over
         if abs(row.signed_nm) > abs(float(rec["value"])):
             rec["value"] = float(row.signed_nm)
             rec["t"] = float(row.t)
