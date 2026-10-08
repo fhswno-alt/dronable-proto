@@ -1783,6 +1783,23 @@ def run_attempt(
         ),
         "id_rail_n": int(getattr(lipm, "id_rail_n", 0)),
         "id_knee_act": float(getattr(lipm, "id_knee_act", 0.0)),
+        "id_knee_ok_phase": str(getattr(lipm, "id_knee_ok_phase", "")),
+        "id_knee_up_abs": float(getattr(lipm, "id_knee_up_abs", 0.0)),
+        "id_knee_up_tau": float(getattr(lipm, "id_knee_up_tau", 0.0)),
+        "id_knee_up_joint": str(getattr(lipm, "id_knee_up_joint", "")),
+        "id_knee_up_t": float(getattr(lipm, "id_knee_up_t", 0.0)),
+        "id_knee_up_phase": str(getattr(lipm, "id_knee_up_phase", "")),
+        "id_knee_up_act": float(getattr(lipm, "id_knee_up_act", 0.0)),
+        "id_hold_tau": float(getattr(lipm, "id_hold_tau", 0.0)),
+        "id_hold_t": float(getattr(lipm, "id_hold_t", -1.0)),
+        "id_hold_act": float(getattr(lipm, "id_hold_act", 0.0)),
+        "id_hold_phase": str(getattr(lipm, "id_hold_phase", "")),
+        "id_hold_up": bool(getattr(lipm, "id_hold_up", False)),
+        "id_hold_dt": float(getattr(lipm, "id_hold_dt", float("inf"))),
+        "id_rail_hits": [
+            {"t": float(t), "joint": str(j), "actuator": float(a), "inverse": float(inv)}
+            for t, j, a, inv in getattr(lipm, "id_rail_hits", [])
+        ],
         "id_ff_resid": float(getattr(lipm, "id_ff_resid", 0.0)),
         "id_resid_joint": str(getattr(lipm, "id_resid_joint", "")),
         "id_resid_pas_max": float(getattr(lipm, "id_resid_pas_max", 0.0)),

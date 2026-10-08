@@ -548,8 +548,22 @@ class LipmWalker:
         self.id_knee_ok_tau = 0.0
         self.id_knee_ok_joint = ""
         self.id_knee_ok_t = 0.0
+        self.id_knee_ok_phase = ""
         self.id_knee_act = 0.0
         self.id_knee_ok_n = 0
+        self.id_knee_up_abs = 0.0
+        self.id_knee_up_tau = 0.0
+        self.id_knee_up_joint = ""
+        self.id_knee_up_t = 0.0
+        self.id_knee_up_phase = ""
+        self.id_knee_up_act = 0.0
+        self.id_hold_tau = 0.0
+        self.id_hold_t = -1.0
+        self.id_hold_act = 0.0
+        self.id_hold_phase = ""
+        self.id_hold_up = 0.0
+        self.id_hold_dt = float("inf")
+        self.id_rail_hits: list[tuple[float, str, float, float]] = []
         self.id_resid_vs_pas = 0.0
         self.id_wall_phys_n = 0
         self.id_arm_phys_n = 0
@@ -1256,12 +1270,10 @@ class LipmWalker:
             actuator, applied = self._implicit_leg_force(
                 name, adr, q, float(qvel0[adr]), float(qvel1[adr]),
             )
-            # F_user is the implicit force the user named:
+            # F_user is the implicit force the step applies:
             # kp(ctrl−q) − kv·qvel_end − damping·qvel_end, with the
             # actuator held at its qvel_t clip when forcerange is active.
-            # qfrc_inverse subtracts qfrc_passive and re-solves the
-            # constraint, so |qfrc_inverse − F_user| is not that step.
-            # The integrator identity below is the exact comparison.
+            # It is the residual comparison only. It is not the inverse.
             ident = abs(float(dyn[adr]) - float(con[adr]) - float(app[adr]) - applied)
             gap = abs(mj_tau - applied)
             if ident > self.id_ident_max:
@@ -1269,9 +1281,10 @@ class LipmWalker:
             if gap > self.id_inv_gap_max:
                 self.id_inv_gap_max = gap
                 self.id_inv_gap_joint = name
-            # The step's inverse is F_user. qfrc_inverse is the re-solved
-            # vector and is not the bucket. A wall uses F_user.
-            tau = applied
+            # Inverse column: qfrc_inverse[dof] after mj_inverse on the
+            # pre-step copy. Not qfrc_actuator, not the forcerange clip,
+            # and not F_user. mj_inverse does not apply forcerange.
+            tau = mj_tau
             stripped = tau - arm
             resid = ident
             prev_resid = float(self.id_tick_resid.get(name, -1.0))
@@ -1295,6 +1308,10 @@ class LipmWalker:
                 self.id_mj_t = float(self.data.time)
             if abs(abs(actuator) - 2.45) <= 1.0e-6:
                 self.id_rail_n += 1
+                if len(self.id_rail_hits) < 64:
+                    self.id_rail_hits.append((
+                        float(self.data.time), name, actuator, mj_tau,
+                    ))
             passed = not outside
             if passed:
                 self._consistent_tau[name] = tau
@@ -1305,7 +1322,24 @@ class LipmWalker:
                         self.id_knee_ok_tau = tau
                         self.id_knee_ok_joint = name
                         self.id_knee_ok_t = float(self.data.time)
+                        self.id_knee_ok_phase = self._ff_phase(name)
                         self.id_knee_act = actuator
+                    if upright and abs(tau) > self.id_knee_up_abs:
+                        self.id_knee_up_abs = abs(tau)
+                        self.id_knee_up_tau = tau
+                        self.id_knee_up_joint = name
+                        self.id_knee_up_t = float(self.data.time)
+                        self.id_knee_up_phase = self._ff_phase(name)
+                        self.id_knee_up_act = actuator
+                if name == "r_knee":
+                    hold_dt = abs(float(self.data.time) - 2.680)
+                    if hold_dt < self.id_hold_dt:
+                        self.id_hold_dt = hold_dt
+                        self.id_hold_t = float(self.data.time)
+                        self.id_hold_tau = tau
+                        self.id_hold_act = actuator
+                        self.id_hold_phase = self._ff_phase(name)
+                        self.id_hold_up = upright
             if resid > self.id_resid_max:
                 self.id_resid_max = resid
                 self.id_resid_joint = name
