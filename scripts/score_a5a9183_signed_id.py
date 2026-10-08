@@ -42,7 +42,7 @@ Double support is split three ways: ZMP position along the foot-to-foot
 line, a min-norm ankle-torque split, and a minimax split (called QP below)
 that minimises the largest |τ| over the leg joints with armature removed.
 The QP keeps each foot's centre of pressure inside its 135×76 mm box and
-each corner force inside a friction pyramid of μ 1.2. The three splits are
+each corner force inside a friction cone of μ 1.2. The three splits are
 reported. A planned-motion wall is only a double-support tick where even
 that QP still needs more than 2.33 Nm without armature. The realised
 double-support contact split is compared with the QP split. Neither
@@ -73,7 +73,7 @@ if str(_SCRIPTS) not in sys.path:
 
 import mujoco as mj
 import numpy as np
-from scipy.optimize import linprog
+from scipy.optimize import Bounds, linprog, minimize
 
 import score_walk_smoothness as sws
 import step_bars
@@ -973,11 +973,12 @@ def _qp_solve_minmax(
     """Minimise the largest |leg torque| with armature already removed.
 
     Corner forces of both feet are the variables. The summed wrench equals
-    ``force`` at ``p_zmp`` with zero moment about that point. Each corner
-    stays in the friction pyramid μ = 1.2, so each foot's centre of pressure
+    ``force`` at ``p_zmp`` with zero moment about that point.     Each corner
+    stays in the friction cone μ = 1.2, so each foot's centre of pressure
     stays inside the convex hull of its 135×76 mm sole. The program is the
-    linear epigraph of that maximum. A second solve, among those optima,
-    minimises the sum of absolute tangential corner forces so the reported
+    linear epigraph of that maximum on the containing pyramid. A solution
+    that leaves the disk is resolved on the disk. Among those optima, a
+    further solve minimises the sum of tangential magnitudes so the reported
     split is one torque-optimal wrench.
     """
     n_c = 8
@@ -1074,19 +1075,231 @@ def _qp_solve_minmax(
     c2[n_f:n_f + n_u] = 1.0
     x2 = _run(c2, a2, b2)
     x = x1 if x2 is None else x2
+    forces1 = x1[:n_f].reshape(n_c, 3)
     forces = x[:n_f].reshape(n_c, 3)
-    eq = a_eq[:, :n_f] @ x[:n_f] - b_eq
+    eq = a_eq[:, :n_f] @ forces.reshape(-1) - b_eq
     if float(np.max(np.abs(eq))) > 1e-4:
         return {"status": "unsolved"}
+
+    def _disk_excess(arr: np.ndarray) -> float:
+        excess = 0.0
+        for c in range(n_c):
+            fx, fy, fz = (float(arr[c, 0]), float(arr[c, 1]), float(arr[c, 2]))
+            if fz < -1e-6 or abs(fx) > mu * max(fz, 0.0) + 1e-5 or abs(fy) > mu * max(fz, 0.0) + 1e-5:
+                return -1.0
+            excess = max(excess, math.hypot(fx, fy) - mu * max(fz, 0.0))
+        return excess
+
+    excess1 = _disk_excess(forces1)
+    if excess1 < 0.0:
+        return {"status": "unsolved"}
+    excess = _disk_excess(forces)
+    if excess < 0.0:
+        forces = forces1
+        excess = excess1
+        x2 = None
+    # Stage 1 already lies in the disk, so its t is the cone minimax.
+    # Keep stage 2 only when that wrench stayed in the disk too.
+    if excess1 <= 1e-6:
+        if excess > 1e-6:
+            forces = forces1
+            excess = excess1
+            x2 = None
+        return {
+            "status": "feasible",
+            "forces": forces,
+            "t_star": t_star,
+            "from_stage2": x2 is not None and excess <= 1e-6,
+            "cone_excess_n": excess,
+            "cone_resolved": False,
+        }
+    refined = _cone_refine(
+        forces1, t_star, rotations, points, coef, b_leg, force, p_zmp,
+    )
+    if refined is None:
+        return {"status": "unsolved"}
+    refined["cone_resolved"] = True
+    return refined
+
+
+def _cone_refine(
+    forces_lp: np.ndarray,
+    t_lp: float,
+    rotations: list[np.ndarray],
+    points: list[np.ndarray],
+    coef: np.ndarray,
+    b_leg: np.ndarray,
+    force: np.ndarray,
+    p_zmp: np.ndarray,
+) -> dict[str, object] | None:
+    """Re-solve on the friction disk when the pyramid solution leaves it.
+
+    The disk is a subset of the pyramid, so the minimax can only rise.
+    The returned ``t_star`` is that disk minimum. The forces minimise the
+    sum of tangential magnitudes among disk solutions within 1e-7 Nm of it.
+    """
+    n_c = 8
+    n_leg = int(b_leg.shape[0])
+    n_f = n_c * 3
+    n = n_f + 1
+    mu = QP_MU
+    a_eq = np.zeros((6, n), dtype=np.float64)
+    for c in range(n_c):
+        cols = slice(3 * c, 3 * c + 3)
+        a_eq[0:3, cols] = rotations[c]
+        a_eq[3:6, cols] = _skew(points[c] - p_zmp) @ rotations[c]
+    b_eq = np.zeros(6, dtype=np.float64)
+    b_eq[0:3] = force
+    flat = np.asarray(coef, dtype=np.float64).reshape(n_leg, n_f)
+    x0 = np.zeros(n, dtype=np.float64)
+    x0[:n_f] = np.asarray(forces_lp, dtype=np.float64).reshape(-1)
+    for c in range(n_c):
+        fx, fy, fz = (float(x0[3 * c]), float(x0[3 * c + 1]), float(x0[3 * c + 2]))
+        if fz < 0.0:
+            x0[3 * c:3 * c + 3] = 0.0
+            continue
+        hyp = math.hypot(fx, fy)
+        limit = mu * fz
+        if hyp > limit and hyp > 0.0:
+            scale = limit / hyp
+            x0[3 * c] *= scale
+            x0[3 * c + 1] *= scale
+    acc0 = flat @ x0[:n_f]
+    x0[-1] = max(float(t_lp), float(np.max(np.abs(b_leg - acc0)))) + 1e-6
+    lb = []
+    ub = []
+    for _c in range(n_c):
+        lb.extend([-np.inf, -np.inf, 0.0])
+        ub.extend([np.inf, np.inf, np.inf])
+    lb.append(0.0)
+    ub.append(np.inf)
+    bounds = Bounds(lb, ub)
+
+    def _torque(x: np.ndarray) -> np.ndarray:
+        delta = b_leg - flat @ x[:n_f]
+        return np.concatenate([x[-1] - delta, x[-1] + delta])
+
+    def _torque_jac(x: np.ndarray) -> np.ndarray:
+        jac = np.zeros((2 * n_leg, n), dtype=np.float64)
+        jac[:n_leg, :n_f] = flat
+        jac[n_leg:, :n_f] = -flat
+        jac[:, -1] = 1.0
+        return jac
+
+    def _friction(x: np.ndarray) -> np.ndarray:
+        out = np.empty(n_c, dtype=np.float64)
+        for c in range(n_c):
+            fx, fy, fz = (float(x[3 * c]), float(x[3 * c + 1]), float(x[3 * c + 2]))
+            out[c] = mu * fz - math.hypot(fx, fy)
+        return out
+
+    def _friction_jac(x: np.ndarray) -> np.ndarray:
+        jac = np.zeros((n_c, n), dtype=np.float64)
+        for c in range(n_c):
+            fx, fy = (float(x[3 * c]), float(x[3 * c + 1]))
+            hyp = math.hypot(fx, fy)
+            if hyp > 1e-10:
+                jac[c, 3 * c] = -fx / hyp
+                jac[c, 3 * c + 1] = -fy / hyp
+            jac[c, 3 * c + 2] = mu
+        return jac
+
+    def _eq(x: np.ndarray) -> np.ndarray:
+        return a_eq @ x - b_eq
+
+    def _eq_jac(x: np.ndarray) -> np.ndarray:
+        return a_eq
+
+    cons = (
+        {"type": "eq", "fun": _eq, "jac": _eq_jac},
+        {"type": "ineq", "fun": _torque, "jac": _torque_jac},
+        {"type": "ineq", "fun": _friction, "jac": _friction_jac},
+    )
+
+    def _obj(x: np.ndarray) -> float:
+        return float(x[-1])
+
+    def _obj_jac(x: np.ndarray) -> np.ndarray:
+        grad = np.zeros(n, dtype=np.float64)
+        grad[-1] = 1.0
+        return grad
+
+    def _accept(res: object, t_cap: float | None) -> np.ndarray | None:
+        if getattr(res, "x", None) is None:
+            return None
+        x = np.asarray(res.x, dtype=np.float64)
+        if float(np.max(np.abs(_eq(x)))) > 1e-4:
+            return None
+        if float(np.min(_friction(x))) < -5e-4:
+            return None
+        if float(np.min(_torque(x))) < -1e-5:
+            return None
+        if float(x[-1]) + 1e-5 < float(t_lp):
+            return None
+        if t_cap is not None and float(x[-1]) > t_cap + 1e-5:
+            return None
+        return x
+
+    try:
+        res1 = minimize(
+            _obj, x0, jac=_obj_jac, method="SLSQP", bounds=bounds, constraints=cons,
+            options={"maxiter": 400, "ftol": 1e-10},
+        )
+    except (ValueError, np.linalg.LinAlgError):
+        return None
+    x1 = _accept(res1, None)
+    if x1 is None:
+        return None
+    t_star = float(x1[-1])
+    ub[-1] = t_star + 1e-7
+    bounds2 = Bounds(lb, ub)
+
+    def _tangential(x: np.ndarray) -> float:
+        total = 0.0
+        for c in range(n_c):
+            total += math.hypot(float(x[3 * c]), float(x[3 * c + 1]))
+        return total
+
+    def _tangential_jac(x: np.ndarray) -> np.ndarray:
+        grad = np.zeros(n, dtype=np.float64)
+        for c in range(n_c):
+            fx, fy = (float(x[3 * c]), float(x[3 * c + 1]))
+            hyp = math.hypot(fx, fy)
+            if hyp > 1e-10:
+                grad[3 * c] = fx / hyp
+                grad[3 * c + 1] = fy / hyp
+        return grad
+
+    try:
+        res2 = minimize(
+            _tangential, x1, jac=_tangential_jac, method="SLSQP", bounds=bounds2,
+            constraints=cons, options={"maxiter": 80, "ftol": 1e-12},
+        )
+    except (ValueError, np.linalg.LinAlgError):
+        res2 = None
+    x2 = None if res2 is None else _accept(res2, t_star + 1e-7)
+    x = x1 if x2 is None else x2
+    for c in range(n_c):
+        fx, fy, fz = (float(x[3 * c]), float(x[3 * c + 1]), float(x[3 * c + 2]))
+        limit = mu * max(fz, 0.0)
+        hyp = math.hypot(fx, fy)
+        if hyp > limit and hyp > 0.0:
+            scale = limit / hyp
+            x[3 * c] *= scale
+            x[3 * c + 1] *= scale
+    if float(np.max(np.abs(_eq(x)))) > 1e-4 or float(np.min(_torque(x))) < -1e-4:
+        return None
+    forces = x[:n_f].reshape(n_c, 3)
+    excess = 0.0
     for c in range(n_c):
         fx, fy, fz = (float(forces[c, 0]), float(forces[c, 1]), float(forces[c, 2]))
-        if fz < -1e-6 or abs(fx) > mu * fz + 1e-5 or abs(fy) > mu * fz + 1e-5:
-            return {"status": "unsolved"}
+        excess = max(excess, math.hypot(fx, fy) - mu * max(fz, 0.0))
     return {
         "status": "feasible",
         "forces": forces,
         "t_star": t_star,
         "from_stage2": x2 is not None,
+        "cone_excess_n": excess,
     }
 
 
@@ -1154,6 +1367,8 @@ def _qp_foot_split(
         "gen": gen,
         "f": world,
         "t_star": float(solved["t_star"]),
+        "cone_excess_n": float(solved.get("cone_excess_n", 0.0)),
+        "cone_resolved": bool(solved.get("cone_resolved")),
     }
 
 
@@ -1345,6 +1560,8 @@ def _planned_tau(
     qp_unsolved = 0
     qp_wall_n = 0
     qp_worst: dict[str, object] | None = None
+    cone_excess_max = 0.0
+    cone_resolved_n = 0
     ss_n = 0
     ss_over_n = 0
     ss_worst: dict[str, object] | None = None
@@ -1422,6 +1639,9 @@ def _planned_tau(
                 tau_qp = ident - gen_qp
                 f_qp = solved["f"] if isinstance(solved["f"], dict) else None
                 t_star = float(solved["t_star"])
+                cone_excess_max = max(cone_excess_max, float(solved.get("cone_excess_n", 0.0)))
+                if solved.get("cone_resolved"):
+                    cone_resolved_n += 1
             else:
                 if qp_status == "infeasible":
                     qp_infeasible += 1
@@ -1616,6 +1836,8 @@ def _planned_tau(
             "n_infeasible": qp_infeasible,
             "n_unsolved": qp_unsolved,
             "n_wall": qp_wall_n,
+            "cone_excess_max_n": cone_excess_max,
+            "n_cone_resolved": cone_resolved_n,
             "bar_nm": ASK_BAR,
             "mu": QP_MU,
             "box_mm": [135.0, 76.0],
@@ -1652,8 +1874,8 @@ def _planned_tau(
             "split, the min-norm ankle split, and a linear program that "
             "minimises the largest |τ| over the leg joints with armature "
             "removed. That program keeps each foot's centre of pressure "
-            "inside the 135×76 mm box and each corner force inside friction "
-            "μ 1.2. A wall is only a double-support tick where this split "
+            "inside the 135×76 mm box and each corner force inside a friction "
+            "cone of μ 1.2. A wall is only a double-support tick where this split "
             "still needs more than 2.33 Nm without armature. Linear and "
             "min-norm exceeding 2.33 are not a wall. Single support above "
             "2.33 without armature is required single-foot torque. The "
@@ -2979,7 +3201,7 @@ def main() -> None:
             "split, and a linear program that minimises the largest |τ| over "
             "the leg joints with armature removed. The program keeps each "
             "foot's centre of pressure inside the 135×76 mm box and each "
-            "corner force inside a friction pyramid of μ 1.2. A wall is only "
+            "corner force inside a friction cone of μ 1.2. A wall is only "
             "a double-support tick where that program still needs more than "
             "2.33 Nm without armature. Linear and min-norm exceeding 2.33 "
             "are not a wall. Single support above 2.33 without armature is "
