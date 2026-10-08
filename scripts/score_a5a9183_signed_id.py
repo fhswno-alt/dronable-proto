@@ -13,11 +13,13 @@ A tick with ``|ctrl_raw| > 2.09`` fails the clip bar. ``ctrl_raw`` is the
 writer command before the ctrlrange clip when that command reproduces the
 stored ctrl; otherwise the clip fraction is ``raw ctrl unavailable``.
 
-Inverse dynamics runs on every physics substep, before ``mj_step``. The copy
-gets ``mj_forward``, then ``mj_inverse`` with that same qacc. A leg joint
-whose ``|qfrc_inverse - (qfrc_actuator + qfrc_passive)|`` exceeds 0.05 Nm
-marks the control tick ``residual-fail, not bucketed``. Only residual-passing
-ticks are split into the three buckets.
+Inverse dynamics runs on every physics substep, before ``mj_step``. A binary
+copy of the model carries ``mjENBL_FWDINV``. The live model does not, so the
+forward rollout is unchanged. The copy gets ``mj_forward``, then
+``mj_compareFwdInv``, then ``mj_inverse`` with that same qacc. A leg joint
+whose raw residual exceeds ``0.05 + dt·(0.08 + kv)·|q̈|`` marks that substep
+``residual-fail, not bucketed``. Only residual-passing substeps are split
+into the three buckets.
 """
 from __future__ import annotations
 
@@ -27,6 +29,7 @@ import json
 import math
 import os
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -59,7 +62,8 @@ QACC_SOURCE = (
     "mj_forward qacc on an mj_copyData of the pre-step state; "
     "mj_inverse uses that same qacc. Not data.qacc after mj_step."
 )
-RESIDUAL_BAR = 0.05
+RESIDUAL_FLOOR = 0.05
+JOINT_DAMPING = 0.08
 RESIDUAL_FAIL = "residual-fail, not bucketed"
 KNEE_ID_CONTROLS_NM = 2.045
 ROOT_DOFS = 6
@@ -76,7 +80,11 @@ CLASS_RULE = (
     "Comparisons use the absolute value of the signed torque. "
     "Exactly 2.33 stays on the low side of each greater-than test. "
     "A physics substep is residual-fail, not bucketed, when any leg joint has "
-    "|qfrc_inverse - (qfrc_actuator + qfrc_passive)| > 0.05. "
+    "|qfrc_inverse - (qfrc_actuator + qfrc_passive)| > "
+    "0.05 + dt*(0.08 + kv)*|qacc|. dt is the plant timestep 0.002 s, kv is "
+    "-actuator_biasprm[i,2], and 0.08 is the leg joint damping. "
+    "The implicitfast offset dt*(0.08 + kv)*qacc is logged signed, and the "
+    "residual is also logged after subtracting that offset. "
     "A control tick is counted residual-fail when any of its substeps fails. "
     "The three buckets use residual-passing substeps only. "
     "controller fail: |qfrc_inverse| <= 2.33 and |ask| > 2.33. "
@@ -97,30 +105,55 @@ INTEGRATOR_NAME = {
 _ORIG_MJ_STEP = mj.mj_step
 _CAPTURE: list[dict[str, np.ndarray]] = []
 _CAPTURE_ON = False
+_ID_MODEL: mj.MjModel | None = None
 _ID_COPY: mj.MjData | None = None
+
+
+def _isolated_inverse_model(model: mj.MjModel) -> mj.MjModel:
+    """Binary copy with ``mjENBL_FWDINV`` set. The source model's flags stay put."""
+    flags = int(model.opt.enableflags)
+    fd, path = tempfile.mkstemp(prefix="a5-inv-", suffix=".mjb")
+    os.close(fd)
+    try:
+        mj.mj_saveModel(model, path)
+        copied = mj.MjModel.from_binary_path(path)
+    finally:
+        os.unlink(path)
+    if int(model.opt.enableflags) != flags:
+        raise RuntimeError("saving the inverse model changed the live enableflags")
+    copied.opt.enableflags |= int(mj.mjtEnableBit.mjENBL_FWDINV)
+    if int(model.opt.enableflags) != flags:
+        raise RuntimeError("the inverse copy shares enableflags with the live model")
+    return copied
 
 
 def _capturing_step(model: mj.MjModel, data: mj.MjData) -> None:
     """Inverse the pre-step copy, then step the live state.
 
     ``mj_forward`` on the copy writes the qacc that belongs to this q and
-    q̇. ``mj_inverse`` reuses that qacc. The live ``mj_step`` is not allowed
-    to pair its integrated q and q̇ with this acceleration.
+    q̇. ``mj_compareFwdInv`` and ``mj_inverse`` reuse that qacc. The live
+    model does not carry ``mjENBL_FWDINV``, and the live ``mj_step`` is not
+    paired with this acceleration.
     """
     if _CAPTURE_ON:
-        if _ID_COPY is None:
+        if _ID_COPY is None or _ID_MODEL is None:
             raise RuntimeError("inverse copy is not allocated")
+        copy_model = _ID_MODEL
         copy = _ID_COPY
-        mj.mj_copyData(copy, model, data)
-        mj.mj_forward(model, copy)
+        mj.mj_copyData(copy, copy_model, data)
+        mj.mj_forward(copy_model, copy)
         qacc = np.array(copy.qacc, dtype=np.float64, copy=True)
         actuator = np.array(copy.qfrc_actuator, dtype=np.float64, copy=True)
         passive = np.array(copy.qfrc_passive, dtype=np.float64, copy=True)
+        # Forward constraint forces are still in place. compareFwdInv saves
+        # them, runs inverse, and restores them. Our own inverse follows.
+        mj.mj_compareFwdInv(copy_model, copy)
+        fwdinv = np.array(copy.solver_fwdinv[:2], dtype=np.float64, copy=True)
         copy.qacc[:] = qacc
-        mj.mj_inverse(model, copy)
+        mj.mj_inverse(copy_model, copy)
         if float(np.max(np.abs(copy.qacc - qacc))) > 1e-8:
             copy.qacc[:] = qacc
-            mj.mj_inverse(model, copy)
+            mj.mj_inverse(copy_model, copy)
         _CAPTURE.append({
             "time": float(data.time),
             "qpos": np.array(data.qpos, dtype=np.float64, copy=True),
@@ -132,10 +165,9 @@ def _capturing_step(model: mj.MjModel, data: mj.MjData) -> None:
             "id": np.array(copy.qfrc_inverse, dtype=np.float64, copy=True),
             "constraint": np.array(copy.qfrc_constraint, dtype=np.float64, copy=True),
             "bias": np.array(copy.qfrc_bias, dtype=np.float64, copy=True),
+            "fwdinv": fwdinv,
         })
     _ORIG_MJ_STEP(model, data)
-    if _CAPTURE_ON and _CAPTURE:
-        _CAPTURE[-1]["fwdinv"] = np.array(data.solver_fwdinv[:2], dtype=np.float64, copy=True)
 
 
 mj.mj_step = _capturing_step
@@ -598,8 +630,58 @@ def _integrator_name(model: mj.MjModel) -> str:
     return INTEGRATOR_NAME.get(code, f"unknown-{code}")
 
 
+def _implicit_terms(dt: float, kv: float, qacc: float) -> tuple[float, float]:
+    """Signed implicitfast offset and the residual band, both in Nm."""
+    scale = float(dt) * (JOINT_DAMPING + float(kv))
+    offset = scale * float(qacc)
+    band = RESIDUAL_FLOOR + scale * abs(float(qacc))
+    return offset, band
+
+
+def _solver_report(model: mj.MjModel) -> dict[str, object]:
+    """Plant solver settings. Cone, impratio, and noslip are the MuJoCo defaults."""
+    opt = model.opt
+    cone = int(opt.cone)
+    solver = int(opt.solver)
+    jacobian = int(opt.jacobian)
+    noslip_iterations = int(opt.noslip_iterations)
+    impratio = float(opt.impratio)
+    report = {
+        "timestep": float(opt.timestep),
+        "integrator": _integrator_name(model),
+        "cone": "pyramidal" if cone == int(mj.mjtCone.mjCONE_PYRAMIDAL) else f"code-{cone}",
+        "impratio": impratio,
+        "noslip_iterations": noslip_iterations,
+        "noslip_tolerance": float(opt.noslip_tolerance),
+        "solver": "Newton" if solver == int(mj.mjtSolver.mjSOL_NEWTON) else f"code-{solver}",
+        "iterations": int(opt.iterations),
+        "tolerance": float(opt.tolerance),
+        "jacobian": "auto" if jacobian == int(mj.mjtJacobian.mjJAC_AUTO) else f"code-{jacobian}",
+        "enableflags": int(opt.enableflags),
+        "disableflags": int(opt.disableflags),
+        "cone_override": cone != int(mj.mjtCone.mjCONE_PYRAMIDAL),
+        "impratio_override": abs(impratio - 1.0) > 1e-15,
+        "noslip_override": noslip_iterations != 0,
+    }
+    if abs(float(opt.timestep) - 0.002) > 1e-15:
+        raise RuntimeError(f"timestep is {float(opt.timestep)}, expected 0.002")
+    if report["integrator"] != "implicitfast":
+        raise RuntimeError(f"integrator is {report['integrator']}")
+    if report["cone_override"] or report["impratio_override"] or report["noslip_override"]:
+        raise RuntimeError(f"solver override on the plant: {report}")
+    if solver != int(mj.mjtSolver.mjSOL_NEWTON) or int(opt.iterations) != 100:
+        raise RuntimeError(f"solver is not the Newton default: {report}")
+    if abs(float(opt.tolerance) - 1e-8) > 1e-15:
+        raise RuntimeError(f"solver tolerance is {float(opt.tolerance)}")
+    if jacobian != int(mj.mjtJacobian.mjJAC_AUTO):
+        raise RuntimeError(f"jacobian is {jacobian}")
+    if int(opt.enableflags) != 0 or int(opt.disableflags) != 0:
+        raise RuntimeError("live model option flags are not clear")
+    return report
+
+
 def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
-    global _CAPTURE_ON, _ID_COPY
+    global _CAPTURE_ON, _ID_COPY, _ID_MODEL
     digest_before = _plant_md5()
     if digest_before != PLANT_MD5:
         raise SystemExit(f"plant md5 {digest_before} != {PLANT_MD5}")
@@ -621,9 +703,13 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
     if not audit["all_pm_2_45"]:
         raise RuntimeError("forcerange is not ±2.45 on every leg joint")
     integrator = _integrator_name(session.model)
-    # Runtime only. The plant XML is not written.
-    session.model.opt.enableflags |= int(mj.mjtEnableBit.mjENBL_FWDINV)
-    _ID_COPY = mj.MjData(session.model)
+    solver = _solver_report(session.model)
+    physics_dt = float(session.model.opt.timestep)
+    # The flag lives on a binary copy. The live model, and the file, stay clear.
+    _ID_MODEL = _isolated_inverse_model(session.model)
+    _ID_COPY = mj.MjData(_ID_MODEL)
+    if int(session.model.opt.enableflags) != 0:
+        raise RuntimeError("live enableflags changed while building the inverse copy")
     root_jid = int(mj.mj_name2id(session.model, mj.mjtObj.mjOBJ_JOINT, "root"))
     if root_jid < 0 or int(session.model.jnt_type[root_jid]) != int(mj.mjtJoint.mjJNT_FREE):
         raise RuntimeError("root is not a free joint")
@@ -637,6 +723,11 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
     tick_box = [0]
     _install(walker, writes, asks, tick_box)
     legs = _leg_actuators(session.model, walker)
+    for leg in legs:
+        damp = float(session.model.dof_damping[int(leg["dof"])])
+        if abs(damp - JOINT_DAMPING) > 1e-12:
+            raise RuntimeError(f"{leg['joint']} damping {damp} is not {JOINT_DAMPING}")
+    kv_of = {str(leg["joint"]): float(leg["kv"]) for leg in legs}
     ctrl_hist: dict[str, list[float]] = {name: [] for name in sws.LEG_JOINTS}
     raw_unavailable = False
     clip_ticks = 0
@@ -665,6 +756,15 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
     max_leg_resid_passive = 0.0
     slope_num = 0.0
     slope_den = 0.0
+    raw_peak_abs = 0.0
+    raw_peak_signed = 0.0
+    raw_peak_offset = 0.0
+    raw_peak_adjusted = 0.0
+    raw_peak_band = 0.0
+    raw_peak_joint: str | None = None
+    raw_peak_t: float | None = None
+    adj_max_abs = 0.0
+    offset_max_abs = 0.0
     tick_residual_fail: list[bool] = []
     move_s = max(float(cfg.gm_move_s), float(session.ctrl_dt))
     slew_frac = min(1.0, float(session.ctrl_dt) / move_s)
@@ -818,6 +918,7 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
             actuator = shot["actuator"]
             passive = shot["passive"]
             qvel = shot["qvel"]
+            qacc = shot["qacc"]
             fwd = shot["fwdinv"]
             fwd0 = max(fwd0, abs(float(fwd[0])))
             fwd1 = max(fwd1, abs(float(fwd[1])))
@@ -828,7 +929,10 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
             for leg in legs:
                 adr = int(leg["dof"])
                 joint = str(leg["joint"])
-                resid = abs(float(ident[adr] - (actuator[adr] + passive[adr])))
+                raw = float(ident[adr] - (actuator[adr] + passive[adr]))
+                resid = abs(raw)
+                offset, band = _implicit_terms(physics_dt, float(leg["kv"]), float(qacc[adr]))
+                adjusted = raw - offset
                 act_gap = abs(float(ident[adr] - actuator[adr]))
                 speed = abs(float(qvel[adr]))
                 max_id_minus_act = max(max_id_minus_act, act_gap)
@@ -839,7 +943,17 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
                     max_leg_resid_joint = joint
                     max_leg_resid_qvel = speed
                     max_leg_resid_passive = abs(float(passive[adr]))
-                if resid > RESIDUAL_BAR + 1e-9:
+                if resid > raw_peak_abs:
+                    raw_peak_abs = resid
+                    raw_peak_signed = raw
+                    raw_peak_offset = offset
+                    raw_peak_adjusted = adjusted
+                    raw_peak_band = band
+                    raw_peak_joint = joint
+                    raw_peak_t = float(shot["time"])
+                adj_max_abs = max(adj_max_abs, abs(adjusted))
+                offset_max_abs = max(offset_max_abs, abs(offset))
+                if resid > band + 1e-9:
                     this_fail = True
                     tick_fail = True
                 signed_id = float(ident[adr])
@@ -998,7 +1112,10 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
                 id_nm = float(split["id"][adr])
                 actuator_nm = float(split["actuator"][adr])
                 qfrc_passive = float(split["passive_raw"][adr])
-                force_resid = abs(id_nm - (actuator_nm + qfrc_passive))
+                qacc_i = float(split["qacc"][adr])
+                raw_i = id_nm - (actuator_nm + qfrc_passive)
+                offset_i, band_i = _implicit_terms(physics_dt, kv_of[over.joint], qacc_i)
+                force_resid = abs(raw_i)
                 fwd = shots[si]["fwdinv"]
                 over.id_blob = {
                     "id_nm": id_nm,
@@ -1009,6 +1126,10 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
                     "ident_nm": ident,
                     "ident_residual_nm": id_nm - ident,
                     "force_residual_nm": force_resid,
+                    "residual_raw_nm": raw_i,
+                    "implicitfast_offset_nm": offset_i,
+                    "residual_adjusted_nm": raw_i - offset_i,
+                    "residual_band_nm": band_i,
                     "armature_model_qacc_nm": float(split["arm_model"][adr]),
                     "qacc_rad_s2": float(split["qacc"][adr]),
                     "actuator_nm": actuator_nm,
@@ -1022,6 +1143,8 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         if session.bus.fault:
             break
     session.assert_plant_unchanged()
+    if int(session.model.opt.enableflags) != 0:
+        raise RuntimeError("live enableflags were set during the bout")
     digest_after = _plant_md5()
     n = len(times)
     dt = sws._uniform_dt(np.asarray(times, dtype=np.float64)) if n else None
@@ -1204,6 +1327,10 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
             "passive_nm": None if not isinstance(blob, dict) else blob["passive_nm"],
             "qfrc_passive_nm": None if not isinstance(blob, dict) else blob["qfrc_passive_nm"],
             "force_residual_nm": None if not isinstance(blob, dict) else blob["force_residual_nm"],
+            "residual_raw_nm": None if not isinstance(blob, dict) else blob["residual_raw_nm"],
+            "implicitfast_offset_nm": None if not isinstance(blob, dict) else blob["implicitfast_offset_nm"],
+            "residual_adjusted_nm": None if not isinstance(blob, dict) else blob["residual_adjusted_nm"],
+            "residual_band_nm": None if not isinstance(blob, dict) else blob["residual_band_nm"],
             "ident_residual_nm": None if not isinstance(blob, dict) else blob["ident_residual_nm"],
             "solver_fwdinv": None if not isinstance(blob, dict) else blob["solver_fwdinv"],
             "residual_gated": gated,
@@ -1307,6 +1434,9 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         "goal_ask_peak_joint": None if goal_peak is None else goal_peak.joint,
         "goal_ask_peak_t_s": None if goal_peak is None else goal_peak.t_s,
         "integrator": integrator,
+        "physics_dt_s": physics_dt,
+        "solver": solver,
+        "joint_damping": JOINT_DAMPING,
         "limiter_active_fraction": (limiter_ticks / n) if n else 0.0,
         "limiter_active_ticks": limiter_ticks,
         "limiter": (
@@ -1318,7 +1448,16 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         "residual_fail_ticks": residual_fail_ticks,
         "residual_fail_substeps": residual_fail_substeps,
         "residual_fail_over_bar": n_residual_over,
-        "residual_bar_nm": RESIDUAL_BAR,
+        "residual_floor_nm": RESIDUAL_FLOOR,
+        "residual_raw_peak_nm": raw_peak_signed,
+        "residual_raw_peak_abs_nm": raw_peak_abs,
+        "residual_raw_peak_joint": raw_peak_joint,
+        "residual_raw_peak_t_s": raw_peak_t,
+        "implicitfast_offset_nm": raw_peak_offset,
+        "residual_adjusted_nm": raw_peak_adjusted,
+        "residual_band_at_raw_peak_nm": raw_peak_band,
+        "residual_adjusted_max_abs_nm": adj_max_abs,
+        "implicitfast_offset_max_abs_nm": offset_max_abs,
         "n_bucketed": n_bucketed,
         "root_id_max_nm": root_id_max,
         "root_id_per_tick_nm": root_id_ticks,
@@ -1341,12 +1480,19 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         "implicit_offset": {
             "integrator": integrator,
             "damping_implicit": integrator in ("implicit", "implicitfast"),
+            "formula_nm": "dt*(0.08 + kv)*qacc",
+            "joint_damping": JOINT_DAMPING,
+            "timestep_s": physics_dt,
             "max_abs_id_minus_actuator_nm": max_id_minus_act,
             "max_leg_residual_nm": max_leg_resid,
             "max_leg_residual_joint": max_leg_resid_joint,
             "max_leg_residual_qvel_rad_s": max_leg_resid_qvel,
             "max_leg_residual_passive_nm": max_leg_resid_passive,
             "residual_per_speed_nm_per_rad_s": (slope_num / slope_den) if slope_den > 0.0 else None,
+            "offset_at_raw_peak_nm": raw_peak_offset,
+            "adjusted_at_raw_peak_nm": raw_peak_adjusted,
+            "adjusted_max_abs_nm": adj_max_abs,
+            "offset_max_abs_nm": offset_max_abs,
         },
         "ctrl_clip_fraction": clip_fraction,
         "ctrl_clip_ticks": clip_ticks,
@@ -1390,6 +1536,8 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         f"goal {row['goal_ask_peak_nm']:.3f} "
         f"clip {clip_fraction} lim {row['limiter_active_fraction']:.3f} "
         f"kneeID {knee_id_peak:.3f} {knee_id_joint} "
+        f"raw {raw_peak_signed:+.4f} off {raw_peak_offset:+.4f} adj {raw_peak_adjusted:+.4f} "
+        f"adjmax {adj_max_abs:.4f} "
         f"root {root_id_max:.3e} resfail {residual_fail_ticks}/{n} "
         f"qdes {row['qdes_peak_nm']:.3f} {row['qdes_peak_joint']} "
         f"over ask/qdes {n_ask_over}/{n_qdes_over} bucketed {n_bucketed} "
@@ -1435,14 +1583,25 @@ def main() -> None:
         "runtime_only": True,
         "qacc_source": QACC_SOURCE,
         "integrator_note": (
-            "implicit and implicitfast treat damping implicitly, so "
-            "|qfrc_inverse - (qfrc_actuator + qfrc_passive)| can carry an "
-            "offset that grows with speed. qfrc_inverse itself matches "
-            "qfrc_actuator when the pre-step forward and inverse see the same qacc."
+            "The plant timestep is 0.002 s and the integrator is implicitfast. "
+            "Cone, impratio, and noslip are the MuJoCo defaults: pyramidal cone, "
+            "impratio 1, noslip iterations 0. Under implicitfast, damping is "
+            "implicit, so the raw residual can carry an offset. The logged "
+            "offset is dt*(0.08 + kv)*qacc, signed. The adjusted residual is "
+            "the raw residual minus that offset."
         ),
-        "residual_bar_nm": RESIDUAL_BAR,
-        "residual_definition": "|qfrc_inverse - (qfrc_actuator + qfrc_passive)| per leg joint",
-        "fwdinv": "model.opt.enableflags |= mjENBL_FWDINV at runtime; solver_fwdinv[0] is the constraint-force norm and [1] is the applied-force norm",
+        "solver": None if not rows else rows[0]["solver"],
+        "residual_floor_nm": RESIDUAL_FLOOR,
+        "residual_band": "0.05 + dt*(0.08 + kv)*|qacc| per leg joint per 0.002 s step",
+        "residual_definition": "signed qfrc_inverse - (qfrc_actuator + qfrc_passive) per leg joint",
+        "implicitfast_offset": "signed dt*(0.08 + kv)*qacc; kv = -actuator_biasprm[i,2]; 0.08 is leg joint damping",
+        "residual_adjusted": "signed raw residual minus the implicitfast offset",
+        "fwdinv": (
+            "mjENBL_FWDINV is set on a binary copy of the model. mj_forward, "
+            "mj_compareFwdInv, and mj_inverse run on that copy. The live model "
+            "enableflags stay 0, so the forward rollout does not see the flag. "
+            "solver_fwdinv[0] is the constraint-force norm and [1] is the applied-force norm."
+        ),
         "ask_bar_nm": ASK_BAR,
         "ask_definition": "|kp*(ctrl_plant-q) - kv*qvel|, ctrl_plant = clip(data.ctrl, ctrlrange) when actuator_ctrllimited",
         "ctrl_clip": "|ctrl_raw| > 2.09 on a control tick is a fail. ctrl_raw is the writer command before the ctrlrange clip when that command reproduces the stored ctrl, and data.ctrl entering mj_step.",
