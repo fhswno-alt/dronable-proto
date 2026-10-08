@@ -63,6 +63,10 @@ class ZmpPreview:
     def com_vel_m_s(self) -> float:
         return float(self._x[1])
 
+    @property
+    def com_acc_m_s2(self) -> float:
+        return float(self._x[2])
+
     def step(self, zmp_future_m: np.ndarray) -> float:
         """Advance one tick. ``zmp_future_m[0]`` is the ZMP due now."""
         ref = np.asarray(zmp_future_m, dtype=np.float64).reshape(-1)
@@ -184,6 +188,66 @@ def cycle_zmp(
     else:
         u_time = (period - r1) + t
     return _cosine_u(u_time / span, amp, -amp, shape)
+
+
+def sway_zmp_amp(
+    period_s: float,
+    dsp: float,
+    zc_m: float,
+    com_target_m: float,
+    zmp_cap_m: float = BOX_CENTER_Y_M,
+    shape: float = 0.0,
+    r_weight: float = 1.0e-4,
+) -> float:
+    """ZMP amplitude whose steady CoM peak is ``com_target_m``.
+
+    The cap is the foot-box centre. A short single support does not
+    carry the CoM out to that centre: the preview orbit is the sway,
+    and a smaller ZMP reference is used when the orbit would overshoot
+    the target. If the cap still falls short of the target, the cap is
+    the amplitude.
+    """
+    cap = max(0.0, float(zmp_cap_m))
+    target = max(0.0, float(com_target_m))
+    if cap <= 1e-6:
+        return 0.0
+
+    def peak(amp: float) -> float:
+        period = float(period_s)
+        ssp = 1.0 - min(0.95, max(0.0, float(dsp)))
+        l0 = (1.0 - ssp) * period / 4.0
+        l1 = (1.0 + ssp) * period / 4.0
+        r0 = (3.0 - ssp) * period / 4.0
+        r1 = (3.0 + ssp) * period / 4.0
+        dt = 0.008
+        horizon = max(8, int(round(1.6 / dt)))
+        preview = ZmpPreview(float(zc_m), dt, horizon, float(r_weight))
+        n = int(round(max(3.0, 4.0 * period) / dt))
+        hold = max(1, int(round(2.0 * period / dt)))
+        acc = 0.0
+        for i in range(n):
+            t = i * dt
+            future = np.empty(horizon, dtype=np.float64)
+            for k in range(horizon):
+                future[k] = cycle_zmp(
+                    t + k * dt, period, l0, l1, r0, r1, amp, shape,
+                )
+            com = abs(preview.step(future))
+            if i >= n - hold:
+                acc = max(acc, com)
+        return acc
+
+    if peak(cap) <= target:
+        return cap
+    lo = 0.0
+    hi = cap
+    for _ in range(14):
+        mid = 0.5 * (lo + hi)
+        if peak(mid) < target:
+            lo = mid
+        else:
+            hi = mid
+    return hi
 
 
 def arm_zmp(t_before_s: float, arm_s: float, amp_m: float) -> float:

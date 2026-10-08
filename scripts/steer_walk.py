@@ -254,6 +254,11 @@ PLANT_XML = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145.xml"
 # Plant thaw from cursor/plant-thaw-legs-foot-6f10 (PR #43): legs ±2.45 Nm,
 # foot contact 135×76 mm. Was 71b2c86d… at ±2.1 and 145×86.
 PLANT_MD5 = "207f3d5e9c6a72e16f7aa0c8d224f75e"
+# Leg joints only. Arms and the head stay at the file armature.
+LEG_JOINT_NAMES = (
+    "l_hip_yaw", "l_hip_roll", "l_hip_pitch", "l_knee", "l_ank_pitch", "l_ank_roll",
+    "r_hip_yaw", "r_hip_roll", "r_hip_pitch", "r_knee", "r_ank_pitch", "r_ank_roll",
+)
 KIT_CAM_POS = (0.050, 0.019, 0.007)
 KIT_CAM_FOVY = 104.82
 # xyaxes "0 -1 0 0 0 1" → camera-frame columns (x, y, z). Look is −Z = +X.
@@ -787,26 +792,37 @@ BUS_KIT_SCRIPT: tuple[DemoSegment, ...] = (
     DemoSegment(BUS_KIT_STOP_S, "stop", 0.0, 0.0, "stop"),
 )
 
-# Cleared voice row. vel at or under this speed selects it. The kit row
+# vel at or under this bus speed selects the voice row. The kit row
 # stays the config for anything faster. Do not retune the kit to match.
+# The bus stays 0.056 m/s. The step is the kinematic x_amp = vx·T/4.
+# At the kit cadence, T = 0.50 s, that amplitude is 7.0 mm. The ZMP
+# reference is the foot-box centre: a 0.50 s preview orbit does not
+# carry the CoM out to 16 mm on a smaller reference. dsp is inside
+# 0.1–0.3. The 8 mm sole is the clearance target. The 42-cell grid
+# does not hold 2.33 Nm. This row is that design point, not a clear.
 VOICE_VX_M_S = 0.056
-VOICE_PERIOD_S = 3.57
-VOICE_DSP = 0.70
+VOICE_PERIOD_S = 0.50
+VOICE_DSP = 0.25
 VOICE_AMP_M = 0.043
-VOICE_Z_M = 0.004
-VOICE_ARM_S = 2.40
+VOICE_Z_M = 0.008
+VOICE_STEP_M = 0.007
+VOICE_ARM_S = 1.00
 VOICE_PREVIEW_R = 1.0e-4
-# 0 is the straight double-support ramp. 1 is the raised cosine, whose
-# hip-roll peak at 3.60 s was 2.3135 Nm.
+# 0 is the straight double-support ramp.
 VOICE_PREVIEW_SHAPE = 0.0
 
 
 def voice_preview_config() -> LipmConfig:
-    """Lateral preview that holds the voice-speed bout under 2.20 Nm.
+    """Lateral preview for the voice command.
 
-    y_swap stays 0. The sway is preview_y. Stand before the first step
-    is the level sole. Stop after the walk is the preview soft stop,
-    not the kit stand solve.
+    y_swap stays 0. The sway is preview_y. The hip-frame step is
+    x_amp = vx·T/4, and gm_x_m is that amplitude at the bus speed.
+    The swing sole rises over the first 20% of single support and
+    holds that peak until 80%. The stop blend nulls measured sole pitch.
+    Stand before the first
+    step is the level sole. The stop blends back to that stand.
+    Crouch stays 25 mm. A shallower drop fails stand IK or asks more
+    on the knee, because the lift rate, not the crouch moment, binds.
     """
     return LipmConfig(
         name="voice056",
@@ -816,7 +832,7 @@ def voice_preview_config() -> LipmConfig:
         gm_period_s=VOICE_PERIOD_S,
         gm_dsp=VOICE_DSP,
         gm_y_swap_m=0.0,
-        gm_x_m=0.020,
+        gm_x_m=VOICE_STEP_M,
         gm_z_m=VOICE_Z_M,
         gm_z_swap_m=0.0,
         gm_pelvis_deg=0.0,
@@ -852,17 +868,20 @@ def voice_bus_script(
     walk_s: float,
     stop_s: float,
     yaw_rate: float = 0.0,
+    vx_m_s: float | None = None,
 ) -> tuple[DemoSegment, ...]:
-    """stand, then 10 Hz vel(0.056, yaw), then one stop.
+    """stand, then 10 Hz vel, then one stop.
 
     Walk duration is what sets the gait phase at the stop. A longer
     quiet stand or a longer settled stop does not move that phase.
+    ``vx_m_s`` defaults to the bus speed.
     """
     t_vel = float(stand_s) + float(walk_s)
     t_stop = t_vel + float(stop_s)
+    vx = VOICE_VX_M_S if vx_m_s is None else float(vx_m_s)
     return (
         DemoSegment(float(stand_s), "stand", 0.0, 0.0, "stand"),
-        DemoSegment(t_vel, "vel", VOICE_VX_M_S, float(yaw_rate), "forward"),
+        DemoSegment(t_vel, "vel", vx, float(yaw_rate), "forward"),
         DemoSegment(t_stop, "stop", 0.0, 0.0, "stop"),
     )
 
@@ -1180,6 +1199,52 @@ def _kit_cam_problems(model: mj.MjModel, *, extra_sites: bool = False) -> list[s
     return problems
 
 
+def compile_plant(xml_path: Path, leg_armature: float) -> mj.MjModel:
+    """Compile with leg armature set on the spec, before dampratio writes kv.
+
+    A position actuator with dampratio=1 stores kv in actuator_biasprm from
+    the inertia, including armature, at compile time. Writing dof_armature
+    afterwards leaves that kv at the file value. Arms and the head are not
+    touched. The XML file is not written.
+    """
+    spec = mj.MjSpec.from_file(str(xml_path))
+    touched = 0
+    for joint in spec.joints:
+        name = joint.name or ""
+        if name not in LEG_JOINT_NAMES:
+            continue
+        joint.armature = float(leg_armature)
+        touched += 1
+    if touched != len(LEG_JOINT_NAMES):
+        raise RuntimeError(f"leg armature override touched {touched} joints in {xml_path}")
+    return spec.compile()
+
+
+def leg_kv_map(model: mj.MjModel) -> dict[str, float]:
+    """Compiled kv, −actuator_biasprm[:, 2], for each leg position servo."""
+    out: dict[str, float] = {}
+    for i in range(model.nu):
+        name = mj.mj_id2name(model, mj.mjtObj.mjOBJ_ACTUATOR, i) or ""
+        if not name.endswith("_pos"):
+            continue
+        joint = name[: -len("_pos")]
+        if joint not in LEG_JOINT_NAMES:
+            continue
+        out[joint] = float(-model.actuator_biasprm[i, 2])
+    if len(out) != len(LEG_JOINT_NAMES):
+        raise RuntimeError(f"leg kv map has {len(out)} joints")
+    return out
+
+
+def leg_kv_side_by_side(xml_path: Path = PLANT_XML) -> dict[str, dict[str, float]]:
+    """kv at the file armature and at the 0.025 load-time override."""
+    tables: dict[str, dict[str, float]] = {}
+    for arm in (0.01, 0.025):
+        model = compile_plant(xml_path, arm)
+        tables[f"{arm:.3f}"] = leg_kv_map(model)
+    return tables
+
+
 def plant_problems(
     model: mj.MjModel,
     xml_path: Path = PLANT_XML,
@@ -1290,6 +1355,7 @@ class SteerSession:
         cam_azimuth: float = 135.0,
         cam_elevation: float = -18.0,
         lipm: LipmConfig | None = None,
+        leg_armature: float | None = None,
     ) -> None:
         problems = []
         if not PLANT_XML.is_file():
@@ -1304,7 +1370,13 @@ class SteerSession:
         self.scene_xml = scene_xml
         self._initial_yaw = float(initial_yaw)
         load_path = PLANT_XML if scene_xml is None else scene_xml
-        self.model = mj.MjModel.from_xml_path(str(load_path))
+        # None keeps the historical from_xml_path load. A number, including
+        # the file's own 0.01, goes through MjSpec so kv matches that armature.
+        self.leg_armature = None if leg_armature is None else float(leg_armature)
+        if self.leg_armature is None:
+            self.model = mj.MjModel.from_xml_path(str(load_path))
+        else:
+            self.model = compile_plant(load_path, self.leg_armature)
         self.data = mj.MjData(self.model)
         problems = plant_problems(
             self.model, PLANT_XML, extra_sites=scene_xml is not None,
@@ -1403,11 +1475,16 @@ class SteerSession:
         self.data.qpos[2] = wg.COM_Z
         half = 0.5 * self._initial_yaw
         self.data.qpos[3:7] = [math.cos(half), 0.0, 0.0, math.sin(half)]
-        for jn, val in self.q_stand.items():
+        # Candidate A is the stand the gait holds. The spawn is the IK
+        # pose, and the min-jerk into A runs after this seat.
+        spawn = self.q_stand
+        if self.lipm is not None and self.lipm.q_spawn:
+            spawn = self.lipm.q_spawn
+        for jn, val in spawn.items():
             jid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, jn)
             if jid >= 0:
                 self.data.qpos[self.model.jnt_qposadr[jid]] = val
-        wg.set_ctrl(self.model, self.data, self.q_stand, self.act_idx)
+        wg.set_ctrl(self.model, self.data, spawn, self.act_idx)
         mj.mj_forward(self.model, self.data)
         # The IK crouch is a different leg length than COM_Z's knee-0.40
         # stand. Seat the soles on the floor. This is the spawn height, not
@@ -1445,6 +1522,7 @@ class SteerSession:
             # approach it over HIP_KNEE_MOVE_S; this 20 ms tick only covers
             # part of that move. Snapshot the command before the write.
             ctrl_from = np.array(self.data.ctrl, dtype=np.float64, copy=True)
+            self.lipm.begin_id_tick()
             if self.bus.fault:
                 self.lipm.hold_stand()
                 holding = True
@@ -1497,15 +1575,162 @@ class SteerSession:
         w, x, y, z = (float(v) for v in self.data.qpos[3:7])
         return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
-    def render(self, lines: list[str]) -> np.ndarray:
+    def render(
+        self,
+        lines: list[str],
+        *,
+        lookat: np.ndarray | None = None,
+        distance: float | None = None,
+        azimuth: float | None = None,
+        elevation: float | None = None,
+        sole_box: bool = False,
+    ) -> np.ndarray:
+        """Pixels of the current mjData. Does not step and does not mj_forward.
+
+        ``sole_box`` tints the two contact boxes for this frame only and
+        draws the floor line at z=0. The rgba is restored before return.
+        Physics does not read it.
+        """
         if self.renderer is None:
             raise RuntimeError("renderer not created")
-        self.cam.lookat[:] = self.data.xpos[self.bid_body]
+        if lookat is None:
+            self.cam.lookat[:] = self.data.xpos[self.bid_body]
+        else:
+            self.cam.lookat[:] = np.asarray(lookat, dtype=np.float64)
+        if distance is not None:
+            self.cam.distance = float(distance)
+        if azimuth is not None:
+            self.cam.azimuth = float(azimuth)
+        if elevation is not None:
+            self.cam.elevation = float(elevation)
         # mj_step already forwarded. A second mj_forward here changes the
         # contact warm-start and tips this gait before the stop.
-        self.renderer.update_scene(self.data, self.cam)
-        raw = np.ascontiguousarray(self.renderer.render().copy(), dtype=np.uint8)
+        saved = self._tint_sole_boxes() if sole_box else None
+        try:
+            self.renderer.update_scene(self.data, self.cam)
+            self._draw_foot_trace()
+            raw = np.ascontiguousarray(self.renderer.render().copy(), dtype=np.uint8)
+            if sole_box:
+                self._paint_floor_line(raw)
+        finally:
+            if saved is not None:
+                self._restore_sole_boxes(saved)
         return wg._burn_overlay(raw, lines)
+
+    def _tint_sole_boxes(self) -> dict[int, np.ndarray]:
+        """Coloured contact boxes, with the ankle mesh ghosted behind them.
+
+        The ankle-roll mesh sole bottoms at −23.09 mm in the body frame.
+        The contact box bottom is at −26.0 mm. The mesh floats 2.91 mm
+        above the box the scorer measures. An opaque mesh writes the depth
+        buffer and hides that box, so this frame ghosts the visual geoms on
+        the same body. The rgba is restored before return.
+        """
+        saved: dict[int, np.ndarray] = {}
+        if self.lipm is None:
+            return saved
+        colors = {
+            "L": np.array([0.15, 0.85, 0.95, 0.55], dtype=np.float32),
+            "R": np.array([0.95, 0.45, 0.10, 0.55], dtype=np.float32),
+        }
+        for side, rgba in colors.items():
+            gid = int(self.lipm.gid[side])
+            saved[gid] = np.array(self.model.geom_rgba[gid], dtype=np.float32).copy()
+            self.model.geom_rgba[gid] = rgba
+            body = int(self.model.geom_bodyid[gid])
+            for i in range(int(self.model.ngeom)):
+                if int(self.model.geom_bodyid[i]) != body or i == gid:
+                    continue
+                if int(self.model.geom_group[i]) == 0:
+                    continue
+                if i in saved:
+                    continue
+                saved[i] = np.array(self.model.geom_rgba[i], dtype=np.float32).copy()
+                ghost = saved[i].copy()
+                ghost[3] = np.float32(0.28)
+                self.model.geom_rgba[i] = ghost
+        return saved
+
+    def _restore_sole_boxes(self, saved: dict[int, np.ndarray]) -> None:
+        for gid, rgba in saved.items():
+            self.model.geom_rgba[gid] = rgba
+
+    def _paint_floor_line(self, raw: np.ndarray) -> None:
+        """Yellow pixels of the plane z=0 under the sole.
+
+        A scene box on z=0 is hidden by the floor plane, so the line is
+        the projection of that plane onto this frame. No mj_forward.
+        """
+        if self.renderer is None:
+            return
+        cam = self.renderer.scene.camera[0]
+        eye = np.array(cam.pos, dtype=np.float64)
+        fwd = np.array(cam.forward, dtype=np.float64)
+        up = np.array(cam.up, dtype=np.float64)
+        fwd /= np.linalg.norm(fwd) or 1.0
+        up /= np.linalg.norm(up) or 1.0
+        right = np.cross(fwd, up)
+        right /= np.linalg.norm(right) or 1.0
+        fovy = math.radians(float(self.model.vis.global_.fovy))
+        height, width = raw.shape[:2]
+        aspect = width / height
+        tan = math.tan(fovy / 2.0)
+
+        def project(point: np.ndarray) -> tuple[float, float] | None:
+            rel = point - eye
+            depth = float(np.dot(rel, fwd))
+            if depth < 1e-4:
+                return None
+            ndc_x = float(np.dot(rel, right)) / depth / (tan * aspect)
+            ndc_y = float(np.dot(rel, up)) / depth / tan
+            return (ndc_x * 0.5 + 0.5) * width, (0.5 - ndc_y * 0.5) * height
+
+        x0 = float(self.cam.lookat[0])
+        y0 = float(self.cam.lookat[1])
+        a = project(np.array([x0 - 0.16, y0, 0.0], dtype=np.float64))
+        b = project(np.array([x0 + 0.16, y0, 0.0], dtype=np.float64))
+        if a is None or b is None:
+            return
+        span = max(1, int(math.hypot(b[0] - a[0], b[1] - a[1])))
+        xs = np.linspace(a[0], b[0], span)
+        ys = np.linspace(a[1], b[1], span)
+        color = np.array([255, 230, 40], dtype=np.uint8)
+        for t in (-1, 0, 1):
+            yy = np.clip(np.rint(ys).astype(np.int32) + t, 0, height - 1)
+            xx = np.clip(np.rint(xs).astype(np.int32), 0, width - 1)
+            raw[yy, xx] = color
+
+    def _draw_foot_trace(self) -> None:
+        """World-frame foot spheres. Empty unless this clip asked for them.
+
+        Drawn after update_scene and before the pixels. No mj_forward.
+        """
+        trace = getattr(self, "foot_trace", None)
+        if not trace or self.renderer is None:
+            return
+        scene = self.renderer.scene
+        colors = (
+            np.array([0.15, 0.85, 0.95, 1.0], dtype=np.float32),
+            np.array([0.95, 0.45, 0.10, 1.0], dtype=np.float32),
+        )
+        size = np.array([0.007, 0.0, 0.0], dtype=np.float64)
+        mat = np.eye(3, dtype=np.float64).reshape(-1)
+        stride = max(1, len(trace) // 160)
+        for i, pts in enumerate(trace):
+            if i % stride:
+                continue
+            for k, pos in enumerate(pts):
+                if int(scene.ngeom) >= int(scene.maxgeom):
+                    return
+                mj.mjv_initGeom(
+                    scene.geoms[int(scene.ngeom)],
+                    int(mj.mjtGeom.mjGEOM_SPHERE),
+                    size,
+                    np.asarray(pos, dtype=np.float64),
+                    mat,
+                    colors[k],
+                )
+                scene.ngeom += 1
 
     def _targets(self, amp: float, direction: int, yaw_rate: float) -> dict[str, float]:
         if amp > 0.02:
@@ -1787,6 +2012,22 @@ class SteerSession:
             and self.lipm.phase == "stand"
             and self.lipm.cfg.schedule == "gait_manager"
         )
+        # The feedforward ctrl is already the torque command. Blending it
+        # back toward the previous position target would apply that
+        # target's ask for part of the tick.
+        if (
+            self.lipm is not None
+            and self.lipm.cfg.gm_id_ff
+            and not hold
+        ):
+            ctrl_from = ctrl_to
+            end = ctrl_to.copy()
+        elif self.lipm is not None:
+            for idx in self._move_ctrl_idx:
+                if abs(float(end[idx]) - float(ctrl_to[idx])) > 1e-12:
+                    self.lipm.limit_slew_n += 1
+                    self.lipm._limit_this_tick = True
+                    break
         for i in range(n):
             alpha = (i + 1) / float(n)
             self.data.ctrl[:] = ctrl_from + (end - ctrl_from) * alpha
@@ -1798,7 +2039,15 @@ class SteerSession:
                         self.lipm.write_force_limited(jn, val)
             self.data.qfrc_applied[:] = 0.0
             self.data.xfrc_applied[:] = 0.0
+            # Realised q̈ is (qvel after − qvel before) / dt. The live
+            # step stays mj_step (implicitfast). The plant XML is not edited.
+            if self.lipm is not None:
+                self.lipm.capture_pre_step()
             mj.mj_step(self.model, self.data)
+            if self.lipm is not None:
+                self.lipm.audit_forward_inverse()
+        if self.lipm is not None:
+            self.lipm.finish_id_tick()
 
     def _substep_plant(self, amp: float, phi: float) -> None:
         for _ in range(self.steps_per_ctrl):

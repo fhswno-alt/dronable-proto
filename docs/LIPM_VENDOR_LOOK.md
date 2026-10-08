@@ -2180,3 +2180,1705 @@ The worst cell is the 3.60 s entrance rug. Right ankle pitch 8.0479 Nm at 13.144
 
 The same gait on a 20.00 s bus bout, stand 3.00 s, walk 11.00 s, stop 6.00 s, 2500 ticks, keeps the walk phase at the stop. applied_vx is +0.0560 / +0.0560 m/s. Unclamped peak is the same right knee 2.0695 Nm, now at 11.848 s. CoM/ZMP minimum is the same +17.93 mm, now at 14.384 s. CoM jerk stays 88.853. The clip is `docs/media/voice_vx_056_side_front.mp4`, side and front, 30 fps. Not kit-safe. Not go-anywhere. Kit vx 0.150 m/s is still left hip pitch 4.4462 Nm.
 
+The #102 rescore of tip ac81435 scores contact CoP on the declared phase polygon. Single support is the stance foot box alone. The loaded-foot hull is not that bar. On the shape-1 rows the miss was the stop, still in left swing: contact CoP −46.58 mm at 12.672 s (3.60 s), −49.05 mm at 12.944 s (3.70 s), −48.83 mm at 13.800 s (slow). At 12.672 s the clock said the right foot was swinging and the left foot was stance. The right foot had 15.46 N and 4 floor contacts. The left foot had 7.75 N and 4 contacts. The swing foot was the loaded one. The stop kept that swing because the stance foot was under an 8 N gate, and it steered the ZMP onto the heavy foot.
+
+The stop now treats two feet at or above 5 N as double support and walks the clock back to the double-support boundary one tick at a time. After the physics step, a declared swing whose swing foot is still above 1 N is double support. The return stays in that shift. It does not enter the kit stand hold. That hold was rewriting every leg toward the flat-floor pose, and on the entrance lip it was the right ankle pitch at 8.36 Nm.
+
+A measured stabilizer sits on the same `write_clipped` path. The capture point is subtree CoM plus subtree linvel over ω, ω from the measured preview height. Outside a 20 mm deadzone it adds a rate-limited shift to `preview_y`, which the IK writes as hip roll, and a matching hip-roll offset. Ankle roll and ankle pitch follow the foot-local contact CoP and the trunk up-vector, outside 12 mm, slewed, tanh-shaped. There is no solve that pins the signed ask at ±2.33 Nm. On the flat 3.57 s bout the capture-point error peaks at 12.4 mm, inside the deadzone, so the hip term stays quiet. y_swap stays 0.
+
+Scored against the declared box, whole bout, soft-pass off. Contact CoP is the ZMP column. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` is unchanged. Friction is the sliding coefficient of floor, l_foot_contact, and r_foot_contact together. Mass ±5% scales body mass and inertia at load. Latency is ±1 planner tick. Ten seeds. The rug is the entrance mat, near edge 15 mm ahead of the toes, top at 20 mm. Start/stop is five bus cycles of the 11 s vel and the 3 s stop, 8800 ticks. Numbers are in `previews/com_zmp_declared.json`.
+
+| Period | Cell | Ask Nm | Joint | t | CoM mm | CoP mm | out | hard_cap | up_z | Result |
+| ---: | --- | ---: | --- | ---: | ---: | ---: | --- | ---: | ---: | --- |
+| 3.57 | nominal, shape 0 | 2.0535 | r_knee | 9.248 | +20.29 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.57 | seeds 0–9 | 2.0532–2.0540 | r_knee | 9.248 | +20.29 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.57 | mass −5% | 2.0465 | r_knee | 9.248 | +20.21 | +0.00 | 0 | 0 | 0.961 | CLEAR |
+| 3.57 | mass +5% | 2.0664 | r_knee | 9.248 | +20.37 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.57 | friction 1.2 | 2.0697 | r_knee | 9.248 | +20.04 | +0.00 | 0 | 0 | 0.963 | CLEAR |
+| 3.57 | friction 1.4 | 2.0174 | r_knee | 9.248 | +20.12 | +0.00 | 0 | 0 | 0.961 | CLEAR |
+| 3.57 | friction 1.6 | 2.0535 | r_knee | 9.248 | +20.29 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.57 | latency +1 | 2.2306 | l_hip_roll | 11.736 | +20.01 | +0.00 | 0 | 0 | 0.961 | CLEAR |
+| 3.57 | latency −1 | 1.9873 | l_knee | 0.416 | +20.50 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.57 | entrance rug | 2.0510 | l_knee | 7.456 | +20.29 | +0.00 | 0 | 0 | 0.961 | CLEAR |
+| 3.57 | start/stop ×5 | 2.0535 | r_knee | 9.248 | +20.29 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | nominal, shape 0 | 2.0415 | r_knee | 9.256 | +20.20 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | seeds 0–9 | 2.0412–2.0420 | r_knee | 9.256 | +20.20 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | mass −5% | 2.0652 | r_knee | 9.248 | +20.12 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | mass +5% | 2.0547 | r_knee | 9.256 | +20.28 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | friction 1.2 | 2.0511 | r_knee | 9.256 | +19.95 | +0.00 | 0 | 0 | 0.963 | CLEAR |
+| 3.60 | friction 1.4 | 2.0067 | r_knee | 9.256 | +20.04 | +0.00 | 0 | 0 | 0.961 | CLEAR |
+| 3.60 | friction 1.6 | 2.0415 | r_knee | 9.256 | +20.20 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | latency +1 | 2.1869 | l_knee | 7.464 | +19.92 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | latency −1 | 1.9524 | l_knee | 0.416 | +20.41 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | entrance rug | 2.0398 | r_knee | 9.256 | +20.20 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | start/stop ×5 | 2.0415 | r_knee | 9.256 | +20.20 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | shape 1 nominal | 2.3106 | r_hip_roll | 8.176 | +20.76 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.60 | shape 1 mass −5% | 2.2995 | r_hip_roll | 8.184 | +20.95 | +0.00 | 0 | 0 | 0.961 | CLEAR |
+| 3.60 | shape 1 friction 1.2 | 2.2953 | r_hip_roll | 8.184 | +21.24 | +0.00 | 0 | 0 | 0.963 | CLEAR |
+| 3.60 | shape 1 latency −1 | 2.1205 | r_hip_roll | 8.176 | +20.74 | +0.00 | 0 | 0 | 0.960 | CLEAR |
+| 3.70 | shape 1 nominal | 2.2584 | r_hip_roll | 8.352 | +20.76 | +0.00 | 0 | 0 | 0.961 | CLEAR |
+| 6.40 | slow, shape 1 | 2.0007 | r_hip_roll | 2.816 | +20.76 | +0.00 | 0 | 0 | 0.965 | CLEAR |
+
+46 cells, 0 fails. The worst cell is the shape-1 3.60 s nominal walk. Right hip roll 2.3106 Nm at 8.176 s, q −0.00839 rad, q_des +0.02372 rad, omega +0.6026 rad/s, headroom to 2.33 Nm +0.0194 Nm, 0 ticks over, hard_cap 0. Contact CoP minimum is +0.002 mm, outside 0. CoM minimum is +20.76 mm. min up_z is 0.960. The shape-0 worst ask is the 3.57 s +1 tick delay, left hip roll 2.2306 Nm at 11.736 s, under 2.33 Nm and 0.0306 Nm over the 2.20 Nm headroom. The flat 3.57 s bout is right knee 2.0535 Nm at 9.248 s, headroom to 2.20 Nm +0.1465 Nm, contact CoP on the polygon edge (+0.00 mm) with outside fraction 0, CoM +20.29 mm. The old mass −5% hip-roll 4.06 Nm, friction-1.2 ankle 8.08 Nm, and latency −1 ankle 3.56 Nm do not recur. The clip `docs/media/voice_vx_056_side_front.mp4` was rendered again on this gait: stand 3.00 s, vel(0.056, 0) for 11.00 s, stop 6.00 s, side and front, 30 fps, 600 frames, 20.00 s, fault none. Not kit-safe. Not go-anywhere.
+
+The +0.00 mm in that table is the whole-bout minimum, and it is a box face. On the shape-0 3.57 s bout before the toe schedule, 1800 ticks and 335 single-support ticks, contact CoP p1/p5/p50 were +0.00 / +0.01 / +23.56 mm. Single support p1/p5/p50/min were +0.00 / +0.00 / +17.09 / +0.004 mm. The fraction of single-support ticks under 2 mm was 0.230, and the fraction under 5 mm was the same 0.230. Those ticks sat under 0.2 mm. The stance polygon alone was p1/p5/p50 +13.10 / +13.86 / +24.47 mm. The sample that read +0.00 mm was the other foot: the declared swing foot still carried about 5–6 N on two contacts, local x exactly +67.5 mm, the toe face. The stance foot on those ticks still had +22 to +28 mm of its own slack. The sole span was about 1 mm. Capture-point error peaked at 12.4 mm, inside the 20 mm deadzone, so preview_y and the hip-roll term were 0. No clamp pins the CoP to the face.
+
+The swing ankle now takes a clocked toe-up. Left pitch is positive and right pitch is negative. It is full by a quarter of the swing and held 0.28 s after single support ends. The walk uses 0.040 rad. The stop uses 0.010 rad. It is slewed at 0.35 rad/s, the command stays within 16 mrad of the measured angle, and it replaces the ankle target so the ask log sees one write. A stop amplitude of 0.000 rad put the nominal whole-bout minimum back on the face at +0.003 mm. A stop amplitude of 0.020 rad put the +1 tick delay's left hip roll at 2.3987 Nm at 11.736 s. 0.010 rad keeps the nominal whole-bout minimum at +6.64 mm and that delay at 2.2667 Nm. Raising the walk amplitude to 0.060 rad dropped the heavy single-support minimum to +2.95 mm. At 0.075 rad the nominal single-support minimum was +4.86 mm and the delayed knee and the light knee both went over 2.33 Nm. That lever stops at 0.040 rad.
+
+Shape 0 is the voice gait. `gait_for_command` does not select shape 1. On this toe schedule the shape-1 3.60 s right hip roll is 2.3354 Nm at 8.176 s, 0.0054 Nm over 2.33 Nm. Those cells are dropped, not retuned.
+
+Scored again, plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`, soft-pass off, whole bout. SS CoP is the single-support minimum. Bout CoP is the whole-bout minimum. p5 is the whole-bout 5th percentile. Dwell is the fraction of single-support ticks under 5 mm. A row is inside the single-support bar only when SS CoP is ≥ +5 mm, CoM is ≥ 0, the unclamped ask is ≤ 2.33 Nm, the outside count is 0, hard_cap is 0, and min up_z is ≥ 0.90. A bout minimum under +5 mm is not called inside. Numbers are in `previews/com_zmp_declared.json`.
+
+| Period | Cell | Ask Nm | Joint | t | CoM mm | SS CoP | SS p5 | Bout CoP | p5 | Dwell | Result |
+| ---: | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 3.57 | nominal, shape 0 | 2.1602 | r_hip_pitch | 9.024 | +20.15 | +8.78 | +11.92 | +6.64 | +12.47 | 0 | inside |
+| 3.57 | seeds 0–2 | 2.1602 | r_hip_pitch | 9.024 | +20.15 | +8.75 | +11.61 | +6.62 | +12.31 | 0 | inside |
+| 3.57 | seeds 3, 5, 7, 9 | 2.1602 | r_hip_pitch | 9.024 | +20.15 | +8.77 | +11.62 | +0.00 | +12.30 | 0 | SS only |
+| 3.57 | seeds 4, 6, 8 | 2.1602 | r_hip_pitch | 9.024 | +20.15 | +8.75 | +11.62 | +3.87 | +12.26 | 0 | SS only |
+| 3.57 | mass −5% | 2.1429 | r_hip_pitch | 9.024 | +20.08 | +9.10 | +12.67 | +7.31 | +13.18 | 0 | inside |
+| 3.57 | mass +5% | 2.1486 | r_hip_pitch | 9.032 | +20.22 | +7.65 | +10.90 | +0.001 | +11.58 | 0 | SS only |
+| 3.57 | friction 1.2 | 2.1699 | l_knee | 11.840 | +19.94 | +11.35 | +13.35 | +0.001 | +12.45 | 0 | SS only |
+| 3.57 | friction 1.4 | 2.1372 | r_hip_pitch | 9.032 | +20.03 | +9.86 | +13.22 | +0.002 | +13.38 | 0 | SS only |
+| 3.57 | friction 1.6 | 2.1602 | r_hip_pitch | 9.024 | +20.15 | +8.78 | +11.92 | +6.64 | +12.47 | 0 | inside |
+| 3.57 | latency +1 | 2.2667 | r_hip_pitch | 9.032 | +19.87 | +9.32 | +11.92 | +6.63 | +12.47 | 0 | inside |
+| 3.57 | latency −1 | 2.1451 | l_knee | 11.872 | +20.30 | +8.20 | +11.60 | +6.59 | +12.23 | 0 | inside |
+| 3.57 | entrance rug | 2.1160 | l_hip_pitch | 7.232 | +20.15 | +0.00 | +8.54 | +0.00 | +10.64 | 0.036 | FAIL |
+| 3.57 | start/stop ×5 | 2.1602 | r_hip_pitch | 9.024 | +20.15 | +8.78 | +11.92 | +6.64 | +14.82 | 0 | inside |
+| 3.60 | nominal, shape 0 | 2.1500 | l_hip_pitch | 10.840 | +20.07 | +8.60 | +11.48 | +6.63 | +12.36 | 0 | inside |
+| 3.60 | seeds 0–2 | 2.1500 | l_hip_pitch | 10.840 | +20.07 | +8.60 | +11.41 | +6.61 | +12.31 | 0 | inside |
+| 3.60 | seeds 3, 5, 7, 9 | 2.1500 | l_hip_pitch | 10.840 | +20.07 | +8.68 | +11.68 | +0.00 | +12.22 | 0 | SS only |
+| 3.60 | seeds 4, 6, 8 | 2.1500 | l_hip_pitch | 10.840 | +20.07 | +8.78 | +11.50 | +3.87 | +12.18 | 0 | SS only |
+| 3.60 | mass −5% | 2.1351 | r_hip_pitch | 9.040 | +20.00 | +8.83 | +12.68 | +7.30 | +13.22 | 0 | inside |
+| 3.60 | mass +5% | 2.1384 | r_hip_pitch | 9.048 | +20.13 | +6.76 | +11.02 | +0.001 | +11.50 | 0 | SS only |
+| 3.60 | friction 1.2 | 2.1052 | r_hip_pitch | 9.056 | +19.85 | +11.25 | +12.71 | +0.001 | +12.48 | 0 | SS only |
+| 3.60 | friction 1.4 | 2.1271 | l_hip_pitch | 10.848 | +19.94 | +8.95 | +12.92 | +0.002 | +13.41 | 0 | SS only |
+| 3.60 | friction 1.6 | 2.1500 | l_hip_pitch | 10.840 | +20.07 | +8.60 | +11.48 | +6.63 | +12.36 | 0 | inside |
+| 3.60 | latency +1 | 2.2678 | r_hip_pitch | 9.048 | +19.79 | +9.14 | +11.83 | +6.62 | +12.47 | 0 | inside |
+| 3.60 | latency −1 | 2.0359 | r_hip_pitch | 9.040 | +20.35 | +8.10 | +11.74 | +6.58 | +12.31 | 0 | inside |
+| 3.60 | entrance rug | 2.1158 | l_hip_pitch | 7.264 | +20.07 | +0.00 | +8.46 | +0.00 | +10.55 | 0.039 | FAIL |
+| 3.60 | start/stop ×5 | 2.1500 | l_hip_pitch | 10.840 | +20.07 | +8.60 | +11.48 | +6.63 | +14.82 | 0 | inside |
+| 3.60 | shape 1 nominal | 2.3354 | r_hip_roll | 8.176 | +20.75 | +8.14 | +10.22 | +7.09 | +11.24 | 0 | dropped |
+| 3.60 | shape 1 mass −5% | 2.3237 | r_hip_roll | 8.176 | +20.82 | +8.36 | +11.52 | +0.003 | +12.10 | 0 | dropped |
+| 3.60 | shape 1 friction 1.2 | 2.3227 | l_hip_roll | 9.968 | +22.18 | +6.18 | +12.05 | +0.001 | +11.67 | 0 | dropped |
+| 3.60 | shape 1 latency −1 | 2.1451 | r_hip_roll | 8.168 | +20.80 | +7.92 | +10.24 | +7.05 | +11.15 | 0 | dropped |
+| 3.70 | shape 1 nominal | 2.2822 | r_hip_roll | 8.352 | +20.80 | +9.20 | +10.42 | +0.002 | +11.13 | 0 | dropped |
+| 6.40 | slow, shape 1 | 2.0055 | r_hip_roll | 2.816 | +21.64 | +9.85 | +10.38 | +6.50 | +10.82 | 0 | dropped |
+
+Flat shape 0 keeps every single-support tick at or above +5 mm. Dwell under 5 mm is 0 on those 38 cells. The nominal 3.57 s bout is contact CoP p1/p5/p50 +8.65 / +12.47 / +23.00 mm, single-support minimum +8.78 mm, single-support p5 +11.92 mm, whole-bout minimum +6.64 mm. CoM minimum is +20.15 mm. min up_z is 0.958. hard_cap is 0. The worst voice ask is the 3.60 s +1 tick delay, right hip pitch 2.2678 Nm at 9.048 s, headroom to 2.33 Nm +0.0622 Nm. It is 0.0678 Nm over the 2.20 Nm headroom. The nominal ask is right hip pitch 2.1602 Nm at 9.024 s.
+
+Eighteen of those 38 also keep the whole-bout minimum at or above +5 mm. The other twenty do not, and the miss is not single support. Seeds 3, 5, 7, and 9 are one stand tick at 0.008 s: the seeded foot carries about 5.2 N on two toe contacts, local x +97.5 mm, and the walk never returns there. Seeds 4, 6, and 8 are the same spawn, spread through about 0.16 s, bout minimum +3.87 to +4.10 mm. Mass +5% is three to five walk double-support ticks: the light foot is at 5.0–5.2 N on the toe face and the stance foot still has about +25 mm. Friction 1.2 and 1.4 are one double-support tick near the start of the gait clock, before the toe-up is scheduled. Single-support dwell on all of those is 0.
+
+The entrance rug fails the single-support bar. At 9.312 s on the 3.57 s row the right foot has 5.63 N, two floor contacts and two rug contacts, and the combined CoP is +0.08 mm inside the toe face. The left foot, the declared stance, has +30.86 mm. Dwell under 5 mm is 0.036 (3.57 s) and 0.039 (3.60 s). The lip is 20 mm and the swing gap is 4 mm. The foot does not clear it. min up_z stays 0.957. Ask stays 2.1160 Nm. The clip `docs/media/voice_vx_056_side_front.mp4` was rendered again on this toe-up gait: stand 3.00 s, vel(0.056, 0) for 11.00 s, stop 6.00 s, side and front, 30 fps, 600 frames, 20.00 s, fault none. Not kit-safe. Not go-anywhere.
+
+That clip is a skate. The same sim the renderer steps, not a replay: `render_side_front` builds a `SteerSession` on `gait_for_command`, publishes the voice script, calls `session.step`, then `session.render`. It does not call `mj_forward`. On that toe-up bout the walk stage is t 5.400–14.000. Five swing intervals, 67 ticks each. Airborne is normal force under 1 N and zero floor contacts. Left 6.040–6.568: airborne ticks 0, contact Δx +5.04 mm, sole −0.77 to −0.23 mm, stance slip 0.60 mm. Left 9.624–10.152: airborne 2 ticks, airborne Δx +0.90 mm, contact Δx +14.12 mm, sole mid −0.00 mm. Left 13.208–13.736: airborne 3 ticks, airborne Δx +0.93 mm, contact Δx +14.98 mm. Right 7.832–8.360: airborne 0, contact Δx +5.16 mm. Right 11.416–11.944: airborne 4 ticks, airborne Δx +1.55 mm, contact Δx +14.51 mm. Airborne forward sum 3.4 mm. Contact-during-swing forward sum 53.8 mm. Trunk Δx during the walk stage +32.4 mm in 8.60 s, 0.0038 m/s, not 0.056 m/s. Stance slip per step max 0.98 mm. Fore/aft separation (left x minus right x) −12.8 to +15.7 mm, median −0.4 mm. The lowest sole corner peaks at +0.01 mm. The swing foot never leaves the floor. Trunk pitch at the stand is −2.08 deg. From 14.008 s to 20.000 s it sits at +15.98 to +14.83 deg, end delta +16.92 deg. The stop freezes the walk pose.
+
+A 4 mm foot height on the 3.57 s, dsp 0.70 swing (0.535 s) does not clear 8 mm under 2.33 Nm. At that period, commanding 8 mm already asks 3.81 Nm on the knee and the sole stays on the floor. Commanding 16 mm on a long swing does clear the sole, and the 5–13 Nm numbers were the first arm tick: the full foot height appeared in one step, knee error −0.085 rad, and the ask was 5.71 Nm at t 0.424 s. The foot height now grows with the existing 2.4 s arm. The start knee on the stepping row is 1.79 Nm.
+
+The voice row is now period 7.00 s, dsp 0.35, foot height 18 mm, step amplitude 11 mm. `gm_x_m` is that amplitude. `vx/7.50` was fit on the skate and is not the step. The bus command is still vel(0.056, 0). The body does not walk at 0.056 m/s. A step that would is about 0.13 m at this period, and the hip pitch is already 2.17 Nm at 11 mm. Longer periods do not buy a longer step: the miss is position error on the hip, not speed. Shorter periods at a height that clears 8 mm put the knee over 2.33 Nm. 0.0038 m/s is the measured speed of this step, from the first completed liftoff to the last landing.
+
+Scored stand 0.40 s, walk 11.00 s, stop 6.00 s, plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`, soft-pass off, y_swap 0. Two completed steps. Mid-swing sole 10.58 mm, peak 10.60 mm, bar 8 mm. Stance slip 0.33 mm per step, sum 0.64 mm, bar 2 mm. Airborne fore/aft separation 18.91 mm against the 11 mm amplitude. Step fraction 0.906, the airborne share of each swing foot's forward travel, bar 0.90. Swing-foot advance 19.0 mm. Stop pitch −0.07 deg from the stand. Stepping speed 0.0038 m/s. Unclamped ask 2.1745 Nm, left knee, t 11.016 s, headroom to 2.33 Nm +0.1555 Nm. Declared CoM minimum +19.53 mm, outside 0. Contact CoP p5 +6.72 mm, single-support p5 +14.15 mm, single-support minimum +9.38 mm, whole-bout minimum +0.003 mm. min up_z 0.943. hard_cap 0. The scorer prints clearance, slip, separation, step fraction, and stop pitch, and CLEAR requires them with the old bars. The stop finishes the swing that is in the air, then blends the joints to the spawn stand over 2 s. A 0.070 rad toe-up on both feet is held through that blend and faded at the end, so the light foot does not sit on the toe face while the knees move. It is not applied during the swing.
+
+Latency +1 asks 2.367 Nm and fails 2.33. The step itself still clears. Latency −1, mass ±5%, and seed 0 clear. Friction 1.2 keeps the step and asks 2.207 Nm, and whole-bout CoP p5 is +4.50 mm, under +5. The entrance rug fails: mid-swing sole 0.13 mm, the 20 mm lip is taller than the step, ask 2.354 Nm. Not kit-safe. Not go-anywhere.
+
+The clip `docs/media/voice_vx_056_side_front.mp4` was rendered on this gait from the same live session, with a cyan trace on the left foot and an orange trace on the right. Stand 3.00 s, vel(0.056, 0) for 11.00 s, stop 6.00 s, side and front, 30 fps, 600 frames, 20.00 s, fault none. The overlay speed is the bus command. The body speed is 0.0038 m/s.
+
+Two more bars, and this bout does not clear them. Clearance is the lowest of the four bottom corners of the 135×76 mm contact box (half-length 67.5 mm), and the bar is the minimum of that corner over 20–80% of the swing. Commanded step length is vx·T/2, and each step's airborne world-x advance has to land within ±20% of it. On this 7.00 s row the command is 0.056 × 3.50 = 196.0 mm. The two landed swings are left 3.416–5.688 s, airborne advance 18.4 mm, and right 6.920–9.192 s, airborne advance 18.8 mm. Ratios 0.094 and 0.096. The ±20% band is 156.8–235.2 mm. The lowest corner over 20–80% is −0.01 mm on the left and −0.00 mm on the right. The same corner does reach 10.60 mm, and it stays at or above 8 mm only from about 39% to 64% of each full swing. Stance slip is still 0.33 mm and the airborne share of forward travel is still 0.906. Ask is still 2.1745 Nm. Declared CoM is still +19.53 mm. Contact CoP p5 is still +6.72 mm. Stop pitch is still −0.07 deg. Plant md5 is still `207f3d5e9c6a72e16f7aa0c8d224f75e`. The miss is the step length and the 20–80% corner, not those. 0.056 m/s at this period is a 196 mm step. The torque bar does not lift that. It lifts about 19 mm.
+
+The same four bars on the earlier rows, same plant, same window (stand 0.40 s, walk 11.00 s, stop 3.00 s). Every one of them was sliding. Air is the airborne world-x advance. Cmd is vx·T/2. Clear is the lowest corner over 20–80%. None of these swings has that corner at 8 mm, so none is a completed step.
+
+`58ce1d8`, the slow row, period 6.40 s, dsp 0.70, swing z 4 mm, vx 0.040 m/s, commanded 128.0 mm. Four swings, airborne advance 0.0 mm on each, n_air 0, step fraction 0. Lowest corner −0.63 to −1.15 mm. Stance slip 1.05, 2.02, 1.05, 0.24 mm.
+
+`58ce1d8`, the 0.150 m/s row, period 2.80 s, dsp 0.55, swing z 8 mm, commanded 210.0 mm. Eight swings. Airborne advance 5.4, 30.0, 37.1, 37.1 mm on the left and 13.1, 38.3, 38.3, 42.4 mm on the right. The best ratio is 0.202. Lowest corner −0.65 to −1.47 mm, and the highest that corner gets inside the window is +0.11 mm. Step fraction 0.127 to 0.613. Stance slip 1.64 to 5.38 mm. The foot rocks. It does not clear the box.
+
+`ac81435`, vx 0.056 m/s, dsp 0.70, swing z 4 mm. The 3.60 s row is the one whose commanded length is 0.056 × 1.80 = 100.8 mm. Five swings, airborne advance 0.0 mm on each, n_air 0, step fraction 0. Lowest corner −0.73 to −0.79 mm. Stance slip 0.92, 2.64, 2.72, 0.94, 2.75 mm. The 6.40 s row commands 179.2 mm and advances 0.0 mm, slip up to 3.00 mm, corner −0.63 to −1.18 mm. The 4.60 s row commands 128.8 mm and advances 0.0 mm, slip up to 2.99 mm. The 3.70 s row commands 103.6 mm and advances 0.0 mm, slip up to 2.76 mm. The 3.50 s row commands 98.0 mm and advances 0.0 mm, slip up to 2.69 mm. The 2.80 s row commands 78.4 mm and advances 0.0 mm on six swings and 0.8 mm on the last, slip up to 2.87 mm. The 4.60 s row at swing z 6 mm commands 128.8 mm and advances 0.0 mm, corner −0.62 to −0.66 mm, slip up to 2.08 mm. Those CLEARs were CoM, ZMP, and torque. The feet stayed on the floor.
+
+`period` is one full left-right cycle, not one step. `OP3Walk.update_time` puts left single support at `(1−ssp)·T/4` to `(1+ssp)·T/4` and right single support at `(3−ssp)·T/4` to `(3+ssp)·T/4`, and the clock wraps at `T`. One step is `T/2`. The step-length bar is the fore/aft placement of the landing foot relative to the stance foot, `vx·T/2`. The world airborne advance of that swing foot is the stride, `vx·T`. At double support the two feet sit at `±vx·T/4` from the pelvis, horizontal, along the heading. All three are ±20%. At 3.60 s and 0.056 m/s those targets are 100.8 mm, 201.6 mm, and ±50.4 mm. On this 7.00 s row they are 196.0 mm, 392.0 mm, and ±98.0 mm.
+
+The same two landings, measured again. Left 3.416–5.688 s: placement +10.4 mm, airborne advance +18.4 mm, pelvis +14.6 mm and +1.5 mm, hip-pitch-to-ankle-pitch vertical 165.6 mm and 164.9 mm. Right 6.920–9.192 s: placement +5.1 mm, airborne advance +18.8 mm, pelvis +14.6 mm and +1.5 mm, vertical 165.6 mm and 164.9 mm. The straight chain, thigh plus calf, is 186.0 mm. A foot 50 mm forward of the pelvis on that chain sits 179.1 mm below the hip pitch. The walk's shortest vertical is 150.1 mm, and it is 159.5 mm on the tick of the 2.1745 Nm knee. That crouch is deeper than the ±50 mm reach, and the unclamped ask on it is 2.1745 Nm, under 2.33 Nm. The feet are not at ±50 mm. The landing foot is 5 to 10 mm ahead of the stance foot, and both sit within 15 mm of the pelvis. The 100.8 mm step and the 201.6 mm stride are not what this torque is lifting.
+
+`kit_bus_step` is the slip. It sets `x_amp = min(0.020, |vx|/7.50)` and does not read the period. `KIT_BODY_PER_X = 7.50` is the body speed per metre of `x_amp` on the short kit cycle, where `4/T` is about 8. At vx 0.056 m/s that formula returns 7.47 mm at every period. A planted stance foot means the hip-frame x of that foot runs from `+x_amp` to `−x_amp`, so the hip advances `2·x_amp` per swing and `4·x_amp` per cycle. The step that matches the bus is `x_amp = vx·T/4`. At 3.60 s that is 50.40 mm, a 100.8 mm placement, a 201.6 mm world stride, and double-support feet at ±50.4 mm. The kit command is 14.8% of that amplitude. `2·x_amp` is 14.93 mm of hip-frame travel against the 201.6 mm stride, which is the 7% the scorer saw. It is not metres against centimetres, and it is not a per-tick step. At T 0.50 s the same formula is 7.47 mm against a kinematic 7.00 mm, 107%. At T 7.00 s it is 7.6% of the 98 mm the bus would need.
+
+On a steady kinematic cycle at that kit amplitude, period 3.60 s, dsp 0.70, swing z 4 mm, sole_level 0, `previous_x` is half the command so the move is the full 7.47 mm. Hip-frame foot x spans −7.68 to +7.68 mm, 15.35 mm. The hip-frame sole gap is ±4.00 mm. The endpoint is the foot end. IK then adds the 26.0 mm ankle along the foot axis. Mid left swing at 0.904 s: left endpoint (0.2, 5.0, −184.0) mm, hip pitch −0.7986 rad, ankle pitch +0.5782 rad; right endpoint (−0.2, −5.0, −188.0) mm, hip pitch +0.7565 rad, ankle pitch −0.5358 rad. A floating-base FK of that pose pitches both soles −14.97° and −14.89°, corner spreads 37.27 mm and 41.40 mm, and the lowest-corner gap is still +4.32 mm because both feet carry the same pitch. sole_level 1 zeros that pitch (spreads 2.32 mm and 6.62 mm) and the gap is +4.39 mm. The 4 mm is on the sole, not on the ankle origin.
+
+The same 4 mm in physics does not clear. The sine gap is `z·sin(πf)²`. At 20% and 80% of the swing that is 34.5% of the peak, 1.38 mm. The loaded pelvis sits low enough that an exact IK of the 4 mm peak, posed on the live base, puts the swing sole at about +0.1 mm and the stance sole a few millimetres into the floor. The measured lowest corner on that skate peaks at −0.07 mm and stays negative through 20–80%. Airborne ticks are 0. The swing ankle tracks the IK within about 2 mrad, inside the 16 mrad band, so the clamp is not what holds the corner down. Hip error is about −0.020 rad and knee error about +0.012 rad. World sole pitch on that skate is about 0.5° to 1.3°, which eats about 1 mm of a 135 mm sole, not the 4 mm a 3.4° pitch would eat (`sin(3.4°)·67.5 mm`). The 15° shows up only in the floating FK. Physics leans the trunk so both soles stay nearly parallel to the floor, and the relative 4 mm is then lost to the sine edge and to the crouch. Hip-pitch to ankle-pitch vertical under that load is about 161–162 mm. The chain is 186.0 mm.
+
+`d7b06e7` froze the walk pose at the stop. sole_level 0 holds the kit hip-pitch offset, and the trunk leans until both soles are flat. In this tree pitch is `atan2(−R[2,0], hypot(R[0,0], R[1,0]))`, positive nose-down. That freeze is about +14.7°. The external −14.6° is the same lean with the sign flipped. The stand, sole_level 1, is about −2°. The stop now blends the joints to the spawn stand over 2 s. A fixed 0.070 rad toe-up during that blend parked the just-landed right sole on the heel face, local CoP x exactly −37.5 mm. Zeroing the toe-up left the heel there. The blend ankle is now a pitch null: sign +1 left and −1 right, times `clamp(4·sole_pitch, ±0.12 rad)`, held until 80% of the blend and then faded. Positive left ankle pitch raises the left toe. Positive right ankle pitch lowers the right toe. Slew is 1.20 rad/s during the blend and 0.35 rad/s otherwise. The 16 mrad band is skipped while the blend is running.
+
+0.056 m/s of a real step does not fit under 2.33 Nm. At T 3.60 s the kinematic amplitude is 50.4 mm. With an 18 mm flat sole, the x ramp, and a 4 s arm, the walk knee asks 12.1 to 12.9 Nm on the left knee, the 20–80% corner stays negative, and the bout faults. A 112 mm step at T 8 s faults in the arm, left hip pitch 13.8 Nm, before any swing. The binding joint for the bus step is the knee. The first cycle used to halve `x_amp` because `previous_x` starts at 0. The voice path sets `previous_x` to the capped amplitude at the walk entry, and it ramps x with the arm so the hip does not take the step in one tick. Commands under the deadband, `0.08·0.150 = 0.012 m/s`, snap to stand, so the bus stays vel(0.056, 0) and the gait caps the step. The cap is not changed. y_swap stays 0.
+
+The longest step whose lowest corner stays at 8 mm over 20–80% of the swing, under 2.33 Nm, is 21 mm of hip-frame amplitude on a 20.0 s cycle, dsp 0.35, swing sole 18 mm held flat from 20% to 80%. At T 19 s and 20 mm the knee asks 2.374 Nm. At T 20 s and 22 mm the window corner is 7.95 mm. Body speed of the wired step is `4·0.021/20 = 0.0042 m/s`. Placement of that step is 42 mm, world travel 84 mm, double support ±21 mm. The scorer still compares those to `vx·T`, which at 0.056 m/s and 20 s is 560 mm, 1120 mm, and ±280 mm. That bar is not lowered.
+
+Scored stand 0.40 s, walk 22.00 s, stop 8.00 s, 3801 ticks, plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`, soft-pass off, y_swap 0. Prefer FAIL, and the only miss is that length. Two completed steps. Lowest corner over 20–80% is 8.08 mm, peak 10.80 mm, bar 8 mm. Stance slip 1.23 mm per step, sum 2.46 mm, bar 2 mm. Step fraction 0.946, bar 0.90. Phase and contact agree on every window tick. Stance contacts in single support stay at 4, bar 3. Stop is flat: corner spread 0.98 mm, sole pitch 0.29°, trunk −0.07° from the stand. Left 4.552–11.048 s: placement +49.9 mm, airborne +76.6 mm, pelvis +27.5 mm and −17.0 mm, crouch 165.7 mm and 164.8 mm, corner 8.09 mm, slip 1.23 mm, fraction 0.947, n_air 634. Right 14.552–21.048 s: placement +26.0 mm, airborne +77.5 mm, pelvis +28.3 mm and −16.1 mm, crouch 165.7 mm and 164.9 mm, corner 8.08 mm, slip 1.23 mm, fraction 0.946, n_air 635. The left placement is inside ±20% of 42 mm. The right placement is short of 42 mm. Both airborne advances are inside ±20% of 84 mm. None of them is inside ±20% of 560 mm or 1120 mm. Stepping speed from the body over those two swings is 0.0057 m/s. Trunk Δx over the bout is +71 mm.
+
+Unclamped ask 2.2567 Nm, right hip roll, t 2.832 s, stage walk, q −0.11738 rad, q_des −0.08599 rad, kp 40, kv 1.703, omega +0.588 rad/s. Headroom to 2.33 Nm is +0.0733 Nm. It is 0.0567 Nm over the old 2.20 Nm headroom. The start ask is right hip roll 2.113 Nm at 2.784 s. The stop ask is right ankle pitch 1.503 Nm at 24.448 s. hard_cap 0. ik_fail 0. fault none. Declared-box CoM minimum +15.11 mm, single-support +19.64 mm and +19.28 mm, outside 0. Contact CoP whole-bout minimum +0.002 mm, p5 +6.36 mm, single-support p5 +8.82 mm, single-support minimum +6.34 mm. min up_z 0.949. Joint jerk peaks at 617 rad/s³ on the right ankle pitch, rms 24.4, against the #102 baseline 39843 / 4111. CoM jerk peaks at 88.9 m/s³, rms 3.00, against 1049 / 132. The support-hull CoM prints −10.38 mm at 23.736 s, when the right foot is at 4.98 N and the hull collapses onto the left foot. That is not the declared-box gate. The declared margin on that bout stays +15.11 mm and the outside count stays 0. Crouch minimum is 150.0 mm. On the ask tick it is 165.3 mm. Reach at ±50 mm on the 186.0 mm chain is 179.1 mm. Not kit-safe. Not go-anywhere.
+
+The clip `docs/media/voice_vx_056_side_front.mp4` was rendered on this gait from the same live session, with a cyan trace on the left foot and an orange trace on the right. Stand 2.00 s, vel(0.056, 0) for 22.00 s, stop 6.00 s, side and front, 30 fps, 901 frames, 30.03 s, fault none. The overlay speed is the bus command. The body speed of the step is 0.0042 m/s.
+
+## Kit cadence, kinematic step
+
+The voice step is `x_amp = vx·T/4`. `kit_bus_step` still returns `|vx|/7.50` and ignores the period. The voice path does not use that cap. `gait_for_command` for `vel(vx ≤ 0.056, yaw)` is now period 0.50 s, dsp 0.25, swing sole 8 mm, ZMP reference 43 mm, crouch 25 mm, arm 1.00 s. At the bus speed the amplitude is 7.0 mm. y_swap stays 0. Soft-pass is off. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` is unchanged. There is no ±2.33 solve.
+
+The sway is the cart-table orbit, not the 43 mm box centre as a CoM target. `sway_zmp_amp` picks the ZMP amplitude whose steady CoM peak is 16 mm, and it stops at the box centre when the orbit cannot get there. At T 0.50 s a 43.00 mm reference peaks at 10.83 mm of CoM. At T 0.60 s the same cap is 42.94 mm and the orbit just reaches 16.00 mm. Longer cycles need less reference: 28.31 mm at 0.80 s, 22.85 mm at 1.00 s, 20.23 mm at 1.20 s, 17.93 mm at 1.60 s, 16.98 mm at 2.00 s.
+
+The swing rise is a raised cosine that starts in the double support before the swing and holds the sine peak from the start of single support through 90%. The score window is still 20–80% of the swing. A completed step needs more than 10 airborne ticks and a lowest corner at or above 8 mm through that window. `n_steps` is that count. The fraction below is the airborne share of forward travel on landed swings, including swings that never clear 8 mm. A dash is a period with no landed swing long enough to score. Phase 1.000 with stance-contact 0 is that empty window.
+
+Stand 0.25 s, arm 1.00 s, walk `1.00 + 2.05·T`, stop 2.40 s. Forty-two cells. Zero pass. Zero completed steps. The lowest unclamped ask on the 8 mm sole is 7.61 Nm.
+
+| T s | vx | x_amp mm | Ask Nm | Joint | Clear mm | Peak mm | Frac | Slip mm | Phase | Stance n | CoM mm | CoP p5 | Result |
+| ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 0.50 | 0.016 | 2.00 | 9.13 | l_knee | — | — | — | — | 1.000 | 0 | 0.1 | 0.0 | FAIL |
+| 0.50 | 0.024 | 3.00 | 8.57 | l_knee | — | — | — | — | 1.000 | 0 | 0.1 | 0.0 | FAIL |
+| 0.50 | 0.032 | 4.00 | 8.60 | l_knee | -0.07 | 1.52 | 0.908 | 0.17 | 0.429 | 4 | 0.1 | 0.0 | FAIL |
+| 0.50 | 0.040 | 5.00 | 8.62 | l_knee | -0.02 | 1.64 | 0.786 | 0.16 | 0.357 | 4 | 0.1 | 0.0 | FAIL |
+| 0.50 | 0.048 | 6.00 | 8.37 | l_knee | -0.01 | 1.56 | 0.751 | 0.14 | 0.286 | 4 | 0.1 | 0.0 | FAIL |
+| 0.50 | 0.056 | 7.00 | 8.40 | l_knee | -0.04 | 1.69 | 0.680 | 0.11 | 0.357 | 4 | 0.2 | 0.0 | FAIL |
+| 0.60 | 0.016 | 2.40 | 7.61 | r_knee | -0.27 | 1.19 | 0.845 | 0.11 | 0.588 | 4 | -0.1 | 0.0 | FAIL |
+| 0.60 | 0.024 | 3.60 | 7.71 | r_knee | -0.19 | 1.33 | 0.825 | 0.09 | 0.529 | 4 | -0.1 | 0.0 | FAIL |
+| 0.60 | 0.032 | 4.80 | 7.81 | r_knee | -0.09 | 1.19 | 0.675 | 0.08 | 0.471 | 4 | -0.1 | 0.0 | FAIL |
+| 0.60 | 0.040 | 6.00 | 7.89 | r_knee | -0.22 | 1.14 | 0.543 | 0.09 | 0.529 | 4 | -0.0 | 0.0 | FAIL |
+| 0.60 | 0.048 | 7.20 | 8.03 | l_knee | -0.22 | 1.11 | 0.555 | 0.09 | 0.529 | 4 | 0.1 | 0.0 | FAIL |
+| 0.60 | 0.056 | 8.40 | 8.16 | l_knee | -0.33 | 1.15 | 0.393 | 0.11 | 0.588 | 4 | 0.3 | 0.0 | FAIL |
+| 0.80 | 0.016 | 3.20 | 8.55 | l_knee | -0.53 | -0.22 | 0.000 | 0.46 | 1.000 | 3 | -5.4 | 0.0 | FAIL |
+| 0.80 | 0.024 | 4.80 | 11.26 | r_knee | -0.53 | -0.10 | 0.000 | 0.56 | 1.000 | 3 | -5.1 | -0.3 | FAIL |
+| 0.80 | 0.032 | 6.40 | 11.64 | r_knee | -0.54 | 0.02 | 0.120 | 0.65 | 0.952 | 3 | -4.8 | 0.0 | FAIL |
+| 0.80 | 0.040 | 8.00 | 12.07 | r_knee | -0.67 | 1.31 | 0.201 | 0.72 | 0.690 | 3 | -4.5 | -2.2 | FAIL |
+| 0.80 | 0.048 | 9.60 | 12.57 | r_knee | -0.63 | 1.10 | 0.142 | 0.78 | 0.667 | 3 | -4.2 | -1.8 | FAIL |
+| 0.80 | 0.056 | 11.20 | 12.97 | r_knee | -0.53 | 1.43 | 0.142 | 0.81 | 0.595 | 3 | -3.9 | 0.0 | FAIL |
+| 1.00 | 0.016 | 4.00 | 11.57 | r_knee | -1.48 | 0.45 | 0.000 | 0.59 | 0.944 | 2 | -6.9 | -9.6 | FAIL |
+| 1.00 | 0.024 | 6.00 | 11.68 | r_knee | -1.34 | 9.65 | 0.093 | 1.99 | 0.815 | 2 | -7.7 | -10.1 | FAIL |
+| 1.00 | 0.032 | 8.00 | 12.19 | r_knee | -1.25 | 8.05 | 0.094 | 1.56 | 0.778 | 2 | -9.3 | -16.6 | FAIL |
+| 1.00 | 0.040 | 10.00 | 14.00 | r_knee | -0.74 | 6.83 | 0.084 | 1.18 | 0.611 | 2 | -10.1 | -6.6 | FAIL |
+| 1.00 | 0.048 | 12.00 | 11.77 | r_knee | -1.38 | 7.41 | 0.000 | 2.17 | 0.585 | 2 | -10.1 | -7.3 | FAIL |
+| 1.00 | 0.056 | 14.00 | 12.63 | r_knee | -0.75 | 7.42 | 0.155 | 1.49 | 0.556 | 2 | -10.4 | -7.5 | FAIL |
+| 1.20 | 0.016 | 4.80 | 10.79 | r_knee | -1.91 | 13.14 | 0.000 | 2.32 | 0.892 | 2 | -21.4 | -16.1 | FAIL |
+| 1.20 | 0.024 | 7.20 | 11.48 | r_knee | -1.81 | 10.74 | 0.075 | 1.85 | 0.794 | 2 | -20.6 | -23.3 | FAIL |
+| 1.20 | 0.032 | 9.60 | 14.00 | r_knee | -1.48 | 13.02 | 0.000 | 2.88 | 0.797 | 2 | -21.2 | -19.6 | FAIL |
+| 1.20 | 0.040 | 12.00 | 11.86 | r_knee | -1.45 | 11.81 | 0.264 | 2.87 | 0.676 | 2 | -20.2 | -16.1 | FAIL |
+| 1.20 | 0.048 | 14.40 | 11.36 | r_knee | -1.56 | 10.31 | 0.214 | 2.78 | 0.667 | 2 | -19.0 | -11.4 | FAIL |
+| 1.20 | 0.056 | 16.80 | 9.93 | r_knee | -1.64 | 9.21 | 0.231 | 2.02 | 0.833 | 2 | -19.9 | -22.9 | FAIL |
+| 1.60 | 0.016 | 6.40 | 8.83 | l_knee | -2.67 | 13.35 | 0.082 | 5.11 | 0.874 | 0 | -24.9 | -58.1 | FAIL |
+| 1.60 | 0.024 | 9.60 | 9.00 | l_knee | -2.36 | 11.72 | 0.056 | 5.45 | 0.889 | 2 | -25.0 | -46.7 | FAIL |
+| 1.60 | 0.032 | 12.80 | 9.27 | l_knee | -2.39 | 10.27 | 0.218 | 4.13 | 0.837 | 2 | -25.5 | -47.7 | FAIL |
+| 1.60 | 0.040 | 16.00 | 9.58 | l_knee | -1.96 | 7.85 | 0.140 | 3.48 | 0.837 | 2 | -24.8 | -40.0 | FAIL |
+| 1.60 | 0.048 | 19.20 | 9.91 | r_knee | -1.67 | 6.84 | 0.171 | 4.73 | 0.830 | 2 | -26.7 | -34.0 | FAIL |
+| 1.60 | 0.056 | 22.40 | 10.18 | l_knee | -1.70 | 8.88 | 0.194 | 5.19 | 0.815 | 2 | -28.7 | -31.8 | FAIL |
+| 2.00 | 0.016 | 8.00 | 10.46 | r_knee | -2.75 | 13.29 | 0.761 | 8.01 | 0.855 | 0 | -24.6 | -67.3 | FAIL |
+| 2.00 | 0.024 | 12.00 | 9.78 | r_knee | -2.55 | 11.39 | 0.531 | 7.31 | 0.806 | 0 | -24.2 | -49.5 | FAIL |
+| 2.00 | 0.032 | 16.00 | 8.41 | l_knee | -2.28 | 10.59 | 0.130 | 6.12 | 0.909 | 1 | -30.6 | -43.4 | FAIL |
+| 2.00 | 0.040 | 20.00 | 8.83 | r_knee | -2.09 | 10.10 | 0.164 | 6.73 | 0.866 | 1 | -25.3 | -40.8 | FAIL |
+| 2.00 | 0.048 | 24.00 | 10.04 | r_knee | -1.96 | 10.61 | 0.165 | 7.24 | 0.911 | 1 | -26.5 | -37.6 | FAIL |
+| 2.00 | 0.056 | 28.00 | 10.84 | r_knee | -1.87 | 9.36 | 0.221 | 10.81 | 0.896 | 1 | -27.3 | -36.3 | FAIL |
+
+The design point is T 0.50 s, vx 0.056 m/s, x_amp 7.00 mm. Unclamped ask 8.4046 Nm, left knee, t 2.312 s, stage stop, q +1.08404 rad, q_des +0.98456 rad, kp 45, kv 1.4573, omega −2.6954 rad/s. The velocity term is 3.93 Nm and the 0.099 rad position error is 4.48 Nm. Lowest corner over 20–80% is −0.04 mm, peak 1.69 mm. Airborne share 0.680. Stance slip 0.11 mm. Phase mismatch 0.357. Stance contacts in the window stay at 4. Placement +5.7 mm against 14.0 mm. Airborne advance +10.0 mm against 28.0 mm. One landed swing, `n_steps` 0. Declared CoM minimum +0.23 mm, outside count 0. The support-hull print is −17.49 mm at 2.488 s, stop, right foot 4.90 N, and that hull is not the declared gate. Contact CoP minimum −9.70 mm, 6 ticks outside, whole-bout p5 +0.01 mm, single-support p5 −6.03 mm, single-support minimum −9.70 mm. The +5 mm CoP bar misses. Joint jerk is left knee 19339 / 1412 rad/s³, under the #102 baseline 39843 / 4111. CoM jerk is 349.4 / 35.0 m/s³, under 1048.991 / 132.473. Stop is flat: corner spread 0.97 mm, sole pitch 0.36°, min up_z 0.958. hard_cap 0. ik_fail 0. fault none.
+
+The cell with airborne share at or above 0.90 is T 0.50 s, vx 0.032 m/s, x_amp 4.00 mm. Fraction 0.908. Lowest corner −0.07 mm, peak 1.52 mm, `n_steps` 0. Ask 8.5966 Nm, left knee, t 2.320 s, stop, omega −2.7254 rad/s. CoP p5 0.0 mm. Phase mismatch 0.429. It is the same miss as the design point, on a shorter step.
+
+Commanding a taller sole does not buy the 8 mm corner. On the design point, sole command 3 mm asks 5.9463 Nm on the left hip roll (q −0.01562, q_des −0.10834, omega −1.3141) and the corner peaks at +0.61 mm with airborne share 0. Command 4 mm asks 6.2874 Nm on that hip roll, peak 0.00 mm, fraction 0.050. Command 6 mm asks 6.6962 Nm on the hip roll, peak +0.54 mm, fraction 0.295, window −0.31 mm. Command 10 mm asks 11.6861 Nm on the left knee, peak +2.90 mm, window −0.01 mm, fraction 0.931, declared CoM −0.2 mm. The highest lowest-corner in that slice is still under the floor through 20–80%. The 8 mm bar is not met at any sole command that was run, and every one of them asks more than 2.33 Nm.
+
+A shallower crouch raises the ask. On the design point, crouch 8 mm asks 23.7770 Nm on the left knee, omega −7.5324 rad/s, and no swing is scored. Crouch 12 mm asks 14.7140 Nm, fraction 0.802, window −0.28 mm. Crouch 18 mm asks 10.4878 Nm, fraction 0.708, window −0.08 mm. Crouch 25 mm is the 8.4046 Nm row above. The knee rate during the lift is the term that grows as the leg straightens.
+
+Double support from 0.10 to 0.30, same design point, stays on the knee:
+
+| dsp | Ask Nm | Joint | Clear mm | Frac | CoM mm |
+| ---: | ---: | --- | ---: | ---: | ---: |
+| 0.10 | 9.07 | l_knee | −0.24 | 0.730 | −2.7 |
+| 0.15 | 8.68 | r_knee | −0.05 | 0.647 | −1.6 |
+| 0.20 | 8.59 | r_knee | −0.17 | 0.667 | −0.7 |
+| 0.25 | 8.40 | l_knee | −0.04 | 0.680 | +0.2 |
+| 0.30 | 8.53 | l_knee | −0.06 | 0.697 | +1.0 |
+
+0.25 is the lowest ask in that slice. Declared CoM is negative at dsp 0.20 and below.
+
+There is no passing row to perturb. The spot-check is the design point, and the same five cells on the 0.032 m/s row. Mass ±5%, sliding friction 1.2, latency ±1 tick. The plant file is not written.
+
+| Row | Cell | Ask Nm | Joint | Clear mm | Frac | CoM mm |
+| --- | --- | ---: | --- | ---: | ---: | ---: |
+| 0.056 | nominal | 8.40 | l_knee | −0.04 | 0.680 | +0.2 |
+| 0.056 | mass −5% | 8.41 | l_knee | −0.04 | 0.743 | +0.3 |
+| 0.056 | mass +5% | 8.61 | l_knee | −0.18 | 0.621 | +0.2 |
+| 0.056 | friction 1.2 | 8.14 | r_knee | −0.01 | 0.798 | +1.4 |
+| 0.056 | latency +1 | 9.71 | l_knee | −0.06 | 0.723 | +1.4 |
+| 0.056 | latency −1 | 9.12 | l_knee | −0.02 | 0.704 | −0.9 |
+| 0.032 | nominal | 8.60 | l_knee | −0.07 | 0.908 | +0.1 |
+| 0.032 | mass −5% | 8.39 | l_knee | — | — | +0.2 |
+| 0.032 | mass +5% | 8.84 | l_knee | −0.25 | 0.736 | +0.0 |
+| 0.032 | friction 1.2 | 7.97 | l_knee | — | — | +1.2 |
+| 0.032 | latency +1 | 9.69 | l_knee | −0.14 | 0.893 | +1.2 |
+| 0.032 | latency −1 | 9.59 | l_knee | — | — | −0.9 |
+
+Every perturbed cell fails the ask, the CoP p5 bar, and the step. Friction 1.2 on the design point is the lowest of those asks, 8.1375 Nm, and the window corner is −0.01 mm.
+
+The clip `docs/media/voice_vx_056_side_front.mp4` is this design point, from the same live session, cyan on the left foot and orange on the right. Stand 1.00 s, vel(0.056, 0) for 4.00 s, stop 2.50 s, side, front, and the sole camera, 30 fps, 225 frames, 7.50 s, fault none. The file previously held the 20 s / 21 mm render, and then a two-panel cadence render. The overlay on every panel is the live lowest corner in mm, the contact count, and the normal in N. At 2.50 s that overlay reads R 1.66 mm, n 0, 0.0 N and L −1.14 mm, n 4, 21.7 N, and the sole panel shows a small gap under the right sole. The body stays near the spawn. The stop is upright with both soles down. The design point was scored again after airborne became zero contacts and all eight corners clear. The fraction stayed 0.680. The window corner stayed −0.04 mm. One left swing, clock 1.288–1.472 s, lift 1.368 s, touchdown 1.440 s, airborne peak 1.69 mm, airborne x +10.0 mm, n_air 9. The 42-cell table above is the earlier pass. Not kit-safe. Not go-anywhere.
+
+## Render honesty, d6e8b5e
+
+The 8.08 mm figure and a review that sees no lift are two readings of one bout. The wide camera sits 1.70 m out, elevation −8°, 640×480, 45° vertical fov. That frame spans about 1.41 m, about 2.9 mm per pixel, so an 8 mm gap is about 3 pixels, and the foot also travels about 76 mm. The review of that picture — soles flush with their reflections, left foot sliding from about 2 s to 13 s, right foot sliding up to meet it from about 13 s to 23 s, trunk held in a lean — is what those 3 pixels look like. The contact box on the same ticks is clear of the floor.
+
+Clearance is the lowest of the eight corners of the 135×76×16 mm contact box, taken from `geom_xpos` and `geom_xmat`. Airborne is zero floor contacts and every one of those corners above the plane z=0. The declared phase is not an input to that test. Phase mismatch still scores the 20–80% window of the clocked swing. A completed step is a landed swing with more than 10 airborne ticks and that window corner at or above 8 mm. Step fraction is the airborne share of forward travel on landed swings, including swings that never clear 8 mm.
+
+Scored on `d6e8b5e` with stand 0.40 s, walk 22.00 s, stop 8.00 s, 3801 ticks, live mjData. The four-corner body clearance and the eight-corner geom clearance matched on this box. The visual mesh sits about 3 mm above the box once both are in the geom frame. At stand the box bottom is about −1.33 mm and the mesh minimum is about +1.73 mm.
+
+Left clock 4.552–11.048 s, 813 ticks. Window corner 8.095–10.665 mm. Mesh over that window 11.365–13.691 mm. Physical edges, including chatter: a one-tick scrape lifts at 5.200 s (box 0.01 mm, x 40.9 mm) and touches at 5.208 s. The step lifts at 5.216 s (box 0.00 mm, n 0, x 41.2 mm) and touches down at 10.280 s (box −0.13 mm, n 1, x 117.5 mm). Contiguous airborne 5.216–10.272 s, 633 ticks, peak box 10.67 mm, peak mesh 13.69 mm, airborne x +76.3 mm. Right clock 14.552–21.048 s. Window corner 8.075–10.798 mm. Mesh 11.372–13.825 mm. One-tick scrapes at 15.176 s, 15.192 s, and 15.216 s, each about 0.00–0.01 mm. The step lifts at 15.232 s (x 69.8 mm) and touches down at 20.288 s (box −0.05 mm, n 1, x 146.2 mm). Contiguous airborne 15.232–20.280 s, 632 ticks, peak box 10.80 mm, peak mesh 13.83 mm, airborne x +76.4 mm. `fn < 1 N` counted 656 and 658 ticks because a few ticks still had a contact while the force was under 1 N. The zero-contact plus eight-corner rule is the long bout. The diary's 8.08 mm is the right-window minimum, 8.075 mm, and 0.946 is the airborne share on that landing. The mesh is the higher of the two, so the sole in the picture is about 11–14 mm up while the scored corner is 8.08 mm.
+
+The ankle-roll visual and the contact box are not the same surface. After the geom quaternion and position, the mesh sole bottoms at −23.086 mm on the left and −23.078 mm on the right, in the ankle-roll body frame. The contact box is 135×76×16 mm with its centre at z −18 mm, so the box bottom is −26.0 mm. The mesh floats 2.91 mm above the box. A picture of the mesh alone sits about 3 mm higher than the corner the overlay prints. At a flat plant the box is about −1.2 mm and the mesh minimum is about +1.7 mm.
+
+The sole panel draws that box. For the frame only, the two group-0 contact geoms are tinted, left cyan and right orange, alpha 0.55, and the visual geoms on the same body are ghosted to alpha 0.28 so the mesh no longer hides the box. `geom_rgba` is restored before the next view. Physics does not read it. A scene box on z=0 is hidden by the floor plane, so the floor mark is the projection of the plane z=0 through the sole camera, a 3 px yellow line painted on the pixels before the overlay. On a planted frame the line crosses the lower part of the cyan box, and the overlay is about −1.2 mm. On a lift the box sits above the line, and the overlay is the positive clearance.
+
+`docs/media/voice_t050_cycles.mp4` is the high-cadence design point, T 0.50 s, vx 0.056 m/s, x_amp 7 mm, stand 0.40 s, walk 3.00 s, stop 1.20 s, 138 frames. Several lift/land cycles fit because the period is 0.50 s. At 0.20 s both feet read about −1.21 mm with four contacts, and the line crosses the box. At 1.55 s the left reads +1.31 mm, n 0, 0.0 N, and the box is above the line while the right stays down. The 42-cell table was not re-scored for this clip. The design point still does not clear 8 mm.
+
+Every render from this tree writes three panels of the mjData just stepped: side at 1.70 m, front at 1.70 m, and the sole camera. The sole camera is 0.15 m to the side of whichever foot has the higher lowest-corner, azimuth 90, elevation −18°, lookat 10 mm above that foot's contact-box centre. The camera height is about 6–8 cm. Elevation 0 puts the sole on the horizon, so the gap has no pixels, and at 0.15 m the foot also leaves the frame. The plant's stereo separation is 68 mm. At 0.15 m that offset walks the foot out of the frame, so the picture is drawn with ipd 0 and `vis.map.znear` 0.0002. Both are restored after the frames. Neither is a plant edit. The render does not call `mj_forward` and does not interpolate a pose. After the three views it checks that `data.time` and `qpos` are the values the step left. The overlay on every panel, every frame, is per foot: lowest-corner clearance in mm, contact count, and normal force in N, from `sole_clearance`, the ground-contact count, and `foot_normal` on that mjData.
+
+`docs/media/voice_d6e8b5e_feet.mp4` is the reviewed timing of `d6e8b5e`, stand 2.00 s, walk 22.00 s, stop 6.00 s, with that camera. It was rendered before the contact-box tint and the floor line. The cycles clip above is the one that draws both. Add 1.60 s to the score times above. The left lift in the clip is about 6.8–11.9 s and the right lift is about 16.8–21.9 s, which is the review's 2–13 s and 13–23 s once the stand and the slide are what the wide shot showed. At 8.00 s of that clip the overlay reads L 10.63 mm, n 0, 0.0 N and R −1.28 mm, n 4, 22.4 N, and the sole panel shows the left sole clear of the floor. At 18.00 s it reads R 10.73 mm, n 0, 0.0 N and L −1.29 mm, n 4, 22.3 N, with the right sole clear. At 1.00 s, still in the stand, both read −1.31 mm, n 4, about 11 N, and both soles sit on the plane. The sole panel is there so the gap is a vertical opening, and the overlay is the same number the scorer stores. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0. The cadence grid still has no cell under 2.33 Nm and no completed step. Not kit-safe. Not go-anywhere.
+
+## Cadence sweep, flat 20–80%
+
+The contact-off window is the step the AI tiebreak scored on `d6e8b5e`: clearance 8.41 mm and 8.60 mm, slip 0.27 mm, step fraction 0.794. That gait steps. The 0.5 s kit walker also steps, fraction 0.93–0.96, and misses the rest of the bars: lowest corner 2.0 mm, slip 3.2–3.4 mm, two stance contacts, phase mismatch 0.31–0.39, and a 16° stop lean. This sweep asks whether a shorter period can hold the three hard bars together. The 42-cell table above is the earlier raised-cosine shape. It was not re-scored.
+
+The grid starts at T 0.80 s and steps down: 0.80, 0.75, 0.70, 0.65, 0.60, 0.55, 0.50. T 0.80 misses the three bars, so the grid adds 1.00 s and 1.20 s. vx is 0.016, 0.024, 0.032, 0.040, 0.048, 0.056. Fifty-four cells. `x_amp = vx·T/4`. The swing command is 8 mm. On the voice path the sole rises with a smootherstep over the first 20% of single support and holds the sine peak until 80%. Kit still uses the sine. The walk ankle stays on the IK target. The stop is the 2 s blend to the spawn stand, and during that blend the ankle nulls measured sole pitch: sign +1 on the left and −1 on the right, `clamp(4·sole_pitch, ±0.12 rad)`, held until 80% of the blend and then faded. Slew is 1.20 rad/s during the blend. A copy of that null through the walk tipped short steps and the longer steps at higher vx, so this grid keeps the null inside the stop. Sway is `sway_zmp_amp` with a 16 mm CoM target and a 43 mm cap. dsp 0.25, crouch 25 mm, hip pitch 15°, arm 1.00 s, preview shape 0, preview r 1e-4. y_swap stays 0.
+
+The pick is the shortest T with unclamped ask ≤ 2.33 Nm, peak leg `|qvel|` ≤ 5.82 rad/s, and a 20–80% lowest corner ≥ 8 mm, then the fastest vx at that T. 5.82 rad/s is the HX-35H no-load limit. The plant applies no velocity cap. The peak is the maximum `|data.qvel|` on the leg joints. Off is the share of forward travel on ticks where the swing foot has zero floor contacts. Clearance stays out of that fraction. A dash is a swing shorter than 20 ticks. n is the minimum stance-contact count in the 20–80% window. CoM is the declared-box minimum. CoP min is the declared contact-CoP minimum, which the non-kit scorer stores in `zmp_min_m`. CoP p5 is the 5th percentile of that contact CoP. Pitch is the trunk change at the stop. Stand 0.25 s, arm 1.00 s, walk `1.00 + 2.05·T`, stop 2.40 s. Soft-pass off. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`.
+
+Zero cells pass the three bars. `n_steps` is 0 on every row. Ask is 8.01–11.81 Nm, and every peak is a knee. `|qvel|` is 2.09–3.36 rad/s, and every peak is a knee, all under 5.82. The 20–80% corner is positive on one cell. CoP p5 peaks at +4.8 mm. The fault string is empty. Every stop is flat: trunk pitch +0.2° to +0.5°, sole pitch 0.27° to 0.37°, corner spread 0.89–1.02 mm, min up_z 0.947–0.962.
+
+| T s | vx | x mm | Ask Nm | Joint | Clear mm | Peak mm | qvel | qvel joint | Off | Slip mm | n | Phase | CoM mm | CoP min | CoP p5 | Pitch ° |
+| ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.80 | 0.016 | 3.20 | 11.10 | r_knee | -0.65 | -0.29 | 3.15 | r_knee | 0.000 | 0.33 | 4 | 1.000 | -4.6 | -79.7 | 0.0 | 0.4 |
+| 0.80 | 0.024 | 4.80 | 10.83 | r_knee | -0.61 | 1.82 | 3.05 | r_knee | 0.506 | 0.33 | 4 | 0.571 | -5.3 | -44.9 | 0.0 | 0.4 |
+| 0.80 | 0.032 | 6.40 | 10.93 | r_knee | -0.55 | 1.72 | 3.07 | r_knee | 0.537 | 0.32 | 3 | 0.500 | -5.6 | -75.2 | 0.0 | 0.4 |
+| 0.80 | 0.040 | 8.00 | 11.17 | r_knee | -0.61 | 2.12 | 3.15 | r_knee | 0.481 | 0.39 | 3 | 0.429 | -6.0 | -45.8 | 0.0 | 0.4 |
+| 0.80 | 0.048 | 9.60 | 10.80 | r_knee | -0.90 | 5.65 | 2.94 | r_knee | 0.396 | 0.68 | 3 | 0.317 | -6.1 | -44.7 | 0.0 | 0.4 |
+| 0.80 | 0.056 | 11.20 | 11.05 | r_knee | -0.89 | 5.27 | 2.98 | r_knee | 0.442 | 0.66 | 3 | 0.317 | -6.2 | -42.5 | 0.0 | 0.4 |
+| 0.75 | 0.016 | 3.00 | 10.75 | r_knee | -0.62 | 2.60 | 2.99 | r_knee | 0.000 | 0.35 | 4 | 0.571 | -3.2 | -19.2 | 0.0 | 0.4 |
+| 0.75 | 0.024 | 4.50 | 10.75 | r_knee | -0.62 | 1.60 | 2.96 | r_knee | 0.575 | 0.27 | 4 | 0.619 | -3.9 | -37.2 | 0.0 | 0.4 |
+| 0.75 | 0.032 | 6.00 | 10.77 | r_knee | -0.65 | 1.54 | 2.94 | r_knee | 0.590 | 0.26 | 4 | 0.548 | -4.3 | -46.9 | 0.0 | 0.4 |
+| 0.75 | 0.040 | 7.50 | 10.52 | r_knee | -0.71 | 1.80 | 2.84 | r_knee | 0.618 | 0.26 | 4 | 0.500 | -4.6 | -46.6 | 0.0 | 0.4 |
+| 0.75 | 0.048 | 9.00 | 10.56 | r_knee | -0.79 | 1.88 | 2.84 | r_knee | 0.594 | 0.25 | 4 | 0.476 | -26.8 | -68.3 | 0.0 | 0.4 |
+| 0.75 | 0.056 | 10.50 | 10.86 | r_knee | -0.87 | 5.95 | 2.93 | r_knee | 0.487 | 0.79 | 4 | 0.317 | -4.9 | -44.7 | 0.0 | 0.4 |
+| 0.70 | 0.016 | 2.80 | 11.50 | r_knee | -0.61 | -0.23 | 3.29 | r_knee | 0.000 | 0.18 | 4 | 1.000 | -2.1 | -12.6 | 0.0 | 0.4 |
+| 0.70 | 0.024 | 4.20 | 11.24 | r_knee | -0.47 | 2.05 | 3.21 | r_knee | 0.956 | 0.29 | 4 | 0.211 | -2.7 | -18.1 | 0.0 | 0.4 |
+| 0.70 | 0.032 | 5.60 | 11.23 | r_knee | -0.59 | 2.03 | 3.17 | r_knee | 0.630 | 0.25 | 4 | 0.579 | -3.3 | -42.8 | 0.0 | 0.4 |
+| 0.70 | 0.040 | 7.00 | 11.43 | r_knee | -0.64 | 2.23 | 3.24 | r_knee | 0.661 | 0.26 | 4 | 0.474 | -3.6 | -48.7 | 0.0 | 0.4 |
+| 0.70 | 0.048 | 8.40 | 11.74 | r_knee | -0.70 | 2.48 | 3.36 | r_knee | 0.661 | 0.30 | 4 | 0.421 | -3.8 | -47.7 | 0.0 | 0.4 |
+| 0.70 | 0.056 | 9.80 | 11.81 | r_knee | -0.78 | 3.05 | 3.32 | r_knee | 0.563 | 0.35 | 4 | 0.395 | -3.9 | -46.4 | 0.0 | 0.4 |
+| 0.65 | 0.016 | 2.60 | 11.27 | r_knee | -0.57 | -0.21 | 3.20 | r_knee | 0.000 | 0.12 | 4 | 1.000 | 0.1 | -10.0 | 1.2 | 0.4 |
+| 0.65 | 0.024 | 3.90 | 11.39 | r_knee | -0.57 | -0.18 | 3.25 | r_knee | 0.000 | 0.14 | 4 | 1.000 | -0.3 | -8.8 | 3.5 | 0.4 |
+| 0.65 | 0.032 | 5.20 | 11.26 | r_knee | -0.61 | 3.44 | 3.15 | r_knee | 0.666 | 0.34 | 4 | 0.528 | -0.9 | -20.0 | 0.0 | 0.4 |
+| 0.65 | 0.040 | 6.50 | 11.28 | r_knee | -0.66 | 3.47 | 3.14 | r_knee | 0.755 | 0.37 | 4 | 0.444 | -1.3 | -41.2 | 0.0 | 0.4 |
+| 0.65 | 0.048 | 7.80 | 11.58 | r_knee | -0.71 | 3.58 | 3.27 | r_knee | 0.798 | 0.38 | 4 | 0.389 | -1.5 | -45.5 | 0.0 | 0.4 |
+| 0.65 | 0.056 | 9.10 | 11.56 | r_knee | -0.78 | 4.09 | 3.20 | r_knee | 0.699 | 0.46 | 4 | 0.333 | -1.6 | -45.8 | 0.0 | 0.4 |
+| 0.60 | 0.016 | 2.40 | 11.26 | r_knee | -0.59 | -0.18 | 3.25 | r_knee | 0.000 | 0.09 | 4 | 1.000 | 2.3 | -4.1 | 0.0 | 0.4 |
+| 0.60 | 0.024 | 3.60 | 11.47 | r_knee | -0.61 | -0.14 | 3.32 | r_knee | 0.000 | 0.10 | 4 | 1.000 | 2.0 | -6.2 | 2.3 | 0.4 |
+| 0.60 | 0.032 | 4.80 | 11.37 | r_knee | 0.37 | 2.18 | 3.28 | r_knee | 0.921 | 0.05 | 4 | 0.000 | 1.4 | -6.8 | 0.0 | 0.3 |
+| 0.60 | 0.040 | 6.00 | 11.21 | r_knee | -0.69 | 0.71 | 3.21 | r_knee | 0.821 | 0.23 | 4 | 0.765 | 0.9 | -16.7 | 0.0 | 0.3 |
+| 0.60 | 0.048 | 7.20 | 11.29 | r_knee | -0.74 | 1.51 | 3.22 | r_knee | 0.894 | 0.27 | 4 | 0.647 | 0.6 | -36.4 | 0.0 | 0.3 |
+| 0.60 | 0.056 | 8.40 | 11.57 | r_knee | -0.79 | 2.38 | 3.29 | r_knee | 0.858 | 0.30 | 4 | 0.588 | 0.5 | -42.7 | 0.0 | 0.3 |
+| 0.55 | 0.016 | 2.20 | 10.56 | l_knee | -0.62 | -0.16 | 2.80 | l_knee | 0.000 | 0.04 | 4 | 1.000 | 2.2 | -9.9 | 4.8 | 0.2 |
+| 0.55 | 0.024 | 3.30 | 10.60 | l_knee | -0.65 | -0.13 | 2.81 | l_knee | 0.000 | 0.06 | 4 | 1.000 | 3.2 | -9.2 | 4.0 | 0.2 |
+| 0.55 | 0.032 | 4.40 | 10.64 | l_knee | — | — | 2.82 | l_knee | — | — | 0 | 1.000 | 1.8 | -9.4 | 3.3 | 0.2 |
+| 0.55 | 0.040 | 5.50 | 10.69 | l_knee | — | — | 2.83 | l_knee | — | — | 0 | 1.000 | 1.7 | -9.4 | 1.8 | 0.2 |
+| 0.55 | 0.048 | 6.60 | 10.75 | l_knee | — | — | 2.84 | l_knee | — | — | 0 | 1.000 | 1.7 | -9.9 | 0.0 | 0.2 |
+| 0.55 | 0.056 | 7.70 | 10.82 | l_knee | — | — | 2.86 | l_knee | — | — | 0 | 1.000 | 1.6 | -4.0 | 0.0 | 0.2 |
+| 0.50 | 0.016 | 2.00 | 10.69 | l_knee | -0.65 | -0.17 | 2.88 | l_knee | 0.000 | 0.05 | 4 | 1.000 | 2.5 | -16.3 | 4.4 | 0.2 |
+| 0.50 | 0.024 | 3.00 | 10.72 | l_knee | -0.68 | -0.14 | 2.88 | l_knee | 0.000 | 0.07 | 4 | 1.000 | 2.4 | -16.9 | 3.4 | 0.2 |
+| 0.50 | 0.032 | 4.00 | 10.77 | l_knee | — | — | 2.89 | l_knee | — | — | 0 | 1.000 | 2.2 | -16.2 | 2.7 | 0.2 |
+| 0.50 | 0.040 | 5.00 | 10.81 | l_knee | — | — | 2.90 | l_knee | — | — | 0 | 1.000 | 1.7 | -17.0 | 0.6 | 0.2 |
+| 0.50 | 0.048 | 6.00 | 10.88 | l_knee | — | — | 2.91 | l_knee | — | — | 0 | 1.000 | 1.6 | -15.7 | 0.1 | 0.2 |
+| 0.50 | 0.056 | 7.00 | 10.95 | l_knee | — | — | 2.93 | l_knee | — | — | 0 | 1.000 | 1.6 | -12.4 | 0.0 | 0.2 |
+| 1.00 | 0.016 | 4.00 | 10.50 | r_knee | -0.69 | 6.48 | 2.98 | r_knee | 0.162 | 0.59 | 3 | 0.333 | -18.0 | -86.0 | -1.7 | 0.4 |
+| 1.00 | 0.024 | 6.00 | 10.73 | r_knee | -0.68 | 6.63 | 3.06 | r_knee | 0.173 | 0.71 | 3 | 0.309 | -19.5 | -86.5 | -2.6 | 0.4 |
+| 1.00 | 0.032 | 8.00 | 11.00 | r_knee | -0.77 | 6.60 | 3.13 | r_knee | 0.163 | 0.81 | 3 | 0.309 | -19.9 | -86.1 | -5.8 | 0.4 |
+| 1.00 | 0.040 | 10.00 | 10.57 | r_knee | -0.86 | 6.37 | 2.92 | r_knee | 0.145 | 0.90 | 3 | 0.309 | -18.7 | -69.0 | -10.0 | 0.4 |
+| 1.00 | 0.048 | 12.00 | 10.38 | r_knee | -1.01 | 6.00 | 2.81 | r_knee | 0.170 | 0.95 | 3 | 0.358 | -9.5 | -74.7 | -12.0 | 0.5 |
+| 1.00 | 0.056 | 14.00 | 9.53 | r_knee | -1.20 | 5.68 | 2.50 | r_knee | 0.226 | 1.03 | 3 | 0.543 | -9.1 | -64.2 | -10.6 | 0.4 |
+| 1.20 | 0.016 | 4.80 | 8.01 | l_knee | -0.80 | 5.79 | 2.09 | r_knee | 0.000 | 0.90 | 2 | 0.339 | -13.3 | -82.1 | -10.5 | 0.3 |
+| 1.20 | 0.024 | 7.20 | 8.28 | r_knee | -0.95 | 6.15 | 2.30 | r_knee | 0.107 | 0.87 | 2 | 0.354 | -14.6 | -83.7 | -10.3 | 0.4 |
+| 1.20 | 0.032 | 9.60 | 9.21 | r_knee | -0.90 | 6.02 | 2.59 | r_knee | 0.000 | 0.91 | 2 | 0.461 | -15.6 | -82.5 | -13.4 | 0.4 |
+| 1.20 | 0.040 | 12.00 | 9.93 | r_knee | -0.98 | 6.11 | 2.81 | r_knee | 0.048 | 1.01 | 2 | 0.480 | -17.0 | -79.4 | -15.0 | 0.5 |
+| 1.20 | 0.048 | 14.40 | 10.04 | r_knee | -1.09 | 5.97 | 2.79 | r_knee | 0.023 | 1.11 | 2 | 0.529 | -16.8 | -63.2 | -15.9 | 0.5 |
+| 1.20 | 0.056 | 16.80 | 9.20 | r_knee | -1.16 | 8.60 | 2.39 | r_knee | 0.172 | 1.68 | 2 | 0.592 | -16.7 | -60.4 | -16.2 | 0.5 |
+
+The highest window is T 0.60 s, vx 0.032 m/s, x_amp 4.80 mm, preview amplitude 42.94 mm. Unclamped ask 11.365 Nm, right knee, t 2.696 s. Lowest corner over 20–80% is +0.368 mm, peak 2.176 mm. Peak leg rate 3.284 rad/s, right knee. Contact-off fraction 0.921, and 0.85 of the swing ticks are contact-off. Stance slip 0.05 mm. Stance contacts stay at 4. Phase mismatch 0.000. Declared CoM minimum +1.37 mm. Contact-CoP minimum −6.80 mm. CoP p5 +0.04 mm. One scored swing, `n_steps` 0. Stop is flat: corner spread 0.96 mm, sole pitch 0.31°, trunk +0.32°, min up_z 0.958. At T 0.60 s single support is 0.225 s, so the 20% rise is 45 ms. The scored window opens as the command reaches the peak, and the corner on that window is +0.37 mm.
+
+The lowest ask is T 1.20 s, vx 0.016 m/s, 8.014 Nm, left knee, t 1.408 s. Window −0.796 mm, peak 5.790 mm. qvel 2.090 rad/s, right knee. Off 0.000. Slip 0.90 mm. Stance contacts 2. Phase mismatch 0.339. Declared CoM −13.3 mm. Contact-CoP minimum −82.1 mm. CoP p5 −10.5 mm. Stop flat, trunk +0.34°. The highest swing peak is T 1.20 s, vx 0.056 m/s, 8.60 mm, and that window minimum is −1.16 mm. The bar is the minimum. The highest rate is 3.356 rad/s, T 0.70 s, vx 0.048 m/s, right knee, ask 11.74 Nm, window −0.70 mm. The highest contact-off fraction is T 0.70 s, vx 0.024 m/s, 0.956, window −0.47 mm.
+
+The eight dashes are T 0.55 s at vx 0.032–0.056 and T 0.50 s at vx 0.032–0.056. Single support at T 0.50 s is 0.1875 s, about 23 ticks, and some clocks never collect 20 samples. Those rows still ask 10.64–10.95 Nm and stop flat. T 0.50 s at 0.016 and 0.024 m/s does score: windows −0.65 mm and −0.68 mm, Off 0.000, stance contacts 4, phase mismatch 1.000. The foot stays loaded while x advances. On the scored short rows the stance count is 4 and the slip is under 1 mm. At T 1.00 s the stance count is 3. At T 1.20 s it is 2, which is the edge-roll the 0.5 s kit walker showed, on a longer period and with an upright stop.
+
+The sweep has no passing T, so it has no fastest vx on a passing T. The wired command stays period 0.50 s and 0.056 m/s. The clip is the highest window.
+
+`docs/media/voice_t060_vx032_feet.mp4` is T 0.60 s, vx 0.032 m/s, from the same live session. Stand 0.40 s, walk 3.00 s (five cycles), stop 2.40 s so the 2 s blend finishes. Side, front, and the sole camera, 1920×480, 30 fps, 174 frames, 5.80 s, fault none. The sole panel tints the group-0 contact boxes, left cyan and right orange, and paints the yellow floor line. At 0.20 s, still in the stand, both feet read −1.21 mm, n 4, 10.9 N, and the line crosses the box. At 1.60 s the right reads +1.67 mm, n 0, 0.0 N, and the left reads −0.98 mm, n 2, 10.4 N, with the right box above the line. At 1.90 s the left reads +1.97 mm, n 0, 0.0 N, and the right reads −1.15 mm, n 4, 22.1 N. At 2.20 s the right reads +1.35 mm, n 0, and the left reads −1.17 mm, n 4, 21.7 N. At 2.50 s the left reads +1.69 mm, n 0, and the right reads −1.17 mm, n 4, 21.5 N. At 3.00 s the right reads +0.89 mm, n 0, and the left reads −1.17 mm, n 4, 21.7 N. Those overlay peaks sit next to the scored peak of 2.18 mm. The 20–80% minimum on the cell is +0.37 mm. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0. Not kit-safe. Not go-anywhere.
+
+## Torque signal on the flat 20–80% sweep
+
+Every newton-metre below is pre-clamp. The command is the `q_des` passed into `write_clipped` or `write_force_limited`, before either function edits `ctrl`. `kv` is `-actuator_biasprm[i, 2]`. Every leg position actuator is `dampratio=1`, and that compiles a different kv on each joint: right hip roll 1.7027, right knee 1.4573, right ankle roll 1.1876. It is not one constant.
+
+Two formulas are logged. Abs is `|kp·(q_des−q)| + |kv·ω|`. That is the historical 2.33 Nm bar, and it is the Ask column in the table above. Sgn is `|kp·(q_des−q) − kv·ω|`, the position-actuator force before the ±2.45 Nm rail. The same-tick signed value on an Abs peak is listed beside it, because the two terms can cancel.
+
+`d6e8b5e`'s 2.2567, `ac81435`'s 2.3135, and `58ce1d8`'s 1.9792 are Abs, from `_install_ask_log`, with that kv. The stored lines are `sum` / `signed`. On the 2.3135 tick the signed force is +0.2607 Nm (`previews/com_zmp_preview_s.json` at that commit: q −0.00845, q_des +0.02372, kp 40, kv 1.7027, ω +0.6028). On the 1.9792 tick the signed force is +0.2486 Nm (`previews/com_zmp_preview_j.json`: q −0.14153, q_des −0.11368, kp 40, kv 1.7027, ω +0.5082). The diary's 2.2567 uses the same `sum` field: q −0.11738, q_des −0.08599, kp 40, kv 1.703, ω +0.588. Rebuilding Abs from those rounded digits gives 2.2570. The signed force on that tick is +0.254 Nm. `historical_torque_identity` checks the three rebuilds.
+
+The manufacturing pass bar is the signed force on every leg joint on every tick: `|kp·(q_des−q) − kv·ω| ≤ 2.33` Nm, with that same kv. Clamp-active fraction must be 0 on every leg joint, and the same-tick DC-motor line is a hard bar. Abs stays in the table. A row that holds the signed bar and misses Abs is listed here.
+
+A tick is clamp-active when that pre-clamp `|signed|` reaches either rail. The actuator `forcerange` and the joint `actuatorfrcrange` are both ±2.45 Nm, so the test is `|signed| ≥ 2.45`. The fraction is counted per leg joint. Yaw, hip roll, both ankle joints, and the right hip pitch are 0 on all 54 rows. The left hip pitch is 0 except T 0.50 s at 0.016 m/s, where the fraction is 0.001. Both knees are above 0 on every row.
+
+The speed line is the DC-motor model, not a datasheet: `|qvel| ≤ 5.82·(1 − |τ|/3.43)` rad/s, with `τ` the pre-clamp `|signed|` and `qvel` the ω from that same write. DC ex is the worst same-tick excess of `|qvel|` over that limit. The trunk ratio is the mean forward speed of `body_link` while the bus commands vx, divided by that command. Forward is the body x axis dotted with `cvel` linear velocity.
+
+Zero rows pass the signed bar. The signed peak is 3.81–6.21 Nm, every one a knee, so each row has ticks over 2.33 Nm: 22 ticks on the shortest of those counts and 47 on the longest. Abs stays 8.01–11.81 Nm, so the conservative sum fails on every row too. The set of rows that pass on signed and fail on the sum is empty. Eighteen rows do have an Abs-peak tick whose own signed force is at or under 2.33 Nm while Abs on that tick is 8.28–11.57 Nm. Those rows still fail the signed bar on another tick. They are T 0.75 s at 0.024 and 0.032; T 0.70 s at 0.024; T 0.65 s at 0.024, 0.032, and 0.040; every vx at T 0.60 s; T 1.00 s at 0.016, 0.024, and 0.032; T 1.20 s at 0.024, 0.032, and 0.040. Clamp fraction is above 0 on every row, and every DC worst tick has `|τ|` above the 3.43 Nm stall, so the allowed speed is negative. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0.
+
+| Joint | Rows with fraction > 0 | Max fraction |
+| --- | ---: | ---: |
+| l_hip_yaw | 0 | 0.000 |
+| l_hip_roll | 0 | 0.000 |
+| l_hip_pitch | 1 | 0.001 |
+| l_knee | 54 | 0.026 |
+| l_ank_pitch | 0 | 0.000 |
+| l_ank_roll | 0 | 0.000 |
+| r_hip_yaw | 0 | 0.000 |
+| r_hip_roll | 0 | 0.000 |
+| r_hip_pitch | 0 | 0.000 |
+| r_knee | 54 | 0.026 |
+| r_ank_pitch | 0 | 0.000 |
+| r_ank_roll | 0 | 0.000 |
+
+| T s | vx | Abs Nm | Joint | tick sgn | Sgn Nm | Sgn joint | L knee | R knee | DC ex | vx ratio | Clear mm |
+| ---: | ---: | ---: | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| 0.80 | 0.016 | 11.10 | r_knee | +2.54 | 4.56 | l_knee | 0.020 | 0.020 | 3.16 | 1.352 | -0.65 |
+| 0.80 | 0.024 | 10.83 | r_knee | +2.50 | 4.61 | l_knee | 0.024 | 0.019 | 3.25 | 1.038 | -0.61 |
+| 0.80 | 0.032 | 10.93 | r_knee | +2.61 | 4.83 | l_knee | 0.024 | 0.019 | 3.34 | 0.855 | -0.55 |
+| 0.80 | 0.040 | 11.17 | r_knee | +2.62 | 4.93 | l_knee | 0.024 | 0.020 | 3.42 | 0.744 | -0.61 |
+| 0.80 | 0.048 | 10.80 | r_knee | +2.78 | 5.03 | l_knee | 0.024 | 0.020 | 3.63 | 0.669 | -0.90 |
+| 0.80 | 0.056 | 11.05 | r_knee | +2.94 | 5.11 | l_knee | 0.024 | 0.022 | 3.82 | 0.623 | -0.89 |
+| 0.75 | 0.016 | 10.75 | r_knee | +2.34 | 4.86 | l_knee | 0.021 | 0.017 | 3.45 | 1.401 | -0.62 |
+| 0.75 | 0.024 | 10.75 | r_knee | +2.23 | 4.91 | l_knee | 0.024 | 0.017 | 3.53 | 1.079 | -0.62 |
+| 0.75 | 0.032 | 10.77 | r_knee | +2.27 | 4.96 | l_knee | 0.024 | 0.017 | 3.61 | 0.888 | -0.65 |
+| 0.75 | 0.040 | 10.52 | r_knee | +2.45 | 5.03 | l_knee | 0.024 | 0.018 | 3.70 | 0.764 | -0.71 |
+| 0.75 | 0.048 | 10.56 | r_knee | +2.69 | 5.14 | l_knee | 0.024 | 0.018 | 3.77 | 0.687 | -0.79 |
+| 0.75 | 0.056 | 10.86 | r_knee | +2.87 | 5.23 | l_knee | 0.024 | 0.021 | 3.87 | 0.639 | -0.87 |
+| 0.70 | 0.016 | 11.50 | r_knee | +2.42 | 5.05 | l_knee | 0.021 | 0.020 | 3.69 | 1.456 | -0.61 |
+| 0.70 | 0.024 | 11.24 | r_knee | +2.31 | 5.10 | l_knee | 0.021 | 0.020 | 3.77 | 1.119 | -0.47 |
+| 0.70 | 0.032 | 11.23 | r_knee | +2.39 | 5.15 | l_knee | 0.024 | 0.020 | 3.85 | 0.925 | -0.59 |
+| 0.70 | 0.040 | 11.43 | r_knee | +2.49 | 5.19 | l_knee | 0.024 | 0.021 | 3.94 | 0.800 | -0.64 |
+| 0.70 | 0.048 | 11.74 | r_knee | +2.59 | 5.23 | l_knee | 0.024 | 0.021 | 4.02 | 0.718 | -0.70 |
+| 0.70 | 0.056 | 11.81 | r_knee | +2.75 | 5.34 | l_knee | 0.024 | 0.021 | 4.10 | 0.658 | -0.78 |
+| 0.65 | 0.016 | 11.27 | r_knee | +2.35 | 5.25 | l_knee | 0.021 | 0.019 | 4.36 | 1.504 | -0.57 |
+| 0.65 | 0.024 | 11.39 | r_knee | +2.32 | 5.29 | l_knee | 0.021 | 0.019 | 4.44 | 1.119 | -0.57 |
+| 0.65 | 0.032 | 11.26 | r_knee | +2.30 | 5.34 | l_knee | 0.021 | 0.019 | 4.51 | 0.964 | -0.61 |
+| 0.65 | 0.040 | 11.28 | r_knee | +2.32 | 5.39 | l_knee | 0.024 | 0.019 | 4.59 | 0.836 | -0.66 |
+| 0.65 | 0.048 | 11.58 | r_knee | +2.55 | 5.43 | l_knee | 0.023 | 0.020 | 4.68 | 0.752 | -0.71 |
+| 0.65 | 0.056 | 11.56 | r_knee | +2.68 | 5.48 | l_knee | 0.025 | 0.020 | 4.75 | 0.687 | -0.78 |
+| 0.60 | 0.016 | 11.26 | r_knee | +2.05 | 5.74 | l_knee | 0.020 | 0.015 | 5.00 | 1.585 | -0.59 |
+| 0.60 | 0.024 | 11.47 | r_knee | +2.12 | 5.78 | l_knee | 0.020 | 0.016 | 5.06 | 1.167 | -0.61 |
+| 0.60 | 0.032 | 11.37 | r_knee | +2.04 | 5.82 | l_knee | 0.019 | 0.015 | 5.13 | 1.018 | 0.37 |
+| 0.60 | 0.040 | 11.21 | r_knee | +1.99 | 5.86 | l_knee | 0.019 | 0.016 | 5.20 | 0.879 | -0.69 |
+| 0.60 | 0.048 | 11.29 | r_knee | +2.02 | 5.90 | l_knee | 0.020 | 0.016 | 5.28 | 0.785 | -0.74 |
+| 0.60 | 0.056 | 11.57 | r_knee | +2.16 | 5.95 | l_knee | 0.020 | 0.016 | 5.37 | 0.718 | -0.79 |
+| 0.55 | 0.016 | 10.56 | l_knee | +3.73 | 5.93 | l_knee | 0.019 | 0.010 | 5.07 | 1.629 | -0.62 |
+| 0.55 | 0.024 | 10.60 | l_knee | +3.77 | 5.97 | l_knee | 0.019 | 0.010 | 5.13 | 1.192 | -0.65 |
+| 0.55 | 0.032 | 10.64 | l_knee | +3.81 | 6.01 | l_knee | 0.019 | 0.010 | 5.19 | 1.032 | — |
+| 0.55 | 0.040 | 10.69 | l_knee | +3.85 | 6.04 | l_knee | 0.019 | 0.010 | 5.25 | 0.888 | — |
+| 0.55 | 0.048 | 10.75 | l_knee | +3.89 | 6.08 | l_knee | 0.021 | 0.010 | 5.32 | 0.789 | — |
+| 0.55 | 0.056 | 10.82 | l_knee | +3.93 | 6.13 | l_knee | 0.021 | 0.010 | 5.41 | 0.716 | — |
+| 0.50 | 0.016 | 10.69 | l_knee | +2.81 | 6.01 | l_knee | 0.021 | 0.008 | 5.71 | 1.554 | -0.65 |
+| 0.50 | 0.024 | 10.72 | l_knee | +2.84 | 6.05 | l_knee | 0.021 | 0.008 | 5.77 | 1.135 | -0.68 |
+| 0.50 | 0.032 | 10.77 | l_knee | +2.87 | 6.09 | l_knee | 0.021 | 0.008 | 5.83 | 0.947 | — |
+| 0.50 | 0.040 | 10.81 | l_knee | +2.91 | 6.12 | l_knee | 0.021 | 0.008 | 5.89 | 0.833 | — |
+| 0.50 | 0.048 | 10.88 | l_knee | +2.94 | 6.16 | l_knee | 0.021 | 0.008 | 5.96 | 0.734 | — |
+| 0.50 | 0.056 | 10.95 | l_knee | +2.98 | 6.21 | l_knee | 0.021 | 0.008 | 6.05 | 0.658 | — |
+| 1.00 | 0.016 | 10.50 | r_knee | +2.11 | 4.12 | l_knee | 0.023 | 0.020 | 2.19 | 1.199 | -0.69 |
+| 1.00 | 0.024 | 10.73 | r_knee | +2.07 | 4.26 | r_knee | 0.024 | 0.020 | 2.43 | 0.907 | -0.68 |
+| 1.00 | 0.032 | 11.00 | r_knee | +2.29 | 4.38 | r_knee | 0.024 | 0.020 | 2.63 | 0.766 | -0.77 |
+| 1.00 | 0.040 | 10.57 | r_knee | +2.47 | 4.51 | r_knee | 0.024 | 0.021 | 2.84 | 0.688 | -0.86 |
+| 1.00 | 0.048 | 10.38 | r_knee | +2.71 | 4.64 | r_knee | 0.025 | 0.024 | 3.04 | 0.635 | -1.01 |
+| 1.00 | 0.056 | 9.53 | r_knee | +2.93 | 4.78 | r_knee | 0.026 | 0.024 | 3.26 | 0.601 | -1.20 |
+| 1.20 | 0.016 | 8.01 | l_knee | +2.55 | 3.81 | r_knee | 0.022 | 0.013 | 1.75 | 1.122 | -0.80 |
+| 1.20 | 0.024 | 8.28 | r_knee | +1.78 | 3.94 | r_knee | 0.022 | 0.016 | 1.99 | 0.861 | -0.95 |
+| 1.20 | 0.032 | 9.21 | r_knee | +1.90 | 4.10 | r_knee | 0.022 | 0.018 | 2.28 | 0.727 | -0.90 |
+| 1.20 | 0.040 | 9.93 | r_knee | +1.98 | 4.34 | r_knee | 0.025 | 0.021 | 2.67 | 0.652 | -0.98 |
+| 1.20 | 0.048 | 10.04 | r_knee | +2.40 | 4.53 | r_knee | 0.025 | 0.022 | 3.02 | 0.627 | -1.09 |
+| 1.20 | 0.056 | 9.20 | r_knee | +2.74 | 4.74 | r_knee | 0.025 | 0.026 | 3.42 | 0.598 | -1.16 |
+
+On the highest window, T 0.60 s at 0.032 m/s, Abs is 11.365 Nm on the right knee at 2.696 s. The signed force on that tick is +2.045 Nm: the position term and the damping term point opposite ways, and Abs adds the absolute values. The Sgn peak is 5.820 Nm on the left knee at 1.328 s, and Abs on that tick is 8.961 Nm. Left-knee clamp fraction 0.019, right knee 0.015, the other ten joints 0. The DC worst tick is that 5.820 Nm sample with `|qvel|` 1.077 rad/s. The line at 5.820 Nm is −4.056 rad/s, so the excess is 5.134 rad/s. Trunk ratio 1.018 (mean 0.0326 m/s against the 0.032 m/s command). Clearance on the 20–80% window stays +0.37 mm.
+
+The lowest Abs is still T 1.20 s at 0.016 m/s, 8.014 Nm on the left knee at 1.408 s, signed on that tick +2.549 Nm. The Sgn peak on that row is 3.810 Nm on the right knee at 2.432 s, and Abs on that tick is 7.027 Nm. That is also the smallest DC excess, 1.749 rad/s: `|τ|` 3.810 Nm, `|qvel|` 1.104 rad/s, limit −0.645 rad/s. Left-knee clamp fraction 0.022, right knee 0.013. Trunk ratio 1.122. The window corner is −0.80 mm.
+
+Trunk ratio runs from 0.598 (T 1.20 s, vx 0.056 m/s) to 1.629 (T 0.55 s, vx 0.016 m/s). The short slow rows run faster than the command. The long fast rows run slower. The 0.60 s / 0.032 m/s row is the one nearest 1.
+
+The clip is unchanged. It is still the highest clearance window. Its signed peak is 5.82 Nm, so it misses the signed bar, the clamp fraction, and the DC-motor line. Not kit-safe. Not go-anywhere.
+
+## Knee phase on the flat hold
+
+The signed spikes are the swing knee. Stance mid and double-support transfer produced no tick over 2.33 Nm on the three rows below. A settled stand at the 25 mm crouch, both feet down, is left knee −0.598 Nm and right knee +0.598 Nm. The spring term is ±0.59 Nm from 0.013 rad of sag. The damper is 0.03 Nm. A frozen mid-swing pose at the same crouch, held as a shift so the stand solver does not wipe it, is swing knee −0.284 Nm and stance knee +0.855 Nm, up_z 0.998. The static crouch is not the bar.
+
+Walk-stage ticks with |signed| over 2.33 Nm, flat 20–80% hold, z command 8 mm. `kp·e` is the spring, `kv·ω` is the damper, and signed is `kp·e − kv·ω`. `e` is ctrl − q on the IK target the scorer logs. The actuator then slews that target, so the scored ctrl leads the applied ctrl by 0.05–0.10 rad.
+
+| Row | Overs | Phase | n | peak signed | kp·e | kv·ω | e rad | where |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T 0.60 / 0.032 | 23 | lift ramp | 7 | +5.82 | +7.39 | +1.57 | +0.164 | frac 0.19, the 20% corner |
+| | | held swing | 6 | +4.84 | +7.54 | +2.70 | +0.168 | frac 0.22, just after the corner |
+| | | descent | 7 | −4.58 | −5.70 | −1.12 | −0.127 | frac 1.00 |
+| | | touchdown | 3 | −3.32 | −5.51 | −2.19 | −0.123 | next tick |
+| T 1.00 / 0.016 | 32 | lift ramp | 17 | +4.00 | +5.37 | +1.38 | +0.119 | frac 0.15 |
+| | | descent | 12 | −4.12 | −5.60 | −1.48 | −0.124 | frac 0.97 |
+| | | touchdown | 3 | −3.02 | — | — | — | no held-swing overs |
+| T 1.20 / 0.024 | 35 | lift ramp | 17 | +3.57 | +5.28 | +1.70 | +0.117 | frac 0.15 |
+| | | descent | 18 | +3.94 | +5.58 | +1.64 | +0.124 | frac 0.96 |
+
+The 0.60 s row is the only one with held-swing overs. Lengthening the period removes the hold and the touchdown, and the lift and the descent stay over 2.33 Nm because the rise is still the first and last 20% of single support. On that 0.60 s lift the command steps about 0.044 rad in one 8 ms tick, and the second difference flips sign by about 0.03 rad at the 20% corner and at the end of the swing. That is a kink in ctrl, not a smooth ramp. The spring is the spike: 45 N·m/rad times 0.16 rad is about 7 Nm, and the damper only gives back part of it.
+
+## Quintic frontier
+
+The flat hold's corners are replaced by a rest-to-rest quintic over the whole single support. Velocity and acceleration are zero at lift, at the peak, and at touchdown. Swing x uses the same quintic between the sine's end positions, which already had zero velocity and a nonzero acceleration. The peak command stays 8 mm. A second shape starts that rise at the previous touchdown so double support is part of the lift. Neither shape holds the sole flat.
+
+Sagittal ctrl (hip pitch, knee, ankle pitch) can also be rate- and accel-limited inside `|ctrl−q| ≤ 2.33/kp`. That bounds the spring term. It does not project the signed force `kp·e − kv·ω`, and it does not clip the actuator. The limit is off on the grid below.
+
+The teleop deadband is 0.012 m/s. A frontier command under that is written onto the gait after the stick zero, so 0.004 m/s is the step that ran. The DC score records the worst excess even when that excess is negative. A sentinel of −1 rad/s had been leaving those rows with an empty joint and a false fail. Rows that already exceeded the line are unchanged.
+
+No period in {1.6, 2, 3, 4, 6, 10} s has a vx in {0.004, 0.012, 0.020, 0.030} m/s that passes every bar. The bars are signed ≤ 2.33 Nm, clamp fraction 0, the DC line, 20–80% clearance ≥ 8 mm, slip ≤ 2 mm, and contact-off fraction ≥ 0.90. Trunk ratio is reported and is not a cutoff. The maximum honest vx at each of those periods is none.
+
+Quintic, z 8 mm, crouch 25 mm, spring limit off. Clearance is the window minimum. cmax is the highest corner inside that window.
+
+| T | vx | signed | joint | mfg | clear | cmax | slip | off | vx ratio |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1.6 | 0.004 | 1.55 | l_knee | yes | −1.45 | 2.30 | 1.07 | 0.00 | 2.80 |
+| 1.6 | 0.012 | 1.67 | r_knee | yes | −1.71 | 3.15 | 1.33 | 0.00 | 1.21 |
+| 1.6 | 0.020 | 1.82 | r_knee | yes | −1.92 | 4.10 | 1.70 | 0.00 | 0.91 |
+| 1.6 | 0.030 | 2.14 | r_knee | yes | −1.82 | 4.06 | 2.99 | 0.03 | 0.74 |
+| 2.0 | 0.004 | 1.28 | r_knee | yes | −1.13 | 1.48 | 1.15 | 0.00 | 2.32 |
+| 2.0 | 0.012 | 1.33 | r_knee | yes | −1.67 | 2.15 | 1.98 | 0.00 | 1.08 |
+| 2.0 | 0.020 | 1.49 | r_knee | yes | −1.89 | 2.87 | 2.78 | 0.04 | 0.87 |
+| 2.0 | 0.030 | 2.06 | l_hip_pitch | yes | −1.89 | 2.73 | 4.21 | 0.00 | 0.76 |
+| 3.0 | 0.004 | 0.75 | r_knee | yes | −0.74 | 0.01 | 1.21 | 0.00 | 1.78 |
+| 3.0 | 0.012 | 1.03 | l_ank_roll | yes | −1.10 | 0.01 | 2.95 | 0.00 | 0.92 |
+| 3.0 | 0.020 | 1.43 | l_hip_pitch | yes | −1.44 | 0.39 | 4.10 | 0.17 | 0.83 |
+| 3.0 | 0.030 | 1.94 | l_hip_pitch | yes | −1.76 | 1.46 | 5.92 | 0.10 | 0.78 |
+| 4.0 | 0.004 | 0.81 | r_hip_pitch | yes | −0.76 | −0.45 | 1.77 | 0.00 | 1.50 |
+| 4.0 | 0.012 | 1.25 | l_hip_pitch | yes | −1.24 | −0.28 | 4.33 | 0.00 | 0.87 |
+| 4.0 | 0.020 | 1.68 | l_hip_pitch | yes | −1.57 | 0.42 | 6.20 | 0.00 | 0.80 |
+| 4.0 | 0.030 | 2.70 | l_ank_roll | no | −1.82 | 0.04 | 9.49 | 0.08 | 0.78 |
+| 6.0 | 0.004 | 0.98 | l_hip_pitch | yes | −0.81 | −0.36 | 3.00 | 0.00 | 1.12 |
+| 6.0 | 0.012 | 1.58 | l_hip_pitch | yes | −1.22 | −0.39 | 7.88 | 0.00 | 0.81 |
+| 6.0 | 0.020 | 2.25 | l_ank_roll | yes | −1.60 | 0.49 | 10.53 | 0.04 | 0.77 |
+| 6.0 | 0.030 | 2.92 | l_ank_roll | no | −2.12 | 0.02 | 18.20 | 0.04 | 0.61 |
+| 10.0 | 0.004 | 1.58 | l_hip_pitch | yes | −0.81 | −0.51 | 5.61 | 0.00 | 0.96 |
+| 10.0 | 0.012 | 1.99 | l_ank_roll | yes | −0.99 | −0.29 | 14.41 | 0.00 | 0.76 |
+| 10.0 | 0.020 | 2.19 | l_hip_pitch | yes | — | — | — | — | −1.56 |
+| 10.0 | 0.030 | 14.04 | l_hip_pitch | no | — | — | — | — | −0.31 |
+
+The two T 10 s rows at 0.020 and 0.030 m/s tip. Signed on the 0.030 m/s row is the fall. At 0.004 m/s the signed bar, the clamp, and the DC line all pass, from T 1.6 s through T 10 s, and the sole still does not clear. The best corner inside any 20–80% window is 4.10 mm. Contact-off fraction stays under 0.17. A quintic that peaks at 8 mm is only 2.54 mm at 20% of the swing (`s(0.40) = 0.317`), so the window minimum cannot be 8 mm on kinematics alone.
+
+The flat 8 mm hold, which does command 8 mm across that window, was measured at T 4 s and 0.016 m/s. Signed peak 1.87 Nm on the right knee, mfg pass, window minimum −1.54 mm, window peak 1.28 mm. During the hold the knee error is about 0.00–0.03 rad and the lowest corner is still on the floor, with a few newtons on the swing foot. The joints are on the IK target. The 8 mm hip-frame gap is not an 8 mm corner.
+
+Shallower crouch on that same flat row raises the knee and does not lift the corner. At 20 mm, signed 2.06 Nm and the window peak is 1.42 mm. At 15 mm, signed 2.38 Nm. At 10 mm, signed 3.04 Nm and the window peak is 0.52 mm. IK still solves. A straighter knee is a larger swing rate, which is the earlier diary result, and the sole stays down.
+
+The spring limit on the T 6 s / 0.012 m/s quintic keeps signed at 1.47 Nm and then tips (margin −0.063, trunk ratio −1.11).
+
+`d6e8b5e` on this scorer, flat 18 mm, T 20 s, dsp 0.35, x_amp 21 mm, preview 0.043 m, arm 2.40 s, stand 0.40 s, walk 22 s: window 9.19 mm, slip 0.52 mm, contact-off fraction 0.96, trunk ratio 0.90. Signed peak 4.74 Nm on the left hip pitch at 2.792 s, which is the arm-to-walk boundary. That tick is over the 3.43 Nm stall, so the DC line is negative and the excess is 2.25 rad/s at `|qvel|` 0.023. Clamp fraction 0.005. The slow swing clears. The entry step does not.
+
+Putting the spring limit on that same 18 mm hold drops the signed peak to 1.25 Nm, clamp 0, DC excess −3.53 rad/s, and the foot still reaches 10.4 mm inside the window. The window minimum is −0.003 mm. The rise is legal and it is not finished when the 20% sample opens. A lead quintic at 18 mm splits the same way: 4.73 Nm on the left hip pitch with the limit off, or 1.41 Nm and a −0.40 mm window minimum with the limit on.
+
+This is a wall. No period from 1.6 s to 10 s, and not the 20 s / 18 mm gait, clears every bar even at the smallest vx. On the 8 mm command the binding bar is the lowest sole corner through 20–80% of the swing, and the signed force is already under 2.33 Nm. On the 18 mm command that does clear, the binding joint is the left hip pitch at the start of the step, 4.74 Nm, because the sole has to be up before the window opens. Spreading that rise to stay under 2.33 Nm puts the sole back on the floor at 20%. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0.
+
+## Inverse dynamics on every over-2.33 tick
+
+The flat 20–80% rows above, T 0.60 s at 0.032 m/s, T 1.00 s at 0.016 m/s, and T 1.20 s at 0.024 m/s. Every leg write whose signed ask exceeds 2.33 Nm is in the table. One hundred and one ticks, all of them knees: left 56, right 45. The phases are the swing lift (41), the descent (37), the stop (11), the held swing (6), and the touchdown (6). Stance mid and double-support transfer still have none.
+
+The ID column below is `mj_inverse` on the realised post-step q and q̇ with the previous q̈. It is the mismatched number, kept so the signed ask and the phase can be read beside it. Arm is `0.01·q̈`. The 0.01 is the armature used for the column. It is not a measured motor inertia. Static is `2.2·9.81·0.093·sin(θ/2)` with θ the knee flexion. CoP x and CoP y are millimetres from the ankle-roll anchor, in that ankle's body frame. When the joint's own foot is unloaded the CoP is the stance foot's, and the ankle column says so. Eighteen ticks are stance. Their horizontal offset is 23–43 mm. On a loaded foot the repeated `x = +97.5` mm is the toe edge of the 135 mm contact box, and `|y| = 52` mm is the lateral edge.
+
+The ID column in the table is `mj_inverse` after integration, on the new q and q̇ with the previous q̈. That residual does not match the actuator force, so the class column is not a bucket. The pre-integration rerun is in the feedforward section. With passive included in the forward side, the fast writes sit above 0.05 Nm and are not bucketed. The t = 2.680 s right-knee cell, ID +2.045, recomputed as `qfrc_inverse` on the pre-step copy is +1.087 Nm. The upright peak of that same bout is +3.057 Nm at 2.690 s. The rows below stay the mismatched column.
+
+The largest ask is +5.820 Nm on the left knee at 1.328 s, swing lift, error +0.164 rad. The mismatched inverse on that row is +1.874 Nm, with armature +1.270 Nm and static 0.889 Nm, and the CoP is at the left toe (`x +97.5` mm, `y −1.8` mm, 3.1 N). The 1.00 s peak ask is −4.121 Nm on the left knee in descent. The 1.20 s peak ask is +3.941 Nm on the right knee in descent. Static across the set is 0.87–1.10 Nm. Those inverse figures are not the buckets.
+
+| T | t | joint | phase | signed | ID | arm | static | CoP x | CoP y | ankle | class |
+| ---: | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| 0.60 | 1.312 | l_knee | swing lift ramp | +2.92 | +0.963 | +0.593 | 0.872 | +87.6 | -18.6 | l foot | controller |
+| 0.60 | 1.320 | l_knee | swing lift ramp | +5.05 | +1.661 | +1.159 | 0.878 | +97.5 | -8.9 | l foot | controller |
+| 0.60 | 1.328 | l_knee | swing lift ramp | +5.82 | +1.874 | +1.270 | 0.889 | +97.5 | -1.8 | l foot | controller |
+| 0.60 | 1.336 | l_knee | held swing | +4.84 | +1.495 | +0.854 | 0.906 | +97.5 | +2.4 | l foot | controller |
+| 0.60 | 1.344 | l_knee | held swing | +3.24 | +0.881 | +0.267 | 0.925 | +97.5 | +5.6 | l foot | controller |
+| 0.60 | 1.496 | l_knee | swing descent | -2.44 | -0.737 | -0.752 | 1.073 | +23.3 | -2.3 | r stance | controller |
+| 0.60 | 1.504 | l_knee | swing descent | -4.19 | -1.211 | -1.167 | 1.070 | +24.0 | -1.3 | r stance | controller |
+| 0.60 | 1.512 | l_knee | swing descent | -4.58 | -1.249 | -1.166 | 1.061 | +24.3 | -0.4 | r stance | controller |
+| 0.60 | 1.520 | l_knee | touchdown impact | -3.32 | -0.754 | -0.675 | 1.049 | +24.4 | +0.5 | r stance | controller |
+| 0.60 | 1.736 | r_knee | swing lift ramp | -4.05 | -1.414 | -1.100 | 0.934 | +97.5 | -36.3 | r foot | controller |
+| 0.60 | 1.744 | r_knee | swing lift ramp | -4.89 | -1.618 | -1.252 | 0.939 | +97.5 | -38.6 | r foot | controller |
+| 0.60 | 1.752 | r_knee | held swing | -3.98 | -1.282 | -0.870 | 0.949 | +97.5 | -52.0 | r foot | controller |
+| 0.60 | 1.760 | r_knee | held swing | -2.45 | -0.587 | -0.303 | 0.963 | +97.5 | -52.0 | r foot | controller |
+| 0.60 | 1.920 | r_knee | swing descent | +4.03 | +1.168 | +1.157 | 1.063 | +22.3 | +36.6 | l stance | controller |
+| 0.60 | 1.928 | r_knee | swing descent | +4.47 | +1.241 | +1.169 | 1.056 | +22.6 | +34.9 | l stance | controller |
+| 0.60 | 1.936 | r_knee | touchdown impact | +3.25 | +0.771 | +0.691 | 1.044 | +22.8 | +32.5 | l stance | controller |
+| 0.60 | 2.104 | l_knee | swing lift ramp | +4.22 | +1.457 | +1.118 | 0.949 | +97.5 | +52.0 | l foot | controller |
+| 0.60 | 2.112 | l_knee | swing lift ramp | +4.90 | +1.605 | +1.197 | 0.956 | +97.5 | +52.0 | l foot | controller |
+| 0.60 | 2.120 | l_knee | held swing | +3.93 | +1.214 | +0.792 | 0.967 | +97.5 | +52.0 | l foot | controller |
+| 0.60 | 2.128 | l_knee | held swing | +2.37 | +0.609 | +0.230 | 0.982 | +97.5 | +52.0 | l foot | controller |
+| 0.60 | 2.288 | l_knee | swing descent | -4.09 | -1.155 | -1.138 | 1.068 | +18.1 | -19.4 | r stance | controller |
+| 0.60 | 2.296 | l_knee | swing descent | -4.52 | -1.227 | -1.150 | 1.060 | +18.6 | -19.1 | r stance | controller |
+| 0.60 | 2.304 | l_knee | touchdown impact | -3.29 | -0.757 | -0.672 | 1.048 | +19.3 | -18.3 | r stance | controller |
+| 0.60 | 2.496 | r_knee | stop | -3.15 | -1.320 | -0.947 | 0.951 | +97.5 | -52.0 | r foot | controller |
+| 0.60 | 2.504 | r_knee | stop | -2.63 | -0.948 | -0.513 | 0.966 | +97.5 | -52.0 | r foot | controller |
+| 0.60 | 2.672 | r_knee | stop | +2.73 | +1.327 | +0.683 | 0.982 | -37.5 | -52.0 | r foot | controller |
+| 0.60 | 2.680 | r_knee | stop | +3.85 | +2.045 | +0.855 | 0.967 | -37.5 | -52.0 | r foot | controller |
+| 0.60 | 2.688 | r_knee | stop | +3.63 | +1.832 | +0.505 | 0.946 | -37.5 | -52.0 | r foot | controller |
+| 1.00 | 1.352 | l_knee | swing lift ramp | +2.61 | +0.849 | +0.528 | 0.942 | +89.2 | -11.0 | l foot | controller |
+| 1.00 | 1.360 | l_knee | swing lift ramp | +3.57 | +1.185 | +0.772 | 0.947 | +97.5 | -2.4 | l foot | controller |
+| 1.00 | 1.368 | l_knee | swing lift ramp | +4.00 | +1.291 | +0.803 | 0.956 | +97.5 | +6.0 | l foot | controller |
+| 1.00 | 1.376 | l_knee | swing lift ramp | +3.79 | +1.165 | +0.636 | 0.968 | +97.5 | +16.5 | l foot | controller |
+| 1.00 | 1.384 | l_knee | swing lift ramp | +3.04 | +0.867 | +0.332 | 0.982 | +97.5 | +23.0 | l foot | controller |
+| 1.00 | 1.656 | l_knee | swing descent | -3.26 | -1.266 | -0.643 | 1.089 | -37.5 | +52.0 | l foot | controller |
+| 1.00 | 1.664 | l_knee | swing descent | -3.95 | -1.551 | -0.694 | 1.083 | -2.4 | +52.0 | l foot | controller |
+| 1.00 | 1.672 | l_knee | swing descent | -4.12 | -1.658 | -0.626 | 1.074 | -4.0 | +52.0 | l foot | controller |
+| 1.00 | 1.680 | l_knee | swing descent | -3.70 | -1.536 | -0.431 | 1.063 | -2.8 | +52.0 | l foot | controller |
+| 1.00 | 1.688 | l_knee | touchdown impact | -2.82 | -1.225 | -0.154 | 1.051 | +0.6 | +52.0 | l foot | controller |
+| 1.00 | 1.960 | r_knee | swing lift ramp | -2.95 | -1.070 | -0.795 | 0.932 | +46.0 | -33.1 | r foot | controller |
+| 1.00 | 1.968 | r_knee | swing lift ramp | -3.46 | -1.165 | -0.889 | 0.936 | -37.5 | -52.0 | r foot | controller |
+| 1.00 | 1.976 | r_knee | swing lift ramp | -3.30 | -1.015 | -0.728 | 0.944 | +24.5 | +15.7 | l stance | controller |
+| 1.00 | 1.984 | r_knee | swing lift ramp | -2.59 | -0.694 | -0.419 | 0.955 | +23.8 | +17.4 | l stance | controller |
+| 1.00 | 2.256 | r_knee | swing descent | +2.80 | +0.864 | +0.365 | 1.086 | -37.5 | -52.0 | r foot | controller |
+| 1.00 | 2.264 | r_knee | swing descent | +3.67 | +1.292 | +0.530 | 1.081 | +5.6 | -52.0 | r foot | controller |
+| 1.00 | 2.272 | r_knee | swing descent | +4.10 | +1.718 | +0.610 | 1.074 | +12.6 | -52.0 | r foot | controller |
+| 1.00 | 2.280 | r_knee | swing descent | +3.83 | +1.713 | +0.482 | 1.065 | +11.6 | -52.0 | r foot | controller |
+| 1.00 | 2.288 | r_knee | touchdown impact | +3.02 | +1.433 | +0.228 | 1.053 | +11.8 | -52.0 | r foot | controller |
+| 1.00 | 2.552 | l_knee | swing lift ramp | +3.00 | +1.080 | +0.789 | 0.939 | +97.5 | +43.3 | l foot | controller |
+| 1.00 | 2.560 | l_knee | swing lift ramp | +3.49 | +1.191 | +0.846 | 0.944 | +97.5 | +52.0 | l foot | controller |
+| 1.00 | 2.568 | l_knee | swing lift ramp | +3.33 | +0.946 | +0.692 | 0.952 | +97.5 | +52.0 | l foot | controller |
+| 1.00 | 2.576 | l_knee | swing lift ramp | +2.64 | +0.726 | +0.425 | 0.964 | +25.4 | -13.8 | r stance | controller |
+| 1.00 | 2.848 | l_knee | swing descent | -2.80 | -0.952 | -0.441 | 1.085 | -37.5 | +52.0 | l foot | controller |
+| 1.00 | 2.856 | l_knee | swing descent | -3.70 | -1.353 | -0.561 | 1.081 | +3.8 | +52.0 | l foot | controller |
+| 1.00 | 2.864 | l_knee | swing descent | -4.08 | -1.681 | -0.615 | 1.073 | +9.9 | +52.0 | l foot | controller |
+| 1.00 | 2.872 | l_knee | swing descent | -3.78 | -1.678 | -0.474 | 1.064 | +10.6 | +52.0 | l foot | controller |
+| 1.00 | 2.880 | l_knee | touchdown impact | -2.97 | -1.390 | -0.216 | 1.053 | +11.0 | +52.0 | l foot | controller |
+| 1.00 | 3.144 | r_knee | swing lift ramp | -2.99 | -1.095 | -0.803 | 0.934 | +97.5 | -39.2 | r foot | controller |
+| 1.00 | 3.152 | r_knee | swing lift ramp | -3.48 | -1.205 | -0.861 | 0.939 | +97.5 | -52.0 | r foot | controller |
+| 1.00 | 3.160 | r_knee | swing lift ramp | -3.33 | -1.062 | -0.758 | 0.947 | +26.2 | +14.1 | l stance | controller |
+| 1.00 | 3.168 | r_knee | swing lift ramp | -2.62 | -0.717 | -0.427 | 0.958 | +25.1 | +15.7 | l stance | controller |
+| 1.00 | 3.432 | r_knee | stop | +2.51 | +1.505 | +0.459 | 1.057 | +15.2 | -52.0 | r foot | controller |
+| 1.00 | 3.440 | r_knee | stop | +3.10 | +1.823 | +0.534 | 1.045 | +8.3 | -51.9 | r foot | controller |
+| 1.00 | 3.448 | r_knee | stop | +3.31 | +1.901 | +0.499 | 1.029 | +1.1 | -51.9 | r foot | controller |
+| 1.00 | 3.456 | r_knee | stop | +2.99 | +1.571 | +0.194 | 1.010 | -4.4 | -51.9 | r foot | controller |
+| 1.20 | 1.376 | l_knee | swing lift ramp | +2.95 | +1.034 | +0.581 | 0.949 | +97.5 | -11.1 | l foot | controller |
+| 1.20 | 1.384 | l_knee | swing lift ramp | +3.48 | +1.192 | +0.680 | 0.956 | +97.5 | -5.2 | l foot | controller |
+| 1.20 | 1.392 | l_knee | swing lift ramp | +3.57 | +1.175 | +0.619 | 0.966 | +97.5 | +1.7 | l foot | controller |
+| 1.20 | 1.400 | l_knee | swing lift ramp | +3.25 | +1.008 | +0.440 | 0.979 | +97.5 | +10.5 | l foot | controller |
+| 1.20 | 1.408 | l_knee | swing lift ramp | +2.61 | +0.753 | +0.193 | 0.993 | +97.5 | +18.5 | l foot | controller |
+| 1.20 | 1.728 | l_knee | swing descent | -2.62 | -1.090 | -0.486 | 1.094 | -37.5 | +52.0 | l foot | controller |
+| 1.20 | 1.736 | l_knee | swing descent | -3.26 | -1.249 | -0.551 | 1.089 | +20.6 | +52.0 | l foot | controller |
+| 1.20 | 1.744 | l_knee | swing descent | -3.64 | -1.453 | -0.547 | 1.081 | +14.3 | +52.0 | l foot | controller |
+| 1.20 | 1.752 | l_knee | swing descent | -3.68 | -1.520 | -0.435 | 1.072 | +10.3 | +52.0 | l foot | controller |
+| 1.20 | 1.760 | l_knee | swing descent | -3.36 | -1.403 | -0.272 | 1.060 | +7.8 | +52.0 | l foot | controller |
+| 1.20 | 1.768 | l_knee | swing descent | -2.74 | -1.187 | -0.085 | 1.048 | +8.1 | +52.0 | l foot | controller |
+| 1.20 | 2.064 | r_knee | swing lift ramp | -2.33 | -0.888 | -0.603 | 0.932 | +23.5 | -9.7 | r foot | controller |
+| 1.20 | 2.072 | r_knee | swing lift ramp | -2.91 | -0.911 | -0.703 | 0.935 | +80.3 | -42.8 | r foot | controller |
+| 1.20 | 2.080 | r_knee | swing lift ramp | -3.09 | -0.976 | -0.709 | 0.941 | -37.5 | -52.0 | r foot | controller |
+| 1.20 | 2.088 | r_knee | swing lift ramp | -2.79 | -0.818 | -0.530 | 0.950 | +23.5 | +13.7 | l stance | controller |
+| 1.20 | 2.416 | r_knee | swing descent | +2.74 | +1.267 | +0.490 | 1.098 | +42.9 | -52.0 | r foot | controller |
+| 1.20 | 2.424 | r_knee | swing descent | +3.42 | +1.538 | +0.561 | 1.094 | +34.3 | -52.0 | r foot | controller |
+| 1.20 | 2.432 | r_knee | swing descent | +3.86 | +1.710 | +0.571 | 1.087 | +26.4 | -52.0 | r foot | controller |
+| 1.20 | 2.440 | r_knee | swing descent | +3.94 | +1.756 | +0.508 | 1.078 | +20.5 | -52.0 | r foot | controller |
+| 1.20 | 2.448 | r_knee | swing descent | +3.62 | +1.641 | +0.355 | 1.067 | +16.5 | -52.0 | r foot | controller |
+| 1.20 | 2.456 | r_knee | swing descent | +2.97 | +1.390 | +0.138 | 1.055 | +14.9 | -52.0 | r foot | controller |
+| 1.20 | 2.744 | l_knee | swing lift ramp | +2.41 | +0.886 | +0.617 | 0.940 | +45.9 | +30.4 | l foot | controller |
+| 1.20 | 2.752 | l_knee | swing lift ramp | +2.93 | +1.037 | +0.696 | 0.944 | +97.5 | +52.0 | l foot | controller |
+| 1.20 | 2.760 | l_knee | swing lift ramp | +3.06 | +0.969 | +0.694 | 0.951 | -37.5 | +52.0 | l foot | controller |
+| 1.20 | 2.768 | l_knee | swing lift ramp | +2.76 | +0.783 | +0.497 | 0.960 | +22.9 | -11.3 | r stance | controller |
+| 1.20 | 3.096 | l_knee | swing descent | -2.65 | -1.180 | -0.480 | 1.096 | +49.1 | +52.0 | l foot | controller |
+| 1.20 | 3.104 | l_knee | swing descent | -3.33 | -1.461 | -0.548 | 1.092 | +38.1 | +52.0 | l foot | controller |
+| 1.20 | 3.112 | l_knee | swing descent | -3.77 | -1.651 | -0.548 | 1.085 | +28.2 | +52.0 | l foot | controller |
+| 1.20 | 3.120 | l_knee | swing descent | -3.86 | -1.691 | -0.481 | 1.076 | +21.1 | +52.0 | l foot | controller |
+| 1.20 | 3.128 | l_knee | swing descent | -3.57 | -1.607 | -0.342 | 1.065 | +16.9 | +52.0 | l foot | controller |
+| 1.20 | 3.136 | l_knee | swing descent | -2.94 | -1.376 | -0.134 | 1.053 | +15.3 | +52.0 | l foot | controller |
+| 1.20 | 3.424 | r_knee | swing lift ramp | -2.38 | -0.906 | -0.621 | 0.935 | +43.7 | -25.7 | r foot | controller |
+| 1.20 | 3.432 | r_knee | swing lift ramp | -2.93 | -1.069 | -0.708 | 0.939 | +97.5 | -52.0 | r foot | controller |
+| 1.20 | 3.440 | r_knee | swing lift ramp | -3.07 | -0.994 | -0.717 | 0.945 | -37.5 | -52.0 | r foot | controller |
+| 1.20 | 3.448 | r_knee | swing lift ramp | -2.78 | -0.809 | -0.519 | 0.954 | +23.0 | +12.4 | l stance | controller |
+| 1.20 | 3.784 | r_knee | stop | +2.56 | +1.554 | +0.348 | 1.078 | +22.3 | -52.0 | r foot | controller |
+| 1.20 | 3.792 | r_knee | stop | +2.57 | +1.502 | +0.225 | 1.065 | +15.7 | -51.9 | r foot | controller |
+
+
+## Inverse-dynamics feedforward
+
+The 0.15 Nm band is retired. The integrator is MuJoCo 3.14 `implicitfast` at 0.002 s. Realised q̈ is `(qvel_{t+1} − qvel_t) / dt` on the pre-step q and q̇. That difference is the acceleration `mj_implicit` integrated. It is not a reference finite difference.
+
+Joint damping acts on the end-of-step velocity. `mjd_smooth_vel` puts dof damping and the actuator velocity gain into `qDeriv`, and implicitfast solves `qH = M − dt·qDeriv`. A force-clamped actuator is omitted from `qDeriv` (`actuatorDerivSkip`), so its force stays at the value computed from `qvel_t`. Joint damping is not skipped. The identity that uses that rule is
+
+`M(q_t)·q̈ + qfrc_bias − qfrc_constraint_forward − qfrc_applied = kp(ctrl−q) − kv·qvel_{t+1} − 0.08·qvel_{t+1}`
+
+with the actuator held at its `qvel_t` clip when `forcerange` is active. On the rows in the next table that identity's leg residual is at most 1.9×10⁻¹⁴ Nm, and the root balance `max |dyn[0:6] − con[0:6] − app[0:6]|` is at most 3.5×10⁻¹⁴ Nm. Those rows were measured before `mjENBL_INVDISCRETE`. The identity remains the cross-check. The bucket residual is the discrete one below.
+
+Without the discrete flag, `mj_inverse` sets `qfrc_inverse = M·q̈ + bias − qfrc_passive − qfrc_constraint` after re-solving the constraint (`engine_inverse.c`). Passive is the stored-velocity damping, and the constraint is not the one the integrator used. `mj_compareFwdInv` then reports a large `solver_fwdinv`. The table is that measurement.
+
+| Row | ident resid | over 0.05 | root balance | `|qfrc_inverse[0:6]|` | `|qfrc_inverse − F_user|` | fwdinv0 | fwdinv1 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| T 0.60 / 0.032, knee gait | 1.0e-14 | 0 | 3.3e-14 | 6.49 | 1.98 | 7.92 | 7.96 |
+| T 0.60 / 0.032, planned | 1.6e-14 | 0 | 1.3e-14 | 11.08 | 1.94 | 11.58 | 11.61 |
+| T 1.00 / 0.016, planned | 1.3e-14 | 0 | 1.2e-14 | 10.30 | 1.61 | 10.97 | 10.99 |
+| T 1.20 / 0.024, planned | 1.3e-14 | 0 | 1.1e-14 | — | 1.90 | 10.00 | 10.03 |
+| T 4 / 0.016, planned | 1.7e-14 | 0 | 3.5e-14 | — | 1.62 | 9.98 | 10.11 |
+
+MuJoCo is 3.14.0. `mjENBL_INVDISCRETE` exists. On the inverse copy only, the audit sets `model.opt.enableflags |= mjENBL_INVDISCRETE` and then runs `mj_inverse` (`mj_compareFwdInv` when `nefc > 0`). The flag makes that inverse treat `q̈ = (qvel_{t+1} − qvel_t) / dt` as the discrete implicitfast step, `(M − dt·qDeriv) q̈ = f`. The flags are restored before the next live step. The plant XML is not edited.
+
+The leg residual is `|qfrc_inverse − qfrc_actuator − qfrc_applied|` on that copy. The inverse column is `qfrc_inverse[dof]`. The Δqvel/dt identity above stays the cross-check: on the flat-hold knee gait its max is 1.0×10⁻¹⁴ Nm.
+
+On the nominal T 0.60 / 0.032 flat hold the discrete residual max is 1.476×10⁻³ Nm, on the right hip pitch at 1.726 s. 4 of 2440 physics steps are over 1×10⁻³ Nm, fraction 0.00164. The target of every tick inside 1×10⁻³ Nm is missed. The largest residual in the ±5% and rug set is 5.242×10⁻³ Nm, on mass +5% with the entrance rug, 6 of 2440 steps, fraction 0.00246. Prefer FAIL on the 1×10⁻³ Nm target. Those residuals are still under 1×10⁻² Nm, and that is the bucket gate. A tick is bucketed while every leg joint is inside 1×10⁻² Nm. The gate does not relax the 2.33 Nm applied-ask bar, and it does not turn the 1×10⁻³ miss into a pass.
+
+The inverse column is `scratch.qfrc_inverse[dof]` after that flagged inverse. A wall is a property of the planned trajectory only: `|τ_req − 0.01·q̈_ref| > 2.33`, where `τ_req = ID(q_ref, q̇_ref, q̈_ref)` with the planned LIPM wrench. The 0.01 has no source and is not changed. On a tick where the actuator is clamped, the inverse of the realised motion returns the clamp, so it cannot tell the controller from the physics. The right knee +2.450 Nm at 2.690 s, stripped +1.302 Nm, is that case: armature·q̈ ≈ 1.15 Nm, so q̈ ≈ 115 rad/s². That is a violent stop transition, not a wall.
+
+The T 4 left-hip-pitch +2.395 and T 20 right-hip-pitch −2.355 figures were the 0.15 Nm band's stripped `qfrc_inverse`. They are the mismatched column, so they were not walls on bucketed ticks of this residual. An exact-residual rescore of the previous realised-state feedforward, before the planned rebuild, also did not reproduce them. T 4 had no wall on the step force. T 20's re-solved inverse spiked on the right hip pitch at 2.962 s, double-support transfer, `qfrc_inverse` −3.649 Nm, stripped −3.408 Nm. The RNE split of that re-solved vector did not close, so the label was unsplit.
+
+`mj_inverse` does not apply `forcerange`. With `mjENBL_INVDISCRETE` it returns the force of the discrete step, and that force is the forward `qfrc_actuator`. On the nominal flat hold the right knee sits on the plant rail for 10 stop steps, and `qfrc_inverse` on those steps equals the rail. The nominal upright knee inverse is +2.450 Nm at 2.690 s. The residual on that step is 7.5×10⁻¹⁵ Nm. Stripping `0.01·q̈` leaves +1.302 Nm. The difference, about 1.15 Nm, is armature times roughly 115 rad/s². The stop used to freeze the reference, so the knee velocity fell to zero in one 8 ms sample. That inverse is the clamp. It is not a wall of a smooth plan.
+
+The previous worst case, mass −5% seed 3, recomputes to the same rail: `qfrc_inverse` +2.450 Nm on the right knee at 2.692 s, stop, torso up, residual 1.6×10⁻¹⁴ Nm, stripped +1.109 Nm. That is the same clamp, not a wall. Across the ±5% seeds the upright knee peak is +2.450 Nm or −2.450 Nm. The rug rows stay under the rail: +1.860 Nm nominal and +1.861 Nm at mass +5%, both on the left knee at 1.336 s, swing lift. The realised inverse cannot exceed the rail on a clamped tick, so it is the wrong column for the 2.33 Nm decision. That decision is the planned τ_req.
+
+The table below is the earlier continuous inverse, before `mjENBL_INVDISCRETE`. It is not this bucket.
+
+| t | joint | actuator | qfrc_inverse |
+| ---: | --- | ---: | ---: |
+| 2.498 | r_knee | −2.450 | −2.985 |
+| 2.500 | r_knee | −2.450 | −2.958 |
+| 2.506 | r_knee | −2.450 | −2.829 |
+| 2.674 | r_knee | +2.450 | +2.858 |
+| 2.682 | r_knee | +2.450 | +2.965 |
+| 2.684 | r_knee | +2.450 | +2.922 |
+| 2.686 | r_knee | +2.450 | +2.884 |
+| 2.690 | r_knee | +2.450 | +3.057 |
+| 2.692 | r_knee | +2.450 | +2.944 |
+| 2.694 | r_knee | +2.450 | +2.828 |
+
+That continuous column counted a sample when the identity residual was inside 1×10⁻³ Nm and the torso up component was at least 0.92. The gait is the flat hold: T 0.60 s, 0.032 m/s, z 8 mm, dsp 0.25, arm 1.0 s, quintic off, feedforward off. min up on those runs stayed at least 0.957. Soft-pass is off.
+
+On that continuous column the flat-hold cell at t = 2.680 s was `qfrc_inverse` +1.087 Nm, and the worst upright knee inverse was +3.160 Nm. The discrete reprint above replaces both.
+
+| Case | qfrc_inverse Nm | joint | t | phase | actuator |
+| --- | ---: | --- | ---: | --- | ---: |
+| nominal | +3.057 | r_knee | 2.690 | stop | +2.450 |
+| flat-hold at 2.680 s | +1.087 | r_knee | 2.680 | stop | +1.180 |
+| mass +5%, seed 0 | +3.064 | r_knee | 2.690 | stop | +2.450 |
+| mass +5%, seed 1 | +3.064 | r_knee | 2.690 | stop | +2.450 |
+| mass +5%, seed 2 | +3.064 | r_knee | 2.690 | stop | +2.450 |
+| mass +5%, seed 3 | +3.121 | r_knee | 2.698 | stop | +2.450 |
+| mass +5%, seed 4 | +3.121 | r_knee | 2.698 | stop | +2.450 |
+| mass +5%, seed 5 | +3.064 | r_knee | 2.690 | stop | +2.450 |
+| mass +5%, seed 6 | +3.074 | r_knee | 2.682 | stop | +2.450 |
+| mass +5%, seed 7 | +3.121 | r_knee | 2.698 | stop | +2.450 |
+| mass +5%, seed 8 | +3.064 | r_knee | 2.690 | stop | +2.450 |
+| mass +5%, seed 9 | +3.064 | r_knee | 2.690 | stop | +2.450 |
+| mass −5%, seed 0 | +3.044 | r_knee | 2.690 | stop | +2.450 |
+| mass −5%, seed 1 | +3.044 | r_knee | 2.690 | stop | +2.450 |
+| mass −5%, seed 2 | +3.044 | r_knee | 2.690 | stop | +2.450 |
+| mass −5%, seed 3 | +3.160 | r_knee | 2.698 | stop | +2.450 |
+| mass −5%, seed 4 | +3.160 | r_knee | 2.698 | stop | +2.450 |
+| mass −5%, seed 5 | +3.044 | r_knee | 2.690 | stop | +2.450 |
+| mass −5%, seed 6 | +3.064 | r_knee | 2.682 | stop | +2.450 |
+| mass −5%, seed 7 | +3.160 | r_knee | 2.698 | stop | +2.450 |
+| mass −5%, seed 8 | +3.043 | r_knee | 2.690 | stop | +2.450 |
+| mass −5%, seed 9 | +3.044 | r_knee | 2.690 | stop | +2.450 |
+| rug | +1.484 | l_knee | 1.336 | swing lift | +1.575 |
+| rug, mass +5% | +1.490 | l_knee | 1.336 | swing lift | +1.577 |
+
+On the continuous column, mass +5% seeds 3, 4, and 7 recorded a left-hip-pitch wall at 2.682 s, `qfrc_inverse` +2.655 Nm, stripped +2.688 Nm. The discrete reprint of those seeds has no wall. The discrete knee peak of +2.450 Nm is the clamped stop, not a planned-trajectory wall. The bucket gate for later rows is 1×10⁻² Nm.
+
+The feedforward is the planned gait, not the realised inverse. `τ_ff = ID(q_ref, q̇_ref, q̈_ref)` on a scratch data with contacts disabled, restored before the live step. The wrench is the LIPM force `m·(0, a_y, g)` with `a_y = (com_y − zmp_y)·g/z_c`, applied by `mj_applyFT`. In single support the whole wrench is projected into the stance box. In double support the vertical split uses the box-centre y so the net CoP y is the ZMP, and each share's x is the planned CoM x clamped inside that box. `q̈_ref` is the central difference of the IK reference at 8 ms. The swing is a quintic with the rise started at the previous touchdown, clearance 8 mm, preview jerk weight 1×10⁻⁴, double support 0.40, and a 1.0 s CoM pre-shift. Then
+
+`ctrl = q + (τ_ff + kv·q̇ + K_fb·(q_ref−q)) / kp`
+
+with `K_fb = 1` Nm/rad and `q̇` the measured joint velocity. The sum is not saturated and not clipped into ±2.33 Nm. A limiter fraction above 0, or a ctrlrange clip fraction above 0, is a hard-cap fail. `K_fb` of 2, 4, and 6 on the 1.00 s row push the signed ask to +2.464, −2.787, and −2.849 Nm and still tip, so the gain stays 1.
+
+At a quiet stand the planned hip pitch, knee, and ankle pitch match the holding actuator to about 0.002 Nm. Hip roll does not. The plan is about ±0.197 Nm and the holding actuator is about ±0.074 Nm: the real contact CoP is not the box-centre split.
+
+No planned row walks. Limiter fraction 0 and clip fraction 0 on every one. The measured applied ask stays under 2.33 Nm. On T 4 the feedforward term alone is −2.650 Nm; feedback opposes it and the applied ask is −2.267 Nm. That is not a saturator. The DC line fails on that row. Clearance is −4.4 mm, slip is 25.8 mm, phase mismatch is 0.22, and the torso tips.
+
+| Row | signed Nm | joint | signed | limit | clip | DC | min up | steps | vx ratio | stop up | bind |
+| --- | ---: | --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- |
+| T 0.60 / 0.032 | +1.624 | r_knee | pass | 0 | 0 | pass | 0.655 | 0 | 0.68 | — | r_knee, DS transfer, armature |
+| T 1.00 / 0.016 | +1.280 | r_hip_roll | pass | 0 | 0 | pass | 0.646 | 0 | 1.06 | — | r_hip_roll, DS transfer, CoP |
+| T 1.20 / 0.024 | +1.145 | r_hip_roll | pass | 0 | 0 | pass | 0.654 | 0 | 0.73 | — | r_hip_roll, DS transfer, CoP |
+| T 4 / 0.016 | −2.267 | r_hip_roll | pass | 0 | 0 | fail | 0.591 | 0 | −0.48 | — | r_hip_roll, stance edge, CoP |
+
+The T 1.00 / 0.016 row is the one whose torque bars pass and whose inside-residual term is a contact, so the perturbations use it. All of them tip in the first transfer. Mass +5% signs +1.239 Nm on the left knee, swing lift, armature. Mass −5% signs +1.345 Nm on the right hip roll, DS transfer, CoP. μ = 1.0 and μ = 0.8 sign +1.217 and +1.218 Nm on the left knee, swing lift, armature. The entrance rug reproduces the nominal tip, signed +1.280 Nm on the right hip roll, DS transfer, CoP. The fall is in that transfer, before a later step would meet the mat. Limiter fraction 0 and clip fraction 0 on all five. None pass, so there is no side, front, or foot video.
+
+The binding joint is the right hip roll, in double-support transfer. The inside-residual term is CoP. On that nominal tick the planned wrench's largest piece is the contact wrench, `τ_ff` +1.639 Nm, and the applied ask is +1.280 Nm. The implicit step force at the same write was +0.912 Nm, inside a residual of 4×10⁻¹⁵ Nm. That +0.912 Nm is the step force. The knee table above is the `qfrc_inverse` reprint.
+
+Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0. The plant XML is not edited.
+
+## Planned τ_req, and the stop quintic
+
+The bucket gate is 1×10⁻² Nm. The 1×10⁻³ Nm target stays a Prefer FAIL: nominal max 1.476×10⁻³ Nm, 4 of 2440 ticks; the worst of the ±5% and rug set is 5.242×10⁻³ Nm. A tick inside 1×10⁻² Nm is bucketed. That does not relax 2.33 Nm.
+
+A wall is only `|τ_req − 0.01·q̈_ref| > 2.33` on the planned motion. `τ_req` is `ID(q_ref, q̇_ref, q̈_ref)` with the LIPM wrench inside the declared stance box, split in double support. The with-armature column is `|τ_req|`. The without column subtracts `0.01·q̈_ref`. The realised inverse on a clamped tick returns the clamp. The right knee +2.450 Nm at 2.690 s, stripped +1.302 Nm, is armature times about 115 rad/s² from the old frozen stop. It is a violent transition, not a wall.
+
+The stop no longer holds the pose for 0.20 s. On the first double-support tick with both soles down, the blend takes its position and velocity from the last two references. The CoM y is a quintic from that preview state into the centre of double support, and the ZMP command is `com − (z_c/g)·a`, clamped into the two contact boxes. The joints are the same quintic from the walk reference to the upright stand. The first sample is one 8 ms step along the curve, initial acceleration is zero, and the end velocity and acceleration are zero. The span is at least 0.5 s, or one double-support interval when that is longer, and it grows until both knees' quintic `|q̈|` is inside 25 rad/s². The measured spans are 0.50 s at T 0.60 and T 1.00, and 1.60 s at T 4. The knee quintic peaks are 4.0, 5.7, and 0.4 rad/s².
+
+Those stop numbers are the reference played on a fixed upright root, so a tip does not replace the free joint before the blend. That playback is not a bar score. On it the planned knee `|τ_req|`, armature included, is 1.910 Nm at T 0.60, 1.376 Nm at T 1.00, and 1.301 Nm at T 4. All three are under 2.0 Nm. The T 0.60 knee peak is the walk's double-support kink, `q̈_ref` about −195 rad/s², bare +0.044 Nm, not the quintic. The largest bare torque on that upright playback is +1.143 Nm, right knee, start. There is no wall.
+
+The live bouts still tip in the first transfer, before the scheduled stop, so their stop span stays 0 and the table below is the live bar set. Limiter fraction 0 and clip fraction 0 on every nominal row. `K_fb` stays 1. None pass, so there is no side, front, or foot video.
+
+| Row | signed Nm | joint | signed | clamp | DC | min up | steps | vx ratio | planned τ_req | bare | phase |
+| --- | ---: | --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| T 0.60 / 0.032 | +1.624 | r_knee | pass | 0 | pass | 0.655 | 0 | 0.68 | +1.784 r_knee | −0.072 | DS transfer |
+| T 1.00 / 0.016 | +1.280 | r_hip_roll | pass | 0 | pass | 0.646 | 0 | 1.06 | +1.639 r_hip_roll | +1.643 | DS transfer |
+| T 1.20 / 0.024 | +1.145 | r_hip_roll | pass | 0 | pass | 0.654 | 0 | 0.73 | +1.479 r_hip_roll | +1.491 | DS transfer |
+| T 4 / 0.016 | −2.267 | r_hip_roll | pass | 0 | fail | 0.591 | 0 | −0.48 | −2.650 r_hip_roll | −2.657 | stance edge |
+
+The T 4 bare value is the live scratch, whose free joint is the falling trunk (min up 0.591). The upright playback of that same reference does not reproduce it. The binding failure on the three shorter rows is the tip, in double-support transfer. On T 1.00 the planned torque there is the right hip roll, `τ_req` +1.639 Nm, bare +1.643 Nm. The knee's live peak on T 0.60 is +1.784 Nm with `q̈_ref` +186 rad/s² and bare −0.072 Nm, so it is the reference kink's armature and it is under 2.0 Nm. It is not a wall.
+
+The perturbations are T 1.00 / 0.016. Mass ±5% uses seeds 0, 1, and 2. All of them tip. Limiter fraction 0 and clip fraction 0. The planned column is the largest `|τ_req|`. On the mass +5% and μ rows the signed joint is the left knee, about +1.21 to +1.24 Nm, and that knee's planned torque stays about +1.21 to +1.23 Nm.
+
+| Case | signed Nm | joint | min up | vx ratio | planned τ_req | bare | phase |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | --- |
+| mass +5%, seed 0 | +1.240 | l_knee | 0.646 | 1.11 | +1.488 r_hip_roll | +1.505 | DS transfer |
+| mass +5%, seed 1 | +1.240 | l_knee | 0.644 | 1.11 | +1.512 r_hip_roll | +1.529 | DS transfer |
+| mass +5%, seed 2 | +1.256 | r_hip_roll | 0.637 | 1.10 | +1.567 r_hip_roll | +1.584 | DS transfer |
+| mass −5%, seed 0 | +1.314 | r_hip_roll | 0.657 | 1.03 | +1.736 r_hip_roll | +1.732 | DS transfer |
+| mass −5%, seed 1 | +1.217 | r_hip_roll | 0.665 | 1.04 | +1.620 r_hip_roll | +1.617 | DS transfer |
+| mass −5%, seed 2 | +1.283 | r_hip_roll | 0.657 | 1.03 | +1.692 r_hip_roll | +1.690 | DS transfer |
+| μ = 1.0 | +1.217 | l_knee | 0.650 | 1.05 | +1.344 r_hip_roll | +1.358 | DS transfer |
+| μ = 0.8 | +1.218 | l_knee | 0.646 | 1.04 | +1.316 r_hip_roll | +1.333 | DS transfer |
+| latency −1 | +2.501 | r_hip_roll | 0.262 | 10.7 | +3.277 r_hip_roll | +3.275 | start |
+| latency +1 | +2.540 | r_hip_roll | 0.626 | 1.11 | +2.894 r_hip_roll | +2.889 | stop |
+| rug | +1.280 | r_hip_roll | 0.646 | 1.06 | +1.639 r_hip_roll | +1.643 | DS transfer |
+| rug, mass +5% | +1.239 | l_knee | 0.648 | 1.11 | +1.468 r_hip_roll | +1.485 | DS transfer |
+
+Latency −1 fails the signed bar, the clamp, and the DC line during the start, with the torso already down. Latency +1 fails the same three during the stop, stop up 0.626, and the planned column on that fallen pose is over 2.33 Nm without armature. The upright playback does not show that hip-roll bare peak. The rug reproduces the nominal tip before the mat. No row passes.
+
+Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0. The plant XML is not edited.
+
+## MFG rule: a wall is the bare plan, a pass is the applied force
+
+`|τ_req − 0.01·q̈_ref|` names a wall and nothing else. A pass is the applied signed force on the real plant, armature 0.01 included, ≤ 2.33 Nm on every tick, with limiter-active fraction 0 and clamp fraction 0. A plan whose bare column is inside 2.33 Nm and whose with-armature column is not is an unsourced-armature candidate. It is not a pass. The smooth-stop target is the with-armature column.
+
+The stop tables are the reference played on a fixed upright root, so the blend actually runs. Each row is the tick of peak `|τ_req|` for that joint during the stop phase. `with` is `τ_req`. `without` is `τ_req − 0.01·q̈_ref` on that same tick. A second line is the tick of peak `|without|` when it is a different sample. Every stop joint is inside 2.33 Nm with the armature left in. None is a wall and none is an unsourced-armature candidate. That playback is not a plant pass.
+
+The live tables are the whole bout on the free plant. The shorter rows tip before the scheduled stop, so those peaks are the walk. No live joint is an unsourced-armature candidate. Three planned columns name a wall because the bare term is over 2.33 Nm: T 4 right hip roll −2.657 Nm at the stance edge, latency −1 right hip roll +3.275 Nm at the start, and latency +1 right hip roll +2.889 Nm in the stop. The applied force fails the 2.33 Nm bar on both latency rows, and those rows also clip. The other rows keep the applied force inside 2.33 Nm with limiter fraction 0 and clamp fraction 0, and they tip, so they are not a pass. There is no side, front, or foot video.
+
+Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0. The plant XML is not edited.
+
+### New stop, T 0.60 / 0.032
+
+Span 0.50 s. Knee quintic peak 4.00 rad/s². Upright root playback, min up 1.000. Not a plant pass.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | -0.099 | -0.099 | +0.00 | 2.488 | stop | inside |
+| l_hip_roll | -1.232 | -0.548 | -68.39 | 2.488 | stop | inside |
+| l_hip_pitch | -0.182 | -0.166 | -1.59 | 2.648 | stop | inside |
+| l_hip_pitch bare peak | -0.171 | -0.174 | +0.31 | 2.744 | stop | inside |
+| l_knee | -0.779 | -0.753 | -2.65 | 2.912 | stop | inside |
+| l_ank_pitch | +0.883 | +0.437 | +44.58 | 2.912 | stop | inside |
+| l_ank_roll | -0.208 | -0.152 | -5.56 | 2.920 | stop | inside |
+| l_ank_roll bare peak | -0.198 | -0.159 | -3.96 | 2.944 | stop | inside |
+| r_hip_yaw | -0.121 | -0.121 | +0.00 | 2.488 | stop | inside |
+| r_hip_roll | +1.375 | +0.867 | +50.85 | 2.480 | stop | inside |
+| r_hip_pitch | -0.248 | -0.250 | +0.20 | 2.488 | stop | inside |
+| r_knee | +1.096 | +1.087 | +0.91 | 2.752 | stop | inside |
+| r_ank_pitch | -0.753 | -0.327 | -42.60 | 2.816 | stop | inside |
+| r_ank_pitch bare peak | -0.667 | -0.677 | +0.99 | 2.496 | stop | inside |
+| r_ank_roll | +0.427 | +0.377 | +5.01 | 2.648 | stop | inside |
+
+### New stop, T 1.00 / 0.016
+
+Span 0.50 s. Knee quintic peak 5.68 rad/s². Upright root playback, min up 1.000. Not a plant pass.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | -0.046 | -0.046 | +0.00 | 3.376 | stop | inside |
+| l_hip_roll | -0.579 | -0.531 | -4.74 | 3.384 | stop | inside |
+| l_hip_pitch | +0.241 | +0.243 | -0.15 | 3.376 | stop | inside |
+| l_knee | -1.065 | -1.079 | +1.35 | 3.440 | stop | inside |
+| l_ank_pitch | +0.899 | +0.629 | +26.97 | 3.440 | stop | inside |
+| l_ank_pitch bare peak | +0.587 | +0.631 | -4.38 | 3.376 | stop | inside |
+| l_ank_roll | -0.311 | -0.266 | -4.46 | 3.472 | stop | inside |
+| l_ank_roll bare peak | -0.304 | -0.270 | -3.46 | 3.504 | stop | inside |
+| r_hip_yaw | +0.013 | +0.013 | +0.00 | 3.384 | stop | inside |
+| r_hip_roll | -0.206 | -0.204 | -0.16 | 3.584 | stop | inside |
+| r_hip_roll bare peak | -0.201 | -0.207 | +0.54 | 3.600 | stop | inside |
+| r_hip_pitch | +0.148 | +0.165 | -1.68 | 3.376 | stop | inside |
+| r_knee | +0.661 | +0.689 | -2.81 | 3.728 | stop | inside |
+| r_ank_pitch | -0.808 | -0.376 | -43.21 | 3.728 | stop | inside |
+| r_ank_pitch bare peak | -0.448 | -0.384 | -6.39 | 3.752 | stop | inside |
+| r_ank_roll | +0.184 | +0.154 | +2.98 | 3.744 | stop | inside |
+| r_ank_roll bare peak | +0.179 | +0.157 | +2.17 | 3.768 | stop | inside |
+
+### New stop, T 1.20 / 0.024
+
+Span 0.50 s. Knee quintic peak 10.38 rad/s². Upright root playback, min up 1.000. Not a plant pass.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.102 | +0.102 | +0.00 | 3.720 | stop | inside |
+| l_hip_roll | -1.540 | -1.431 | -10.96 | 3.848 | stop | inside |
+| l_hip_pitch | +0.264 | +0.265 | -0.10 | 3.712 | stop | inside |
+| l_hip_pitch bare peak | +0.262 | +0.268 | -0.58 | 3.720 | stop | inside |
+| l_knee | -1.004 | -1.012 | +0.84 | 3.976 | stop | inside |
+| l_ank_pitch | +0.737 | +0.726 | +1.13 | 3.968 | stop | inside |
+| l_ank_roll | -0.438 | -0.427 | -1.03 | 3.968 | stop | inside |
+| l_ank_roll bare peak | -0.437 | -0.436 | -0.17 | 3.976 | stop | inside |
+| r_hip_yaw | +0.092 | +0.092 | +0.00 | 3.720 | stop | inside |
+| r_hip_roll | +1.229 | +0.606 | +62.32 | 3.720 | stop | inside |
+| r_hip_pitch | +0.215 | +0.179 | +3.65 | 3.912 | stop | inside |
+| r_hip_pitch bare peak | +0.201 | +0.197 | +0.42 | 3.976 | stop | inside |
+| r_knee | +0.882 | +0.814 | +6.78 | 4.136 | stop | inside |
+| r_ank_pitch | -0.908 | -0.482 | -42.61 | 4.152 | stop | inside |
+| r_ank_roll | +0.228 | +0.148 | +8.00 | 4.152 | stop | inside |
+| r_ank_roll bare peak | +0.208 | +0.160 | +4.73 | 4.184 | stop | inside |
+
+### New stop, T 4 / 0.016
+
+Span 1.60 s. Knee quintic peak 0.40 rad/s². Upright root playback, min up 1.000. Not a plant pass.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | -0.075 | -0.075 | +0.00 | 9.464 | stop | inside |
+| l_hip_roll | -1.263 | -0.573 | -68.98 | 9.464 | stop | inside |
+| l_hip_pitch | -0.147 | -0.147 | +0.04 | 10.272 | stop | inside |
+| l_knee | -0.572 | -0.571 | -0.17 | 10.936 | stop | inside |
+| l_knee bare peak | -0.572 | -0.571 | -0.16 | 10.944 | stop | inside |
+| l_ank_pitch | +0.502 | +0.285 | +21.68 | 10.688 | stop | inside |
+| l_ank_pitch bare peak | +0.354 | +0.350 | +0.34 | 10.960 | stop | inside |
+| l_ank_roll | -0.156 | -0.152 | -0.32 | 10.960 | stop | inside |
+| l_ank_roll bare peak | -0.155 | -0.153 | -0.15 | 11.016 | stop | inside |
+| r_hip_yaw | -0.144 | -0.144 | +0.00 | 9.464 | stop | inside |
+| r_hip_roll | +1.356 | +0.853 | +50.27 | 9.456 | stop | inside |
+| r_hip_pitch | -0.237 | -0.237 | -0.00 | 9.464 | stop | inside |
+| r_knee | +1.165 | +1.164 | +0.05 | 10.272 | stop | inside |
+| r_ank_pitch | -1.089 | -0.938 | -15.10 | 9.848 | stop | inside |
+| r_ank_pitch bare peak | -0.953 | -0.939 | -1.32 | 9.832 | stop | inside |
+| r_ank_roll | +0.339 | +0.335 | +0.45 | 9.976 | stop | inside |
+
+### T 0.60 / 0.032 live
+
+Applied signed +1.624 Nm on r_knee, signed_ok True, clamp_ok True, limiter 0.000, min up 0.655.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.500 | +0.500 | +0.00 | 1.936 | DS transfer | inside |
+| l_hip_roll | +1.169 | +1.189 | -1.93 | 1.976 | DS transfer | inside |
+| l_hip_pitch | +0.693 | +0.096 | +59.79 | 1.440 | held swing | inside |
+| l_hip_pitch bare peak | +0.319 | +0.340 | -2.09 | 1.920 | DS transfer | inside |
+| l_knee | +1.361 | -0.148 | +150.94 | 1.264 | DS transfer | inside |
+| l_knee bare peak | -0.588 | -0.588 | +0.00 | 0.256 | start | inside |
+| l_ank_pitch | -0.785 | -0.755 | -3.08 | 1.688 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.779 | -0.757 | -2.17 | 1.648 | DS transfer | inside |
+| l_ank_roll | -0.561 | -0.523 | -3.78 | 1.920 | DS transfer | inside |
+| l_ank_roll bare peak | -0.560 | -0.525 | -3.49 | 1.928 | DS transfer | inside |
+| r_hip_yaw | +0.353 | +0.353 | +0.00 | 2.128 | DS transfer | inside |
+| r_hip_roll | +1.535 | +1.533 | +0.17 | 2.128 | DS transfer | inside |
+| r_hip_pitch | -0.919 | -0.071 | -84.80 | 1.624 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.467 | -0.317 | -15.05 | 1.416 | stance mid | inside |
+| r_knee | +1.784 | -0.072 | +185.54 | 1.624 | DS transfer | inside |
+| r_knee bare peak | +0.762 | +0.758 | +0.47 | 0.728 | start | inside |
+| r_ank_pitch | +0.988 | -0.020 | +100.74 | 1.624 | DS transfer | inside |
+| r_ank_pitch bare peak | +0.886 | +0.791 | +9.51 | 1.496 | touchdown impact | inside |
+| r_ank_roll | -0.463 | -0.433 | -3.03 | 1.336 | stance edge | inside |
+| r_ank_roll bare peak | -0.460 | -0.501 | +4.08 | 1.496 | touchdown impact | inside |
+
+### T 1.00 / 0.016 live
+
+Applied signed +1.280 Nm on r_hip_roll, signed_ok True, clamp_ok True, limiter 0.000, min up 0.646.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.368 | +0.368 | +0.00 | 2.128 | DS transfer | inside |
+| l_hip_roll | +1.114 | +1.173 | -5.87 | 2.176 | DS transfer | inside |
+| l_hip_roll bare peak | +1.112 | +1.174 | -6.22 | 2.168 | DS transfer | inside |
+| l_hip_pitch | +0.605 | +0.088 | +51.67 | 1.360 | DS transfer | inside |
+| l_hip_pitch bare peak | +0.344 | +0.353 | -0.88 | 2.080 | DS transfer | inside |
+| l_knee | +1.208 | +0.188 | +101.95 | 1.408 | swing lift ramp | inside |
+| l_knee bare peak | -0.647 | -0.608 | -3.88 | 2.048 | DS transfer | inside |
+| l_ank_pitch | -0.757 | -0.152 | -60.45 | 1.360 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.560 | -0.550 | -1.06 | 1.856 | DS transfer | inside |
+| l_ank_roll | -0.547 | -0.380 | -16.76 | 2.056 | DS transfer | inside |
+| l_ank_roll bare peak | -0.525 | -0.449 | -7.54 | 2.128 | DS transfer | inside |
+| r_hip_yaw | +0.307 | +0.307 | +0.00 | 2.320 | DS transfer | inside |
+| r_hip_roll | +1.639 | +1.643 | -0.40 | 2.320 | DS transfer | inside |
+| r_hip_pitch | -0.535 | -0.026 | -50.90 | 1.904 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.334 | -0.265 | -6.87 | 1.552 | stance mid | inside |
+| r_knee | +1.022 | -0.084 | +110.61 | 1.904 | DS transfer | inside |
+| r_knee bare peak | +0.657 | +0.655 | +0.25 | 0.656 | start | inside |
+| r_ank_pitch | +0.815 | +0.782 | +3.36 | 1.696 | touchdown impact | inside |
+| r_ank_roll | -0.598 | -0.521 | -7.71 | 1.408 | stance edge | inside |
+| r_ank_roll bare peak | -0.560 | -0.522 | -3.78 | 1.416 | stance edge | inside |
+
+### T 1.20 / 0.024 live
+
+Applied signed +1.145 Nm on r_hip_roll, signed_ok True, clamp_ok True, limiter 0.000, min up 0.654.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.340 | +0.340 | +0.00 | 2.232 | DS transfer | inside |
+| l_hip_roll | +1.105 | +1.174 | -6.89 | 2.280 | DS transfer | inside |
+| l_hip_roll bare peak | +1.105 | +1.177 | -7.21 | 2.272 | DS transfer | inside |
+| l_hip_pitch | -0.554 | -0.247 | -30.75 | 1.608 | held swing | inside |
+| l_hip_pitch bare peak | +0.357 | +0.335 | +2.12 | 2.160 | DS transfer | inside |
+| l_knee | +1.021 | +0.174 | +84.68 | 1.432 | swing lift ramp | inside |
+| l_knee bare peak | -0.773 | -0.688 | -8.48 | 2.136 | DS transfer | inside |
+| l_ank_pitch | -0.684 | -0.168 | -51.61 | 1.376 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.447 | -0.442 | -0.45 | 1.872 | DS transfer | inside |
+| l_ank_roll | -0.495 | -0.414 | -8.09 | 2.232 | DS transfer | inside |
+| l_ank_roll bare peak | -0.495 | -0.414 | -8.04 | 2.240 | DS transfer | inside |
+| r_hip_yaw | +0.310 | +0.310 | +0.00 | 2.408 | DS transfer | inside |
+| r_hip_roll | +1.479 | +1.491 | -1.21 | 2.408 | DS transfer | inside |
+| r_hip_pitch | -0.613 | -0.379 | -23.41 | 1.608 | stance mid | inside |
+| r_knee | +0.846 | -0.086 | +93.19 | 2.024 | DS transfer | inside |
+| r_knee bare peak | +0.650 | +0.647 | +0.25 | 0.656 | start | inside |
+| r_ank_pitch | +0.940 | +0.906 | +3.42 | 1.784 | touchdown impact | inside |
+| r_ank_roll | -0.612 | -0.537 | -7.52 | 1.432 | stance edge | inside |
+| r_ank_roll bare peak | -0.568 | -0.537 | -3.06 | 1.440 | stance edge | inside |
+
+### T 4 / 0.016 live
+
+Applied signed -2.267 Nm on r_hip_roll, signed_ok True, clamp_ok True, limiter 0.000, min up 0.591.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.141 | +0.141 | +0.00 | 2.832 | swing descent | inside |
+| l_hip_roll | +0.268 | +0.262 | +0.62 | 2.832 | swing descent | inside |
+| l_hip_pitch | -0.232 | -0.222 | -1.02 | 2.800 | swing descent | inside |
+| l_hip_pitch bare peak | -0.232 | -0.222 | -0.96 | 2.808 | swing descent | inside |
+| l_knee | -0.588 | -0.588 | +0.00 | 0.256 | start | inside |
+| l_ank_pitch | -0.568 | -0.567 | -0.08 | 1.400 | DS transfer | inside |
+| l_ank_roll | -0.166 | -0.156 | -1.09 | 0.328 | start | inside |
+| l_ank_roll bare peak | -0.164 | -0.156 | -0.81 | 0.360 | start | inside |
+| r_hip_yaw | +0.382 | +0.382 | +0.00 | 2.096 | stance mid | inside |
+| r_hip_roll | -2.650 | -2.657 | +0.68 | 2.832 | stance edge | wall |
+| r_hip_pitch | -0.800 | -0.808 | +0.82 | 2.832 | stance edge | inside |
+| r_knee | +0.792 | +0.793 | -0.07 | 2.624 | stance edge | inside |
+| r_ank_pitch | +0.705 | +0.705 | +0.03 | 2.216 | stance mid | inside |
+| r_ank_roll | -0.563 | -0.568 | +0.54 | 1.696 | stance edge | inside |
+
+### mass +5% seed 0
+
+Applied signed +1.240 Nm on l_knee, signed_ok True, clamp_ok True, limiter 0.000, min up 0.646.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.415 | +0.415 | +0.00 | 2.096 | DS transfer | inside |
+| l_hip_roll | +1.208 | +1.277 | -6.85 | 2.136 | DS transfer | inside |
+| l_hip_pitch | +0.617 | +0.100 | +51.67 | 1.360 | DS transfer | inside |
+| l_hip_pitch bare peak | +0.403 | +0.395 | +0.78 | 2.040 | DS transfer | inside |
+| l_knee | +1.232 | +0.207 | +102.48 | 1.392 | swing lift ramp | inside |
+| l_knee bare peak | -0.616 | -0.616 | +0.00 | 0.256 | start | inside |
+| l_ank_pitch | -0.778 | -0.173 | -60.45 | 1.360 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.622 | -0.614 | -0.79 | 1.880 | DS transfer | inside |
+| l_ank_roll | -0.535 | -0.412 | -12.37 | 2.032 | DS transfer | inside |
+| l_ank_roll bare peak | -0.533 | -0.456 | -7.70 | 2.096 | DS transfer | inside |
+| r_hip_yaw | +0.283 | +0.283 | +0.00 | 2.256 | DS transfer | inside |
+| r_hip_roll | +1.488 | +1.505 | -1.68 | 2.256 | DS transfer | inside |
+| r_hip_pitch | -0.540 | -0.031 | -50.91 | 1.888 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.356 | -0.285 | -7.10 | 1.536 | stance mid | inside |
+| r_knee | +1.018 | -0.088 | +110.63 | 1.888 | DS transfer | inside |
+| r_knee bare peak | +0.688 | +0.685 | +0.26 | 0.640 | start | inside |
+| r_ank_pitch | +0.865 | +0.834 | +3.15 | 1.680 | touchdown impact | inside |
+| r_ank_roll | -0.611 | -0.533 | -7.78 | 1.392 | stance edge | inside |
+| r_ank_roll bare peak | -0.558 | -0.537 | -2.06 | 1.408 | stance edge | inside |
+
+### mass +5% seed 1
+
+Applied signed +1.240 Nm on l_knee, signed_ok True, clamp_ok True, limiter 0.000, min up 0.644.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.416 | +0.416 | +0.00 | 2.096 | DS transfer | inside |
+| l_hip_roll | +1.209 | +1.278 | -6.85 | 2.136 | DS transfer | inside |
+| l_hip_pitch | +0.616 | +0.099 | +51.67 | 1.360 | DS transfer | inside |
+| l_hip_pitch bare peak | +0.401 | +0.393 | +0.78 | 2.040 | DS transfer | inside |
+| l_knee | +1.232 | +0.207 | +102.48 | 1.392 | swing lift ramp | inside |
+| l_knee bare peak | -0.617 | -0.617 | +0.00 | 0.256 | start | inside |
+| l_ank_pitch | -0.777 | -0.172 | -60.45 | 1.360 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.624 | -0.616 | -0.78 | 1.880 | DS transfer | inside |
+| l_ank_roll | -0.532 | -0.455 | -7.70 | 2.096 | DS transfer | inside |
+| r_hip_yaw | +0.286 | +0.286 | +0.00 | 2.256 | DS transfer | inside |
+| r_hip_roll | +1.512 | +1.529 | -1.68 | 2.256 | DS transfer | inside |
+| r_hip_pitch | -0.540 | -0.031 | -50.92 | 1.888 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.356 | -0.285 | -7.10 | 1.536 | stance mid | inside |
+| r_knee | +1.018 | -0.089 | +110.64 | 1.888 | DS transfer | inside |
+| r_knee bare peak | +0.688 | +0.685 | +0.26 | 0.640 | start | inside |
+| r_ank_pitch | +0.868 | +0.837 | +3.15 | 1.680 | touchdown impact | inside |
+| r_ank_roll | -0.611 | -0.533 | -7.78 | 1.392 | stance edge | inside |
+| r_ank_roll bare peak | -0.557 | -0.537 | -2.06 | 1.408 | stance edge | inside |
+
+### mass +5% seed 2
+
+Applied signed +1.256 Nm on r_hip_roll, signed_ok True, clamp_ok True, limiter 0.000, min up 0.637.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.414 | +0.414 | +0.00 | 2.096 | DS transfer | inside |
+| l_hip_roll | +1.217 | +1.285 | -6.85 | 2.136 | DS transfer | inside |
+| l_hip_roll bare peak | +1.214 | +1.285 | -7.12 | 2.128 | DS transfer | inside |
+| l_hip_pitch | +0.617 | +0.101 | +51.67 | 1.360 | DS transfer | inside |
+| l_hip_pitch bare peak | +0.401 | +0.393 | +0.79 | 2.040 | DS transfer | inside |
+| l_knee | +1.232 | +0.207 | +102.48 | 1.392 | swing lift ramp | inside |
+| l_knee bare peak | -0.617 | -0.617 | +0.00 | 0.256 | start | inside |
+| l_ank_pitch | -0.779 | -0.174 | -60.45 | 1.360 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.619 | -0.611 | -0.78 | 1.880 | DS transfer | inside |
+| l_ank_roll | -0.532 | -0.455 | -7.70 | 2.096 | DS transfer | inside |
+| r_hip_yaw | +0.291 | +0.291 | +0.00 | 2.256 | DS transfer | inside |
+| r_hip_roll | +1.567 | +1.584 | -1.68 | 2.256 | DS transfer | inside |
+| r_hip_pitch | -0.540 | -0.030 | -50.92 | 1.888 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.356 | -0.285 | -7.10 | 1.536 | stance mid | inside |
+| r_knee | +1.018 | -0.088 | +110.64 | 1.888 | DS transfer | inside |
+| r_knee bare peak | +0.690 | +0.688 | +0.26 | 0.640 | start | inside |
+| r_ank_pitch | +0.869 | +0.838 | +3.15 | 1.680 | touchdown impact | inside |
+| r_ank_roll | -0.611 | -0.533 | -7.78 | 1.392 | stance edge | inside |
+| r_ank_roll bare peak | -0.557 | -0.537 | -2.06 | 1.408 | stance edge | inside |
+
+### mass −5% seed 0
+
+Applied signed +1.314 Nm on r_hip_roll, signed_ok True, clamp_ok True, limiter 0.000, min up 0.657.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.323 | +0.323 | +0.00 | 2.168 | DS transfer | inside |
+| l_hip_roll | +1.001 | +1.048 | -4.75 | 2.216 | DS transfer | inside |
+| l_hip_roll bare peak | +0.996 | +1.051 | -5.50 | 2.200 | DS transfer | inside |
+| l_hip_pitch | +0.595 | +0.078 | +51.67 | 1.360 | DS transfer | inside |
+| l_hip_pitch bare peak | +0.296 | +0.315 | -1.89 | 2.112 | DS transfer | inside |
+| l_knee | +1.190 | +0.169 | +102.15 | 1.424 | swing lift ramp | inside |
+| l_knee bare peak | -0.637 | -0.606 | -3.05 | 2.072 | DS transfer | inside |
+| l_ank_pitch | -0.739 | -0.135 | -60.45 | 1.360 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.499 | -0.488 | -1.09 | 1.864 | DS transfer | inside |
+| l_ank_roll | -0.508 | -0.433 | -7.56 | 2.144 | DS transfer | inside |
+| l_ank_roll bare peak | -0.506 | -0.434 | -7.14 | 2.160 | DS transfer | inside |
+| r_hip_yaw | +0.326 | +0.326 | +0.00 | 2.392 | DS transfer | inside |
+| r_hip_roll | +1.736 | +1.732 | +0.33 | 2.392 | DS transfer | inside |
+| r_hip_pitch | -0.529 | -0.020 | -50.89 | 1.920 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.314 | -0.246 | -6.79 | 1.568 | stance mid | inside |
+| r_knee | +1.027 | -0.079 | +110.58 | 1.920 | DS transfer | inside |
+| r_knee bare peak | +0.628 | +0.625 | +0.25 | 0.656 | start | inside |
+| r_ank_pitch | +0.756 | +0.721 | +3.54 | 1.712 | touchdown impact | inside |
+| r_ank_roll | -0.567 | -0.506 | -6.13 | 1.424 | stance edge | inside |
+
+### mass −5% seed 1
+
+Applied signed +1.217 Nm on r_hip_roll, signed_ok True, clamp_ok True, limiter 0.000, min up 0.665.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.325 | +0.325 | +0.00 | 2.168 | DS transfer | inside |
+| l_hip_roll | +1.003 | +1.051 | -4.75 | 2.216 | DS transfer | inside |
+| l_hip_roll bare peak | +1.000 | +1.055 | -5.50 | 2.200 | DS transfer | inside |
+| l_hip_pitch | +0.595 | +0.078 | +51.67 | 1.360 | DS transfer | inside |
+| l_hip_pitch bare peak | +0.296 | +0.315 | -1.89 | 2.112 | DS transfer | inside |
+| l_knee | +1.190 | +0.169 | +102.15 | 1.424 | swing lift ramp | inside |
+| l_knee bare peak | -0.636 | -0.606 | -3.05 | 2.072 | DS transfer | inside |
+| l_ank_pitch | -0.739 | -0.134 | -60.45 | 1.360 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.501 | -0.490 | -1.09 | 1.864 | DS transfer | inside |
+| l_ank_roll | -0.508 | -0.432 | -7.55 | 2.144 | DS transfer | inside |
+| l_ank_roll bare peak | -0.505 | -0.434 | -7.14 | 2.160 | DS transfer | inside |
+| r_hip_yaw | +0.313 | +0.313 | +0.00 | 2.384 | DS transfer | inside |
+| r_hip_roll | +1.620 | +1.617 | +0.27 | 2.384 | DS transfer | inside |
+| r_hip_pitch | -0.530 | -0.021 | -50.89 | 1.920 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.314 | -0.246 | -6.79 | 1.568 | stance mid | inside |
+| r_knee | +1.027 | -0.079 | +110.58 | 1.920 | DS transfer | inside |
+| r_knee bare peak | +0.627 | +0.625 | +0.24 | 0.664 | start | inside |
+| r_ank_pitch | +0.758 | +0.723 | +3.54 | 1.712 | touchdown impact | inside |
+| r_ank_roll | -0.567 | -0.506 | -6.13 | 1.424 | stance edge | inside |
+
+### mass −5% seed 2
+
+Applied signed +1.283 Nm on r_hip_roll, signed_ok True, clamp_ok True, limiter 0.000, min up 0.657.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.324 | +0.324 | +0.00 | 2.160 | DS transfer | inside |
+| l_hip_roll | +1.009 | +1.060 | -5.13 | 2.208 | DS transfer | inside |
+| l_hip_roll bare peak | +1.006 | +1.061 | -5.50 | 2.200 | DS transfer | inside |
+| l_hip_pitch | +0.595 | +0.079 | +51.67 | 1.360 | DS transfer | inside |
+| l_hip_pitch bare peak | +0.297 | +0.316 | -1.89 | 2.112 | DS transfer | inside |
+| l_knee | +1.190 | +0.169 | +102.15 | 1.424 | swing lift ramp | inside |
+| l_knee bare peak | -0.627 | -0.607 | -2.00 | 2.072 | DS transfer | inside |
+| l_ank_pitch | -0.740 | -0.135 | -60.45 | 1.360 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.499 | -0.489 | -1.09 | 1.864 | DS transfer | inside |
+| l_ank_roll | -0.521 | -0.356 | -16.54 | 2.080 | DS transfer | inside |
+| l_ank_roll bare peak | -0.505 | -0.433 | -7.14 | 2.160 | DS transfer | inside |
+| r_hip_yaw | +0.320 | +0.320 | +0.00 | 2.384 | DS transfer | inside |
+| r_hip_roll | +1.692 | +1.690 | +0.27 | 2.384 | DS transfer | inside |
+| r_hip_pitch | -0.529 | -0.020 | -50.89 | 1.920 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.314 | -0.246 | -6.79 | 1.568 | stance mid | inside |
+| r_knee | +1.027 | -0.079 | +110.59 | 1.920 | DS transfer | inside |
+| r_knee bare peak | +0.630 | +0.627 | +0.24 | 0.664 | start | inside |
+| r_ank_pitch | +0.758 | +0.723 | +3.54 | 1.712 | touchdown impact | inside |
+| r_ank_roll | -0.567 | -0.506 | -6.13 | 1.424 | stance edge | inside |
+
+### μ = 1.0
+
+Applied signed +1.217 Nm on l_knee, signed_ok True, clamp_ok True, limiter 0.000, min up 0.650.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.382 | +0.382 | +0.00 | 2.112 | DS transfer | inside |
+| l_hip_roll | +1.198 | +1.260 | -6.21 | 2.168 | DS transfer | inside |
+| l_hip_roll bare peak | +1.196 | +1.261 | -6.53 | 2.160 | DS transfer | inside |
+| l_hip_pitch | +0.606 | +0.089 | +51.67 | 1.360 | DS transfer | inside |
+| l_hip_pitch bare peak | +0.356 | +0.359 | -0.32 | 2.072 | DS transfer | inside |
+| l_knee | +1.208 | +0.189 | +101.95 | 1.408 | swing lift ramp | inside |
+| l_knee bare peak | -0.631 | -0.615 | -1.62 | 2.056 | DS transfer | inside |
+| l_ank_pitch | -0.760 | -0.155 | -60.45 | 1.360 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.549 | -0.537 | -1.20 | 1.832 | DS transfer | inside |
+| l_ank_roll | -0.523 | -0.446 | -7.67 | 2.112 | DS transfer | inside |
+| l_ank_roll bare peak | -0.523 | -0.447 | -7.62 | 2.120 | DS transfer | inside |
+| r_hip_yaw | +0.270 | +0.270 | +0.00 | 2.280 | DS transfer | inside |
+| r_hip_roll | +1.344 | +1.358 | -1.41 | 2.280 | DS transfer | inside |
+| r_hip_pitch | -0.531 | -0.022 | -50.94 | 1.904 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.333 | -0.264 | -6.87 | 1.552 | stance mid | inside |
+| r_knee | +1.025 | -0.082 | +110.68 | 1.904 | DS transfer | inside |
+| r_knee bare peak | +0.659 | +0.657 | +0.25 | 0.656 | start | inside |
+| r_ank_pitch | +0.810 | +0.777 | +3.36 | 1.696 | touchdown impact | inside |
+| r_ank_roll | -0.598 | -0.521 | -7.71 | 1.408 | stance edge | inside |
+| r_ank_roll bare peak | -0.560 | -0.522 | -3.78 | 1.416 | stance edge | inside |
+
+### μ = 0.8
+
+Applied signed +1.218 Nm on l_knee, signed_ok True, clamp_ok True, limiter 0.000, min up 0.646.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.385 | +0.385 | +0.00 | 2.112 | DS transfer | inside |
+| l_hip_roll | +1.228 | +1.290 | -6.20 | 2.168 | DS transfer | inside |
+| l_hip_roll bare peak | +1.226 | +1.292 | -6.53 | 2.160 | DS transfer | inside |
+| l_hip_pitch | +0.606 | +0.089 | +51.67 | 1.360 | DS transfer | inside |
+| l_hip_pitch bare peak | +0.362 | +0.360 | +0.23 | 2.064 | DS transfer | inside |
+| l_knee | +1.208 | +0.189 | +101.95 | 1.408 | swing lift ramp | inside |
+| l_knee bare peak | -0.635 | -0.618 | -1.63 | 2.056 | DS transfer | inside |
+| l_ank_pitch | -0.761 | -0.156 | -60.45 | 1.360 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.550 | -0.538 | -1.20 | 1.832 | DS transfer | inside |
+| l_ank_roll | -0.524 | -0.447 | -7.66 | 2.112 | DS transfer | inside |
+| l_ank_roll bare peak | -0.524 | -0.448 | -7.61 | 2.120 | DS transfer | inside |
+| r_hip_yaw | +0.264 | +0.264 | +0.00 | 2.272 | DS transfer | inside |
+| r_hip_roll | +1.316 | +1.333 | -1.67 | 2.272 | DS transfer | inside |
+| r_hip_pitch | -0.531 | -0.021 | -50.95 | 1.904 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.333 | -0.264 | -6.87 | 1.552 | stance mid | inside |
+| r_knee | +1.025 | -0.082 | +110.69 | 1.904 | DS transfer | inside |
+| r_knee bare peak | +0.659 | +0.657 | +0.25 | 0.656 | start | inside |
+| r_ank_pitch | +0.810 | +0.777 | +3.36 | 1.696 | touchdown impact | inside |
+| r_ank_roll | -0.598 | -0.521 | -7.71 | 1.408 | stance edge | inside |
+| r_ank_roll bare peak | -0.560 | -0.522 | -3.78 | 1.416 | stance edge | inside |
+
+### latency −1
+
+Applied signed +2.501 Nm on r_hip_roll, signed_ok False, clamp_ok False, limiter 0.000, min up 0.262.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | -0.144 | -0.144 | +0.00 | 0.800 | start | inside |
+| l_hip_roll | +0.866 | +0.862 | +0.46 | 0.752 | start | inside |
+| l_hip_pitch | -1.782 | -0.784 | -99.80 | 0.792 | start | inside |
+| l_knee | -1.077 | -1.076 | -0.09 | 0.680 | start | inside |
+| l_ank_pitch | +0.959 | +0.019 | +94.01 | 0.800 | start | inside |
+| l_ank_pitch bare peak | +0.762 | +0.755 | +0.65 | 0.680 | start | inside |
+| l_ank_roll | -0.283 | -0.283 | -0.07 | 0.728 | start | inside |
+| r_hip_yaw | +0.947 | +0.947 | +0.00 | 0.856 | start | inside |
+| r_hip_roll | +3.277 | +3.275 | +0.23 | 0.856 | start | wall |
+| r_hip_pitch | +1.607 | +0.670 | +93.71 | 0.800 | start | inside |
+| r_hip_pitch bare peak | +0.874 | +0.874 | +0.02 | 0.856 | start | inside |
+| r_knee | +1.268 | +1.225 | +4.36 | 0.800 | start | inside |
+| r_ank_pitch | -1.457 | -0.451 | -100.60 | 0.792 | start | inside |
+| r_ank_roll | -0.399 | -0.401 | +0.16 | 0.856 | start | inside |
+
+### latency +1
+
+Applied signed +2.540 Nm on r_hip_roll, signed_ok False, clamp_ok False, limiter 0.000, min up 0.626.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | -0.513 | -0.513 | +0.00 | 2.712 | DS transfer | inside |
+| l_hip_roll | -1.266 | -1.250 | -1.62 | 2.712 | DS transfer | inside |
+| l_hip_pitch | -0.666 | -0.095 | -57.07 | 2.224 | swing lift ramp | inside |
+| l_hip_pitch bare peak | +0.193 | +0.255 | -6.22 | 2.520 | touchdown impact | inside |
+| l_knee | +1.425 | +0.199 | +122.61 | 2.224 | swing lift ramp | inside |
+| l_knee bare peak | -0.621 | -0.606 | -1.53 | 2.624 | DS transfer | inside |
+| l_ank_pitch | -0.750 | -0.524 | -22.63 | 3.384 | stop | inside |
+| l_ank_pitch bare peak | -0.534 | -0.531 | -0.37 | 3.280 | DS transfer | inside |
+| l_ank_roll | -0.546 | -0.536 | -0.97 | 3.536 | stop | inside |
+| r_hip_yaw | +0.731 | +0.731 | +0.00 | 3.752 | stop | inside |
+| r_hip_roll | +2.894 | +2.889 | +0.55 | 3.800 | stop | wall |
+| r_hip_pitch | -0.533 | -0.022 | -51.17 | 2.720 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.296 | -0.296 | +0.00 | 3.880 | stop | inside |
+| r_knee | +1.043 | -0.068 | +111.12 | 2.720 | DS transfer | inside |
+| r_knee bare peak | +0.745 | +0.745 | +0.03 | 0.824 | start | inside |
+| r_ank_pitch | +0.595 | -0.004 | +59.95 | 2.720 | DS transfer | inside |
+| r_ank_pitch bare peak | +0.528 | +0.495 | +3.31 | 2.512 | touchdown impact | inside |
+| r_ank_roll | +0.483 | +0.425 | +5.78 | 1.632 | DS transfer | inside |
+| r_ank_roll bare peak | +0.470 | +0.434 | +3.58 | 1.680 | DS transfer | inside |
+
+### rug
+
+Applied signed +1.280 Nm on r_hip_roll, signed_ok True, clamp_ok True, limiter 0.000, min up 0.646.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.368 | +0.368 | +0.00 | 2.128 | DS transfer | inside |
+| l_hip_roll | +1.114 | +1.173 | -5.87 | 2.176 | DS transfer | inside |
+| l_hip_roll bare peak | +1.112 | +1.174 | -6.22 | 2.168 | DS transfer | inside |
+| l_hip_pitch | +0.605 | +0.088 | +51.67 | 1.360 | DS transfer | inside |
+| l_hip_pitch bare peak | +0.344 | +0.353 | -0.88 | 2.080 | DS transfer | inside |
+| l_knee | +1.208 | +0.188 | +101.95 | 1.408 | swing lift ramp | inside |
+| l_knee bare peak | -0.647 | -0.608 | -3.88 | 2.048 | DS transfer | inside |
+| l_ank_pitch | -0.757 | -0.152 | -60.45 | 1.360 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.560 | -0.550 | -1.06 | 1.856 | DS transfer | inside |
+| l_ank_roll | -0.547 | -0.380 | -16.76 | 2.056 | DS transfer | inside |
+| l_ank_roll bare peak | -0.525 | -0.449 | -7.54 | 2.128 | DS transfer | inside |
+| r_hip_yaw | +0.307 | +0.307 | +0.00 | 2.320 | DS transfer | inside |
+| r_hip_roll | +1.639 | +1.643 | -0.40 | 2.320 | DS transfer | inside |
+| r_hip_pitch | -0.535 | -0.026 | -50.90 | 1.904 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.334 | -0.265 | -6.87 | 1.552 | stance mid | inside |
+| r_knee | +1.022 | -0.084 | +110.61 | 1.904 | DS transfer | inside |
+| r_knee bare peak | +0.657 | +0.655 | +0.25 | 0.656 | start | inside |
+| r_ank_pitch | +0.815 | +0.782 | +3.36 | 1.696 | touchdown impact | inside |
+| r_ank_roll | -0.598 | -0.521 | -7.71 | 1.408 | stance edge | inside |
+| r_ank_roll bare peak | -0.560 | -0.522 | -3.78 | 1.416 | stance edge | inside |
+
+### rug, mass +5%
+
+Applied signed +1.239 Nm on l_knee, signed_ok True, clamp_ok True, limiter 0.000, min up 0.648.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.415 | +0.415 | +0.00 | 2.096 | DS transfer | inside |
+| l_hip_roll | +1.212 | +1.280 | -6.85 | 2.136 | DS transfer | inside |
+| l_hip_pitch | +0.616 | +0.099 | +51.67 | 1.360 | DS transfer | inside |
+| l_hip_pitch bare peak | +0.398 | +0.391 | +0.78 | 2.040 | DS transfer | inside |
+| l_knee | +1.232 | +0.207 | +102.48 | 1.392 | swing lift ramp | inside |
+| l_knee bare peak | -0.619 | -0.619 | +0.00 | 0.256 | start | inside |
+| l_ank_pitch | -0.776 | -0.172 | -60.45 | 1.360 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.624 | -0.616 | -0.79 | 1.880 | DS transfer | inside |
+| l_ank_roll | -0.564 | -0.409 | -15.50 | 2.032 | DS transfer | inside |
+| l_ank_roll bare peak | -0.535 | -0.458 | -7.71 | 2.096 | DS transfer | inside |
+| r_hip_yaw | +0.282 | +0.282 | +0.00 | 2.256 | DS transfer | inside |
+| r_hip_roll | +1.468 | +1.485 | -1.68 | 2.256 | DS transfer | inside |
+| r_hip_pitch | -0.540 | -0.031 | -50.91 | 1.888 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.356 | -0.285 | -7.10 | 1.536 | stance mid | inside |
+| r_knee | +1.018 | -0.089 | +110.63 | 1.888 | DS transfer | inside |
+| r_knee bare peak | +0.687 | +0.685 | +0.26 | 0.648 | start | inside |
+| r_ank_pitch | +0.869 | +0.837 | +3.15 | 1.680 | touchdown impact | inside |
+| r_ank_roll | -0.611 | -0.533 | -7.78 | 1.392 | stance edge | inside |
+| r_ank_roll bare peak | -0.557 | -0.537 | -2.06 | 1.408 | stance edge | inside |
+
+## Double-support split
+
+The planned ZMP wrench does not fix how the two feet share it, and the knee torque follows the share. On each double-support tick the same wrench is split three ways. (a) shares the force by where the ZMP sits on the foot-to-foot line, then clamps each CoP into its box. (b) minimises the Euclidean norm of the four ankle torques. (c) minimises the maximum |leg-joint torque| with the armature removed. The contact constraints on (b) and (c) are the declared 135×76 mm box, a four-sided friction pyramid of coefficient 1.2 (the inner approximation of the cone that keeps the program linear), unilateral normals, and equality with the planned wrench. A pyramid solution inside 2.33 Nm is a cone solution inside 2.33 Nm.
+
+A wall is a tick where (c) still needs more than 2.33 Nm without armature. No solved tick does. The largest (c) bare torque on a live row is +1.642 Nm, left hip roll, latency +1. Feedforward uses (c) on every tick the program solves. A tick the pyramid cannot represent keeps the line split; that count is below, and it is not a wall.
+
+The knee columns are the signed bare torques on the single tick with the widest knee spread. The peak columns are the largest |bare| of each split on one tick, which is usually a different tick and usually the right hip pitch under (b). (b) reaches 2.392 Nm bare. (c) on that same tick is about 0.4 Nm. The pass rule is unchanged: applied signed force on the real plant, armature 0.01 included, ≤ 2.33 Nm on every tick, limiter fraction 0, clamp fraction 0.
+
+| Row | knee (a) | knee (b) | knee (c) | knee spread | peak (a) | peak (b) | peak (c) | (c) max | infeas | signed | up |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| T 0.60 / 0.032 | +0.770 | −0.474 | +0.525 | 1.244 | 0.690 | 2.080 | 0.468 | 0.757 l_hip_roll | 0 | +2.198 | 0.628 |
+| T 1.00 / 0.016 | +0.495 | −0.641 | +0.441 | 1.136 | 0.439 | 2.325 | 0.403 | 0.567 l_knee | 11 | +1.824 | 0.585 |
+| T 1.20 / 0.024 | +0.514 | −0.619 | +0.474 | 1.133 | 0.437 | 2.349 | 0.382 | 0.663 r_ank_pitch | 0 | +1.219 | 0.681 |
+| T 4 / 0.016 | +0.536 | −0.643 | +0.520 | 1.179 | 0.547 | 2.232 | 0.395 | 0.567 l_hip_yaw | 0 | −1.567 | 0.670 |
+| mass +5% s0 | +0.508 | −0.639 | +0.468 | 1.147 | 0.465 | 2.378 | 0.417 | 0.598 l_knee | 6 | +2.136 | 0.577 |
+| mass +5% s1 | +0.498 | −0.649 | +0.464 | 1.147 | 0.457 | 2.370 | 0.404 | 0.598 l_knee | 6 | +2.125 | 0.580 |
+| mass +5% s2 | +0.518 | −0.642 | +0.471 | 1.160 | 0.452 | 2.381 | 0.404 | 0.598 l_knee | 7 | +2.157 | 0.560 |
+| mass −5% s0 | +0.496 | −0.609 | +0.424 | 1.105 | 0.459 | 2.230 | 0.400 | 0.966 r_hip_roll | 0 | +1.381 | 0.641 |
+| mass −5% s1 | +0.474 | −0.625 | +0.410 | 1.099 | 0.443 | 2.220 | 0.389 | 0.802 r_hip_yaw | 0 | +1.355 | 0.652 |
+| mass −5% s2 | +0.493 | −0.615 | +0.420 | 1.108 | 0.457 | 2.219 | 0.395 | 0.546 r_hip_roll | 0 | +1.331 | 0.655 |
+| μ = 1.0 | +0.541 | −0.617 | +0.503 | 1.159 | 0.436 | 2.293 | 0.399 | 0.563 r_hip_yaw | 7 | +1.785 | 0.596 |
+| μ = 0.8 | +0.527 | −0.596 | +0.520 | 1.123 | 0.418 | 2.249 | 0.384 | 0.562 r_hip_roll | 3 | +1.984 | 0.591 |
+| latency −1 | +0.385 | +1.209 | +0.074 | 1.135 | 0.528 | 2.049 | 0.323 | 0.953 r_hip_roll | 6 | +2.441 | 0.385 |
+| latency +1 | +0.780 | −0.328 | +0.526 | 1.107 | 0.421 | 2.165 | 0.343 | 1.642 l_hip_roll | 37 | +1.826 | 0.637 |
+| rug | +0.495 | −0.641 | +0.441 | 1.136 | 0.439 | 2.325 | 0.403 | 0.567 l_knee | 11 | +1.824 | 0.585 |
+| rug, mass +5% | +0.508 | −0.639 | +0.468 | 1.147 | 0.465 | 2.378 | 0.417 | 0.598 l_knee | 6 | +2.136 | 0.577 |
+
+The knee spread is 1.10 to 1.24 Nm. It is the right knee at the start on every live row. The line split's clamped CoP misses the planned ZMP by up to 8.6 cm on latency −1, 5.3 cm at μ = 0.8, and 3.0 cm on T 1.00. T 4 misses by 0.4 mm.
+
+The live rows tip in the first transfer, so the scheduled stop does not produce a (c) sample. The stop table is the T 1.00 reference on a fixed upright root, where (c) solves for 541 stop ticks and the pyramid rejects none. The same-tick knee spread there is 0.789 Nm on the right knee: (a) −0.046, (b) +0.743, (c) +0.508. Peak |bare| during that stop, and the with-armature value on the same tick:
+
+| joint | (a) bare | (a) with | (b) bare | (b) with | (c) bare | (c) with |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| l_hip_yaw | −0.024 | −0.024 | −0.708 | −0.708 | −0.545 | −0.545 |
+| l_hip_roll | −0.230 | −0.231 | +1.364 | +1.364 | +0.547 | +0.565 |
+| l_hip_pitch | +0.153 | +0.153 | +1.370 | +1.370 | +0.535 | +0.533 |
+| l_knee | −1.109 | −1.095 | −0.815 | −0.826 | −0.547 | −0.555 |
+| l_ank_pitch | +0.694 | +0.686 | +0.433 | +0.231 | +0.535 | +0.491 |
+| l_ank_roll | −0.347 | −0.397 | −0.335 | −0.386 | −0.535 | −0.585 |
+| r_hip_yaw | +0.009 | +0.009 | +0.818 | +0.818 | +0.547 | +0.547 |
+| r_hip_roll | −0.204 | −0.203 | −1.364 | −1.364 | −0.547 | −0.529 |
+| r_hip_pitch | +0.102 | +0.102 | +1.329 | +1.327 | +0.518 | +0.498 |
+| r_knee | +0.731 | +0.703 | +1.218 | +1.204 | +0.547 | +0.536 |
+| r_ank_pitch | −0.433 | −0.507 | −0.322 | −0.261 | −0.329 | −0.398 |
+| r_ank_roll | +0.165 | +0.190 | −0.203 | −0.250 | −0.272 | −0.324 |
+
+(c) on that stop stays inside 0.59 Nm with the armature included. The fixed-root T 0.60 stop is a different case: the pyramid rejects 563 stop ticks because the commanded ZMP sits outside the tilted soles, and (c) has no stop sample there. The ticks it does solve peak at 1.121 Nm bare on the right knee.
+
+Limiter fraction is 0 on every row. Clamp fraction is 0 on every row. Latency −1 is the applied-force failure, signed +2.441 Nm on the right hip roll, min up 0.385. The other rows keep the applied force inside 2.33 Nm and the torso tips, so none pass. There is no side, front, or foot video.
+
+Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0. The plant XML is not edited.
+
+## Inset CoP and the realised split
+
+The QP rectangle is the declared 135×76 mm box with 5 mm taken off every side, 125×66 mm, half-sizes 0.0625×0.033 m. Splits (b) and (c) place their corner forces on that inset. Split (a) stays on the full box. The margin below is the distance from the QP centre of pressure to the declared edge, logged on every solved tick for each foot whose vertical force is above 1 N. The minimum on every row is 5.00 mm, which is the inset itself. A loaded foot does not sit in the outer rim.
+
+The position servo does not command the double-support load split. The contact solver does. After the step, with both feet above 5 N, the realised normal share α = Fz_L / (Fz_L + Fz_R) and each sole-frame centre of pressure are compared with the QP sample from that tick. Rug contacts count. The ZMP plan then steps toward the foot the QP is under-loaded on, 0.25 of the barycentric correction per tick, at most 1.5 mm, and the stored shift is capped at 20 mm and clamped into the inset support of the feet that are loaded. The stop CoM takes the same shift as the ZMP, so the planned lateral acceleration stays the quintic's.
+
+The gap is large. The feedforward does not hold the split.
+
+Every row drives the shift to the 20 mm cap. On the fixed upright root the mean normal share then matches: T 1.00 is 0.443 against 0.444, gap mean 0.020, and T 0.60 is 0.433 against 0.425, gap mean 0.022. The worst tick on those two is still 0.194 and 0.282. The centre of pressure does not follow. Mean gaps are 38 mm and 19 mm on T 1.00, 42 mm and 22 mm on T 0.60, and the worst foot is 52–75 mm off the QP point, an order past the 5 mm inset. On the live rows the mean split gap stays 0.065–0.199 and the max is 0.234–0.665. At the T 1.00 worst tick the QP asked for 0.769 on the left and the contacts put 0.191 there. The right-foot CoP on T 4 is 121 mm off the QP point. The QP's own share already leaves the line split by 0.06–0.16 on average, up to 0.41. Moving the ZMP moves that program and the line share together. It does not hand the contact solver the corner forces.
+
+No solved (c) tick needs more than 2.33 Nm without armature. The largest live (c) bare is 1.382 Nm, left hip roll, latency +1. The walls in the table are the single-support wrench, right hip roll, 2.437–2.931 Nm bare, in stance or at touchdown. The 20 mm shift is in that plan. The upright stop still solves: 562 ticks at T 1.00 and 558 at T 0.60, pyramid rejects none, and (c) on those stop ticks stays inside 0.60 Nm with the armature included. The T 0.60 stop that previously left the ZMP off the tilted soles is inside once the shift is on.
+
+Applied signed force, limiter fraction, and clamp fraction are the pass rule, and the torso still has to stay up. None pass. There is no side, front, or foot video.
+
+| Row | margin min L/R mm | split max | split mean | QP α | contact α | CoP mean L/R mm | signed | wall bare | up |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| T 0.60 / 0.032 | 5.00 / 5.00 | 0.234 | 0.129 | 0.469 | 0.594 | 14 / 13 | +3.677 | +2.437 touchdown | 0.567 |
+| T 1.00 / 0.016 | 5.00 / 5.00 | 0.578 | 0.120 | 0.487 | 0.569 | 17 / 18 | +2.496 | +2.742 stance mid | 0.536 |
+| T 1.20 / 0.024 | 5.00 / 5.00 | 0.641 | 0.103 | 0.541 | 0.597 | 15 / 16 | +2.546 | +2.814 stance mid | 0.501 |
+| T 4 / 0.016 | 5.00 / 5.00 | 0.652 | 0.108 | 0.577 | 0.615 | 15 / 16 | +2.342 | none | 0.602 |
+| mass +5% s0 | 5.00 / 5.00 | 0.593 | 0.126 | 0.485 | 0.560 | 17 / 20 | +2.716 | +2.931 stance mid | 0.519 |
+| mass +5% s1 | 5.00 / 5.00 | 0.501 | 0.125 | 0.484 | 0.561 | 17 / 19 | +2.717 | +2.922 stance mid | 0.527 |
+| mass +5% s2 | 5.00 / 5.00 | 0.558 | 0.126 | 0.484 | 0.561 | 18 / 20 | +2.715 | +2.931 stance mid | 0.522 |
+| mass −5% s0 | 5.00 / 5.00 | 0.540 | 0.125 | 0.465 | 0.557 | 16 / 18 | +2.369 | +2.676 stance edge | 0.528 |
+| mass −5% s1 | 5.00 / 5.00 | 0.547 | 0.122 | 0.467 | 0.560 | 16 / 18 | +2.389 | +2.703 stance edge | 0.517 |
+| mass −5% s2 | 5.00 / 5.00 | 0.547 | 0.122 | 0.468 | 0.560 | 16 / 18 | +2.392 | +2.709 stance edge | 0.516 |
+| μ = 1.0 | 5.00 / 5.00 | 0.665 | 0.172 | 0.500 | 0.484 | 24 / 23 | +2.272 | +2.651 stance mid | 0.555 |
+| μ = 0.8 | 5.00 / 5.00 | 0.624 | 0.123 | 0.512 | 0.451 | 27 / 19 | +2.420 | +2.804 stance mid | 0.532 |
+| latency −1 | 5.00 / 5.00 | 0.295 | 0.065 | 0.445 | 0.482 | 7 / 16 | +2.346 | none | 0.757 |
+| latency +1 | 5.00 / 5.00 | 0.345 | 0.199 | 0.419 | 0.609 | 20 / 16 | −2.152 | none | 0.686 |
+| rug | 5.00 / 5.00 | 0.578 | 0.120 | 0.487 | 0.569 | 17 / 18 | +2.496 | +2.742 stance mid | 0.536 |
+| rug, mass +5% | 5.00 / 5.00 | 0.593 | 0.126 | 0.485 | 0.560 | 17 / 20 | +2.716 | +2.931 stance mid | 0.519 |
+| upright T 1.00 | 5.00 / 5.00 | 0.194 | 0.020 | 0.443 | 0.444 | 38 / 19 | −1.624 | none | 1.000 |
+| upright T 0.60 | 5.00 / 5.00 | 0.282 | 0.022 | 0.433 | 0.425 | 42 / 22 | −2.319 | none | 1.000 |
+
+Mean margins to the declared edge, left then right, are 20/12 mm at T 0.60, 22/13 mm at T 1.00, 18/10 mm at T 1.20, 14/8 mm at T 4, and 18/13 mm and 18/11 mm on the two upright rows. Clamp fraction is not 0 on T 0.60, T 1.00, T 1.20, every mass +5% row, and both rug rows. Limiter fraction is 0 except latency −1 at 0.061. Latency −1 applies +2.346 Nm on the left hip roll. The binding live plan is the T 1.20 single-support right hip roll, +2.814 Nm bare at stance mid, with the applied force at +2.546 Nm and min up 0.501.
+
+Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0. The plant XML is not edited.
+
+## Leg armature 0.01 and 0.025
+
+Nothing is locked. The full bar is signed force at or under 2.33 Nm on every tick, limiter fraction 0, clamp fraction 0, the DC line, the stepping bars, and an upright stop, and the same row has to clear that bar at leg armature 0.01 and at 0.025. There is no winning gait. The row under test is voice056 at T 1.00 s and 0.016 m/s. The stop row is that reference with the root pinned.
+
+The override is load-time only. MjSpec sets armature on the twelve leg joints and the model is compiled from that spec, so a position actuator with dampratio=1 stores kv from the inertia that includes the new armature. Arms and the head stay at the file value. The XML is not written. HW's cited range is 0.0012–0.045. The STS3215 SysID band is 0.022–0.026, and the second row is 0.025.
+
+Compiled kv is −actuator_biasprm[:, 2]. Left leg below. The right leg matches within 1e-6. Each scored model matches the column it was compiled with. The file compile at 0.010 is still hip roll 1.7027 and knee 1.4573.
+
+| joint | kv at 0.010 | kv at 0.025 |
+| --- | ---: | ---: |
+| hip yaw | 1.2919 | 2.0172 |
+| hip roll | 1.7027 | 2.3020 |
+| hip pitch | 1.8102 | 2.4447 |
+| knee | 1.4573 | 2.1963 |
+| ank pitch | 1.1980 | 1.8802 |
+| ank roll | 1.1876 | 1.8736 |
+
+Planned τ is mj_inverse of the reference, so it already includes armature·q̈. Bare is that torque minus the compiled armature times q̈.
+
+On the build before the walk knee acceleration was capped, the upright playback cleared the force bars only at 0.01. At t = 1.360 s, double-support transfer, the left knee reference acceleration was −109 rad/s². At 0.01 the plan was −1.657 Nm, bare about −0.56 Nm, and the applied signed force was −1.624 Nm, with clamp fraction 0, limiter fraction 0, and the DC line held. At 0.025 the same kink planned −3.300 Nm, bare −0.564 Nm, and applied −3.272 Nm. Clamp fraction was 0.0018 and the DC line failed on that knee. The bare term was inside 2.33 Nm. The extra was the armature. That was a transfer risk.
+
+The walk knee reference is now limited to 40 rad/s² before inverse dynamics. At 0.025 that cap is 1.0 Nm of armature torque. It binds. On both upright rows the left knee second difference at t = 1.384 s is −40.0 rad/s², planned −0.994 Nm at 0.010 (bare −0.594) and −1.594 Nm at 0.025 (bare −0.594).
+
+The upright playback after the cap keeps the torso up and holds the force bars at both armatures. The root is pinned, so the stepping bars stay failed and the soles are not a flat walk: spread 154 mm at 0.010 and 53 mm at 0.025. These rows are the stop measurement.
+
+| | armature 0.010 | armature 0.025 |
+| --- | --- | --- |
+| signed | +1.423 r_knee, t = 1.496 | +1.916 l_ank_pitch, t = 1.264 |
+| signed ≤ 2.33 | yes | yes |
+| limiter | 0 | 0 |
+| clamp | 0 | 0 |
+| DC | held | held |
+| torso / stop | 1.000 / 1.000 | 1.000 / 1.000 |
+| wall | none | none |
+| stop ticks | 554, span 0.5 s, knee q̈ 8.76 | 524, span 0.5 s, knee q̈ 8.35 |
+
+Planned peaks on that upright playback. τ is the largest |τ| on the joint, and bare on the same line is the bare torque of that same sample.
+
+| joint | 0.010 τ | 0.010 bare | 0.025 τ | 0.025 bare |
+| --- | ---: | ---: | ---: | ---: |
+| l_hip_yaw | −0.572 | −0.572 | −0.549 | −0.549 |
+| l_hip_roll | −0.890 | −0.590 | −1.005 | −0.711 |
+| l_hip_pitch | −0.870 | −0.380 | −1.576 | −0.374 |
+| l_knee | −0.994 | −0.594 | −1.594 | −0.594 |
+| l_ank_pitch | +0.973 | +0.527 | +1.641 | +0.529 |
+| l_ank_roll | −0.394 | −0.158 | −0.801 | −0.160 |
+| r_hip_yaw | +0.572 | +0.572 | +0.543 | +0.543 |
+| r_hip_roll | −0.792 | −0.629 | −1.089 | −0.608 |
+| r_hip_pitch | −0.774 | −0.711 | −0.869 | −0.711 |
+| r_knee | +1.337 | +1.152 | +1.690 | +1.153 |
+| r_ank_pitch | −0.893 | −0.887 | −1.873 | −0.671 |
+| r_ank_roll | +1.354 | +1.297 | +1.765 | +1.223 |
+
+The largest bare torque on the upright bout is +1.297 Nm at 0.010 and +1.314 Nm at 0.025, both right ankle roll. Ankle pitch still reaches about 45–49 rad/s². At 0.025 the planned ankle peak is −1.873 Nm on the stop, bare −0.671 Nm, and the applied peak is the +1.916 Nm above. Both are inside 2.33 Nm.
+
+Stop-phase peaks, same pairing. The largest stop bare is +1.219 Nm at 0.010 and +1.257 Nm at 0.025, both right knee.
+
+| joint | 0.010 τ | 0.010 bare | 0.025 τ | 0.025 bare |
+| --- | ---: | ---: | ---: | ---: |
+| l_hip_yaw | −0.572 | −0.572 | −0.546 | −0.546 |
+| l_hip_roll | −0.890 | −0.590 | +0.543 | +0.543 |
+| l_hip_pitch | −0.589 | −0.590 | −0.513 | −0.538 |
+| l_knee | −0.583 | −0.572 | −0.565 | −0.538 |
+| l_ank_pitch | +0.890 | +0.445 | +1.097 | −0.015 |
+| l_ank_roll | −0.311 | −0.311 | −0.299 | −0.299 |
+| r_hip_yaw | +0.572 | +0.572 | +0.543 | +0.543 |
+| r_hip_roll | −0.588 | −0.572 | −0.618 | −0.538 |
+| r_hip_pitch | −0.583 | −0.558 | −0.617 | −0.536 |
+| r_knee | +1.266 | +1.216 | +1.361 | +1.200 |
+| r_ank_pitch | −0.738 | −0.440 | −1.873 | −0.671 |
+| r_ank_roll | +0.587 | +0.590 | +0.485 | +0.487 |
+
+The live gait fails the full bar at both armatures. It tips before the stop, so there is no stop plan on these rows. The knee cap binds on the 0.025 live row (left knee q̈ +40 rad/s², planned +1.109 Nm, bare +0.109 Nm) and stays slack on the 0.010 live row (left knee q̈ −38.1 rad/s²). The failure is the right hip roll.
+
+| | armature 0.010 | armature 0.025 |
+| --- | --- | --- |
+| signed | +2.508 r_hip_roll, t = 1.576 | +2.477 r_hip_roll, t = 1.648 |
+| limiter | 0 | 0 |
+| clamp fraction | 0.00307 | 0.00867 |
+| DC | fail, r_hip_roll excess 3.51 | fail, r_hip_roll excess 1.20 |
+| steps / torso | fail / 0.533 | fail / 0.553 |
+| wall bare | +2.754 stance mid, 6 ticks | +2.330 touchdown, 1 tick |
+
+Live planned peaks, τ and the bare torque of that same sample. The hip-roll wall is that sample: bare +2.754 Nm at 0.010 and +2.330 Nm at 0.025, and |bare| over 2.33 is the wall. The 0.025 applied force on that joint is +2.477 Nm.
+
+| joint | 0.010 τ | 0.010 bare | 0.025 τ | 0.025 bare |
+| --- | ---: | ---: | ---: | ---: |
+| l_hip_yaw | −0.569 | −0.569 | +0.945 | +0.945 |
+| l_hip_roll | +0.569 | +0.569 | +1.068 | +1.070 |
+| l_hip_pitch | −0.522 | −0.528 | +0.766 | +0.762 |
+| l_knee | −0.733 | −0.351 | +1.109 | +0.109 |
+| l_ank_pitch | +0.538 | +0.051 | +1.173 | −0.064 |
+| l_ank_roll | −0.453 | −0.469 | −0.509 | −0.399 |
+| r_hip_yaw | +1.072 | +1.072 | +0.894 | +0.894 |
+| r_hip_roll | +2.755 | +2.754 | +2.361 | +2.330 |
+| r_hip_pitch | −0.593 | −0.556 | +1.031 | +0.947 |
+| r_knee | +0.852 | +0.805 | +0.790 | +0.762 |
+| r_ank_pitch | −0.568 | −0.555 | −0.593 | −0.518 |
+| r_ank_roll | −0.793 | −0.746 | +0.736 | +0.518 |
+
+The upright force bars, which cleared only at 0.01 before the knee cap, now hold at 0.025 as well. The live row in the table above does not clear at either armature. That table is the gait before the hip-roll check below.
+
+## Free-root hip-roll check
+
+The +2.754 Nm bare sample is r_hip_roll at stance mid, t = 1.576 s, right stance, left swing, armature 0.010, q̈ +0.12 rad/s². The six root rows of that planned inverse, the planned contact wrench, and the residual (inverse − wrench) are:
+
+| | fx N | fy N | fz N | tx Nm | ty Nm | tz Nm |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| inverse | −0.162 | +0.599 | +22.676 | +0.444 | +0.025 | +0.254 |
+| wrench | 0 | +1.108 | +23.029 | +3.218 | +0.274 | +1.016 |
+| residual | −0.162 | −0.509 | −0.353 | −2.774 | −0.249 | −0.763 |
+
+The roll residual is −2.774 Nm. On that hip dof the joint inverse is −0.334 Nm and the wrench is −3.089 Nm, so the planned joint torque is +2.755 Nm. The joint is absorbing the root moment the wrench did not balance.
+
+Preview CoM y is −0.0111 m and the planned ZMP y is −0.0198 m. Lateral acceleration is +0.472 m/s², equal to ω²(y_com − y_zmp) at z_c 0.181 m. The pose that was inverted has CoM y −0.1187 m (live CoM y −0.1213 m). ω² of that gap against the same ZMP is −5.35 m/s². Stance foot centre y is −0.0027 m. Stance hip y is −0.1588 m. The CoM of the inverted pose is 11 cm off the preview, and the foot centre has drifted to the midline.
+
+On that hip dof the gravity term is −0.315 Nm, coriolis is 0, the inertial term is −0.011 Nm, and the swing-leg term is +0.00004 Nm. The wrench is −3.089 Nm. Gravity matches the hand estimate: a 15 mm lever and about 2 kg is 0.3–0.6 Nm. The 2.75 Nm is the unbalanced wrench.
+
+Swing sole clearance at that tick is 65.4 mm. Torso roll is +0.937 rad, pitch is +0.249 rad, and up_z is 0.574. Live r_hip_roll speed is +5.072 rad/s.
+
+The DC line that failed at 0.010 with excess 3.51 is this same sample: joint r_hip_roll, phase stance mid, t = 1.576 s, signed +2.508 Nm, |ω| 5.072 rad/s, limit about 1.56 rad/s. That speed is the fall. The feedforward double-support fraction is 0.55, so on the 1.00 s period each transfer is 0.275 s and each single support is 0.225 s. The frozen `gm_dsp` field stays 0.40.
+
+The CoM is the Kajita preview of the foot-centre ZMP. The horizon is 1.6 s. z_c is the pelvis subtree CoM height above the sole, measured when the preview is built. Single support holds the ZMP at the foot centre, ±0.043 m, inside the 5 mm inset. Double support is a raised cosine between the feet. The wrench ZMP tracks the preview CoM, ay = ay_ref + 2ω(v_ref − v) + ω²(y_ref − y), then stays inside the inset boxes of the feet that carry at least 1 N. A nose-down torso moves the fore-aft ZMP toward the toe, at most 40 mm. Capture-point error slews the next foot placement at 0.015 m/s, capped at 25 mm. Ankle roll and pitch add a measured-CoP torque, 40 Nm/m, capped at 0.50 Nm. Planned inverse dynamics remains the feedforward. K_fb stays 1.0. The limiter stays off. The inverse uses the measured root. Planned leg q̈ is clipped at 40 rad/s². The 20 mm ZMP/α bias stays off on this path.
+
+Free-root scores after that change. Period 1.00 s, vx 0.016 m/s, foot height 8 mm, stand 0.25 s, walk 4.0 s, stop 2.5 s. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off.
+
+| | armature 0.010 | armature 0.025 |
+| --- | --- | --- |
+| signed | −2.103 l_knee, t = 2.912 | −2.608 l_knee, t = 3.072 |
+| signed ≤ 2.33 | yes | no, over by 0.278 |
+| limiter | 0 | 0 |
+| clamp | 0 | l_knee 0.0144, r_knee 0.00617 |
+| DC | held, l_knee excess −1.29 | held, r_knee excess −0.18 |
+| torso / stop | 0.996, flat, spread 1.33 mm | 0.993, flat, spread 0.80 mm |
+| steps | fail, clear −0.76 mm | fail, clear −1.30 mm |
+| vx ratio | 0.481 | 0.530 |
+| bare over 2.33 | none | none |
+
+The 0.010 DC sample that sets the (negative) excess is l_knee at t = 3.152 s, τ 1.987 Nm, |ω| 1.155 rad/s, limit 2.449 rad/s. At 0.025 it is r_knee at t = 2.560 s, τ 2.422 Nm, |ω| 1.526 rad/s, limit 1.710 rad/s. The old r_hip_roll excess of 3.51 is gone on these rows.
+
+Largest planned |τ| on the free-root bout, with the bare torque of that same sample. τ includes armature·q̈.
+
+| joint | 0.010 τ | 0.010 bare | 0.025 τ | 0.025 bare |
+| --- | ---: | ---: | ---: | ---: |
+| l_hip_yaw | +0.628 | +0.628 | −0.629 | −0.629 |
+| l_hip_roll | −0.897 | −0.883 | −1.350 | −0.749 |
+| l_hip_pitch | −0.806 | −0.504 | −1.292 | −0.521 |
+| l_knee | −1.990 | −1.590 | −2.502 | −1.502 |
+| l_ank_pitch | +1.235 | +1.108 | +1.620 | +0.769 |
+| l_ank_roll | −0.688 | −0.485 | −1.058 | −0.343 |
+| r_hip_yaw | +0.657 | +0.657 | +0.639 | +0.639 |
+| r_hip_roll | −0.876 | −0.639 | +1.482 | +0.832 |
+| r_hip_pitch | +0.835 | +0.524 | +1.265 | +0.494 |
+| r_knee | +1.919 | +1.519 | +2.456 | +1.456 |
+| r_ank_pitch | −1.260 | −1.136 | −1.420 | −1.103 |
+| r_ank_roll | +0.735 | +0.502 | +1.015 | +0.467 |
+
+At 0.025 the left knee plan at the stance edge is −2.502 Nm, bare −1.502 Nm, q̈ −40 rad/s², t = 3.072 s. That is the applied −2.608 Nm tick. The piece above the bare term is the armature at the cap. The torso stays up, the DC line holds, and the stop is flat. The signed force and the knee clamp fraction miss 2.33 and 0. This row is a transfer risk. Cutting the cap to 28 rad/s² dropped the torso at 0.025, so the cap stays 40.
+
+The largest root residual on these rows is a fore-aft force, 2.77 N at t = 2.088 s (0.010) and 2.81 N at t = 3.592 s (0.025). The largest moment on those samples is −0.40 Nm and −0.54 Nm. The old −2.77 Nm roll residual is gone.
+
+Stepping bars fail at both armatures. Clearance over 20–80% of the declared swing is −0.76 mm at 0.010 and −1.30 mm at 0.025, against an 8 mm bar. The highest sole in those windows is 2.43 mm and 2.64 mm. Step fraction is 0 and 0.33. Placement is −5.4 mm and −10.2 mm against an 8 mm command. Slip stays inside 2 mm (0.59 mm and 0.60 mm). Six swings are declared and none scores as a step. The inverse is of the measured pose, so the feedforward holds the foot that is still on the floor, and 1 Nm/rad does not lift the 8 mm swing inside a 0.225 s single support. vx over the walk window, which includes the 1.0 s arm, is 0.0077 m/s and 0.0085 m/s.
+
+The 0.010 row holds signed force, limiter, clamp, the DC line, and the upright flat stop. It misses the stepping bars and the vx ratio sits at 0.48. The 0.025 row holds the torso, the DC line, limiter 0, and the flat stop, and misses signed force, clamp, and the stepping bars. The gait is not locked. There is no video.
+
+Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. The plant XML is not edited.
+
+## Stance hip guard
+
+HW's lever on this plant: the contact box centre is 14 mm outboard of the ankle-roll origin, and the hip-roll axis is on that ankle. With the whole 2.347 kg on one foot the static stance hip roll is 23.0 N times the CoP offset, −0.55 to +1.2 Nm across the foot and 0.32 Nm at the box centre. A stance hip-roll |τ_req| above 1.3 Nm is a flag. It is reported with the tick, the phase, and the gravity, inertial, swing-leg, and contact parts. It does not discard the plan. A plan is aborted only when a planned root row, inverse minus the planned wrench, is outside 1e-2 N or 1e-2 Nm, or when the planned CoM or ZMP leaves the support box.
+
+The 2.75 Nm sample is not a swing-leg term. `preview_y` was added on feet that already sit at the box centres. The live centres are about ±0.048 m, the ±0.043 m geom plus the 5 mm kit offset. The swing sole then left the world y it had been standing on. The clock swing foot is now biased so its forward kinematics stay on the latched world y. The stance foot bias stays 0, so the pelvis sway still runs through the planted sole. The latch does not adopt a later outward slide.
+
+A separate one-tick wiggle of about 0.002 rad in the hip-roll reference is 28 rad/s². At armature 0.025 that is 0.7 Nm on top of a 0.7 Nm contact moment, and the guard saw +1.387 Nm while the CoM was still 20 mm inside the box. The planned hip-roll acceleration is the middle of the last three samples, so that wiggle is not a stance moment. The knee cap stays 40 rad/s². Capture-point error is averaged for 80 ms before the 0.015 m/s step slew.
+
+One walk cycle at armature 0.010, after the arm. Planned CoM y, open-loop ZMP y, stance box centre, stance hip, live CoM. Hip τ is the planned stance hip roll.
+
+| t | phase | stance | pCom | ZMP | box | hip | live | hip τ |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1.520 | swing | R | −0.033 | −0.043 | −0.048 | −0.069 | −0.035 | +0.81 |
+| 1.760 | shift | R | +0.000 | +0.004 | −0.048 | −0.031 | −0.002 | +0.11 |
+| 2.040 | swing | L | +0.028 | +0.043 | +0.046 | +0.060 | +0.027 | −0.69 |
+| 2.240 | shift | L | +0.002 | +0.005 | +0.046 | +0.039 | +0.005 | +0.40 |
+
+Through that cycle the planned CoM stays inside the stance box, and the stance hip stays under 1.3 Nm. The right sole is still on −0.048 m while it is the stance foot. It later slides to about −0.054 m during the next swing; the latch stays at the earlier plant.
+
+The stop blend was a second frame error. It took a hip-roll reference of −1.30 rad/s into a 0.55 s quintic whose endpoints were both −0.03 rad. The curve overshot to −0.17 rad, the left sole walked out to +0.10 m, and the 0.010 stop tipped (up_z 0.70, CoM margin −0.054 m). The blend now keeps only the incoming velocity whose quintic stays within 0.02 rad of the endpoints. That sample becomes −0.16 rad/s. The stop also clears the swing-foot bias, so the return is between the two planted feet.
+
+Free-root rescore with the earlier guard in the loop. Same window as the table above. That guard did not fire. The corrected abort, below, refuses this plan on the first walk tick. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off.
+
+| | armature 0.010 | armature 0.025 |
+| --- | --- | --- |
+| signed | −2.116 l_knee, t = 3.120 | −2.666 l_knee, t = 3.928 |
+| signed ≤ 2.33 | yes | no, over by 0.336 |
+| limiter | 0 | 0 |
+| clamp | 0 | l_knee 0.0154, r_knee 0.0062 |
+| DC | held, l_knee excess −1.37, t = 3.136 | held, l_knee excess −0.35, t = 1.920 |
+| torso / stop | 0.987, flat, spread 0.94 mm | 0.998, flat, spread 0.95 mm |
+| steps | fail, clear −0.37 mm, 3 swings | fail, clear −1.27 mm, 5 swings |
+| vx ratio | 0.306 | 0.101 |
+| bare over 2.33 | none | none |
+
+The 0.010 DC sample is l_knee, τ 2.115 Nm, |ω| 0.859 rad/s, limit 2.231 rad/s. At 0.025 it is l_knee, τ 2.440 Nm, |ω| 1.324 rad/s, limit 1.679 rad/s.
+
+Largest planned |τ|, and the bare torque of that same sample. Single-support hip roll in the traced cycle is +0.81 Nm and −0.69 Nm. The peaks below are double support or the stop. A stance hip above 1.3 Nm on those phases is flagged. The flag does not discard it.
+
+| joint | 0.010 τ | 0.010 bare | 0.025 τ | 0.025 bare |
+| --- | ---: | ---: | ---: | ---: |
+| l_hip_roll | +1.162 | +1.195 | −1.352 | −1.283 |
+| r_hip_roll | −1.278 | −1.397 | −1.407 | −1.320 |
+| l_knee | −2.090 | −1.690 | −2.542 | −1.542 |
+| r_knee | +1.844 | +1.444 | +2.468 | +1.468 |
+
+At 0.025 the left knee plan at the stance edge is −2.542 Nm, bare −1.542 Nm, q̈ −40 rad/s², t = 3.928 s. That is the applied −2.666 Nm tick. The piece above the bare term is the armature at the cap. The torso stays up. Signed force and the knee clamp miss. This row is a transfer risk.
+
+Largest planned root residual: 2.70 N fore-aft at t = 2.088 s on 0.010, vector [+2.704, +0.549, +0.329, +0.072, −0.296, +0.104]. On 0.025 it is 3.37 N fore-aft at t = 3.264 s, vector [+3.372, −0.171, +0.626, +0.015, −0.636, −0.053]. The roll component is +0.07 Nm and +0.02 Nm.
+
+Stepping bars still fail. Clearance over 20–80% of the declared swing is −0.37 mm at 0.010 and −1.27 mm at 0.025. The highest sole in those windows is 1.01 mm and 2.28 mm. Placement is −10.9 mm and −7.2 mm against an 8 mm command. Slip is 0.55 mm and 1.05 mm. vx over the window, including the 1.0 s arm, is 0.0049 m/s and 0.0016 m/s. That is slower than the previous free-root row (0.48 and 0.53). The swing sole is being held on its latched y, and the foot still does not clear.
+
+The 0.010 row holds signed force, limiter, clamp, the DC line, and the upright flat stop. It misses the stepping bars. The 0.025 row holds the torso, the DC line, limiter 0, and the flat stop, and misses signed force, clamp, and the stepping bars. The gait is not locked. There is no video.
+
+## Root-row abort
+
+The 1.3 Nm hip check does not discard a plan. A stance hip-roll |τ_req| above 1.3 Nm is printed with the tick, the phase, and four parts that add to τ_req: gravity, inertial (coriolis, armature·q̈, and minus passive), swing-leg, and contact. Contact is −qfrc_applied on that dof, the planned wrench's share. The swing-leg part is the RNE change when that leg's mass and inertia are removed. mj_comPos refreshes the composite inertia first. mj_crb alone still sees the old mass.
+
+The plan aborts when any planned root row is outside 1e-2. Those rows are qfrc_inverse minus the planned wrench. mj_inverse does not subtract qfrc_applied, so the raw vertical row is the weight, 23.029 N, and is not the check. The plan also aborts when the planned CoM or ZMP leaves the support box of the feet that tick is using. Single support is the stance box. Double support, the stand, and the stop are the convex hull of both full contact boxes.
+
+On the cold plant the first planned tick aborts. No hip flag is raised, because both stance hips are under 1.3 Nm. The support check does not fire. Soft-pass is off. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`.
+
+| | t | phase | fx N | fy N | fz N | tx Nm | ty Nm | tz Nm |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.010 | 0.256 | start | +0.0137 | +0.0000 | +0.3362 | −0.0002 | −0.0003 | −0.0000 |
+| 0.025 | 0.256 | start | +0.0176 | +0.0000 | +0.3422 | −0.0001 | −0.0005 | −0.0000 |
+
+The preview stage is start and the clock phase is shift, so both hips are stance. At 0.010 the wrench's vertical row is the weight, 23.029 N, and the inverse wants 23.365 N. The 0.336 N difference is the abort. The moments are inside 1e-2 Nm. At that tick the planned hips are +0.614 Nm and −0.607 Nm. Splitting them gives gravity ±0.023 Nm, inertial +0.006 Nm, swing-leg 0 (there is no swing leg in the shift), and contact +0.630 Nm and −0.636 Nm. The four parts match τ_req within 0.0003 Nm. Removing the right leg's mass moves its whole 0.029 Nm RNE into the swing-leg part and leaves the hip's own gravity at 0, so that part is the leg that was removed. The previous free-root table is the motion before this abort. It is not a score of the corrected guard. There is no video.
+
+## Scorer alignment
+
+The two live rows below are voice056, T 1.00, vx 0.016, clearance 0.008, double-support fraction 0.25, armature 0.01, seed none, latency 0, mass scale 1, μ none. Arm 1.0 s, stand 0.25 s, walk 3.05 s, stop 2.40 s, preview R 1e-4, sway amplitude 0.022851623535156247. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. MuJoCo 3.14.0. The baseline JSON leaves the version null because that commit's result dict did not store it. The process that ran it was 3.14.0.
+
+These tips produce r_hip_roll signed +0.904 and +2.591. The cited 0.823 and 2.51 are not what either tip writes.
+
+Baseline, no feedforward and no knee cap. Tip `a5a9183461105016211bebbf110051c2bb8f9df2`. Seed none.
+
+```
+python3 scripts/run_live_row.py --t 1.00 --vx 0.016 --clearance 0.008 --dsp 0.25 --ff 0 --knee-qdd-cap none --armature 0.01 --seed none --latency 0 --mass-scale 1 --mu none --arm-s 1 --stand-s 0.25 --walk-s 3.05 --stop-s 2.4 --preview-shape 0 --z-quintic 0 --z-lead 0 --honor-vx 0
+```
+
+r_hip_roll signed +0.9040376673934295 at t = 2.640, over-bar ticks 0. Signed bar fails: 36 ticks, worst −4.120620900110971 on l_knee at t = 1.672. Tip holds, min up_z 0.9526661091450443, fault empty. DC fails on l_knee, excess +2.1885500284336477, τ 4.120620900110971, |ω| 1.0167093174581812, t = 1.672. At this commit the stored signed force is the pre-clamp kp·(q_des − q) − kv·ω.
+
+Feedforward with the knee cap at 40 rad/s². Tip `40f2fe6193a26743b229c45f951f798f0be83754`. The cap itself landed in its parent 3479209; this tip's gait diff is comments. Seed none.
+
+```
+python3 scripts/run_live_row.py --t 1.00 --vx 0.016 --clearance 0.008 --dsp 0.25 --ff 1 --knee-qdd-cap 40 --armature 0.01 --seed none --latency 0 --mass-scale 1 --mu none --arm-s 1 --stand-s 0.25 --walk-s 3.05 --stop-s 2.4 --preview-shape 0 --amp 0.022851623535156247 --z-quintic 1 --z-lead 1 --honor-vx 1
+```
+
+r_hip_roll signed +2.5909271580816853 at t = 1.568, over-bar ticks 10. Signed bar fails on that hip. Tip fails, min up_z 0.528344367257705, fault `tip up_z=0.53`. DC fails on r_hip_roll, excess +3.7472496570186644, τ 2.5909271580816853, |ω| 5.1709825841220445, t = 1.568. Signed force here is kp·(clip(ctrl, ±2.09) − q) − kv·ω. This tip has no ID_FF_DSP override, so the double-support fraction stays 0.25.
+
+Running those same arguments on a later tip executes the later planner. The numbers above are the two historical tips.
+
+## Box-centre ZMP
+
+The per-step ZMP reference is the touchdown `geom_xpos` of `l_foot_contact` and `r_foot_contact`. That box centre is the local offset (+0.030, ±0.014, −0.018) in the ankle-roll link, already rotated by the foot yaw. The nominal ±0.043 m, the sway amplitude, and the mesh are not this reference. A foot that stays down does not move the latch if it later slides. Single support holds the stance foot's latched centre. Double support is a raised cosine between the two centres, which stays inside the convex hull of both boxes. The CoM is the Kajita preview of that reference, horizon 1.6 s, z_c from the pelvis height. The sagittal preview starts at the standing CoM x. A preview that starts at the origin is already 41 mm behind the box centre.
+
+The planned contact is the inverse's three root-force components, applied through the same foot stamp the residual is checked against. The CoP starts on the latched centre and moves with the residual moment over fz. Root angular acceleration stays zero. The root linear acceleration is the preview state's, then clamped so the dynamic ZMP of this pose stays on the support hull. With that acceleration at zero, the crouched stand still wants a CoP about 2 mm behind the heel, which is 0.05 Nm of pitch. A small linear-acceleration correction brings that CoP onto the box. The live cart table about the box centre has the opposite sign, about −2.2 m/s², and that feedforward flips the torso.
+
+The phase clock no longer snaps onto the phase marker. Snapping bunched two samples, and the 8 ms central difference reported a q̈ spike and an inverse root force of order 100 N. Every planned joint acceleration is the middle of the last three samples, then the shared cap.
+
+On the cold plant, free root, armature 0.010, the plan runs the full bar window (stand 0.25 s, walk 4.0 s, stop 2.5 s) without an abort and without a stance-hip flag. The largest planned root residual is 4.23e-4 Nm of pitch at t = 1.256 s. Min up_z on that probe is 0.974. In the window 1.304–1.336 s the inverse root fx is −0.030 N to −0.039 N. The raw second difference there is l_knee 19.7 rad/s². A later hip-roll reference step, +0.028 rad to −0.137 rad at t = 1.76 s, has a raw second difference of 2741 rad/s². The three-sample median keeps that edge out of the inverse. The inverse fx peak on the window is −5.5 N at t = 0.48 s.
+
+Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. The plant XML is not edited.
+
+## Free-root rescore
+
+Scored with the committed entry point, tip `5a1cf8066ef939f77dfb3dc91f1f0a3c13254760`. Seed none. Soft-pass off. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. MuJoCo 3.14.0. The plan does not abort.
+
+```
+python3 scripts/score_free.py 0.01 /tmp/arm/box010.json
+python3 scripts/score_free.py 0.025 /tmp/arm/box025.json
+```
+
+That forwards T 1.00, vx 0.016, clearance 0.008, dsp 0.40, feedforward on, knee q̈ cap 40, seed none, latency 0, mass scale 1, μ none, arm 1.0 s, stand 0.25 s, walk 4.0 s, stop 2.5 s, preview shape 1, amplitude 0.016. The feedforward path raises dsp to 0.55. K_fb stays 1.0.
+
+| | armature 0.010 | armature 0.025 |
+| --- | --- | --- |
+| signed | +1.872 r_knee, t = 3.544 | +2.449 r_knee, t = 4.368 |
+| signed ≤ 2.33 | yes, 0 ticks over | no, 21 ticks (r_knee 15, l_knee 6) |
+| r_hip_roll signed | +0.935, t = 1.616, 0 over | +1.025, t = 1.616, 0 over |
+| limiter | 0 | 0 |
+| clamp | 0 | 0 |
+| DC | held, r_ank_roll excess −1.257, τ 1.563, \|ω\| 1.910, limit 3.168, t = 4.840 | held, l_knee excess −0.396, τ 2.381, \|ω\| 1.385, limit 1.780, t = 1.912 |
+| torso / stop | min up_z 0.974, stop 0.974, flat, spread 1.30 mm | min up_z 0.990, stop 0.990, flat, spread 0.99 mm |
+| steps | fail, clear −0.625 mm, peak sole 0.63 mm, 5 swings, 0 steps | fail, clear −0.884 mm, peak sole 0.54 mm, 6 swings, 0 steps |
+| slip | 0.445 mm | 0.366 mm |
+| place | −2.45 mm vs 8 mm command | −4.69 mm vs 8 mm command |
+| vx | ratio −0.154, mean −0.00246 m/s vs 0.016 | ratio −0.345, mean −0.00552 m/s vs 0.016 |
+| root residual | 4.23e-4 Nm pitch, t = 1.256 | 7.21e-4 Nm roll, t = 1.216 |
+| bare over 2.33 | none | none |
+
+Planned peaks at 0.010: r_hip_roll +0.845 Nm (bare +0.794, touchdown), l_hip_roll −0.701, r_knee +1.788 (bare +1.388, q̈ +40, stance mid). At 0.025: r_hip_roll +0.950, l_hip_roll −1.011, r_knee +2.431 (bare +1.431, q̈ +40, stop). The 0.025 knee plan is above 2.33 Nm with the bare term inside 2.33 Nm, and the applied signed force on that knee is +2.449 Nm, which is the bar miss. No stance hip flag. The 1.3 Nm hip value stays a flag only.
+
+mfg_ok is true at 0.010 because signed, clamp, and DC hold. That is not a walk pass. Both rows miss the stepping bars. The body velocity over the walk window, including the 1.0 s arm, is backward. The 0.025 row is a transfer risk: the torso, the limiter, the clamp, the DC line, and the flat stop hold, and the signed force does not. The gait is not locked. There is no video.
+
+## Compiled manifest
+
+`compiled_order` is the object from PR #102 at `76b8164`. The pack is 253 little-endian float64 values: leg `dof_armature`, `kv`, `kp`, `forcerange`, `actfrcrange`, `ctrlrange` as lo, hi, right leg then left; all 26 `body_mass`; `body_inertia`; `geom_friction` of floor, `r_foot_contact`, and `l_foot_contact`; all 30 `dof_damping`; timestep; integrator.
+
+The reference hashes are keyed by `mujoco_version`. On MuJoCo 3.14.0 the plain plant at armature 0.01 with `perturbation` `none` hashes to `03ed33386178ab8d05db76a7307f1c1d`. It does match. Armature 0.025 hashes to `f4fb2b70b5312a851e16316a38a88283`. A mismatch names the `compiled_order` field at rtol 1e-9. `perturbation` is `none`, `armature_0.025`, `mass_+5%`, `mass_-5%`, `mu_1.2`, `mu_1.4`. Nominal μ is 1.6, the triple `[1.6, 0.1, 0.01]`, so 1.2 and 1.4 are the low-friction rows. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. The plant XML is not edited.
+
+## Runner manifest gate
+
+`scripts/run_live_row.py` writes the full manifest on each row. The leading fields are `xml_md5`, `compiled_md5`, `dof_armature`, `kv`, `kp`, `forcerange`, `actfrcrange`, `ctrlrange`, `mujoco_version`, `tip_sha`, `scorer_sha`, `seed`, `args`, `cmd`, then `perturbation`. `cmd` is the exact argv the entry point received. The reference hashes are read from `previews/compiled_refs.json`, the file from `13a9af6`. Before any scored row the entry point asserts `03ed33386178ab8d05db76a7307f1c1d` at armature 0.01 and `f4fb2b70b5312a851e16316a38a88283` at 0.025, on the cold plant and on the load-time 0.01 and 0.025 compiles. A miss names the compiled field at rtol 1e-9 and does not score. Actuator 0 is `l_hip_yaw_pos`. `compiled_order` is the right leg, then the left. kv comes from the `<joint>_pos` actuator by name. Knee kv rounds to 1.45734 and 2.19633. Between those two compiles only `dof_armature` and `kv` differ.
+
+Each row also records `signed_peak`, `sum_peak` (`|kp·e| + |kv·q̇|`), and `sum_over`. `clear` is false when the signed bar fails, the stepping bars fail, or the sum peak is more than twice the signed peak. The last case needs separate ±1 tick latency rows and five bus-stop rows on the signed bar, run as their own entry-point invocations. Step fraction 0 is a skate. A walk needs the stepping bars at armature 0.01 and at 0.025. Soft-pass stays off. The plant XML is not edited.
+
+## Stand-to-shift residual
+
+The `6bae07e` abort at t = 0.256 s was the force row `fz` at +0.336 N. The moments on that tick were inside 1e-2. The bucket stays 1e-2. On the current plan, tip `29552c1`, both armatures, t = 0.256 s is phase `start` and the six planned root rows are fx 0, fy 0, fz 0, with moments at most 2.6e-7 Nm. No tick from t = 0 through the short window exceeds 1e-2. The full-bar worst is still 4.23e-4 Nm of pitch (`ty`) at t = 1.256 s on armature 0.01, and 7.21e-4 Nm of roll (`tx`) at t = 1.216 s on armature 0.025.
+
+## Full bar and perturbations
+
+Scored through `scripts/run_live_row.py` at tip `29552c1c97e774d3665cca4d837522c7c315cd58`. Seed none. Soft-pass off. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Each path below is the row the runner wrote. `clear` is false on every row. Nothing here is a walk.
+
+| row | manifest | signed peak | sum peak | sum over | step frac | tip | notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| full 0.01 | `previews/live_rows/full_a010.json` | +1.872 r_knee t=3.544 | 6.359 | 282 | 0 | holds, up 0.974 | signed holds, limiter 0, clamp 0, DC holds, vx ratio −0.154 |
+| full 0.025 | `previews/live_rows/full_a025.json` | +2.449 r_knee t=4.368 | 8.463 | 875 | 0 | holds, up 0.990 | 21 signed ticks over, transfer risk, vx ratio −0.345 |
+| mass +5% 0.01 | `previews/live_rows/mass_p5_a010.json` | +2.047 r_knee | 4.799 | 310 | 0 | tips, up 0.846 | fields `body_mass`, `body_inertia` |
+| mass +5% 0.025 | `previews/live_rows/mass_p5_a025.json` | −2.536 l_knee | 8.496 | 929 | 0 | holds | 45 signed ticks over, clamp fails |
+| mass −5% 0.01 | `previews/live_rows/mass_m5_a010.json` | +1.809 r_knee | 5.804 | 229 | 0 | holds | signed holds |
+| mass −5% 0.025 | `previews/live_rows/mass_m5_a025.json` | +2.427 r_knee | 8.562 | 871 | 0.059 | holds | 7 signed ticks over |
+| μ 1.2 0.01 | `previews/live_rows/mu_1_2_a010.json` | −1.881 l_knee | 4.661 | 318 | 0.205 | holds | signed holds, 0 steps |
+| μ 1.2 0.025 | `previews/live_rows/mu_1_2_a025.json` | abort t=1.168 |  |  |  |  | moments tx −0.0180, ty +0.0128 Nm; fields `dof_armature`, `kv`, `geom_friction` |
+| μ 1.4 0.01 | `previews/live_rows/mu_1_4_a010.json` | +1.931 r_knee | 5.107 | 298 | 0 | holds | signed holds |
+| μ 1.4 0.025 | `previews/live_rows/mu_1_4_a025.json` | −2.112 l_knee | 6.478 | 183 | 1 | tips, up 0.847 | signed holds, 0 steps, vx ratio −4.20 |
+| latency +1 0.01 | `previews/live_rows/lat_p1_a010.json` | −1.724 l_knee | 2.994 | 61 | 0 | holds | signed holds; sum is under 2× signed |
+| latency +1 0.025 | `previews/live_rows/lat_p1_a025.json` | −2.397 l_knee | 5.394 | 437 | 0 | holds | 22 signed ticks over |
+| latency −1 0.01 | `previews/live_rows/lat_m1_a010.json` | −6.075 r_knee | 49.214 | 342 |  | collapsed | signed fails, 4 ticks over |
+| latency −1 0.025 | `previews/live_rows/lat_m1_a025.json` | abort t=1.056 |  |  |  |  | moments tx −0.0582, ty −0.0157, tz +0.0405 Nm |
+
+Five bus-stop rows are `previews/live_rows/busstop1_a010.json` through `busstop5_a010.json`, and the same names with `a025`. Walk lengths are 1.00, 1.25, 1.50, 1.75, and 2.00 s, then the bus stop. At 0.01 the first four pass the signed bar (+1.358, +1.583, −1.540, −1.684) and the fifth aborts at t = 2.824 s because the planned ZMP is 0.2 mm outside the support box. At 0.025 the first three pass signed and the last two miss it (l_knee −2.381, 3 ticks). The ±1 latency pair does not both pass the signed bar. A row whose sum peak is more than twice its signed peak is not CLEAR. The full bars are in that set, and their step fraction is 0. That is a skate. A walk still needs the stepping bars at both armatures. There is no video.

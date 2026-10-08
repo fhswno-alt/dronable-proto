@@ -254,6 +254,10 @@ class Op3Walker:
         self.z_offset = float(z_offset_m)
         self.y_offset = 0.0
         self.x_offset = 0.0
+        # Metres the pelvis sits forward of the IK foot, stand and walk.
+        # Positive moves both feet back in the hip frame. Trunk pitch
+        # (hit_pitch_offset) is not part of this shift.
+        self.pelvis_forward_m = 0.0
         self.roll_offset = 0.0
         self.pitch_offset = 0.0
         self.yaw_offset = 0.0
@@ -263,6 +267,15 @@ class Op3Walker:
         # pose, foot pitched with the hip. Preview stands at 1 and ramps
         # to 0 before the first lift. Kit stays at 0.
         self.sole_level = 0.0
+        # Voice only. The kit sine leaves the sole near the floor at 20%
+        # and 80% of the swing. The hold keeps the peak height across that
+        # window. Kit stays off. z_quintic replaces that hold with a
+        # rest-to-rest minimum jerk over the whole single support.
+        self.z_flat = False
+        self.z_quintic = False
+        # Rise through the double support before the swing, still a
+        # rest-to-rest quintic, so the 20% point is not the start of the lift.
+        self.z_lead = False
         self.z_swap_cmd = float(z_swap_m)
         self.step_fb = float(step_fb)
         self.pelvis_offset = math.radians(pelvis_deg)
@@ -295,6 +308,22 @@ class Op3Walker:
         # Positive moves the feet toward +y in the hip frame, so the pelvis
         # sits toward -y. y_swap_cmd is a different channel and stays put.
         self.preview_y = 0.0
+        # Per-foot addition, metres, hip frame. The swing foot uses this to
+        # land on the world y it left. The stance foot stays at 0 so the
+        # pelvis sway is not applied a second time to the airborne foot.
+        self.foot_bias_l = 0.0
+        self.foot_bias_r = 0.0
+        # Per-foot hip-frame z, metres. The swing sole uses this so its
+        # contact-box lowest corner follows the world clearance. The
+        # stance foot stays at 0.
+        self.foot_z_l = 0.0
+        self.foot_z_r = 0.0
+        # Extra sole tilt, radians, hip frame. The world plant uses these
+        # so the contact box stays level while foot_z sets its clearance.
+        self.foot_pitch_l = 0.0
+        self.foot_pitch_r = 0.0
+        self.foot_roll_l = 0.0
+        self.foot_roll_r = 0.0
         self.period = self.period_cmd
         self.pelvis_swing = 0.0
         self.l_ssp_start = 0.0
@@ -390,6 +419,13 @@ class Op3Walker:
         self.lead_blend_tick = False
         self.lead_carry_tick = False
         self.lead_blend_s = 0.0
+        self.foot_z_l = 0.0
+        self.foot_z_r = 0.0
+        self.foot_pitch_l = 0.0
+        self.foot_pitch_r = 0.0
+        self.foot_roll_l = 0.0
+        self.foot_roll_r = 0.0
+        self.x_offset = 0.0
         self.update_movement()
 
     def next_swing(self) -> str | None:
@@ -547,6 +583,10 @@ class Op3Walker:
         return out
 
     def process_phase(self, dt: float) -> None:
+        # Amplitudes still refresh within half a tick of the phase marker.
+        # Snapping the clock onto the marker bunches two samples and the
+        # 8 ms central difference reports a q̈ spike, which is an inverse
+        # root force of order 100 N. The clock stays on the uniform grid.
         half = dt / 2.0
         if self.time == 0.0:
             self.update_time()
@@ -556,14 +596,11 @@ class Op3Walker:
         elif abs(self.time - self.phase1) <= half:
             self.update_movement()
             self.update_time()
-            self.time = self.phase1
         elif abs(self.time - self.phase2) <= half:
             self.update_time()
-            self.time = self.phase2
         elif abs(self.time - self.phase3) <= half:
             self.update_movement()
             self.update_time()
-            self.time = self.phase3
 
     def _leg_move(self, t_x: float, t_z: float, phase_t: float, sign: float, extra_pi: bool) -> tuple[float, float, float, float]:
         extra = math.pi if extra_pi else 0.0
@@ -636,23 +673,40 @@ class Op3Walker:
         # helper above used phase_t for z as well. Rebuild those z terms so
         # the frozen foot matches computeLegAngle, which passes r_ssp_start
         # as both the sample time and the phase for the right z channel.
+        if self.z_quintic:
+            # Swing x is already a sine with zero velocity at lift and at
+            # touchdown, and a nonzero acceleration there. The quintic
+            # matches those end positions and zeroes the acceleration, so
+            # the sole meets the floor with no velocity step.
+            if self.l_ssp_start < t <= self.l_ssp_end:
+                x0 = self._leg_move(self.l_ssp_start, self.l_ssp_start, self.l_ssp_start, 1.0, False)[0]
+                x1 = self._leg_move(self.l_ssp_end, self.l_ssp_end, self.l_ssp_start, 1.0, False)[0]
+                span = self.l_ssp_end - self.l_ssp_start
+                s = self._minjerk((t - self.l_ssp_start) / span) if span > 1e-9 else 1.0
+                left = (x0 + (x1 - x0) * s, left[1], left[2], left[3])
+            elif self.r_ssp_start < t <= self.r_ssp_end:
+                x0 = self._leg_move(self.r_ssp_start, self.r_ssp_start, self.r_ssp_start, -1.0, True)[0]
+                x1 = self._leg_move(self.r_ssp_end, self.r_ssp_end, self.r_ssp_start, -1.0, True)[0]
+                span = self.r_ssp_end - self.r_ssp_start
+                s = self._minjerk((t - self.r_ssp_start) / span) if span > 1e-9 else 1.0
+                right = (x0 + (x1 - x0) * s, right[1], right[2], right[3])
         right_z = self._right_z(t)
         left_z = self._left_z(t)
         leg = self.lengths.thigh_m + self.lengths.calf_m + self.lengths.ankle_m
         er = np.array([
-            swap_x + right[0] + self.x_offset,
-            swap_y + right[1] - self.y_offset / 2.0,
-            swap_z + right_z + self.z_offset - leg,
-            0.0 - self.roll_offset / 2.0,
-            0.0 + self.pitch_offset,
+            swap_x + right[0] + self.x_offset - self.pelvis_forward_m,
+            swap_y + right[1] - self.y_offset / 2.0 + self.foot_bias_r,
+            swap_z + right_z + self.z_offset - leg + self.foot_z_r,
+            0.0 - self.roll_offset / 2.0 + self.foot_roll_r,
+            0.0 + self.pitch_offset + self.foot_pitch_r,
             right[3] - self.yaw_offset / 2.0,
         ], dtype=np.float64)
         el = np.array([
-            swap_x + left[0] + self.x_offset,
-            swap_y + left[1] + self.y_offset / 2.0,
-            swap_z + left_z + self.z_offset - leg,
-            0.0 + self.roll_offset / 2.0,
-            0.0 + self.pitch_offset,
+            swap_x + left[0] + self.x_offset - self.pelvis_forward_m,
+            swap_y + left[1] + self.y_offset / 2.0 + self.foot_bias_l,
+            swap_z + left_z + self.z_offset - leg + self.foot_z_l,
+            0.0 + self.roll_offset / 2.0 + self.foot_roll_l,
+            0.0 + self.pitch_offset + self.foot_pitch_l,
             left[3] + self.yaw_offset / 2.0,
         ], dtype=np.float64)
         return er, el, pel_r, pel_l, swap_y
@@ -690,18 +744,94 @@ class Op3Walker:
         z_phase = math.pi / 2.0 + 2.0 * math.pi / max(self.z_move_period, 1e-6) * phase_t
         return wsin(t_z, self.z_move_period, z_phase, self._z_move, self._z_move_shift)
 
+    @staticmethod
+    def _minjerk(u: float) -> float:
+        """Rest-to-rest quintic. Zero value, slope, and curvature at 0 and 1."""
+        u = min(1.0, max(0.0, float(u)))
+        return u * u * u * (u * (u * 6.0 - 15.0) + 10.0)
+
+    def _swing_z(self, t: float, start: float, end: float, phase_t: float) -> float:
+        """OP3 sine, a 20–80% hold, or a minimum-jerk rise and fall.
+
+        The sine gap is z·sin(πf)². At 20% and 80% of the swing that is
+        35% of the peak, so a 4 mm peak is 1.4 mm and an 18 mm peak is
+        6 mm. The loaded sole does not clear either. The flat voice walk
+        rises with a smootherstep over the first 20% and holds the peak
+        until 80%. Those two corners are a step in command acceleration.
+        ``z_quintic`` spends the first half of single support on a
+        rest-to-rest quintic up to the same peak and the second half on
+        the matching descent, so lift-off, the peak, and touchdown all
+        have zero velocity and zero acceleration. Kit leaves both flags
+        off and keeps the sine.
+        """
+        if end <= start + 1e-9:
+            return self._z_at(t, phase_t)
+        if not self.z_flat and not self.z_quintic:
+            return self._z_at(t, phase_t)
+        z_lo = self._z_at(start, phase_t)
+        z_hi = self._z_at(start + 0.5 * (end - start), phase_t)
+        frac = (float(t) - start) / (end - start)
+        if self.z_quintic:
+            if frac <= 0.5:
+                scale = self._minjerk(frac / 0.5)
+            else:
+                scale = 1.0 - self._minjerk((frac - 0.5) / 0.5)
+            return z_lo + (z_hi - z_lo) * scale
+        rise = 0.20
+        if frac <= rise:
+            scale = self._minjerk(frac / rise)
+        elif frac >= 1.0 - rise:
+            scale = self._minjerk((1.0 - frac) / rise)
+        else:
+            scale = 1.0
+        return z_lo + (z_hi - z_lo) * scale
+
+    def _elapsed(self, t: float, origin: float) -> float:
+        period = float(self.period)
+        if period <= 1e-9:
+            return 0.0
+        return (float(t) - float(origin)) % period
+
+    def _lead_scale(self, t: float, rise_origin: float, mid: float, fall_end: float) -> float:
+        """Minimum jerk up from the previous touchdown to mid-swing, then down.
+
+        Velocity and acceleration are zero at the start of the rise, at
+        the peak, and at touchdown. There is no flat hold.
+        """
+        rise_len = self._elapsed(mid, rise_origin)
+        el = self._elapsed(t, rise_origin)
+        if rise_len > 1e-9 and el <= rise_len + 1e-12:
+            return self._minjerk(el / rise_len)
+        fall_len = self._elapsed(fall_end, mid)
+        el_fall = self._elapsed(t, mid)
+        if fall_len > 1e-9 and el_fall <= fall_len + 1e-12:
+            return 1.0 - self._minjerk(el_fall / fall_len)
+        return 0.0
+
     def _right_z(self, t: float) -> float:
+        if self.z_quintic and self.z_lead and self.period > 1e-9:
+            mid = 0.5 * (self.r_ssp_start + self.r_ssp_end)
+            z_lo = self._z_at(self.r_ssp_start, self.r_ssp_start)
+            z_hi = self._z_at(mid, self.r_ssp_start)
+            scale = self._lead_scale(t, self.l_ssp_end, mid, self.r_ssp_end)
+            return z_lo + (z_hi - z_lo) * scale
         if t <= self.r_ssp_start:
             return self._z_at(self.r_ssp_start, self.r_ssp_start)
         if t <= self.r_ssp_end:
-            return self._z_at(t, self.r_ssp_start)
+            return self._swing_z(t, self.r_ssp_start, self.r_ssp_end, self.r_ssp_start)
         return self._z_at(self.r_ssp_end, self.r_ssp_start)
 
     def _left_z(self, t: float) -> float:
+        if self.z_quintic and self.z_lead and self.period > 1e-9:
+            mid = 0.5 * (self.l_ssp_start + self.l_ssp_end)
+            z_lo = self._z_at(self.l_ssp_start, self.l_ssp_start)
+            z_hi = self._z_at(mid, self.l_ssp_start)
+            scale = self._lead_scale(t, self.r_ssp_end, mid, self.l_ssp_end)
+            return z_lo + (z_hi - z_lo) * scale
         if t <= self.l_ssp_start:
             return self._z_at(self.l_ssp_start, self.l_ssp_start)
         if t <= self.l_ssp_end:
-            return self._z_at(t, self.l_ssp_start)
+            return self._swing_z(t, self.l_ssp_start, self.l_ssp_end, self.l_ssp_start)
         return self._z_at(self.l_ssp_end, self.l_ssp_start)
 
     def _apply_direction(self, raw: np.ndarray, names: tuple[str, ...]) -> np.ndarray:
@@ -777,6 +907,14 @@ class Op3Walker:
             self.time,
             self.previous_x,
             self.ctrl_running,
+            self.foot_bias_l,
+            self.foot_bias_r,
+            self.foot_z_l,
+            self.foot_z_r,
+            self.foot_pitch_l,
+            self.foot_pitch_r,
+            self.foot_roll_l,
+            self.foot_roll_r,
         )
         self.x_cmd = 0.0
         self.y_cmd = 0.0
@@ -784,6 +922,14 @@ class Op3Walker:
         self.z_move_cmd = 0.0
         self.y_swap_cmd = 0.0
         self.z_swap_cmd = 0.0
+        self.foot_bias_l = 0.0
+        self.foot_bias_r = 0.0
+        self.foot_z_l = 0.0
+        self.foot_z_r = 0.0
+        self.foot_pitch_l = 0.0
+        self.foot_pitch_r = 0.0
+        self.foot_roll_l = 0.0
+        self.foot_roll_r = 0.0
         self.time = 0.0
         self.previous_x = 0.0
         self.ctrl_running = False
@@ -800,6 +946,14 @@ class Op3Walker:
             self.time,
             self.previous_x,
             self.ctrl_running,
+            self.foot_bias_l,
+            self.foot_bias_r,
+            self.foot_z_l,
+            self.foot_z_r,
+            self.foot_pitch_l,
+            self.foot_pitch_r,
+            self.foot_roll_l,
+            self.foot_roll_r,
         ) = saved
         self.update_time()
         self.update_movement()
