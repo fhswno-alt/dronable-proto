@@ -501,6 +501,17 @@ class LipmWalker:
         self.id_resid_max = 0.0
         self.id_resid_joint = ""
         self.id_resid_pas_max = 0.0
+        self.id_root_max = 0.0
+        self.id_root_t = 0.0
+        self.id_root_dof = -1
+        self.id_root_fail_n = 0
+        self.id_tick_root = 0.0
+        self.id_knee_ok_abs = 0.0
+        self.id_knee_ok_tau = 0.0
+        self.id_knee_ok_joint = ""
+        self.id_knee_ok_t = 0.0
+        self.id_knee_ok_n = 0
+        self.id_resid_vs_pas = 0.0
         self.id_wall_phys_n = 0
         self.id_arm_phys_n = 0
         self.ctrl_ticks = 0
@@ -1058,6 +1069,7 @@ class LipmWalker:
         self.id_tick_resid = {}
         self.id_tick_resid_pas = {}
         self.id_tick_ok = {name: True for name in self._leg_dof}
+        self.id_tick_root = 0.0
         self._limit_this_tick = False
 
     def finish_id_tick(self) -> None:
@@ -1070,10 +1082,12 @@ class LipmWalker:
 
         q, q̇, q̈, contacts, and the actuator force are the ones
         mj_forward just wrote. mj_inverse on a copy of that data keeps
-        the same configuration. The matched residual is
-        |qfrc_inverse − (qfrc_actuator + qfrc_applied)|. Adding
-        qfrc_passive leaves the joint damper, which is logged and is
-        not this gate. A leg residual above ID_RESID_NM is not bucketed.
+        the same configuration. The free joint is qfrc_inverse[0:6].
+        Nothing actuates it, so that wrench is the contact check and
+        is recorded before the leg residual. The leg residual is
+        |qfrc_inverse − (qfrc_actuator + qfrc_passive + qfrc_applied)|.
+        qfrc_passive includes the 0.08·q̇ damper. Armature is already
+        inside M·q̈. A leg residual above ID_RESID_NM is not bucketed.
         """
         self._ensure_leg_dof()
         if self._id_data is None:
@@ -1087,7 +1101,18 @@ class LipmWalker:
         mj.mj_inverse(self.model, scratch)
         inv = np.array(scratch.qfrc_inverse, dtype=np.float64, copy=True)
         self.id_phys_n += 1
-        step_fail = False
+        root_abs = np.abs(inv[:6])
+        root = float(np.max(root_abs)) if root_abs.size else 0.0
+        if root > self.id_tick_root:
+            self.id_tick_root = root
+        if root > self.id_root_max:
+            self.id_root_max = root
+            self.id_root_t = float(self.data.time)
+            self.id_root_dof = int(np.argmax(root_abs))
+        root_bad = root > ID_RESID_NM
+        if root_bad:
+            self.id_root_fail_n += 1
+        step_fail = root_bad
         rot = np.array(self.data.xmat[self.bid_body], dtype=np.float64).reshape(3, 3)
         upright = float(rot[2, 2]) >= 0.92
         sag = float(KNEE_SAG_NM)
@@ -1095,8 +1120,9 @@ class LipmWalker:
             tau = float(inv[adr])
             arm = ID_FF_ARMATURE * float(qacc[adr])
             stripped = tau - arm
-            resid = abs(tau - (float(act[adr]) + float(app[adr])))
-            resid_pas = abs(tau - (float(act[adr]) + float(pas[adr]) + float(app[adr])))
+            forward = float(act[adr]) + float(pas[adr]) + float(app[adr])
+            resid = abs(tau - forward)
+            resid_pas = resid
             prev_resid = float(self.id_tick_resid.get(name, -1.0))
             if resid > prev_resid:
                 self.id_tick_resid[name] = resid
@@ -1110,14 +1136,24 @@ class LipmWalker:
                 self.id_tick_tau[name] = tau
                 self.id_tick_arm[name] = arm
                 self.id_tick_stripped[name] = stripped
-            if resid <= ID_RESID_NM:
+            if resid <= ID_RESID_NM and not root_bad:
                 self._consistent_tau[name] = tau
+                if name.endswith("knee"):
+                    self.id_knee_ok_n += 1
+                    if abs(tau) > self.id_knee_ok_abs:
+                        self.id_knee_ok_abs = abs(tau)
+                        self.id_knee_ok_tau = tau
+                        self.id_knee_ok_joint = name
+                        self.id_knee_ok_t = float(self.data.time)
             if resid > self.id_resid_max:
                 self.id_resid_max = resid
                 self.id_resid_joint = name
             if resid_pas > self.id_resid_pas_max:
                 self.id_resid_pas_max = resid_pas
-            if resid > ID_RESID_NM or not upright:
+            gap = abs(resid - abs(float(pas[adr])))
+            if gap > self.id_resid_vs_pas:
+                self.id_resid_vs_pas = gap
+            if root_bad or resid > ID_RESID_NM or not upright:
                 continue
             if abs(stripped) > sag + 1e-9:
                 self.id_wall_phys_n += 1
@@ -1155,6 +1191,9 @@ class LipmWalker:
                 self.id_ff_arm = arm
                 self.id_ff_stripped = stripped
                 self.id_ff_stripped_abs = abs(stripped)
+        if root_bad:
+            for name in self.id_tick_ok:
+                self.id_tick_ok[name] = False
         if step_fail:
             self.id_resid_fail_n += 1
 

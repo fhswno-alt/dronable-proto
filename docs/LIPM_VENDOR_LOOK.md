@@ -2682,7 +2682,7 @@ The flat 20–80% rows above, T 0.60 s at 0.032 m/s, T 1.00 s at 0.016 m/s, and 
 
 The ID column below is `mj_inverse` on the realised post-step q and q̇ with the previous q̈. It is the mismatched number, kept so the signed ask and the phase can be read beside it. Arm is `0.01·q̈`. The 0.01 is the armature used for the column. It is not a measured motor inertia. Static is `2.2·9.81·0.093·sin(θ/2)` with θ the knee flexion. CoP x and CoP y are millimetres from the ankle-roll anchor, in that ankle's body frame. When the joint's own foot is unloaded the CoP is the stance foot's, and the ankle column says so. Eighteen ticks are stance. Their horizontal offset is 23–43 mm. On a loaded foot the repeated `x = +97.5` mm is the toe edge of the 135 mm contact box, and `|y| = 52` mm is the lateral edge.
 
-The ID column in the table is `mj_inverse` after integration, on the new q and q̇ with the previous q̈. That residual does not match the actuator force, so the class column is not a bucket. The re-run in the feedforward section, on the pre-integration state, keeps the same 101 over-2.33 writes and splits them 90 controller / 11 unsourced-armature candidate / 0 wall once the matched residual is under 0.05 Nm.
+The ID column in the table is `mj_inverse` after integration, on the new q and q̇ with the previous q̈. That residual does not match the actuator force, so the class column is not a bucket. The pre-integration rerun is in the feedforward section. With passive included in the forward side, the fast writes sit above 0.05 Nm and are not bucketed.
 
 The largest ask is +5.820 Nm on the left knee at 1.328 s, swing lift, error +0.164 rad. The mismatched inverse on that row is +1.874 Nm, with armature +1.270 Nm and static 0.889 Nm, and the CoP is at the left toe (`x +97.5` mm, `y −1.8` mm, 3.1 N). The 1.00 s peak ask is −4.121 Nm on the left knee in descent. The 1.20 s peak ask is +3.941 Nm on the right knee in descent. Static across the set is 0.87–1.10 Nm. Those inverse figures are not the buckets.
 
@@ -2805,32 +2805,25 @@ The signed ask on these rows is `kp·(ctrl−q) − kv·q̇` with ctrl after the
 
 A tick whose `mj_inverse` is over 2.33 Nm only because of armature·q̈ — `mj_inverse − 0.01·q̈` still inside ±2.33 — is an unsourced-armature candidate. The 0.01 has no source and is not changed. A wall is only a tick where `mj_inverse − 0.01·q̈` is still over 2.33 Nm. On a wall the dominant piece is named. q̈ is the inertia excluding armature, plus the velocity product. Armature is `0.01·q̈`. Impact is the contact torque at touchdown. CoP is the contact torque when that foot's centre of pressure is at least 15 mm from the ankle. Any other contact is counted with gravity. The peak is taken while the torso up component is at least 0.92, so a fallen pose does not supply the name.
 
-The inverse is taken on a copy of the data after the forward and before `mj_implicit`, so q, q̇, q̈, the contacts, and the actuator force are one state. The integration is the same implicitfast step as `mj_step`. The matched residual is `|qfrc_inverse − (qfrc_actuator + qfrc_applied)|`. On these runs its maximum is 1.3×10⁻⁴ Nm and the fail count is 0, so every leg write is eligible to be bucketed. Adding `qfrc_passive` leaves the joint damper: that column peaks at 0.19–0.27 Nm, which is above 0.05 Nm and is not a mismatched state. The 0.05 Nm gate is the matched residual. There is no wall on any row.
+The inverse is taken on a copy of the data after the forward and before `mj_implicit`. The free joint is `qfrc_inverse[0:6]`. Nothing actuates it, so that wrench is the contact check and is reported before the leg residual. The leg residual is `|qfrc_inverse − (qfrc_actuator + qfrc_passive + qfrc_applied)|`. `qfrc_passive` includes the damper `0.08·q̇`. Armature is already inside `M·q̈` and is not added again on the forward side. A tick with a root wrench or a leg residual above 0.05 Nm is not bucketed.
 
-The feedforward rows do not saturate the sum. The limiter fraction is 0: no torque cap, no ctrlrange clip, no 0.98 band, and no 20 ms slew changed a command. `ctrllimited` is set on all 12 leg actuators and the clip fraction is 0. Where the unsaturated ask exceeds 2.33 Nm, that is the bar failing on the command itself.
+The root wrench stays under 5.2×10⁻⁴ Nm on the eight rows and under 7.8×10⁻⁴ Nm on the mass sweep. The count of physics steps above 0.05 Nm is 0. That is not a contact mismatch, and it is not the source of a hip spike.
 
-| Row | signed | over | clamp | DC ex | clip | limit | resid | resid+pas | wall | arm cand | controller | clear | slip | step | off | stance n | phase | stop up | vx / cmd |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| T 0.60 / 0.032 | +2.482 | 5 | 0.0019 | −0.47 | 0 | 0 | 5.1e-5 | 0.254 | 0 | 5 | 0 | −0.43 | 0.29 | 0.80 | 0.80 | 2 | 0.29 | 0.713 | 0.030 / 0.032 |
-| T 1.00 / 0.016 | −2.307 | 0 | 0 | −0.70 | 0 | 0 | 6.0e-5 | 0.222 | 0 | 0 | 0 | −2.36 | 2.43 | 0.07 | 0.07 | 1 | 0.90 | 0.944 | 0.023 / 0.016 |
-| T 1.20 / 0.024 | −2.270 | 0 | 0 | −0.13 | 0 | 0 | 6.6e-5 | 0.222 | 0 | 0 | 0 | −1.89 | 8.46 | 0.59 | 0.59 | 1 | 0.67 | 0.950 | 0.021 / 0.024 |
-| T 4 / 0.016 | −2.468 | 4 | 0.0031 | −0.45 | 0 | 0 | 7.6e-5 | 0.255 | 0 | 4 | 0 | −2.57 | 9.24 | 0.52 | 0.52 | 1 | 0.88 | — | 0.016 / 0.016 |
-| T 20 / 0.0042 | −2.832 | 54 | 0.0051 | −0.38 | 0 | 0 | 1.3e-4 | 0.187 | 0 | 54 | 0 | 3.52 | 22.77 | 0.96 | 0.96 | 2 | 0.56 | 0.954 | 0.00424 / 0.0042 |
+The leg residual equals `|qfrc_passive|` within 1.6×10⁻⁴ Nm. It crosses 0.05 Nm when `|q̇|` crosses 0.625 rad/s. Those physics steps are not bucketed. On the three knee rows the fail counts are 637, 851, and 845.
 
-Clearance and slip are millimetres. Step is the airborne share of forward travel and off is the contact-off fraction. Phase is the fraction of the swing window that misses the swing-up / stance-down pairing. Stance n is the smallest stance contact count in those windows. Stop up is the minimum torso up component during the stop. T 4 faulted on the support margin before the stop window, and its minimum up component over the run is 0.744. No row completes an 8 mm airborne step (`n_steps` is 0).
+| Row | root max | root t | root dof | resid max | resid joint | resid fails | knee ID | knee t |
+| --- | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: |
+| T 0.60 / 0.032, feedforward | 2.3e-4 | 0.294 | y | 1.002 | l_knee | 468 | +2.45 | 1.712 |
+| T 1.00 / 0.016, feedforward | 7.5e-14 | 1.460 | z | 0.958 | l_ank_pitch | 460 | −2.45 | 1.536 |
+| T 1.20 / 0.024, feedforward | 5.1e-4 | 0.318 | x | 1.009 | l_ank_pitch | 594 | +2.45 | 1.730 |
+| T 4 / 0.016, feedforward | 7.1e-14 | 1.530 | z | 1.166 | r_knee | 835 | +2.45 | 2.164 |
+| T 20 / 0.0042, feedforward | 3.1e-4 | 1.584 | y | 0.892 | l_ank_pitch | 409 | +2.45 | 2.296 |
+| T 0.60 / 0.032, knee gait | 4.4e-4 | 4.656 | y | 0.266 | r_knee | 637 | −2.45 | 2.496 |
+| T 1.00 / 0.016, knee gait | 1.5e-4 | 1.860 | x | 0.241 | r_knee | 851 | +1.59 | 3.424 |
+| T 1.20 / 0.024, knee gait | 5.2e-4 | 5.416 | y | 0.186 | r_knee | 845 | +2.26 | 3.776 |
 
-The five armature-candidate writes on T 0.60 s are the right ankle pitch at the stance edge. The matched inverse is +2.45 Nm, which is the plant forcerange, and armature·q̈ is +0.92 Nm, so the stripped inverse is +1.53 Nm. The signed ask on that tick is +2.48 Nm. The same pattern is the left ankle roll on T 4 s (inverse −2.45 Nm, armature −0.96 Nm, stripped −1.49 Nm) and the left ankle pitch at stance mid on the 20 s row (inverse −2.45 Nm, armature −0.30 Nm, stripped −2.15 Nm, 54 writes). None of those stripped values is over 2.33 Nm, so none is a wall.
+Knee ID is the largest `|qfrc_inverse|` on a knee whose residual on that step is ≤ 0.05 Nm. On T 0.60 it is the plant rail, 2.45 Nm, which is over 2.33 Nm.
 
-T 1.00 s and T 1.20 s keep the signed ask, the clamp, the DC line, the clip fraction, and the limiter fraction inside the bar. They do not keep the step. T 1.00 s has a contact-off fraction of 0.07, a 20–80% clearance of −2.36 mm, and slip of 2.43 mm, with the torso up at 0.944 in the stop and forward speed 0.023 m/s against 0.016 m/s. T 1.20 s has contact-off 0.59, clearance −1.89 mm, slip 8.46 mm, stop up 0.950, and forward speed 0.021 m/s against 0.024 m/s.
+The same T 0.60 knee gait, mass scaled on the body inertias at load, ten hinge seeds at +5% and ten at −5%, plus the entrance rug. Every residual-passing knee sample is included. The root wrench stays under 7.8×10⁻⁴ Nm. The worst knee ID is 2.450 Nm, on the right knee near 2.50 s, at both mass scales and on every seed. The rug peaks are 1.698 Nm and 1.716 Nm. 2.450 Nm is over 2.33 Nm, so the feedforward path is not worth building.
 
-T 0.60 s leaves the support (margin −56 mm, stop up 0.713). T 4 s leaves it as well (margin −55 mm) before the stop. The 20 s row stays up (stop up 0.954, min up 0.932, forward speed 0.00424 m/s against 0.0042 m/s) and still misses the 8 mm window: the 20–80% clearance is 3.52 mm and slip is 22.8 mm. Its 54 over-bar writes are unsourced-armature candidates, not walls, and the limiter fraction is 0.
-
-The same residual on the three knee rows, without this feedforward, re-buckets the 101 over-2.33 writes. The matched residual still passes (maximum 1.1×10⁻⁴ Nm, fail count 0). Ninety writes are controller: the signed ask is over 2.33 Nm and the matched inverse is inside it. Eleven are unsourced-armature candidates, all of them an inverse of ±2.45 Nm whose armature term brings the stripped value under 2.33 Nm. Zero are walls. The limiter fraction on these rows is 0.46, 0.53, and 0.57, from the 20 ms slew and, on the shorter rows, the 0.98 band. That fraction is above 0, so those rows are a hard-cap fail.
-
-| Row | over | controller | arm cand | wall | limit | slew ticks | band writes | clear | slip | step | off | stance n | phase | stop up | vx / cmd |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| T 0.60 / 0.032 | 28 | 23 | 5 | 0 | 0.46 | 278 | 123 | 0.37 | 0.05 | 0.92 | 0.92 | 4 | 0 | 0.958 | 0.033 / 0.032 |
-| T 1.00 / 0.016 | 36 | 32 | 4 | 0 | 0.53 | 381 | 5 | −0.69 | 0.59 | 0.16 | 0.16 | 3 | 0.33 | 0.953 | 0.019 / 0.016 |
-| T 1.20 / 0.024 | 37 | 35 | 2 | 0 | 0.57 | 432 | 0 | −0.95 | 0.87 | 0.11 | 0.11 | 2 | 0.35 | 0.952 | 0.021 / 0.024 |
-
-Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0. No wall is claimed. The earlier −18 Nm, −10 Nm, and CoP wall names were the inverse after integration and are withdrawn.
+Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0.
