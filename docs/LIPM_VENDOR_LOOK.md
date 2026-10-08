@@ -2937,3 +2937,515 @@ The perturbations are T 1.00 / 0.016. Mass ±5% uses seeds 0, 1, and 2. All of t
 Latency −1 fails the signed bar, the clamp, and the DC line during the start, with the torso already down. Latency +1 fails the same three during the stop, stop up 0.626, and the planned column on that fallen pose is over 2.33 Nm without armature. The upright playback does not show that hip-roll bare peak. The rug reproduces the nominal tip before the mat. No row passes.
 
 Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0. The plant XML is not edited.
+
+## MFG rule: a wall is the bare plan, a pass is the applied force
+
+`|τ_req − 0.01·q̈_ref|` names a wall and nothing else. A pass is the applied signed force on the real plant, armature 0.01 included, ≤ 2.33 Nm on every tick, with limiter-active fraction 0 and clamp fraction 0. A plan whose bare column is inside 2.33 Nm and whose with-armature column is not is an unsourced-armature candidate. It is not a pass. The smooth-stop target is the with-armature column.
+
+The stop tables are the reference played on a fixed upright root, so the blend actually runs. Each row is the tick of peak `|τ_req|` for that joint during the stop phase. `with` is `τ_req`. `without` is `τ_req − 0.01·q̈_ref` on that same tick. A second line is the tick of peak `|without|` when it is a different sample. Every stop joint is inside 2.33 Nm with the armature left in. None is a wall and none is an unsourced-armature candidate. That playback is not a plant pass.
+
+The live tables are the whole bout on the free plant. The shorter rows tip before the scheduled stop, so those peaks are the walk. No live joint is an unsourced-armature candidate. Three planned columns name a wall because the bare term is over 2.33 Nm: T 4 right hip roll −2.657 Nm at the stance edge, latency −1 right hip roll +3.275 Nm at the start, and latency +1 right hip roll +2.889 Nm in the stop. The applied force fails the 2.33 Nm bar on both latency rows, and those rows also clip. The other rows keep the applied force inside 2.33 Nm with limiter fraction 0 and clamp fraction 0, and they tip, so they are not a pass. There is no side, front, or foot video.
+
+Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0. The plant XML is not edited.
+
+### New stop, T 0.60 / 0.032
+
+Span 0.50 s. Knee quintic peak 4.00 rad/s². Upright root playback, min up 1.000. Not a plant pass.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | -0.099 | -0.099 | +0.00 | 2.488 | stop | inside |
+| l_hip_roll | -1.232 | -0.548 | -68.39 | 2.488 | stop | inside |
+| l_hip_pitch | -0.182 | -0.166 | -1.59 | 2.648 | stop | inside |
+| l_hip_pitch bare peak | -0.171 | -0.174 | +0.31 | 2.744 | stop | inside |
+| l_knee | -0.779 | -0.753 | -2.65 | 2.912 | stop | inside |
+| l_ank_pitch | +0.883 | +0.437 | +44.58 | 2.912 | stop | inside |
+| l_ank_roll | -0.208 | -0.152 | -5.56 | 2.920 | stop | inside |
+| l_ank_roll bare peak | -0.198 | -0.159 | -3.96 | 2.944 | stop | inside |
+| r_hip_yaw | -0.121 | -0.121 | +0.00 | 2.488 | stop | inside |
+| r_hip_roll | +1.375 | +0.867 | +50.85 | 2.480 | stop | inside |
+| r_hip_pitch | -0.248 | -0.250 | +0.20 | 2.488 | stop | inside |
+| r_knee | +1.096 | +1.087 | +0.91 | 2.752 | stop | inside |
+| r_ank_pitch | -0.753 | -0.327 | -42.60 | 2.816 | stop | inside |
+| r_ank_pitch bare peak | -0.667 | -0.677 | +0.99 | 2.496 | stop | inside |
+| r_ank_roll | +0.427 | +0.377 | +5.01 | 2.648 | stop | inside |
+
+### New stop, T 1.00 / 0.016
+
+Span 0.50 s. Knee quintic peak 5.68 rad/s². Upright root playback, min up 1.000. Not a plant pass.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | -0.046 | -0.046 | +0.00 | 3.376 | stop | inside |
+| l_hip_roll | -0.579 | -0.531 | -4.74 | 3.384 | stop | inside |
+| l_hip_pitch | +0.241 | +0.243 | -0.15 | 3.376 | stop | inside |
+| l_knee | -1.065 | -1.079 | +1.35 | 3.440 | stop | inside |
+| l_ank_pitch | +0.899 | +0.629 | +26.97 | 3.440 | stop | inside |
+| l_ank_pitch bare peak | +0.587 | +0.631 | -4.38 | 3.376 | stop | inside |
+| l_ank_roll | -0.311 | -0.266 | -4.46 | 3.472 | stop | inside |
+| l_ank_roll bare peak | -0.304 | -0.270 | -3.46 | 3.504 | stop | inside |
+| r_hip_yaw | +0.013 | +0.013 | +0.00 | 3.384 | stop | inside |
+| r_hip_roll | -0.206 | -0.204 | -0.16 | 3.584 | stop | inside |
+| r_hip_roll bare peak | -0.201 | -0.207 | +0.54 | 3.600 | stop | inside |
+| r_hip_pitch | +0.148 | +0.165 | -1.68 | 3.376 | stop | inside |
+| r_knee | +0.661 | +0.689 | -2.81 | 3.728 | stop | inside |
+| r_ank_pitch | -0.808 | -0.376 | -43.21 | 3.728 | stop | inside |
+| r_ank_pitch bare peak | -0.448 | -0.384 | -6.39 | 3.752 | stop | inside |
+| r_ank_roll | +0.184 | +0.154 | +2.98 | 3.744 | stop | inside |
+| r_ank_roll bare peak | +0.179 | +0.157 | +2.17 | 3.768 | stop | inside |
+
+### New stop, T 1.20 / 0.024
+
+Span 0.50 s. Knee quintic peak 10.38 rad/s². Upright root playback, min up 1.000. Not a plant pass.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.102 | +0.102 | +0.00 | 3.720 | stop | inside |
+| l_hip_roll | -1.540 | -1.431 | -10.96 | 3.848 | stop | inside |
+| l_hip_pitch | +0.264 | +0.265 | -0.10 | 3.712 | stop | inside |
+| l_hip_pitch bare peak | +0.262 | +0.268 | -0.58 | 3.720 | stop | inside |
+| l_knee | -1.004 | -1.012 | +0.84 | 3.976 | stop | inside |
+| l_ank_pitch | +0.737 | +0.726 | +1.13 | 3.968 | stop | inside |
+| l_ank_roll | -0.438 | -0.427 | -1.03 | 3.968 | stop | inside |
+| l_ank_roll bare peak | -0.437 | -0.436 | -0.17 | 3.976 | stop | inside |
+| r_hip_yaw | +0.092 | +0.092 | +0.00 | 3.720 | stop | inside |
+| r_hip_roll | +1.229 | +0.606 | +62.32 | 3.720 | stop | inside |
+| r_hip_pitch | +0.215 | +0.179 | +3.65 | 3.912 | stop | inside |
+| r_hip_pitch bare peak | +0.201 | +0.197 | +0.42 | 3.976 | stop | inside |
+| r_knee | +0.882 | +0.814 | +6.78 | 4.136 | stop | inside |
+| r_ank_pitch | -0.908 | -0.482 | -42.61 | 4.152 | stop | inside |
+| r_ank_roll | +0.228 | +0.148 | +8.00 | 4.152 | stop | inside |
+| r_ank_roll bare peak | +0.208 | +0.160 | +4.73 | 4.184 | stop | inside |
+
+### New stop, T 4 / 0.016
+
+Span 1.60 s. Knee quintic peak 0.40 rad/s². Upright root playback, min up 1.000. Not a plant pass.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | -0.075 | -0.075 | +0.00 | 9.464 | stop | inside |
+| l_hip_roll | -1.263 | -0.573 | -68.98 | 9.464 | stop | inside |
+| l_hip_pitch | -0.147 | -0.147 | +0.04 | 10.272 | stop | inside |
+| l_knee | -0.572 | -0.571 | -0.17 | 10.936 | stop | inside |
+| l_knee bare peak | -0.572 | -0.571 | -0.16 | 10.944 | stop | inside |
+| l_ank_pitch | +0.502 | +0.285 | +21.68 | 10.688 | stop | inside |
+| l_ank_pitch bare peak | +0.354 | +0.350 | +0.34 | 10.960 | stop | inside |
+| l_ank_roll | -0.156 | -0.152 | -0.32 | 10.960 | stop | inside |
+| l_ank_roll bare peak | -0.155 | -0.153 | -0.15 | 11.016 | stop | inside |
+| r_hip_yaw | -0.144 | -0.144 | +0.00 | 9.464 | stop | inside |
+| r_hip_roll | +1.356 | +0.853 | +50.27 | 9.456 | stop | inside |
+| r_hip_pitch | -0.237 | -0.237 | -0.00 | 9.464 | stop | inside |
+| r_knee | +1.165 | +1.164 | +0.05 | 10.272 | stop | inside |
+| r_ank_pitch | -1.089 | -0.938 | -15.10 | 9.848 | stop | inside |
+| r_ank_pitch bare peak | -0.953 | -0.939 | -1.32 | 9.832 | stop | inside |
+| r_ank_roll | +0.339 | +0.335 | +0.45 | 9.976 | stop | inside |
+
+### T 0.60 / 0.032 live
+
+Applied signed +1.624 Nm on r_knee, signed_ok True, clamp_ok True, limiter 0.000, min up 0.655.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.500 | +0.500 | +0.00 | 1.936 | DS transfer | inside |
+| l_hip_roll | +1.169 | +1.189 | -1.93 | 1.976 | DS transfer | inside |
+| l_hip_pitch | +0.693 | +0.096 | +59.79 | 1.440 | held swing | inside |
+| l_hip_pitch bare peak | +0.319 | +0.340 | -2.09 | 1.920 | DS transfer | inside |
+| l_knee | +1.361 | -0.148 | +150.94 | 1.264 | DS transfer | inside |
+| l_knee bare peak | -0.588 | -0.588 | +0.00 | 0.256 | start | inside |
+| l_ank_pitch | -0.785 | -0.755 | -3.08 | 1.688 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.779 | -0.757 | -2.17 | 1.648 | DS transfer | inside |
+| l_ank_roll | -0.561 | -0.523 | -3.78 | 1.920 | DS transfer | inside |
+| l_ank_roll bare peak | -0.560 | -0.525 | -3.49 | 1.928 | DS transfer | inside |
+| r_hip_yaw | +0.353 | +0.353 | +0.00 | 2.128 | DS transfer | inside |
+| r_hip_roll | +1.535 | +1.533 | +0.17 | 2.128 | DS transfer | inside |
+| r_hip_pitch | -0.919 | -0.071 | -84.80 | 1.624 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.467 | -0.317 | -15.05 | 1.416 | stance mid | inside |
+| r_knee | +1.784 | -0.072 | +185.54 | 1.624 | DS transfer | inside |
+| r_knee bare peak | +0.762 | +0.758 | +0.47 | 0.728 | start | inside |
+| r_ank_pitch | +0.988 | -0.020 | +100.74 | 1.624 | DS transfer | inside |
+| r_ank_pitch bare peak | +0.886 | +0.791 | +9.51 | 1.496 | touchdown impact | inside |
+| r_ank_roll | -0.463 | -0.433 | -3.03 | 1.336 | stance edge | inside |
+| r_ank_roll bare peak | -0.460 | -0.501 | +4.08 | 1.496 | touchdown impact | inside |
+
+### T 1.00 / 0.016 live
+
+Applied signed +1.280 Nm on r_hip_roll, signed_ok True, clamp_ok True, limiter 0.000, min up 0.646.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.368 | +0.368 | +0.00 | 2.128 | DS transfer | inside |
+| l_hip_roll | +1.114 | +1.173 | -5.87 | 2.176 | DS transfer | inside |
+| l_hip_roll bare peak | +1.112 | +1.174 | -6.22 | 2.168 | DS transfer | inside |
+| l_hip_pitch | +0.605 | +0.088 | +51.67 | 1.360 | DS transfer | inside |
+| l_hip_pitch bare peak | +0.344 | +0.353 | -0.88 | 2.080 | DS transfer | inside |
+| l_knee | +1.208 | +0.188 | +101.95 | 1.408 | swing lift ramp | inside |
+| l_knee bare peak | -0.647 | -0.608 | -3.88 | 2.048 | DS transfer | inside |
+| l_ank_pitch | -0.757 | -0.152 | -60.45 | 1.360 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.560 | -0.550 | -1.06 | 1.856 | DS transfer | inside |
+| l_ank_roll | -0.547 | -0.380 | -16.76 | 2.056 | DS transfer | inside |
+| l_ank_roll bare peak | -0.525 | -0.449 | -7.54 | 2.128 | DS transfer | inside |
+| r_hip_yaw | +0.307 | +0.307 | +0.00 | 2.320 | DS transfer | inside |
+| r_hip_roll | +1.639 | +1.643 | -0.40 | 2.320 | DS transfer | inside |
+| r_hip_pitch | -0.535 | -0.026 | -50.90 | 1.904 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.334 | -0.265 | -6.87 | 1.552 | stance mid | inside |
+| r_knee | +1.022 | -0.084 | +110.61 | 1.904 | DS transfer | inside |
+| r_knee bare peak | +0.657 | +0.655 | +0.25 | 0.656 | start | inside |
+| r_ank_pitch | +0.815 | +0.782 | +3.36 | 1.696 | touchdown impact | inside |
+| r_ank_roll | -0.598 | -0.521 | -7.71 | 1.408 | stance edge | inside |
+| r_ank_roll bare peak | -0.560 | -0.522 | -3.78 | 1.416 | stance edge | inside |
+
+### T 1.20 / 0.024 live
+
+Applied signed +1.145 Nm on r_hip_roll, signed_ok True, clamp_ok True, limiter 0.000, min up 0.654.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.340 | +0.340 | +0.00 | 2.232 | DS transfer | inside |
+| l_hip_roll | +1.105 | +1.174 | -6.89 | 2.280 | DS transfer | inside |
+| l_hip_roll bare peak | +1.105 | +1.177 | -7.21 | 2.272 | DS transfer | inside |
+| l_hip_pitch | -0.554 | -0.247 | -30.75 | 1.608 | held swing | inside |
+| l_hip_pitch bare peak | +0.357 | +0.335 | +2.12 | 2.160 | DS transfer | inside |
+| l_knee | +1.021 | +0.174 | +84.68 | 1.432 | swing lift ramp | inside |
+| l_knee bare peak | -0.773 | -0.688 | -8.48 | 2.136 | DS transfer | inside |
+| l_ank_pitch | -0.684 | -0.168 | -51.61 | 1.376 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.447 | -0.442 | -0.45 | 1.872 | DS transfer | inside |
+| l_ank_roll | -0.495 | -0.414 | -8.09 | 2.232 | DS transfer | inside |
+| l_ank_roll bare peak | -0.495 | -0.414 | -8.04 | 2.240 | DS transfer | inside |
+| r_hip_yaw | +0.310 | +0.310 | +0.00 | 2.408 | DS transfer | inside |
+| r_hip_roll | +1.479 | +1.491 | -1.21 | 2.408 | DS transfer | inside |
+| r_hip_pitch | -0.613 | -0.379 | -23.41 | 1.608 | stance mid | inside |
+| r_knee | +0.846 | -0.086 | +93.19 | 2.024 | DS transfer | inside |
+| r_knee bare peak | +0.650 | +0.647 | +0.25 | 0.656 | start | inside |
+| r_ank_pitch | +0.940 | +0.906 | +3.42 | 1.784 | touchdown impact | inside |
+| r_ank_roll | -0.612 | -0.537 | -7.52 | 1.432 | stance edge | inside |
+| r_ank_roll bare peak | -0.568 | -0.537 | -3.06 | 1.440 | stance edge | inside |
+
+### T 4 / 0.016 live
+
+Applied signed -2.267 Nm on r_hip_roll, signed_ok True, clamp_ok True, limiter 0.000, min up 0.591.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.141 | +0.141 | +0.00 | 2.832 | swing descent | inside |
+| l_hip_roll | +0.268 | +0.262 | +0.62 | 2.832 | swing descent | inside |
+| l_hip_pitch | -0.232 | -0.222 | -1.02 | 2.800 | swing descent | inside |
+| l_hip_pitch bare peak | -0.232 | -0.222 | -0.96 | 2.808 | swing descent | inside |
+| l_knee | -0.588 | -0.588 | +0.00 | 0.256 | start | inside |
+| l_ank_pitch | -0.568 | -0.567 | -0.08 | 1.400 | DS transfer | inside |
+| l_ank_roll | -0.166 | -0.156 | -1.09 | 0.328 | start | inside |
+| l_ank_roll bare peak | -0.164 | -0.156 | -0.81 | 0.360 | start | inside |
+| r_hip_yaw | +0.382 | +0.382 | +0.00 | 2.096 | stance mid | inside |
+| r_hip_roll | -2.650 | -2.657 | +0.68 | 2.832 | stance edge | wall |
+| r_hip_pitch | -0.800 | -0.808 | +0.82 | 2.832 | stance edge | inside |
+| r_knee | +0.792 | +0.793 | -0.07 | 2.624 | stance edge | inside |
+| r_ank_pitch | +0.705 | +0.705 | +0.03 | 2.216 | stance mid | inside |
+| r_ank_roll | -0.563 | -0.568 | +0.54 | 1.696 | stance edge | inside |
+
+### mass +5% seed 0
+
+Applied signed +1.240 Nm on l_knee, signed_ok True, clamp_ok True, limiter 0.000, min up 0.646.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.415 | +0.415 | +0.00 | 2.096 | DS transfer | inside |
+| l_hip_roll | +1.208 | +1.277 | -6.85 | 2.136 | DS transfer | inside |
+| l_hip_pitch | +0.617 | +0.100 | +51.67 | 1.360 | DS transfer | inside |
+| l_hip_pitch bare peak | +0.403 | +0.395 | +0.78 | 2.040 | DS transfer | inside |
+| l_knee | +1.232 | +0.207 | +102.48 | 1.392 | swing lift ramp | inside |
+| l_knee bare peak | -0.616 | -0.616 | +0.00 | 0.256 | start | inside |
+| l_ank_pitch | -0.778 | -0.173 | -60.45 | 1.360 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.622 | -0.614 | -0.79 | 1.880 | DS transfer | inside |
+| l_ank_roll | -0.535 | -0.412 | -12.37 | 2.032 | DS transfer | inside |
+| l_ank_roll bare peak | -0.533 | -0.456 | -7.70 | 2.096 | DS transfer | inside |
+| r_hip_yaw | +0.283 | +0.283 | +0.00 | 2.256 | DS transfer | inside |
+| r_hip_roll | +1.488 | +1.505 | -1.68 | 2.256 | DS transfer | inside |
+| r_hip_pitch | -0.540 | -0.031 | -50.91 | 1.888 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.356 | -0.285 | -7.10 | 1.536 | stance mid | inside |
+| r_knee | +1.018 | -0.088 | +110.63 | 1.888 | DS transfer | inside |
+| r_knee bare peak | +0.688 | +0.685 | +0.26 | 0.640 | start | inside |
+| r_ank_pitch | +0.865 | +0.834 | +3.15 | 1.680 | touchdown impact | inside |
+| r_ank_roll | -0.611 | -0.533 | -7.78 | 1.392 | stance edge | inside |
+| r_ank_roll bare peak | -0.558 | -0.537 | -2.06 | 1.408 | stance edge | inside |
+
+### mass +5% seed 1
+
+Applied signed +1.240 Nm on l_knee, signed_ok True, clamp_ok True, limiter 0.000, min up 0.644.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.416 | +0.416 | +0.00 | 2.096 | DS transfer | inside |
+| l_hip_roll | +1.209 | +1.278 | -6.85 | 2.136 | DS transfer | inside |
+| l_hip_pitch | +0.616 | +0.099 | +51.67 | 1.360 | DS transfer | inside |
+| l_hip_pitch bare peak | +0.401 | +0.393 | +0.78 | 2.040 | DS transfer | inside |
+| l_knee | +1.232 | +0.207 | +102.48 | 1.392 | swing lift ramp | inside |
+| l_knee bare peak | -0.617 | -0.617 | +0.00 | 0.256 | start | inside |
+| l_ank_pitch | -0.777 | -0.172 | -60.45 | 1.360 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.624 | -0.616 | -0.78 | 1.880 | DS transfer | inside |
+| l_ank_roll | -0.532 | -0.455 | -7.70 | 2.096 | DS transfer | inside |
+| r_hip_yaw | +0.286 | +0.286 | +0.00 | 2.256 | DS transfer | inside |
+| r_hip_roll | +1.512 | +1.529 | -1.68 | 2.256 | DS transfer | inside |
+| r_hip_pitch | -0.540 | -0.031 | -50.92 | 1.888 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.356 | -0.285 | -7.10 | 1.536 | stance mid | inside |
+| r_knee | +1.018 | -0.089 | +110.64 | 1.888 | DS transfer | inside |
+| r_knee bare peak | +0.688 | +0.685 | +0.26 | 0.640 | start | inside |
+| r_ank_pitch | +0.868 | +0.837 | +3.15 | 1.680 | touchdown impact | inside |
+| r_ank_roll | -0.611 | -0.533 | -7.78 | 1.392 | stance edge | inside |
+| r_ank_roll bare peak | -0.557 | -0.537 | -2.06 | 1.408 | stance edge | inside |
+
+### mass +5% seed 2
+
+Applied signed +1.256 Nm on r_hip_roll, signed_ok True, clamp_ok True, limiter 0.000, min up 0.637.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.414 | +0.414 | +0.00 | 2.096 | DS transfer | inside |
+| l_hip_roll | +1.217 | +1.285 | -6.85 | 2.136 | DS transfer | inside |
+| l_hip_roll bare peak | +1.214 | +1.285 | -7.12 | 2.128 | DS transfer | inside |
+| l_hip_pitch | +0.617 | +0.101 | +51.67 | 1.360 | DS transfer | inside |
+| l_hip_pitch bare peak | +0.401 | +0.393 | +0.79 | 2.040 | DS transfer | inside |
+| l_knee | +1.232 | +0.207 | +102.48 | 1.392 | swing lift ramp | inside |
+| l_knee bare peak | -0.617 | -0.617 | +0.00 | 0.256 | start | inside |
+| l_ank_pitch | -0.779 | -0.174 | -60.45 | 1.360 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.619 | -0.611 | -0.78 | 1.880 | DS transfer | inside |
+| l_ank_roll | -0.532 | -0.455 | -7.70 | 2.096 | DS transfer | inside |
+| r_hip_yaw | +0.291 | +0.291 | +0.00 | 2.256 | DS transfer | inside |
+| r_hip_roll | +1.567 | +1.584 | -1.68 | 2.256 | DS transfer | inside |
+| r_hip_pitch | -0.540 | -0.030 | -50.92 | 1.888 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.356 | -0.285 | -7.10 | 1.536 | stance mid | inside |
+| r_knee | +1.018 | -0.088 | +110.64 | 1.888 | DS transfer | inside |
+| r_knee bare peak | +0.690 | +0.688 | +0.26 | 0.640 | start | inside |
+| r_ank_pitch | +0.869 | +0.838 | +3.15 | 1.680 | touchdown impact | inside |
+| r_ank_roll | -0.611 | -0.533 | -7.78 | 1.392 | stance edge | inside |
+| r_ank_roll bare peak | -0.557 | -0.537 | -2.06 | 1.408 | stance edge | inside |
+
+### mass −5% seed 0
+
+Applied signed +1.314 Nm on r_hip_roll, signed_ok True, clamp_ok True, limiter 0.000, min up 0.657.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.323 | +0.323 | +0.00 | 2.168 | DS transfer | inside |
+| l_hip_roll | +1.001 | +1.048 | -4.75 | 2.216 | DS transfer | inside |
+| l_hip_roll bare peak | +0.996 | +1.051 | -5.50 | 2.200 | DS transfer | inside |
+| l_hip_pitch | +0.595 | +0.078 | +51.67 | 1.360 | DS transfer | inside |
+| l_hip_pitch bare peak | +0.296 | +0.315 | -1.89 | 2.112 | DS transfer | inside |
+| l_knee | +1.190 | +0.169 | +102.15 | 1.424 | swing lift ramp | inside |
+| l_knee bare peak | -0.637 | -0.606 | -3.05 | 2.072 | DS transfer | inside |
+| l_ank_pitch | -0.739 | -0.135 | -60.45 | 1.360 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.499 | -0.488 | -1.09 | 1.864 | DS transfer | inside |
+| l_ank_roll | -0.508 | -0.433 | -7.56 | 2.144 | DS transfer | inside |
+| l_ank_roll bare peak | -0.506 | -0.434 | -7.14 | 2.160 | DS transfer | inside |
+| r_hip_yaw | +0.326 | +0.326 | +0.00 | 2.392 | DS transfer | inside |
+| r_hip_roll | +1.736 | +1.732 | +0.33 | 2.392 | DS transfer | inside |
+| r_hip_pitch | -0.529 | -0.020 | -50.89 | 1.920 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.314 | -0.246 | -6.79 | 1.568 | stance mid | inside |
+| r_knee | +1.027 | -0.079 | +110.58 | 1.920 | DS transfer | inside |
+| r_knee bare peak | +0.628 | +0.625 | +0.25 | 0.656 | start | inside |
+| r_ank_pitch | +0.756 | +0.721 | +3.54 | 1.712 | touchdown impact | inside |
+| r_ank_roll | -0.567 | -0.506 | -6.13 | 1.424 | stance edge | inside |
+
+### mass −5% seed 1
+
+Applied signed +1.217 Nm on r_hip_roll, signed_ok True, clamp_ok True, limiter 0.000, min up 0.665.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.325 | +0.325 | +0.00 | 2.168 | DS transfer | inside |
+| l_hip_roll | +1.003 | +1.051 | -4.75 | 2.216 | DS transfer | inside |
+| l_hip_roll bare peak | +1.000 | +1.055 | -5.50 | 2.200 | DS transfer | inside |
+| l_hip_pitch | +0.595 | +0.078 | +51.67 | 1.360 | DS transfer | inside |
+| l_hip_pitch bare peak | +0.296 | +0.315 | -1.89 | 2.112 | DS transfer | inside |
+| l_knee | +1.190 | +0.169 | +102.15 | 1.424 | swing lift ramp | inside |
+| l_knee bare peak | -0.636 | -0.606 | -3.05 | 2.072 | DS transfer | inside |
+| l_ank_pitch | -0.739 | -0.134 | -60.45 | 1.360 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.501 | -0.490 | -1.09 | 1.864 | DS transfer | inside |
+| l_ank_roll | -0.508 | -0.432 | -7.55 | 2.144 | DS transfer | inside |
+| l_ank_roll bare peak | -0.505 | -0.434 | -7.14 | 2.160 | DS transfer | inside |
+| r_hip_yaw | +0.313 | +0.313 | +0.00 | 2.384 | DS transfer | inside |
+| r_hip_roll | +1.620 | +1.617 | +0.27 | 2.384 | DS transfer | inside |
+| r_hip_pitch | -0.530 | -0.021 | -50.89 | 1.920 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.314 | -0.246 | -6.79 | 1.568 | stance mid | inside |
+| r_knee | +1.027 | -0.079 | +110.58 | 1.920 | DS transfer | inside |
+| r_knee bare peak | +0.627 | +0.625 | +0.24 | 0.664 | start | inside |
+| r_ank_pitch | +0.758 | +0.723 | +3.54 | 1.712 | touchdown impact | inside |
+| r_ank_roll | -0.567 | -0.506 | -6.13 | 1.424 | stance edge | inside |
+
+### mass −5% seed 2
+
+Applied signed +1.283 Nm on r_hip_roll, signed_ok True, clamp_ok True, limiter 0.000, min up 0.657.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.324 | +0.324 | +0.00 | 2.160 | DS transfer | inside |
+| l_hip_roll | +1.009 | +1.060 | -5.13 | 2.208 | DS transfer | inside |
+| l_hip_roll bare peak | +1.006 | +1.061 | -5.50 | 2.200 | DS transfer | inside |
+| l_hip_pitch | +0.595 | +0.079 | +51.67 | 1.360 | DS transfer | inside |
+| l_hip_pitch bare peak | +0.297 | +0.316 | -1.89 | 2.112 | DS transfer | inside |
+| l_knee | +1.190 | +0.169 | +102.15 | 1.424 | swing lift ramp | inside |
+| l_knee bare peak | -0.627 | -0.607 | -2.00 | 2.072 | DS transfer | inside |
+| l_ank_pitch | -0.740 | -0.135 | -60.45 | 1.360 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.499 | -0.489 | -1.09 | 1.864 | DS transfer | inside |
+| l_ank_roll | -0.521 | -0.356 | -16.54 | 2.080 | DS transfer | inside |
+| l_ank_roll bare peak | -0.505 | -0.433 | -7.14 | 2.160 | DS transfer | inside |
+| r_hip_yaw | +0.320 | +0.320 | +0.00 | 2.384 | DS transfer | inside |
+| r_hip_roll | +1.692 | +1.690 | +0.27 | 2.384 | DS transfer | inside |
+| r_hip_pitch | -0.529 | -0.020 | -50.89 | 1.920 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.314 | -0.246 | -6.79 | 1.568 | stance mid | inside |
+| r_knee | +1.027 | -0.079 | +110.59 | 1.920 | DS transfer | inside |
+| r_knee bare peak | +0.630 | +0.627 | +0.24 | 0.664 | start | inside |
+| r_ank_pitch | +0.758 | +0.723 | +3.54 | 1.712 | touchdown impact | inside |
+| r_ank_roll | -0.567 | -0.506 | -6.13 | 1.424 | stance edge | inside |
+
+### μ = 1.0
+
+Applied signed +1.217 Nm on l_knee, signed_ok True, clamp_ok True, limiter 0.000, min up 0.650.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.382 | +0.382 | +0.00 | 2.112 | DS transfer | inside |
+| l_hip_roll | +1.198 | +1.260 | -6.21 | 2.168 | DS transfer | inside |
+| l_hip_roll bare peak | +1.196 | +1.261 | -6.53 | 2.160 | DS transfer | inside |
+| l_hip_pitch | +0.606 | +0.089 | +51.67 | 1.360 | DS transfer | inside |
+| l_hip_pitch bare peak | +0.356 | +0.359 | -0.32 | 2.072 | DS transfer | inside |
+| l_knee | +1.208 | +0.189 | +101.95 | 1.408 | swing lift ramp | inside |
+| l_knee bare peak | -0.631 | -0.615 | -1.62 | 2.056 | DS transfer | inside |
+| l_ank_pitch | -0.760 | -0.155 | -60.45 | 1.360 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.549 | -0.537 | -1.20 | 1.832 | DS transfer | inside |
+| l_ank_roll | -0.523 | -0.446 | -7.67 | 2.112 | DS transfer | inside |
+| l_ank_roll bare peak | -0.523 | -0.447 | -7.62 | 2.120 | DS transfer | inside |
+| r_hip_yaw | +0.270 | +0.270 | +0.00 | 2.280 | DS transfer | inside |
+| r_hip_roll | +1.344 | +1.358 | -1.41 | 2.280 | DS transfer | inside |
+| r_hip_pitch | -0.531 | -0.022 | -50.94 | 1.904 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.333 | -0.264 | -6.87 | 1.552 | stance mid | inside |
+| r_knee | +1.025 | -0.082 | +110.68 | 1.904 | DS transfer | inside |
+| r_knee bare peak | +0.659 | +0.657 | +0.25 | 0.656 | start | inside |
+| r_ank_pitch | +0.810 | +0.777 | +3.36 | 1.696 | touchdown impact | inside |
+| r_ank_roll | -0.598 | -0.521 | -7.71 | 1.408 | stance edge | inside |
+| r_ank_roll bare peak | -0.560 | -0.522 | -3.78 | 1.416 | stance edge | inside |
+
+### μ = 0.8
+
+Applied signed +1.218 Nm on l_knee, signed_ok True, clamp_ok True, limiter 0.000, min up 0.646.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.385 | +0.385 | +0.00 | 2.112 | DS transfer | inside |
+| l_hip_roll | +1.228 | +1.290 | -6.20 | 2.168 | DS transfer | inside |
+| l_hip_roll bare peak | +1.226 | +1.292 | -6.53 | 2.160 | DS transfer | inside |
+| l_hip_pitch | +0.606 | +0.089 | +51.67 | 1.360 | DS transfer | inside |
+| l_hip_pitch bare peak | +0.362 | +0.360 | +0.23 | 2.064 | DS transfer | inside |
+| l_knee | +1.208 | +0.189 | +101.95 | 1.408 | swing lift ramp | inside |
+| l_knee bare peak | -0.635 | -0.618 | -1.63 | 2.056 | DS transfer | inside |
+| l_ank_pitch | -0.761 | -0.156 | -60.45 | 1.360 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.550 | -0.538 | -1.20 | 1.832 | DS transfer | inside |
+| l_ank_roll | -0.524 | -0.447 | -7.66 | 2.112 | DS transfer | inside |
+| l_ank_roll bare peak | -0.524 | -0.448 | -7.61 | 2.120 | DS transfer | inside |
+| r_hip_yaw | +0.264 | +0.264 | +0.00 | 2.272 | DS transfer | inside |
+| r_hip_roll | +1.316 | +1.333 | -1.67 | 2.272 | DS transfer | inside |
+| r_hip_pitch | -0.531 | -0.021 | -50.95 | 1.904 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.333 | -0.264 | -6.87 | 1.552 | stance mid | inside |
+| r_knee | +1.025 | -0.082 | +110.69 | 1.904 | DS transfer | inside |
+| r_knee bare peak | +0.659 | +0.657 | +0.25 | 0.656 | start | inside |
+| r_ank_pitch | +0.810 | +0.777 | +3.36 | 1.696 | touchdown impact | inside |
+| r_ank_roll | -0.598 | -0.521 | -7.71 | 1.408 | stance edge | inside |
+| r_ank_roll bare peak | -0.560 | -0.522 | -3.78 | 1.416 | stance edge | inside |
+
+### latency −1
+
+Applied signed +2.501 Nm on r_hip_roll, signed_ok False, clamp_ok False, limiter 0.000, min up 0.262.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | -0.144 | -0.144 | +0.00 | 0.800 | start | inside |
+| l_hip_roll | +0.866 | +0.862 | +0.46 | 0.752 | start | inside |
+| l_hip_pitch | -1.782 | -0.784 | -99.80 | 0.792 | start | inside |
+| l_knee | -1.077 | -1.076 | -0.09 | 0.680 | start | inside |
+| l_ank_pitch | +0.959 | +0.019 | +94.01 | 0.800 | start | inside |
+| l_ank_pitch bare peak | +0.762 | +0.755 | +0.65 | 0.680 | start | inside |
+| l_ank_roll | -0.283 | -0.283 | -0.07 | 0.728 | start | inside |
+| r_hip_yaw | +0.947 | +0.947 | +0.00 | 0.856 | start | inside |
+| r_hip_roll | +3.277 | +3.275 | +0.23 | 0.856 | start | wall |
+| r_hip_pitch | +1.607 | +0.670 | +93.71 | 0.800 | start | inside |
+| r_hip_pitch bare peak | +0.874 | +0.874 | +0.02 | 0.856 | start | inside |
+| r_knee | +1.268 | +1.225 | +4.36 | 0.800 | start | inside |
+| r_ank_pitch | -1.457 | -0.451 | -100.60 | 0.792 | start | inside |
+| r_ank_roll | -0.399 | -0.401 | +0.16 | 0.856 | start | inside |
+
+### latency +1
+
+Applied signed +2.540 Nm on r_hip_roll, signed_ok False, clamp_ok False, limiter 0.000, min up 0.626.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | -0.513 | -0.513 | +0.00 | 2.712 | DS transfer | inside |
+| l_hip_roll | -1.266 | -1.250 | -1.62 | 2.712 | DS transfer | inside |
+| l_hip_pitch | -0.666 | -0.095 | -57.07 | 2.224 | swing lift ramp | inside |
+| l_hip_pitch bare peak | +0.193 | +0.255 | -6.22 | 2.520 | touchdown impact | inside |
+| l_knee | +1.425 | +0.199 | +122.61 | 2.224 | swing lift ramp | inside |
+| l_knee bare peak | -0.621 | -0.606 | -1.53 | 2.624 | DS transfer | inside |
+| l_ank_pitch | -0.750 | -0.524 | -22.63 | 3.384 | stop | inside |
+| l_ank_pitch bare peak | -0.534 | -0.531 | -0.37 | 3.280 | DS transfer | inside |
+| l_ank_roll | -0.546 | -0.536 | -0.97 | 3.536 | stop | inside |
+| r_hip_yaw | +0.731 | +0.731 | +0.00 | 3.752 | stop | inside |
+| r_hip_roll | +2.894 | +2.889 | +0.55 | 3.800 | stop | wall |
+| r_hip_pitch | -0.533 | -0.022 | -51.17 | 2.720 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.296 | -0.296 | +0.00 | 3.880 | stop | inside |
+| r_knee | +1.043 | -0.068 | +111.12 | 2.720 | DS transfer | inside |
+| r_knee bare peak | +0.745 | +0.745 | +0.03 | 0.824 | start | inside |
+| r_ank_pitch | +0.595 | -0.004 | +59.95 | 2.720 | DS transfer | inside |
+| r_ank_pitch bare peak | +0.528 | +0.495 | +3.31 | 2.512 | touchdown impact | inside |
+| r_ank_roll | +0.483 | +0.425 | +5.78 | 1.632 | DS transfer | inside |
+| r_ank_roll bare peak | +0.470 | +0.434 | +3.58 | 1.680 | DS transfer | inside |
+
+### rug
+
+Applied signed +1.280 Nm on r_hip_roll, signed_ok True, clamp_ok True, limiter 0.000, min up 0.646.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.368 | +0.368 | +0.00 | 2.128 | DS transfer | inside |
+| l_hip_roll | +1.114 | +1.173 | -5.87 | 2.176 | DS transfer | inside |
+| l_hip_roll bare peak | +1.112 | +1.174 | -6.22 | 2.168 | DS transfer | inside |
+| l_hip_pitch | +0.605 | +0.088 | +51.67 | 1.360 | DS transfer | inside |
+| l_hip_pitch bare peak | +0.344 | +0.353 | -0.88 | 2.080 | DS transfer | inside |
+| l_knee | +1.208 | +0.188 | +101.95 | 1.408 | swing lift ramp | inside |
+| l_knee bare peak | -0.647 | -0.608 | -3.88 | 2.048 | DS transfer | inside |
+| l_ank_pitch | -0.757 | -0.152 | -60.45 | 1.360 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.560 | -0.550 | -1.06 | 1.856 | DS transfer | inside |
+| l_ank_roll | -0.547 | -0.380 | -16.76 | 2.056 | DS transfer | inside |
+| l_ank_roll bare peak | -0.525 | -0.449 | -7.54 | 2.128 | DS transfer | inside |
+| r_hip_yaw | +0.307 | +0.307 | +0.00 | 2.320 | DS transfer | inside |
+| r_hip_roll | +1.639 | +1.643 | -0.40 | 2.320 | DS transfer | inside |
+| r_hip_pitch | -0.535 | -0.026 | -50.90 | 1.904 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.334 | -0.265 | -6.87 | 1.552 | stance mid | inside |
+| r_knee | +1.022 | -0.084 | +110.61 | 1.904 | DS transfer | inside |
+| r_knee bare peak | +0.657 | +0.655 | +0.25 | 0.656 | start | inside |
+| r_ank_pitch | +0.815 | +0.782 | +3.36 | 1.696 | touchdown impact | inside |
+| r_ank_roll | -0.598 | -0.521 | -7.71 | 1.408 | stance edge | inside |
+| r_ank_roll bare peak | -0.560 | -0.522 | -3.78 | 1.416 | stance edge | inside |
+
+### rug, mass +5%
+
+Applied signed +1.239 Nm on l_knee, signed_ok True, clamp_ok True, limiter 0.000, min up 0.648.
+
+| joint | with 0.01·q̈ | without | q̈_ref | t | phase | class |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| l_hip_yaw | +0.415 | +0.415 | +0.00 | 2.096 | DS transfer | inside |
+| l_hip_roll | +1.212 | +1.280 | -6.85 | 2.136 | DS transfer | inside |
+| l_hip_pitch | +0.616 | +0.099 | +51.67 | 1.360 | DS transfer | inside |
+| l_hip_pitch bare peak | +0.398 | +0.391 | +0.78 | 2.040 | DS transfer | inside |
+| l_knee | +1.232 | +0.207 | +102.48 | 1.392 | swing lift ramp | inside |
+| l_knee bare peak | -0.619 | -0.619 | +0.00 | 0.256 | start | inside |
+| l_ank_pitch | -0.776 | -0.172 | -60.45 | 1.360 | DS transfer | inside |
+| l_ank_pitch bare peak | -0.624 | -0.616 | -0.79 | 1.880 | DS transfer | inside |
+| l_ank_roll | -0.564 | -0.409 | -15.50 | 2.032 | DS transfer | inside |
+| l_ank_roll bare peak | -0.535 | -0.458 | -7.71 | 2.096 | DS transfer | inside |
+| r_hip_yaw | +0.282 | +0.282 | +0.00 | 2.256 | DS transfer | inside |
+| r_hip_roll | +1.468 | +1.485 | -1.68 | 2.256 | DS transfer | inside |
+| r_hip_pitch | -0.540 | -0.031 | -50.91 | 1.888 | DS transfer | inside |
+| r_hip_pitch bare peak | -0.356 | -0.285 | -7.10 | 1.536 | stance mid | inside |
+| r_knee | +1.018 | -0.089 | +110.63 | 1.888 | DS transfer | inside |
+| r_knee bare peak | +0.687 | +0.685 | +0.26 | 0.648 | start | inside |
+| r_ank_pitch | +0.869 | +0.837 | +3.15 | 1.680 | touchdown impact | inside |
+| r_ank_roll | -0.611 | -0.533 | -7.78 | 1.392 | stance edge | inside |
+| r_ank_roll bare peak | -0.557 | -0.537 | -2.06 | 1.408 | stance edge | inside |
