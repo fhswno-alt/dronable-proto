@@ -561,6 +561,10 @@ class Op3Walker:
         return out
 
     def process_phase(self, dt: float) -> None:
+        # Amplitudes still refresh within half a tick of the phase marker.
+        # Snapping the clock onto the marker bunches two samples and the
+        # 8 ms central difference reports a q̈ spike, which is an inverse
+        # root force of order 100 N. The clock stays on the uniform grid.
         half = dt / 2.0
         if self.time == 0.0:
             self.update_time()
@@ -570,14 +574,11 @@ class Op3Walker:
         elif abs(self.time - self.phase1) <= half:
             self.update_movement()
             self.update_time()
-            self.time = self.phase1
         elif abs(self.time - self.phase2) <= half:
             self.update_time()
-            self.time = self.phase2
         elif abs(self.time - self.phase3) <= half:
             self.update_movement()
             self.update_time()
-            self.time = self.phase3
 
     def _leg_move(self, t_x: float, t_z: float, phase_t: float, sign: float, extra_pi: bool) -> tuple[float, float, float, float]:
         extra = math.pi if extra_pi else 0.0

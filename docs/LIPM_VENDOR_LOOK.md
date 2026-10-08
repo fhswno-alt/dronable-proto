@@ -3776,3 +3776,39 @@ On the cold plant the first planned tick aborts. No hip flag is raised, because 
 | 0.025 | 0.256 | start | +0.0176 | +0.0000 | +0.3422 | −0.0001 | −0.0005 | −0.0000 |
 
 The preview stage is start and the clock phase is shift, so both hips are stance. At 0.010 the wrench's vertical row is the weight, 23.029 N, and the inverse wants 23.365 N. The 0.336 N difference is the abort. The moments are inside 1e-2 Nm. At that tick the planned hips are +0.614 Nm and −0.607 Nm. Splitting them gives gravity ±0.023 Nm, inertial +0.006 Nm, swing-leg 0 (there is no swing leg in the shift), and contact +0.630 Nm and −0.636 Nm. The four parts match τ_req within 0.0003 Nm. Removing the right leg's mass moves its whole 0.029 Nm RNE into the swing-leg part and leaves the hip's own gravity at 0, so that part is the leg that was removed. The previous free-root table is the motion before this abort. It is not a score of the corrected guard. There is no video.
+
+## Scorer alignment
+
+The two live rows below are voice056, T 1.00, vx 0.016, clearance 0.008, double-support fraction 0.25, armature 0.01, seed none, latency 0, mass scale 1, μ none. Arm 1.0 s, stand 0.25 s, walk 3.05 s, stop 2.40 s, preview R 1e-4, sway amplitude 0.022851623535156247. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. MuJoCo 3.14.0. The baseline JSON leaves the version null because that commit's result dict did not store it. The process that ran it was 3.14.0.
+
+These tips produce r_hip_roll signed +0.904 and +2.591. The cited 0.823 and 2.51 are not what either tip writes.
+
+Baseline, no feedforward and no knee cap. Tip `a5a9183461105016211bebbf110051c2bb8f9df2`. Seed none.
+
+```
+python3 scripts/run_live_row.py --t 1.00 --vx 0.016 --clearance 0.008 --dsp 0.25 --ff 0 --knee-qdd-cap none --armature 0.01 --seed none --latency 0 --mass-scale 1 --mu none --arm-s 1 --stand-s 0.25 --walk-s 3.05 --stop-s 2.4 --preview-shape 0 --z-quintic 0 --z-lead 0 --honor-vx 0
+```
+
+r_hip_roll signed +0.9040376673934295 at t = 2.640, over-bar ticks 0. Signed bar fails: 36 ticks, worst −4.120620900110971 on l_knee at t = 1.672. Tip holds, min up_z 0.9526661091450443, fault empty. DC fails on l_knee, excess +2.1885500284336477, τ 4.120620900110971, |ω| 1.0167093174581812, t = 1.672. At this commit the stored signed force is the pre-clamp kp·(q_des − q) − kv·ω.
+
+Feedforward with the knee cap at 40 rad/s². Tip `40f2fe6193a26743b229c45f951f798f0be83754`. The cap itself landed in its parent 3479209; this tip's gait diff is comments. Seed none.
+
+```
+python3 scripts/run_live_row.py --t 1.00 --vx 0.016 --clearance 0.008 --dsp 0.25 --ff 1 --knee-qdd-cap 40 --armature 0.01 --seed none --latency 0 --mass-scale 1 --mu none --arm-s 1 --stand-s 0.25 --walk-s 3.05 --stop-s 2.4 --preview-shape 0 --amp 0.022851623535156247 --z-quintic 1 --z-lead 1 --honor-vx 1
+```
+
+r_hip_roll signed +2.5909271580816853 at t = 1.568, over-bar ticks 10. Signed bar fails on that hip. Tip fails, min up_z 0.528344367257705, fault `tip up_z=0.53`. DC fails on r_hip_roll, excess +3.7472496570186644, τ 2.5909271580816853, |ω| 5.1709825841220445, t = 1.568. Signed force here is kp·(clip(ctrl, ±2.09) − q) − kv·ω. This tip has no ID_FF_DSP override, so the double-support fraction stays 0.25.
+
+Running those same arguments on a later tip executes the later planner. The numbers above are the two historical tips.
+
+## Box-centre ZMP
+
+The per-step ZMP reference is the touchdown `geom_xpos` of `l_foot_contact` and `r_foot_contact`. That box centre is the local offset (+0.030, ±0.014, −0.018) in the ankle-roll link, already rotated by the foot yaw. The nominal ±0.043 m, the sway amplitude, and the mesh are not this reference. A foot that stays down does not move the latch if it later slides. Single support holds the stance foot's latched centre. Double support is a raised cosine between the two centres, which stays inside the convex hull of both boxes. The CoM is the Kajita preview of that reference, horizon 1.6 s, z_c from the pelvis height. The sagittal preview starts at the standing CoM x. A preview that starts at the origin is already 41 mm behind the box centre.
+
+The planned contact is the inverse's three root-force components, applied through the same foot stamp the residual is checked against. The CoP starts on the latched centre and moves with the residual moment over fz. Root angular acceleration stays zero. The root linear acceleration is the preview state's, then clamped so the dynamic ZMP of this pose stays on the support hull. With that acceleration at zero, the crouched stand still wants a CoP about 2 mm behind the heel, which is 0.05 Nm of pitch. A small linear-acceleration correction brings that CoP onto the box. The live cart table about the box centre has the opposite sign, about −2.2 m/s², and that feedforward flips the torso.
+
+The phase clock no longer snaps onto the phase marker. Snapping bunched two samples, and the 8 ms central difference reported a q̈ spike and an inverse root force of order 100 N. Every planned joint acceleration is the middle of the last three samples, then the shared cap.
+
+On the cold plant, free root, armature 0.010, the plan runs the full bar window (stand 0.25 s, walk 4.0 s, stop 2.5 s) without an abort and without a stance-hip flag. The largest planned root residual is 4.23e-4 Nm of pitch at t = 1.256 s. Min up_z on that probe is 0.974. In the window 1.304–1.336 s the inverse root fx is −0.030 N to −0.039 N. The raw second difference there is l_knee 19.7 rad/s². A later hip-roll reference step, +0.028 rad to −0.137 rad at t = 1.76 s, has a raw second difference of 2741 rad/s². The three-sample median keeps that edge out of the inverse. The inverse fx peak on the window is −5.5 N at t = 0.48 s.
+
+Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. The plant XML is not edited.

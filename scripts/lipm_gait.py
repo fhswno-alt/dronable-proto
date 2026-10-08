@@ -563,9 +563,16 @@ class LipmWalker:
         self.preview_stage = "stand"
         self.preview_com_y = 0.0
         self._foot_y_latch: dict[str, float] = {}
+        # Touchdown geom_xpos of l/r_foot_contact, world xy. The box centre
+        # is (+0.030, ±0.014, −0.018) in the ankle-roll frame.
+        self._foot_centre: dict[str, np.ndarray] = {}
+        self._foot_was_down = {"L": False, "R": False}
         self._anchor_was = {"L": False, "R": False}
         self._anchor_data: mj.MjData | None = None
         self._preview: zmp_preview.ZmpPreview | None = None
+        self._preview_x: zmp_preview.ZmpPreview | None = None
+        self.preview_com_x = 0.0
+        self._pending_x_future: np.ndarray | None = None
         self._preview_clock = 0.0
         self._preview_zc = 0.0
         self._stop_planted = False
@@ -772,10 +779,20 @@ class LipmWalker:
         self._swing_z_full = False
         self._dcm_step = 0.0
         self._dcm_err_f = 0.0
-        # Last three planned hip-roll accelerations. A one-tick wiggle of
-        # about 0.002 rad is 28 rad/s², and at armature 0.025 that is the
-        # 0.7 Nm that pushes a 0.7 Nm contact moment past 1.3 Nm.
+        # Last three planned joint accelerations. A one-tick wiggle of
+        # about 0.002 rad is 28 rad/s². The middle of the three is what
+        # the inverse sees, so that wiggle is not a root force.
         self._hip_qdd_med: dict[str, list[float]] = {}
+        self.qdd_spike_abs = 0.0
+        self.qdd_spike_joint = ""
+        self.qdd_spike_t = 0.0
+        self.qdd_win_abs = 0.0
+        self.qdd_win_joint = ""
+        self.qdd_win_t = 0.0
+        self.inv_fx_abs = 0.0
+        self.inv_fx = 0.0
+        self.inv_fx_t = 0.0
+        self.inv_fx_window: list[tuple[float, float]] = []
         self.hip_tau_flags: list[dict[str, float | str]] = []
         self.id_plan_root_max = 0.0
         self.id_plan_root_t = 0.0
@@ -993,17 +1010,102 @@ class LipmWalker:
         self._preview = zmp_preview.ZmpPreview(
             zc, op3_walk.OP3_CTRL_S, horizon, float(self.cfg.preview_r),
         )
+        self._preview_x = zmp_preview.ZmpPreview(
+            zc, op3_walk.OP3_CTRL_S, horizon, float(self.cfg.preview_r),
+        )
+        # Standing CoM x is ahead of the origin. A sagittal preview that
+        # starts at 0 is already behind the latched box centre.
+        self._preview_x._x[0] = float(self.data.subtree_com[self.bid_body, 0])
+        self.preview_com_x = float(self._preview_x._x[0])
         self._preview_clock = -float(self.cfg.preview_arm_s)
         return self._preview
+
+    def _note_foot_centres(self) -> None:
+        """Latch geom_xpos of each contact box when that foot is placed.
+
+        The geom is the box, not the mesh. Its centre is the local offset
+        (+0.030, ±0.014, −0.018) already rotated by the foot yaw. A foot
+        that stays down does not move the latch if it later slides.
+        """
+        for side in ("L", "R"):
+            down = self.foot_normal(side) >= 5.0
+            was = bool(self._foot_was_down.get(side, False))
+            if down and (not was or side not in self._foot_centre):
+                gid = int(self.gid[side])
+                pos = np.asarray(self.data.geom_xpos[gid], dtype=np.float64)
+                self._foot_centre[side] = np.array(
+                    [float(pos[0]), float(pos[1])], dtype=np.float64,
+                )
+            self._foot_was_down[side] = down
+        for side in ("L", "R"):
+            if side in self._foot_centre:
+                continue
+            gid = int(self.gid[side])
+            pos = np.asarray(self.data.geom_xpos[gid], dtype=np.float64)
+            self._foot_centre[side] = np.array(
+                [float(pos[0]), float(pos[1])], dtype=np.float64,
+            )
+
+    def _ff_zmp_xy(self, t_s: float) -> tuple[float, float]:
+        """Planned ZMP from the two latched box centres.
+
+        Single support holds the stance foot's touchdown centre. Double
+        support is a raised cosine between the two centres, which stays
+        inside the hull of the two boxes. The nominal ±0.043 m and the
+        sway amplitude are not this reference.
+        """
+        self._note_foot_centres()
+        walker = self.op3
+        right = self._foot_centre.get("R")
+        left = self._foot_centre.get("L")
+        if walker is None or right is None or left is None:
+            return 0.0, 0.0
+        stance0 = "R" if self.start_lead == "L" else "L"
+        if float(t_s) < 0.0:
+            mid = 0.5 * (right + left)
+            target = self._foot_centre[stance0]
+            arm = max(float(self.cfg.preview_arm_s), 1e-6)
+            u = 1.0 - min(1.0, max(0.0, -float(t_s) / arm))
+            s = u * u * (3.0 - 2.0 * u)
+            point = mid + (target - mid) * s
+            return float(point[0]), float(point[1])
+        period = float(walker.period)
+        if period <= 1e-6:
+            point = self._foot_centre[stance0]
+            return float(point[0]), float(point[1])
+        t = float(t_s) % period
+        l0 = float(walker.l_ssp_start)
+        l1 = float(walker.l_ssp_end)
+        r0 = float(walker.r_ssp_start)
+        r1 = float(walker.r_ssp_end)
+        if l0 < t <= l1:
+            point = right
+        elif r0 < t <= r1:
+            point = left
+        elif l1 < t <= r0:
+            span = max(r0 - l1, 1e-9)
+            w = zmp_preview._cosine_u((t - l1) / span, 0.0, 1.0, 1.0)
+            point = (1.0 - w) * right + w * left
+        else:
+            span = (period - r1) + l0
+            if span <= 1e-9:
+                point = right
+            else:
+                u_time = (t - r1) if t > r1 else (period - r1) + t
+                w = zmp_preview._cosine_u(u_time / span, 0.0, 1.0, 1.0)
+                point = (1.0 - w) * left + w * right
+        return float(point[0]), float(point[1])
 
     def _cycle_zmp(self, t_s: float) -> float:
         walker = self.op3
         if walker is None:
             return 0.0
-        # Single support holds the foot centre, which sits inside the
-        # 5 mm inset. Double support is a raised cosine between the feet.
-        amp = zmp_preview.BOX_CENTER_Y_M if self.cfg.gm_id_ff else self.cfg.preview_amp_m
-        shape = 1.0 if self.cfg.gm_id_ff else float(self.cfg.preview_shape)
+        if self.cfg.gm_id_ff:
+            return self._ff_zmp_xy(t_s)[1]
+        # Preview amplitude from the caller. The feedforward path does
+        # not use this amplitude: its reference is the latched box centre.
+        amp = self.cfg.preview_amp_m
+        shape = float(self.cfg.preview_shape)
         return zmp_preview.cycle_zmp(
             t_s,
             walker.period,
@@ -1018,7 +1120,16 @@ class LipmWalker:
     def _step_preview(self, preview: zmp_preview.ZmpPreview, future: np.ndarray) -> float:
         self._apply_split_bias(future)
         self._zmp_cmd = float(future[0]) if len(future) else 0.0
-        return preview.step(future)
+        com = preview.step(future)
+        if self.cfg.gm_id_ff and self._preview_x is not None:
+            if self._pending_x_future is None or len(self._pending_x_future) != self._preview_x.horizon:
+                self._pending_x_future = np.full(
+                    self._preview_x.horizon, float(self._zmp_x), dtype=np.float64,
+                )
+            self.preview_com_x = float(self._preview_x.step(self._pending_x_future))
+            self._ax_cmd = float(self._preview_x.com_acc_m_s2)
+            self._pending_x_future = None
+        return com
 
     def _apply_split_bias(self, future: np.ndarray) -> None:
         """Move the ZMP with the capture point, then keep it in the inset.
@@ -1068,9 +1179,10 @@ class LipmWalker:
         return min(hi, max(lo, float(y)))
 
     def _zmp_at(self, t_s: float) -> float:
-        amp = zmp_preview.BOX_CENTER_Y_M if self.cfg.gm_id_ff else self.cfg.preview_amp_m
+        if self.cfg.gm_id_ff:
+            return self._ff_zmp_xy(t_s)[1]
         if t_s < 0.0:
-            return zmp_preview.arm_zmp(t_s, self.cfg.preview_arm_s, amp)
+            return zmp_preview.arm_zmp(t_s, self.cfg.preview_arm_s, self.cfg.preview_amp_m)
         return self._cycle_zmp(t_s)
 
     def _zmp_future(self, t0_s: float) -> np.ndarray:
@@ -1079,8 +1191,19 @@ class LipmWalker:
             raise RuntimeError("preview controller is not built")
         dt = op3_walk.OP3_CTRL_S
         out = np.zeros(preview.horizon, dtype=np.float64)
+        x_future = np.zeros(preview.horizon, dtype=np.float64)
         for i in range(preview.horizon):
-            out[i] = self._zmp_at(t0_s + i * dt)
+            t = t0_s + i * dt
+            if self.cfg.gm_id_ff:
+                x, y = self._ff_zmp_xy(t)
+                out[i] = y
+                x_future[i] = x
+                if i == 0:
+                    self._zmp_x = x
+            else:
+                out[i] = self._zmp_at(t)
+        if self.cfg.gm_id_ff:
+            self._pending_x_future = x_future
         return out
 
     def _slew(self, current: float, target: float, rate: float) -> float:
@@ -1120,8 +1243,16 @@ class LipmWalker:
         return pitch, rate
 
     def _command_zmp_x(self, omega2: float) -> float:
-        """Fore-aft ZMP. A nose-down torso moves the ZMP toward the toe."""
+        """Fore-aft ZMP. The feedforward reference is the box-centre blend.
+
+        A nose-down torso still moves the non-feedforward ZMP toward the toe.
+        """
         com_x = float(self.data.subtree_com[self.bid_body, 0])
+        if self.cfg.gm_id_ff:
+            # Sagittal acceleration is the Kajita preview of the box-centre
+            # x. (com − zmp)·ω² is the open-loop cart table and walks the
+            # CoM out behind the heel.
+            return float(self._zmp_x)
         pitch, rate = self._torso_pitch()
         offset = 0.50 * pitch + 0.08 * rate
         offset = min(0.040, max(-0.040, offset))
@@ -2018,10 +2149,23 @@ class LipmWalker:
             if self.cfg.gm_id_ff:
                 # The wrench uses this pose's CoM. Shifting the root onto
                 # the preview CoM made the hip absorb a moment the live
-                # body does not have.
+                # body does not have. The lateral acceleration is the
+                # Kajita state's, which is the plan of the box-centre ZMP.
                 zmp_y = self._clamp_zmp_y(scratch, zmp_y, self._planned_stance())
-            com_y = float(scratch.subtree_com[self.bid_body, 1])
-            ay = (com_y - zmp_y) * G / zc
+            com = np.array(scratch.subtree_com[self.bid_body], dtype=np.float64)
+            com_y = float(com[1])
+            if self.cfg.gm_id_ff:
+                # Kajita acceleration of the box-centre reference. The live
+                # cart table about that centre has the opposite sign and the
+                # feedforward flips the torso. The clamp keeps the dynamic
+                # ZMP of this pose inside the support hull.
+                ax = float(self._preview_x.com_acc_m_s2) if self._preview_x is not None else 0.0
+                ay = float(self._preview.com_acc_m_s2) if self._preview is not None else 0.0
+                ax, ay = self._clamp_root_acc(scratch, com, ax, ay, zc)
+                self._ax_cmd = ax
+            else:
+                ay = (com_y - zmp_y) * G / zc
+                ax = 0.0
             for name, val in qdd.items():
                 jid = int(mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, name))
                 if jid < 0:
@@ -2029,7 +2173,7 @@ class LipmWalker:
                 vadr = int(self.model.jnt_dofadr[jid])
                 scratch.qacc[vadr] = float(val)
             self._cap_plan_qacc(scratch, joints, qdd)
-            scratch.qacc[free + 0] = float(self._ax_cmd) if self.cfg.gm_id_ff else 0.0
+            scratch.qacc[free + 0] = float(ax) if self.cfg.gm_id_ff else 0.0
             scratch.qacc[free + 1] = ay
             scratch.qacc[free + 2] = 0.0
             scratch.qacc[free + 3] = 0.0
@@ -2041,8 +2185,17 @@ class LipmWalker:
             inv = np.array(scratch.qfrc_inverse, dtype=np.float64, copy=True)
             # Double support does not fix the foot-to-foot share. Split (c)
             # is the feedforward when it solves. One airborne foot is the
-            # stance box, the same as single support.
-            if self._planned_stance() is None and not self._return_hold:
+            # stance box, the same as single support. The feedforward plan
+            # puts the inverse's root force on the feet and shifts the CoP
+            # by the residual moment over fz. Root angular acceleration
+            # stays zero.
+            if self.cfg.gm_id_ff:
+                inv = self._realize_zmp_contact(scratch, inv, zmp_y)
+                inv, ax, ay = self._pull_moment_inside(
+                    scratch, inv, com, ax, ay, zc, zmp_y,
+                )
+                self._ax_cmd = ax
+            elif self._planned_stance() is None and not self._return_hold:
                 self._ds_apply_split(scratch, zmp_y, inv, qdd)
             else:
                 forced = None
@@ -2050,7 +2203,15 @@ class LipmWalker:
                     loaded = self._loaded_box_zmp()
                     if loaded is not None:
                         forced = "L" if loaded > 0.0 else "R"
-                self._apply_planned_wrench(scratch, zmp_y, forced)
+                self._apply_planned_wrench(scratch, zmp_y, forced, inv)
+            fx = float(inv[free])
+            t_now = float(self.data.time)
+            if abs(fx) > self.inv_fx_abs:
+                self.inv_fx_abs = abs(fx)
+                self.inv_fx = fx
+                self.inv_fx_t = t_now
+            if 1.300 <= t_now <= 1.340:
+                self.inv_fx_window.append((t_now, fx))
             applied = np.array(scratch.qfrc_applied, dtype=np.float64, copy=True)
             resid_root = inv[free:free + 6] - applied[free:free + 6]
             self._last_root = resid_root.copy()
@@ -2227,11 +2388,10 @@ class LipmWalker:
         geq = np.concatenate(
             [maps[i][np.ix_(free_dofs, range(6))] @ blocks[i] for i in (0, 1)], axis=1,
         )
-        scratch.qfrc_applied[:] = 0.0
-        mj.mj_applyFT(
-            self.model, scratch, force, np.zeros(3), p_zmp, int(self.bid_body), scratch.qfrc_applied,
-        )
-        target = np.array(scratch.qfrc_applied[free_dofs], dtype=np.float64, copy=True)
+        # The root rows of the inverse are the wrench the contacts have to
+        # match. A LIPM force at the ZMP leaves the vertical row short by
+        # the link acceleration, and the guard aborts that plan.
+        target = np.array(inv[free_dofs], dtype=np.float64, copy=True)
         bare0 = np.array(
             [
                 float(inv[self._leg_dof[name]]) - self.leg_armature * float(qdd.get(name, 0.0))
@@ -2264,14 +2424,36 @@ class LipmWalker:
             or bool(np.any(ds_split._A_UB @ x_b > 1e-4))
         ):
             x_b = None
+        bares_b = None
+        taus_b = None
+        if x_b is not None:
+            bares_b = bare0 - J @ x_b
+            taus_b = tau0 - J @ x_b
         if x_c is not None and float(np.linalg.norm(geq @ x_c - target)) > 1e-3:
             x_c = None
-        bares = {"a": bare_a, "b": None, "c": None}
-        taus = {"a": tau0 - qfrc_a, "b": None, "c": None}
+        if x_c is None and self.cfg.gm_id_ff:
+            # The 5 mm inset refused the wrench. The support check is the
+            # full box, so try that rectangle before giving up.
+            full_blocks = [
+                ds_split.corner_wrench_map(feet[i][1], full[i][0], full[i][1]) for i in (0, 1)
+            ]
+            J_full = np.concatenate(
+                [maps[i][np.ix_(dofs, range(6))] @ full_blocks[i] for i in (0, 1)], axis=1,
+            )
+            geq_full = np.concatenate(
+                [maps[i][np.ix_(free_dofs, range(6))] @ full_blocks[i] for i in (0, 1)], axis=1,
+            )
+            x0_full = ds_split.barycentric_forces(
+                linear, [feet[0][1], feet[1][1]], full,
+            )
+            x_full, _t_full = ds_split.solve_minimax(J_full, bare0, geq_full, target, x0_full)
+            if x_full is not None and float(np.linalg.norm(geq_full @ x_full - target)) <= 1e-3:
+                x_c = x_full
+                J = J_full
+                inner = full
+        bares = {"a": bare_a, "b": bares_b, "c": None}
+        taus = {"a": tau0 - qfrc_a, "b": taus_b, "c": None}
         chosen = None
-        if x_b is not None:
-            bares["b"] = bare0 - J @ x_b
-            taus["b"] = tau0 - J @ x_b
         if x_c is not None:
             bares["c"] = bare0 - J @ x_c
             taus["c"] = tau0 - J @ x_c
@@ -2432,10 +2614,261 @@ class LipmWalker:
             "phase": phase,
         }
 
+    def _zmp_contact_point(self, scratch: mj.MjData, side: str) -> np.ndarray:
+        """Bottom centre of one contact box. This is the sole point of the geom."""
+        center, rot, half = self._sole_frame(scratch, side)
+        return center + rot @ np.array([0.0, 0.0, -float(half[2])], dtype=np.float64)
+
+    def _contact_stance(self) -> str | None:
+        stance = self._planned_stance()
+        if self._return_hold:
+            loaded = self._loaded_box_zmp()
+            if loaded is not None:
+                return "L" if loaded > 0.0 else "R"
+        return stance if stance in ("L", "R") else None
+
+    def _cop_in_box(
+        self, scratch: mj.MjData, side: str, xy: np.ndarray,
+    ) -> bool:
+        center, rot, half = self._sole_frame(scratch, side)
+        bottom = center + rot @ np.array([0.0, 0.0, -float(half[2])], dtype=np.float64)
+        local = rot.T @ (np.array([float(xy[0]), float(xy[1]), float(bottom[2])]) - bottom)
+        return abs(float(local[0])) <= float(half[0]) + 1.0e-4 and abs(float(local[1])) <= float(half[1]) + 1.0e-4
+
+    def _apply_cop_force(
+        self, scratch: mj.MjData, force: np.ndarray, cop_xy: np.ndarray, yaw: float,
+    ) -> None:
+        """Put ``force`` on the feet at ``cop_xy``. Yaw stays on the loaded sole."""
+        scratch.qfrc_applied[:] = 0.0
+        scratch.xfrc_applied[:] = 0.0
+        stance = self._contact_stance()
+        torque = np.array([0.0, 0.0, float(yaw)], dtype=np.float64)
+        if stance in ("L", "R"):
+            point = self._zmp_contact_point(scratch, stance)
+            point = np.array(point, dtype=np.float64)
+            point[0] = float(cop_xy[0])
+            point[1] = float(cop_xy[1])
+            body = int(self.model.geom_bodyid[self.gid[stance]])
+            mj.mj_applyFT(
+                self.model, scratch, force, torque, point, body, scratch.qfrc_applied,
+            )
+            return
+        feet = []
+        for side in ("L", "R"):
+            point = self._zmp_contact_point(scratch, side)
+            _center, rot, half = self._sole_frame(scratch, side)
+            body = int(self.model.geom_bodyid[self.gid[side]])
+            feet.append((point, rot, (float(half[0]), float(half[1])), body))
+        z = 0.5 * (float(feet[0][0][2]) + float(feet[1][0][2]))
+        p_zmp = np.array([float(cop_xy[0]), float(cop_xy[1]), z], dtype=np.float64)
+        linear = ds_split.linear_split(
+            [feet[0][0], feet[1][0]],
+            [feet[0][1], feet[1][1]],
+            [feet[0][2], feet[1][2]],
+            p_zmp,
+            np.asarray(force, dtype=np.float64),
+        )
+        # Yaw has no line to split along. Park it on the foot nearer the CoP.
+        yaw_side = 0 if abs(float(feet[0][0][1]) - float(cop_xy[1])) <= abs(float(feet[1][0][1]) - float(cop_xy[1])) else 1
+        for i, (wrench, foot) in enumerate(zip(linear["wrenches"], feet)):
+            tq = np.array(wrench[3:], dtype=np.float64)
+            if i == yaw_side:
+                tq[2] += float(yaw)
+            mj.mj_applyFT(
+                self.model, scratch, wrench[:3], tq, foot[0], foot[3], scratch.qfrc_applied,
+            )
+
+    def _clamp_root_acc(
+        self,
+        scratch: mj.MjData,
+        com: np.ndarray,
+        ax: float,
+        ay: float,
+        zc: float,
+    ) -> tuple[float, float]:
+        """Largest preview acceleration whose ZMP stays on the support hull."""
+        zc_use = zc if zc > 0.05 else 0.18
+        zx = float(com[0]) - zc_use / G * float(ax)
+        zy = float(com[1]) - zc_use / G * float(ay)
+        held = self._project_support_xy(scratch, np.array([zx, zy], dtype=np.float64))
+        return (
+            (float(com[0]) - float(held[0])) * G / zc_use,
+            (float(com[1]) - float(held[1])) * G / zc_use,
+        )
+
+    def _support_sides(self) -> tuple[str, ...]:
+        stance = self._contact_stance()
+        if stance in ("L", "R"):
+            return (stance,)
+        return ("L", "R")
+
+    def _project_support_xy(
+        self, scratch: mj.MjData, xy: np.ndarray,
+    ) -> np.ndarray:
+        """Closest point of ``xy`` on the support hull. Inside points stay."""
+        sides = self._support_sides()
+        if self._outside_support_m(scratch, float(xy[0]), float(xy[1]), sides) <= 0.0:
+            return np.array(xy, dtype=np.float64)
+        hull = self._support_hull(self._support_corners(scratch, sides))
+        if len(hull) < 2:
+            return np.array(xy, dtype=np.float64)
+        best = np.array(hull[0], dtype=np.float64)
+        best_d = float(np.hypot(best[0] - xy[0], best[1] - xy[1]))
+        n = len(hull)
+        for i in range(n):
+            a = np.array(hull[i], dtype=np.float64)
+            b = np.array(hull[(i + 1) % n], dtype=np.float64)
+            edge = b - a
+            length2 = float(edge @ edge)
+            if length2 < 1e-16:
+                cand = a
+            else:
+                t = float((np.asarray(xy, dtype=np.float64) - a) @ edge / length2)
+                t = min(1.0, max(0.0, t))
+                cand = a + t * edge
+            dist = float(np.hypot(cand[0] - xy[0], cand[1] - xy[1]))
+            if dist < best_d:
+                best = cand
+                best_d = dist
+        return best
+
+    def _shift_acc_for_moment(
+        self,
+        scratch: mj.MjData,
+        resid: np.ndarray,
+        free: int,
+        acc_i: int,
+        resid_i: int,
+        acc: float,
+        cop: np.ndarray,
+        yaw: float,
+    ) -> float:
+        """One Newton step of root linear acceleration against a root moment."""
+        bump = 0.05
+        scratch.qacc[free + acc_i] = float(acc) + bump
+        scratch.qfrc_applied[:] = 0.0
+        scratch.xfrc_applied[:] = 0.0
+        mj.mj_inverse(self.model, scratch)
+        inv_b = np.array(scratch.qfrc_inverse[free:free + 6], dtype=np.float64, copy=True)
+        scratch.qacc[free + acc_i] = float(acc)
+        self._apply_cop_force(scratch, inv_b[:3], cop, yaw)
+        resid_b = float(inv_b[resid_i] - scratch.qfrc_applied[free + resid_i])
+        sens = (resid_b - float(resid[resid_i])) / bump
+        if abs(sens) < 1.0e-4:
+            return float(acc)
+        return float(acc) - float(resid[resid_i]) / sens
+
+    def _pull_moment_inside(
+        self,
+        scratch: mj.MjData,
+        inv: np.ndarray,
+        com: np.ndarray,
+        ax: float,
+        ay: float,
+        zc: float,
+        zmp_y: float,
+    ) -> tuple[np.ndarray, float, float]:
+        """Move root linear acceleration until the heel can hold the pitch.
+
+        With zero acceleration the crouched stand wants a CoP about 2 mm
+        behind the heel, a 0.05 Nm miss. A small backward acceleration
+        brings that CoP onto the box. Root angular acceleration stays zero.
+        """
+        free = self._free_dof()
+        for _ in range(2):
+            applied = np.array(scratch.qfrc_applied[free:free + 6], dtype=np.float64)
+            resid = inv[free:free + 6] - applied
+            if float(np.max(np.abs(resid))) <= 1.0e-3:
+                break
+            cop = np.array(self._cop_xy, dtype=np.float64)
+            yaw = float(self._cop_yaw)
+            ax = self._shift_acc_for_moment(
+                scratch, resid, free, 0, 4, ax, cop, yaw,
+            )
+            ay = self._shift_acc_for_moment(
+                scratch, resid, free, 1, 3, ay, cop, yaw,
+            )
+            ax, ay = self._clamp_root_acc(scratch, com, ax, ay, zc)
+            scratch.qacc[free + 0] = float(ax)
+            scratch.qacc[free + 1] = float(ay)
+            scratch.qacc[free + 2] = 0.0
+            scratch.qacc[free + 3] = 0.0
+            scratch.qacc[free + 4] = 0.0
+            scratch.qacc[free + 5] = 0.0
+            scratch.qfrc_applied[:] = 0.0
+            scratch.xfrc_applied[:] = 0.0
+            mj.mj_inverse(self.model, scratch)
+            inv = np.array(scratch.qfrc_inverse, dtype=np.float64, copy=True)
+            inv = self._realize_zmp_contact(scratch, inv, zmp_y)
+        return inv, float(ax), float(ay)
+
+    def _realize_zmp_contact(
+        self, scratch: mj.MjData, inv: np.ndarray, zmp_y: float,
+    ) -> np.ndarray:
+        """Stamp the inverse root force with the foot apply the plan keeps.
+
+        The force is the inverse's three root components. The CoP starts
+        on the latched box-centre blend. Each step measures how that same
+        apply moves the root rows and shifts the CoP by the residual
+        moment over fz, about a millimetre at the stand pose. Root angular
+        acceleration stays zero. A CoP the hull cannot hold is projected
+        back, and the moment that remains is the abort.
+        """
+        del zmp_y
+        free = self._free_dof()
+        target = np.array(inv[free:free + 6], dtype=np.float64)
+        force = np.array(target[:3], dtype=np.float64)
+        cop = np.array([float(self._zmp_x), float(self._zmp_cmd)], dtype=np.float64)
+        yaw = 0.0
+        eps = 1.0e-4
+        best_cop = cop.copy()
+        best_yaw = yaw
+        best_resid = 1.0e9
+        for _ in range(4):
+            self._apply_cop_force(scratch, force, cop, yaw)
+            applied = np.array(scratch.qfrc_applied[free:free + 6], dtype=np.float64)
+            resid = target - applied
+            resid_n = float(np.max(np.abs(resid)))
+            if resid_n < best_resid:
+                best_resid = resid_n
+                best_cop = cop.copy()
+                best_yaw = yaw
+            if resid_n <= 1.0e-4:
+                break
+            jac = np.zeros((6, 3), dtype=np.float64)
+            for col, (dcx, dcy, dyaw) in enumerate((
+                (eps, 0.0, 0.0),
+                (0.0, eps, 0.0),
+                (0.0, 0.0, eps),
+            )):
+                trial = np.array([cop[0] + dcx, cop[1] + dcy], dtype=np.float64)
+                self._apply_cop_force(scratch, force, trial, yaw + dyaw)
+                bumped = np.array(scratch.qfrc_applied[free:free + 6], dtype=np.float64)
+                jac[:, col] = (bumped - applied) / eps
+            delta, *_ = np.linalg.lstsq(jac, resid, rcond=None)
+            step = float(np.hypot(delta[0], delta[1]))
+            if step > 0.08:
+                delta[:2] *= 0.08 / step
+            if abs(float(delta[2])) > 1.0:
+                delta[2] *= 1.0 / abs(float(delta[2]))
+            cop = cop + delta[:2]
+            yaw = yaw + float(delta[2])
+        cop = self._project_support_xy(scratch, best_cop)
+        yaw = best_yaw
+        self._cop_xy = cop
+        self._cop_yaw = float(yaw)
+        self._apply_cop_force(scratch, force, cop, yaw)
+        return inv
+
     def _apply_planned_wrench(
-        self, scratch: mj.MjData, zmp_y: float, stance: str | None = None,
+        self,
+        scratch: mj.MjData,
+        zmp_y: float,
+        stance: str | None = None,
+        inv: np.ndarray | None = None,
     ) -> None:
         """LIPM wrench on one foot. Double support uses ``_ds_apply_split``."""
+        del inv
         mass = float(self.model.body_subtreemass[self.bid_body])
         if mass < 1e-6:
             mass = float(np.sum(self.model.body_mass))
@@ -2500,18 +2933,25 @@ class LipmWalker:
         if not self.cfg.gm_id_ff:
             return
         cap = float(WALK_KNEE_QDD_MAX)
-        for name in joints:
-            if not name.endswith(
-                ("hip_yaw", "hip_roll", "hip_pitch", "knee", "ank_pitch", "ank_roll")
-            ):
-                continue
+        t_now = float(self.data.time)
+        for name in list(qdd):
+            raw = float(qdd.get(name, 0.0))
+            if abs(raw) > self.qdd_spike_abs:
+                self.qdd_spike_abs = abs(raw)
+                self.qdd_spike_joint = name
+                self.qdd_spike_t = t_now
+            if 1.300 <= t_now <= 1.340 and abs(raw) > self.qdd_win_abs:
+                self.qdd_win_abs = abs(raw)
+                self.qdd_win_joint = name
+                self.qdd_win_t = t_now
             jid = int(mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, name))
             if jid < 0:
                 continue
             vadr = int(self.model.jnt_dofadr[jid])
-            cmd = float(qdd.get(name, 0.0))
-            if name.endswith("hip_roll"):
-                cmd = self._median_hip_qdd(name, cmd)
+            # One sample of a few milliradians is hundreds of rad/s² and
+            # a root force of order 100 N. The middle of three samples is
+            # the acceleration that is still there on the next tick.
+            cmd = self._median_hip_qdd(name, raw)
             if cmd > cap:
                 cmd = cap
             elif cmd < -cap:
@@ -3103,7 +3543,7 @@ class LipmWalker:
             )
         stance = self._planned_stance()
         sides = (stance,) if stance in ("L", "R") else ("L", "R")
-        com_x = float(scratch.subtree_com[self.bid_body, 0])
+        com_x = float(self.preview_com_x)
         com_y = float(self.preview_com_y)
         com_out = self._outside_support_m(scratch, com_x, com_y, sides)
         if com_out > 0.0:
@@ -3358,7 +3798,21 @@ class LipmWalker:
         return cycles * period + edge
 
     def _on_stance_side(self, stance: str) -> bool:
-        """True when CoM y is past the inner edge, onto ``stance``."""
+        """True when the planned CoM is inside the stance box.
+
+        The feedforward check is the box inner edge, geom half-width
+        inboard of the latched centre. The other gaits use the 8 mm line.
+        """
+        if self.cfg.gm_id_ff:
+            self._note_foot_centres()
+            centre = self._foot_centre.get(stance)
+            if centre is None:
+                return False
+            hy = float(self.model.geom_size[int(self.gid[stance])][1])
+            y = float(self.preview_com_y)
+            if stance == "L":
+                return y >= float(centre[1]) - hy - 1.0e-4
+            return y <= float(centre[1]) + hy + 1.0e-4
         y = float(self.data.subtree_com[self.bid_body, 1])
         if stance == "L":
             return y >= zmp_preview.ENTRY_Y_M
@@ -3367,11 +3821,11 @@ class LipmWalker:
     def _hold_until_stance(
         self, walker: op3_walk.Op3Walker, preview: zmp_preview.ZmpPreview,
     ) -> bool:
-        """Keep both feet down until CoM is 8 mm onto the upcoming stance foot.
+        """Keep both feet down until the planned CoM is inside the stance box.
 
-        The ZMP target on that hold is the box centre, ±0.043 m. The clock
-        does not enter single support while the mass is still in the gap.
-        After 1.5 s the clock is released and the miss is scored.
+        On the feedforward walk the ZMP target is that foot's latched box
+        centre. The clock does not enter single support while the mass is
+        still outside that box. After 1.5 s the clock is released.
         """
         dt = op3_walk.OP3_CTRL_S
         t_now = float(walker.time)
@@ -3399,7 +3853,16 @@ class LipmWalker:
             self._gate_open = True
             return False
         self.preview_gate_holds += 1
-        target = zmp_preview.BOX_CENTER_Y_M if stance_next == "L" else -zmp_preview.BOX_CENTER_Y_M
+        if self.cfg.gm_id_ff:
+            self._note_foot_centres()
+            centre = self._foot_centre.get(stance_next)
+            if centre is None:
+                target = 0.0
+            else:
+                target = float(centre[1])
+                self._zmp_x = float(centre[0])
+        else:
+            target = zmp_preview.BOX_CENTER_Y_M if stance_next == "L" else -zmp_preview.BOX_CENTER_Y_M
         future = np.full(preview.horizon, target, dtype=np.float64)
         com = self._step_preview(preview, future)
         self.preview_com_y = com
@@ -3431,10 +3894,24 @@ class LipmWalker:
         fn_l = self.foot_normal("L")
         fn_r = self.foot_normal("R")
         if fn_l > 8.0 and fn_r <= 8.0:
+            side = "L"
+        elif fn_r > 8.0 and fn_l <= 8.0:
+            side = "R"
+        else:
+            return None
+        if self.cfg.gm_id_ff:
+            self._note_foot_centres()
+            centre = self._foot_centre.get(side)
+            if centre is not None:
+                self._zmp_x = float(centre[0])
+                return float(centre[1])
+            gid = int(self.gid[side])
+            pos = np.asarray(self.data.geom_xpos[gid], dtype=np.float64)
+            self._zmp_x = float(pos[0])
+            return float(pos[1])
+        if side == "L":
             return zmp_preview.BOX_CENTER_Y_M
-        if fn_r > 8.0 and fn_l <= 8.0:
-            return -zmp_preview.BOX_CENTER_Y_M
-        return None
+        return -zmp_preview.BOX_CENTER_Y_M
 
     def _note_preview_phase(self, info: op3_walk.StepInfo) -> None:
         if info.phase == "L":
@@ -3588,6 +4065,12 @@ class LipmWalker:
 
     def _stop_zmp_future(self, horizon: int, t_now: float, span: float) -> np.ndarray:
         """LIPM ZMP of the planned CoM deceleration, clamped into the stance boxes."""
+        if self.cfg.gm_id_ff:
+            self._note_foot_centres()
+            left = self._foot_centre.get("L")
+            right = self._foot_centre.get("R")
+            if left is not None and right is not None:
+                self._zmp_x = float(0.5 * (left[0] + right[0]))
         dt = float(op3_walk.OP3_CTRL_S)
         zc = float(self._preview_zc) if self._preview_zc > 0.05 else 0.18
         lo, hi = self._stance_y_limits()
@@ -3661,6 +4144,10 @@ class LipmWalker:
                     self._plant_preview_return(walker)
                 else:
                     future = np.full(preview.horizon, float(self.preview_com_y), dtype=np.float64)
+                    if self._preview_x is not None:
+                        self._pending_x_future = np.full(
+                            self._preview_x.horizon, float(self.preview_com_x), dtype=np.float64,
+                        )
                     com = self._step_preview(preview, future)
                     self.preview_com_y = com
                     walker.preview_y = self._preview_y_with_stab(com)
