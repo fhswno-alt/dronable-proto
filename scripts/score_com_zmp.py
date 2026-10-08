@@ -5,14 +5,14 @@ Stand, shift onto the first stance foot, walk, soft-stop. y_swap stays 0.
 The lateral channel is the cart-table preview. Nothing here solves q_des
 onto ±2.33 Nm, edits the plant, or raises a torque rail.
 
-Two pre-clamp signals are logged, both on the command before
-write_clipped or write_force_limited edits ctrl. The historical 2.33 Nm
-bar is |kp*(q_des−q)| + |kv*ω|. The signed force is
-kp*(q_des−q) − kv*ω. kv is −actuator_biasprm[i, 2] from dampratio=1,
-a different number on every joint. Max |ctrl| is logged per leg joint
-against ctrlrange ±2.09. MuJoCo clips ctrl before the force, so a
-command outside that range is a clip. The historical mfg bar does not
-include that clip.
+The historical 2.33 Nm bar is |kp*(q_des−q)| + |kv*ω| on the command
+before the ctrlrange clip. The signed force is the ctrl MuJoCo applies
+after that clip: kp*(clip(ctrl, ±2.09)−q) − kv*ω. kv is
+−actuator_biasprm[i, 2] from dampratio=1, a different number on every
+joint. Max |ctrl| and the clip fraction are logged per row against
+ctrlrange ±2.09. ctrllimited is required on every leg actuator, so the
+clip is the one the force uses. The historical mfg bar does not include
+the clip fraction.
 """
 from __future__ import annotations
 
@@ -125,11 +125,11 @@ def preclamp_torque(
     ``kv`` is ``-actuator_biasprm[i, 2]``. dampratio=1 compiles a
     different kv on every joint. It is not a shared constant.
 
-    The signed force is ``kp·(q_des−q) − kv·ω``. That is the position
-    actuator before forcerange. The conservative bar is
-    ``|kp·(q_des−q)| + |kv·ω|``. The historical 2.33 Nm figure is the
-    conservative one. ``q_des`` here is the command the walker asked
-    for, not the ctrl that was written.
+    The signed force is ``kp·(ctrl−q) − kv·ω`` on the ctrl passed in.
+    The logger passes the command after the ±2.09 clip, which is the
+    ctrl MuJoCo uses when ctrllimited is set. The conservative bar is
+    ``|kp·(q_des−q)| + |kv·ω|`` on the pre-clip command. The historical
+    2.33 Nm figure is the conservative one.
     """
     kp_term = float(kp) * (float(q_des) - float(q))
     signed = kp_term - float(kv) * float(omega)
@@ -201,7 +201,13 @@ def historical_torque_identity(model: mj.MjModel | None = None) -> list[dict[str
 def _log_preclamp(
     lipm: lipm_gait.LipmWalker, bucket: list[AskRow], jn: str, q_des: float,
 ) -> None:
-    """Record the command before write_clipped or write_force_limited clips it."""
+    """Record the pre-clip command and the signed ask of the applied ctrl.
+
+    ``q_des`` is the command before the ctrlrange clip, so a clip stays
+    visible. The signed force uses the ctrl after that clip. ctrllimited
+    on the actuator is what makes MuJoCo apply the same clip before the
+    force. The conservative sum stays on the pre-clip command.
+    """
     if jn not in LEG_JOINTS:
         return
     idx = lipm.act_idx.get(jn + "_pos")
@@ -212,7 +218,11 @@ def _log_preclamp(
     omega = float(lipm.data.qvel[int(lipm.model.jnt_dofadr[jid])])
     kp = float(lipm.model.actuator_gainprm[idx, 0])
     kv = -float(lipm.model.actuator_biasprm[idx, 2])
-    signed, total = preclamp_torque(kp, float(q_des), q, kv, omega)
+    lo = float(lipm.model.actuator_ctrlrange[idx, 0])
+    hi = float(lipm.model.actuator_ctrlrange[idx, 1])
+    applied = min(hi, max(lo, float(q_des)))
+    signed, _ = preclamp_torque(kp, applied, q, kv, omega)
+    _, total = preclamp_torque(kp, float(q_des), q, kv, omega)
     bucket.append(AskRow(
         t=float(lipm.data.time),
         joint=jn,
@@ -273,6 +283,8 @@ def _ctrl_limits(lipm: lipm_gait.LipmWalker) -> dict[str, tuple[float, float]]:
         hi = float(lipm.model.actuator_ctrlrange[idx, 1])
         if abs(lo + CTRL_RANGE) > 1e-9 or abs(hi - CTRL_RANGE) > 1e-9:
             raise RuntimeError(f"{jn} ctrlrange {lo} {hi} != ±{CTRL_RANGE}")
+        if int(lipm.model.actuator_ctrllimited[idx]) == 0:
+            raise RuntimeError(f"{jn} actuator_ctrllimited is off")
         out[jn] = (lo, hi)
     return out
 
@@ -1564,8 +1576,9 @@ def run_attempt(
     clamp_joint = max(clamp_frac, key=lambda jn: clamp_frac[jn]) if clamp_frac else ""
     clamp_ok = all(clamp_n[jn] > 0 and clamp_hit[jn] == 0 for jn in LEG_JOINTS)
     dc_ok = dc_excess > -1.0e8 and dc_excess <= 1e-6 and dc_joint != ""
-    # Signed bar: |kp*(q_des-q) - kv*ω| <= 2.33 on every leg write.
-    # Sum bar: the conservative |kp*e|+|kv*ω| on every leg write.
+    # Signed bar: |kp*(applied ctrl−q) − kv*ω| <= 2.33. The applied
+    # ctrl is q_des after the ±2.09 clip. Sum bar: the conservative
+    # |kp*e|+|kv*ω| on the pre-clip command.
     signed_ok = bool(asks) and signed_over == 0
     sum_ok = bool(asks) and sum_over == 0
     signed_pass_sum_fail = bool(signed_ok and not sum_ok)
@@ -1573,6 +1586,9 @@ def run_attempt(
     ctrl_clip_n = int(sum(ctrl_clip.values()))
     ctrl_abs_joint = max(ctrl_abs, key=lambda jn: ctrl_abs[jn]) if asks else ""
     ctrl_abs_max = float(ctrl_abs[ctrl_abs_joint]) if ctrl_abs_joint else 0.0
+    ctrl_clip_frac = (
+        float(ctrl_clip_n) / float(len(asks)) if asks else float("nan")
+    )
     # Clip-free is part of the feedforward bar. It stays out of mfg_ok
     # so a historical row is not rewritten when its IK target sits
     # outside ctrlrange and write_clipped then clips it.
@@ -1639,7 +1655,7 @@ def run_attempt(
         "signed_t": 0.0 if signed_all is None else float(signed_all.t),
         "signed_sum": 0.0 if signed_all is None else float(signed_all.sum_nm),
         "ask_signed": 0.0 if ask_all is None else float(ask_all.signed_nm),
-        "signed_formula": "kp*(q_des-q)-kv*omega",
+        "signed_formula": "kp*(clip(ctrl,±2.09)-q)-kv*omega",
         "signed_over": signed_over,
         "signed_ok": signed_ok,
         "sum_over": sum_over,
@@ -1651,8 +1667,11 @@ def run_attempt(
         "ctrl_abs_joint": ctrl_abs_joint,
         "ctrl_clip": ctrl_clip,
         "ctrl_clip_n": ctrl_clip_n,
+        "ctrl_clip_frac": ctrl_clip_frac,
         "ctrl_ok": ctrl_ok,
         "ctrl_range": CTRL_RANGE,
+        "ctrl_limited": True,
+        "ctrl_limited_n": len(ctrl_lim),
         "id_ff": bool(getattr(cfg, "gm_id_ff", False)),
         "id_ff_peak": float(getattr(lipm, "id_ff_peak_abs", 0.0)),
         "id_ff_tau": float(getattr(lipm, "id_ff_peak_tau", 0.0)),
@@ -1661,6 +1680,12 @@ def run_attempt(
         "id_ff_term": str(getattr(lipm, "id_ff_peak_term", "")),
         "id_ff_t": float(getattr(lipm, "id_ff_peak_t", 0.0)),
         "id_ff_over_n": int(getattr(lipm, "id_ff_over_n", 0)),
+        "id_ff_wall_n": int(getattr(lipm, "id_ff_wall_n", 0)),
+        "id_ff_arm_n": int(getattr(lipm, "id_ff_arm_n", 0)),
+        "id_ff_bucket": str(getattr(lipm, "id_ff_bucket", "")),
+        "id_ff_arm": float(getattr(lipm, "id_ff_arm", 0.0)),
+        "id_ff_stripped": float(getattr(lipm, "id_ff_stripped", 0.0)),
+        "id_ff_stripped_abs": float(getattr(lipm, "id_ff_stripped_abs", 0.0)),
         "id_ff_hold": float(getattr(lipm, "id_ff_hold_abs", 0.0)),
         "id_ff_hold_tau": float(getattr(lipm, "id_ff_hold_tau", 0.0)),
         "id_ff_hold_joint": str(getattr(lipm, "id_ff_hold_joint", "")),

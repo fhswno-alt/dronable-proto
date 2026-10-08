@@ -469,6 +469,12 @@ class LipmWalker:
         self.id_ff_peak_t = 0.0
         self.id_ff_peak_tau = 0.0
         self.id_ff_over_n = 0
+        self.id_ff_wall_n = 0
+        self.id_ff_arm_n = 0
+        self.id_ff_bucket = ""
+        self.id_ff_arm = 0.0
+        self.id_ff_stripped = 0.0
+        self.id_ff_stripped_abs = 0.0
         self.id_ff_hold_abs = 0.0
         self.id_ff_hold_joint = ""
         self.id_ff_hold_phase = ""
@@ -881,59 +887,117 @@ class LipmWalker:
         return max(scores, key=lambda name: scores[name])
 
     def _note_id_peak(self, inv: np.ndarray, names: dict[str, float], hold: bool) -> None:
-        """Remember the largest inverse torque.
+        """Classify mj_inverse at this step's data.qacc.
 
-        The feedforward calls this with mj_inverse at data.qacc and
-        ``hold`` false. The hold slot is the unused zero-q̈ record.
+        ``hold`` is the unused zero-q̈ record. On the data.qacc path a
+        tick with |mj_inverse| > 2.33 Nm is an unsourced-armature
+        candidate when |mj_inverse − 0.01·q̈| is still inside ±2.33.
+        The 0.01 is not a sourced inertia and is not changed. A wall
+        is only a tick where |mj_inverse − 0.01·q̈| is still over 2.33.
         """
         sag = float(KNEE_SAG_NM)
-        worst_abs = 0.0
-        worst_name = ""
-        worst_tau = 0.0
+        rot = np.array(self.data.xmat[self.bid_body], dtype=np.float64).reshape(3, 3)
+        if float(rot[2, 2]) < 0.92:
+            return
+        if hold:
+            worst_abs = 0.0
+            worst_name = ""
+            worst_tau = 0.0
+            for name, adr in self._leg_dof.items():
+                if name not in names:
+                    continue
+                tau = float(inv[adr])
+                if abs(tau) > worst_abs:
+                    worst_abs = abs(tau)
+                    worst_name = name
+                    worst_tau = tau
+            if worst_abs > sag + 1e-9:
+                self.id_ff_hold_over_n += 1
+            if not worst_name or worst_abs <= self.id_ff_hold_abs:
+                return
+            self.id_ff_hold_abs = worst_abs
+            self.id_ff_hold_joint = worst_name
+            self.id_ff_hold_phase = self._ff_phase(worst_name)
+            self.id_ff_hold_term = ""
+            self.id_ff_hold_tau = worst_tau
+            self.id_ff_hold_t = float(self.data.time)
+            return
+        qacc = None
+        if self._id_data is not None:
+            qacc = np.array(self._id_data.qacc, dtype=np.float64, copy=True)
+        wall_abs = -1.0
+        wall_name = ""
+        wall_tau = 0.0
+        wall_arm = 0.0
+        wall_stripped = 0.0
+        cand_abs = -1.0
+        cand_name = ""
+        cand_tau = 0.0
+        cand_arm = 0.0
+        cand_stripped = 0.0
         for name, adr in self._leg_dof.items():
             if name not in names:
                 continue
             tau = float(inv[adr])
-            if abs(tau) > worst_abs:
-                worst_abs = abs(tau)
-                worst_name = name
-                worst_tau = tau
-        rot = np.array(self.data.xmat[self.bid_body], dtype=np.float64).reshape(3, 3)
-        upright = float(rot[2, 2]) >= 0.92
-        if not upright:
-            return
-        if worst_abs > sag + 1e-9:
-            if hold:
-                self.id_ff_hold_over_n += 1
-            else:
-                self.id_ff_over_n += 1
-        stored = self.id_ff_hold_abs if hold else self.id_ff_peak_abs
-        if not worst_name or worst_abs <= stored:
-            return
-        phase = self._ff_phase(worst_name)
-        term = ""
-        if worst_abs > sag + 1e-9 and self._id_data is not None:
-            side = "l" if worst_name.startswith("l_") else "r"
-            other = "r" if side == "l" else "l"
-            cop = self._ankle_cop_mm(side)
-            if cop is None:
-                cop = self._ankle_cop_mm(other)
-            cop_h = None if cop is None else cop[2]
-            term = self._id_dominant(self._id_data, self._leg_dof[worst_name], phase, cop_h)
-        if hold:
-            self.id_ff_hold_abs = worst_abs
-            self.id_ff_hold_joint = worst_name
-            self.id_ff_hold_phase = phase
-            self.id_ff_hold_term = term
-            self.id_ff_hold_tau = worst_tau
-            self.id_ff_hold_t = float(self.data.time)
-        else:
-            self.id_ff_peak_abs = worst_abs
-            self.id_ff_peak_joint = worst_name
+            arm = 0.0 if qacc is None else ID_FF_ARMATURE * float(qacc[adr])
+            stripped = tau - arm
+            if abs(stripped) > sag + 1e-9:
+                if abs(stripped) > wall_abs:
+                    wall_abs = abs(stripped)
+                    wall_name = name
+                    wall_tau = tau
+                    wall_arm = arm
+                    wall_stripped = stripped
+            elif abs(tau) > sag + 1e-9 and abs(tau) > cand_abs:
+                cand_abs = abs(tau)
+                cand_name = name
+                cand_tau = tau
+                cand_arm = arm
+                cand_stripped = stripped
+        if wall_name:
+            self.id_ff_wall_n += 1
+            self.id_ff_over_n += 1
+            if self.id_ff_bucket == "wall" and wall_abs <= self.id_ff_stripped_abs:
+                return
+            phase = self._ff_phase(wall_name)
+            term = ""
+            if self._id_data is not None:
+                side = "l" if wall_name.startswith("l_") else "r"
+                other = "r" if side == "l" else "l"
+                cop = self._ankle_cop_mm(side)
+                if cop is None:
+                    cop = self._ankle_cop_mm(other)
+                cop_h = None if cop is None else cop[2]
+                term = self._id_dominant(
+                    self._id_data, self._leg_dof[wall_name], phase, cop_h,
+                )
+            self.id_ff_bucket = "wall"
+            self.id_ff_peak_abs = abs(wall_tau)
+            self.id_ff_peak_joint = wall_name
             self.id_ff_peak_phase = phase
             self.id_ff_peak_term = term
-            self.id_ff_peak_tau = worst_tau
+            self.id_ff_peak_tau = wall_tau
             self.id_ff_peak_t = float(self.data.time)
+            self.id_ff_arm = wall_arm
+            self.id_ff_stripped = wall_stripped
+            self.id_ff_stripped_abs = wall_abs
+            return
+        if not cand_name:
+            return
+        self.id_ff_arm_n += 1
+        self.id_ff_over_n += 1
+        if self.id_ff_bucket == "wall" or cand_abs <= self.id_ff_peak_abs:
+            return
+        self.id_ff_bucket = "unsourced-armature candidate"
+        self.id_ff_peak_abs = cand_abs
+        self.id_ff_peak_joint = cand_name
+        self.id_ff_peak_phase = self._ff_phase(cand_name)
+        self.id_ff_peak_term = "unsourced-armature candidate"
+        self.id_ff_peak_tau = cand_tau
+        self.id_ff_peak_t = float(self.data.time)
+        self.id_ff_arm = cand_arm
+        self.id_ff_stripped = cand_stripped
+        self.id_ff_stripped_abs = abs(cand_stripped)
 
     def _id_feedforward(self, joints: dict[str, float]) -> None:
         """Replace each leg target with the ctrl that applies τ.
