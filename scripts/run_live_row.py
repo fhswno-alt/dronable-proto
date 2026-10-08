@@ -47,13 +47,25 @@ def _cmd(argv: list[str] | None) -> str:
     return " ".join(parts)
 
 
+def _note_diff(payload: dict[str, object]) -> None:
+    if "compiled_md5" not in payload or "compiled_order" not in payload:
+        return
+    report = plant_manifest.mismatch_report(payload)
+    if not report["match"]:
+        payload["compiled_diff"] = report["fields"]
+
+
 def _report(payload: dict[str, object]) -> str:
-    refs = plant_manifest.REFERENCE_COMPILED_MD5
+    table = plant_manifest.COMPILED_MD5_REF.get(mj.__version__, {})
+    fields = payload.get("compiled_diff")
+    tail = ""
+    if isinstance(fields, list) and fields:
+        tail = " fields " + ",".join(str(name) for name in fields)
     return (
-        f"ref armature_0.01 {refs['armature_0.01']} "
-        f"armature_0.025 {refs['armature_0.025']} "
+        f"ref {mj.__version__} armature_0.01 {table.get('armature_0.01')} "
+        f"armature_0.025 {table.get('armature_0.025')} "
         f"compiled_md5 {payload.get('compiled_md5')} "
-        f"perturbation {payload.get('perturbation')}"
+        f"perturbation {payload.get('perturbation')}{tail}"
     )
 
 
@@ -198,6 +210,7 @@ def main(argv: list[str] | None = None) -> int:
         payload["tip_ok"] = None
         payload["dc_ok"] = None
         plant_manifest.merge_compiled(payload, plant_manifest.manifest_from_traceback(exc))
+        _note_diff(payload)
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(payload, indent=2, default=str) + "\n")
         print(
@@ -208,6 +221,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     manifest = result.pop("compiled_manifest", None) if isinstance(result, dict) else None
     plant_manifest.merge_compiled(payload, manifest)
+    _note_diff(payload)
     joint = result.get("joint_signed") or {}
     hip = joint.get("r_hip_roll") if isinstance(joint, dict) else None
     payload["abort"] = None

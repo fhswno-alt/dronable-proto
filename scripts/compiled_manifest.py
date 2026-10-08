@@ -76,9 +76,22 @@ _MODEL_FRONT = IDENTITY_KEYS[:9]
 _RUN_KEYS = IDENTITY_KEYS[9:]
 
 
+# Nominal foot and floor friction is slide 1.6, torsion 0.1, roll 0.01.
+# μ 1.2 and 1.4 are the low-friction perturbations.
+NOMINAL_MU = 1.6
+
+# Reference hashes keyed by mujoco.__version__. PR #102 at 76b8164.
+COMPILED_MD5_REF = {
+    "3.14.0": {
+        "armature_0.01": REF_MD5_ARMATURE_0_01,
+        "armature_0.025": REF_MD5_ARMATURE_0_025,
+    }
+}
+
+
 def compile_note(leg_armature: float | None) -> str:
-    """How this model was compiled. The entry point always passes a number."""
-    if leg_armature is None:
+    """Compile line copied from the 76b8164 manifest when the plant is the file."""
+    if leg_armature is None or abs(float(leg_armature) - FILE_ARMATURE_KGM2) <= 1e-12:
         return COMPILE_XML
     return (
         "MjSpec.from_file, twelve leg joint armatures set to "
@@ -88,25 +101,20 @@ def compile_note(leg_armature: float | None) -> str:
 
 
 def perturbation_note(leg_armature: float | None, perturb: object | None) -> str:
-    """Name every load-time difference. The plain 0.01 plant is ``none``.
-
-    Mass ±5%, μ, latency, seed, and a rug each get their own token. A row
-    whose compiled arrays are not one of the two reference hashes, and whose
-    perturbation is ``none``, is an unlabelled override.
-    """
+    """``none``, ``armature_0.025``, ``mass_+5%``, ``mu_1.2``, and the same pattern."""
     parts: list[str] = []
     if leg_armature is not None and abs(float(leg_armature) - FILE_ARMATURE_KGM2) > 1e-12:
         parts.append(f"armature_{float(leg_armature):g}")
     if perturb is not None:
         scale = float(getattr(perturb, "mass_scale", 1.0))
         if abs(scale - 0.95) <= 1e-12:
-            parts.append("mass-5%")
+            parts.append("mass_-5%")
         elif abs(scale - 1.05) <= 1e-12:
-            parts.append("mass+5%")
+            parts.append("mass_+5%")
         elif abs(scale - 1.0) > 1e-12:
             parts.append(f"mass_scale_{scale:g}")
         friction = getattr(perturb, "friction", None)
-        if friction is not None:
+        if friction is not None and abs(float(friction) - NOMINAL_MU) > 1e-12:
             parts.append(f"mu_{float(friction):g}")
         ticks = int(getattr(perturb, "latency_ticks", 0) or 0)
         if ticks != 0:
@@ -123,32 +131,6 @@ def perturbation_note(leg_armature: float | None, perturb: object | None) -> str
     if not parts:
         return "none"
     return ",".join(parts)
-
-
-def array_order_text(joints: list[str], n_values: int) -> str:
-    """The pack order, written into the manifest next to the arrays."""
-    joint_list = ", ".join(joints)
-    return (
-        "dof_armature, kv = -actuator_biasprm[actuator, 2], "
-        "kp = actuator_gainprm[actuator, 0], forcerange lo then hi, "
-        "actfrcrange lo then hi, ctrlrange lo then hi; "
-        f"joint order is ascending MuJoCo joint id: {joint_list}; "
-        "then body_mass, ascending body id, world first; "
-        "then body_inertia as ix, iy, iz; "
-        "then geom_friction of floor, then the two foot contact boxes "
-        "in ascending geom id, as slide, torsion, roll; "
-        "then dof_damping, ascending dof id, root:0 through root:5 "
-        "then each hinge under its joint name; "
-        "then opt.timestep; then opt.integrator as float64 "
-        "(mjINT_IMPLICITFAST is 3). "
-        f"{n_values} little-endian float64 values, md5."
-    )
-
-
-REFERENCE_COMPILED_MD5 = {
-    "armature_0.01": REF_MD5_ARMATURE_0_01,
-    "armature_0.025": REF_MD5_ARMATURE_0_025,
-}
 
 
 def _integrator_name(code: int) -> str:
@@ -274,7 +256,6 @@ def compiled_manifest(
     xml_md5: str,
     compile: str,
     perturbation: str,
-    compare_baseline: bool = True,
 ) -> dict:
     """Snapshot ``model`` after compile and after any mass or friction edit."""
     joints = _leg_joints(model)
@@ -340,7 +321,6 @@ def compiled_manifest(
         "n": 0,
         "nbytes": 0,
         "hash": "md5",
-        "array_order": "",
         "compile": compile,
         "perturbation": perturbation,
         "armature_kgm2": armature_kgm2,
@@ -357,7 +337,6 @@ def compiled_manifest(
         "mujoco_version": mj.__version__,
         "compiled_md5_by_mujoco_version": {},
         "perturbation": perturbation,
-        "reference_compiled_md5": dict(REFERENCE_COMPILED_MD5),
         "body_mass": body_mass,
         "body_inertia": body_inertia,
         "geom_friction": geom_friction,
@@ -373,24 +352,42 @@ def compiled_manifest(
     digest = hashlib.md5(np.ascontiguousarray(packed).tobytes()).hexdigest()
     order["n"] = int(packed.size)
     order["nbytes"] = int(packed.nbytes)
-    order["array_order"] = array_order_text(joint_names, int(packed.size))
     manifest["compiled_md5"] = digest
     manifest["compiled_md5_by_mujoco_version"] = {mj.__version__: digest}
-    if digest not in (REF_MD5_ARMATURE_0_01, REF_MD5_ARMATURE_0_025) and perturbation == "none":
-        manifest["perturbation"] = "unlabelled_compiled_diff"
-        order["perturbation"] = "unlabelled_compiled_diff"
-    if compare_baseline and digest != REF_MD5_ARMATURE_0_01:
-        baseline_model = mj.MjModel.from_xml_path(str(sw.PLANT_XML))
+    return manifest
+
+
+def mismatch_report(manifest: dict, baseline: dict | None = None) -> dict:
+    """Match ``compiled_md5`` to the version-keyed reference.
+
+    On a mismatch, name each compiled_order field that differs from the
+    plain 0.01 plant at rtol 1e-9, atol 0.
+    """
+    version = str(manifest.get("mujoco_version", ""))
+    digest = str(manifest.get("compiled_md5", ""))
+    table = COMPILED_MD5_REF.get(version, {})
+    matched = [name for name, ref in table.items() if ref == digest]
+    if matched:
+        return {
+            "match": True,
+            "mujoco_version": version,
+            "compiled_md5": digest,
+            "ref": matched[0],
+        }
+    if baseline is None:
         baseline = compiled_manifest(
-            baseline_model,
-            xml_md5=xml_md5,
+            mj.MjModel.from_xml_path(str(sw.PLANT_XML)),
+            xml_md5=str(manifest.get("xml_md5", "")),
             compile=COMPILE_XML,
             perturbation="none",
-            compare_baseline=False,
         )
-        order["baseline_compiled_md5"] = baseline["compiled_md5"]
-        order["changed_vs_baseline"] = changed_fields(manifest, baseline)
-    return manifest
+    return {
+        "match": False,
+        "mujoco_version": version,
+        "compiled_md5": digest,
+        "rtol": 1e-9,
+        "fields": changed_fields(manifest, baseline),
+    }
 
 
 def merge_compiled(payload: dict, manifest: dict | None) -> None:
@@ -405,10 +402,8 @@ def merge_compiled(payload: dict, manifest: dict | None) -> None:
         if key in payload:
             out[key] = payload[key]
     out["perturbation"] = manifest.get("perturbation", "none")
-    out["reference_compiled_md5"] = {
-        "mujoco_version": mj.__version__,
-        "armature_0.01": REF_MD5_ARMATURE_0_01,
-        "armature_0.025": REF_MD5_ARMATURE_0_025,
+    out["compiled_md5_ref"] = {
+        version: dict(table) for version, table in COMPILED_MD5_REF.items()
     }
     for key in (
         "compiled_md5_by_mujoco_version",
@@ -473,10 +468,14 @@ def _self_check() -> None:
         raise SystemExit("pack is not 253 float64 / 2024 bytes")
     if "baseline_compiled_md5" in spec_01["compiled_order"]:
         raise SystemExit("0.01 snapshot should match the file hash with no baseline block")
-    if spec_25["compiled_order"]["changed_vs_baseline"] != ["dof_armature", "kv"]:
-        raise SystemExit(spec_25["compiled_order"]["changed_vs_baseline"])
-    if spec_25["compiled_order"]["baseline_compiled_md5"] != REF_MD5_ARMATURE_0_01:
-        raise SystemExit("0.025 baseline is not the 0.01 hash")
+    if list(spec_01["compiled_order"]) != list(file_manifest["compiled_order"]):
+        raise SystemExit("compiled_order keys drifted")
+    diff_25 = changed_fields(spec_25, file_manifest)
+    if diff_25 != ["dof_armature", "kv"]:
+        raise SystemExit(diff_25)
+    report_25 = mismatch_report(spec_25, file_manifest)
+    if not report_25["match"] or report_25["ref"] != "armature_0.025":
+        raise SystemExit(report_25)
     expect_compile = (
         "MjSpec.from_file, twelve leg joint armatures set to 0.025 before compile. "
         "model.dof_armature is not written after compile. The XML file is not written."
@@ -485,10 +484,17 @@ def _self_check() -> None:
         raise SystemExit(spec_25["compiled_order"]["compile"])
     if spec_25["perturbation"] != "armature_0.025" or spec_01["perturbation"] != "none":
         raise SystemExit("perturbation labels")
-    if "r_hip_yaw" not in spec_01["compiled_order"]["array_order"]:
-        raise SystemExit("array order is missing the joint list")
-    if "253 little-endian" not in spec_01["compiled_order"]["array_order"]:
-        raise SystemExit(spec_01["compiled_order"]["array_order"])
+    import subprocess
+    pinned = json.loads(subprocess.check_output(
+        ["git", "show", "76b8164:previews/run_manifest_a5a9183_voice056.json"],
+    ))
+    if file_manifest["compiled_order"] != pinned["compiled_order"]:
+        left = file_manifest["compiled_order"]
+        right = pinned["compiled_order"]
+        drifted = [key for key in left.keys() | right.keys() if left.get(key) != right.get(key)]
+        raise SystemExit(f"compiled_order != 76b8164: {drifted}")
+    if file_manifest["compiled_md5"] != "03ed33386178ab8d05db76a7307f1c1d":
+        raise SystemExit("baseline hash is not 03ed33386178ab8d05db76a7307f1c1d")
 
     class _Perturb:
         def __init__(self, **kw: object) -> None:
@@ -500,27 +506,28 @@ def _self_check() -> None:
             self.cycles = kw.get("cycles", 0)
 
     labels = {
-        perturbation_note(0.01, _Perturb(mass_scale=0.95)): "mass-5%",
-        perturbation_note(0.01, _Perturb(mass_scale=1.05)): "mass+5%",
+        perturbation_note(0.01, _Perturb(mass_scale=0.95)): "mass_-5%",
+        perturbation_note(0.01, _Perturb(mass_scale=1.05)): "mass_+5%",
         perturbation_note(0.01, _Perturb(friction=1.2)): "mu_1.2",
         perturbation_note(0.01, _Perturb(friction=1.4)): "mu_1.4",
+        perturbation_note(0.01, _Perturb(friction=1.6)): "none",
         perturbation_note(0.01, _Perturb(latency_ticks=1)): "latency_+1",
         perturbation_note(0.01, _Perturb(latency_ticks=-1)): "latency_-1",
         perturbation_note(
-            0.025, _Perturb(mass_scale=0.95, friction=1.4, latency_ticks=1),
-        ): "armature_0.025,mass-5%,mu_1.4,latency_+1",
+            0.025, _Perturb(mass_scale=1.05, friction=1.2, latency_ticks=1),
+        ): "armature_0.025,mass_+5%,mu_1.2,latency_+1",
     }
     for got, expect in labels.items():
         if got != expect:
             raise SystemExit(f"perturbation {got!r} != {expect!r}")
     scaled = mj.MjModel.from_xml_path(str(sw.PLANT_XML))
     scaled.body_mass[1] *= 1.05
-    unlabelled = compiled_manifest(
+    shifted = compiled_manifest(
         scaled, xml_md5=xml_md5, compile=COMPILE_XML, perturbation="none",
-        compare_baseline=False,
     )
-    if unlabelled["perturbation"] != "unlabelled_compiled_diff":
-        raise SystemExit(f"unlabelled guard {unlabelled['perturbation']}")
+    shifted_report = mismatch_report(shifted, file_manifest)
+    if shifted_report["match"] or shifted_report["fields"] != ["body_mass"]:
+        raise SystemExit(shifted_report)
     kv01 = spec_01["kv"]
     if kv01["r_hip_roll"] != 1.702689162101357 or kv01["r_knee"] != 1.4573414651387:
         raise SystemExit(f"0.01 kv {kv01['r_hip_roll']} {kv01['r_knee']}")
@@ -550,9 +557,11 @@ def _self_check() -> None:
         raise SystemExit(f"field order {list(payload)[:len(IDENTITY_KEYS)]}")
     if payload["perturbation"] != "none":
         raise SystemExit("plain row perturbation")
-    refs = payload["reference_compiled_md5"]
+    refs = payload["compiled_md5_ref"]["3.14.0"]
     if refs["armature_0.01"] != REF_MD5_ARMATURE_0_01 or refs["armature_0.025"] != REF_MD5_ARMATURE_0_025:
         raise SystemExit(f"reference hashes {refs}")
+    if "array_order" in payload["compiled_order"]:
+        raise SystemExit("compiled_order grew an invented key")
 
     class _Walker:
         compiled_manifest = spec_25

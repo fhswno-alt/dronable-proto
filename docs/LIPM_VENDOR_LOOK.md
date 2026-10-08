@@ -3846,13 +3846,6 @@ mfg_ok is true at 0.010 because signed, clamp, and DC hold. That is not a walk p
 
 ## Compiled manifest
 
-MFG checks every row against these two reference `compiled_md5` values. MuJoCo 3.14.0. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off.
+`compiled_order` is the object from PR #102 at `76b8164`. The pack is 253 little-endian float64 values: leg `dof_armature`, `kv`, `kp`, `forcerange`, `actfrcrange`, `ctrlrange` as lo, hi, right leg then left; all 26 `body_mass`; `body_inertia`; `geom_friction` of floor, `r_foot_contact`, and `l_foot_contact`; all 30 `dof_damping`; timestep; integrator.
 
-| plant | compiled_md5 |
-| --- | --- |
-| plain, armature 0.01 | `03ed33386178ab8d05db76a7307f1c1d` |
-| plain, armature 0.025 | `f4fb2b70b5312a851e16316a38a88283` |
-
-The live-row JSON uses these names, in this order: `xml_md5`, `compiled_md5`, `dof_armature`, `kv`, `kp`, `forcerange`, `actfrcrange`, `ctrlrange`, `mujoco_version`, `tip_sha`, `scorer_sha`, `seed`, `args`, `cmd`. `scorer_sha` is the commit that scored the row, the same commit as `tip_sha`. `seed` is null when the row is unseeded. `cmd` is the entry-point command. `compiled_order.array_order` writes the pack order: the twelve leg joints in ascending joint id (`r_hip_yaw`, `r_hip_roll`, `r_hip_pitch`, `r_knee`, `r_ank_pitch`, `r_ank_roll`, `l_hip_yaw`, `l_hip_roll`, `l_hip_pitch`, `l_knee`, `l_ank_pitch`, `l_ank_roll`), then `dof_armature`, `kv` (`−actuator_biasprm[:, 2]`), `kp` (`actuator_gainprm[:, 0]`), `forcerange`, `actfrcrange`, and `ctrlrange` as lo, hi; then body mass; then body inertia as ix, iy, iz; then floor and foot friction as slide, torsion, roll; then dof damping; then the timestep; then the integrator as a float64. 253 little-endian float64 values, 2024 bytes.
-
-The plain 0.01 plant is `perturbation` `none`. Armature 0.025 is `armature_0.025`. Any other load-time difference is named in that same field: `mass-5%`, `mass+5%`, `mu_1.2`, `mu_1.4`, `latency_+1`, `latency_-1`, and a seed or a rug when those are set. A compiled hash that matches neither reference and carries `perturbation` `none` is rewritten to `unlabelled_compiled_diff`. The entry point compiles through MjSpec even at 0.01, so that row's compile line names the MjSpec path. The numeric hash is the 0.01 reference. A plan abort still writes the snapshot. The plant XML is not edited.
+The reference hashes are keyed by `mujoco_version`. On MuJoCo 3.14.0 the plain plant at armature 0.01 with `perturbation` `none` hashes to `03ed33386178ab8d05db76a7307f1c1d`. It does match. Armature 0.025 hashes to `f4fb2b70b5312a851e16316a38a88283`. A mismatch names the `compiled_order` field at rtol 1e-9. `perturbation` is `none`, `armature_0.025`, `mass_+5%`, `mass_-5%`, `mu_1.2`, `mu_1.4`. Nominal μ is 1.6, the triple `[1.6, 0.1, 0.01]`, so 1.2 and 1.4 are the low-friction rows. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. The plant XML is not edited.
