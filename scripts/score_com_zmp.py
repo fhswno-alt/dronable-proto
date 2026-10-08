@@ -1178,6 +1178,8 @@ def run_attempt(
     clamp_hit = {jn: 0 for jn in LEG_JOINTS}
     dc_excess = -1.0
     dc_joint = ""
+    signed_over = 0
+    sum_over = 0
     dc_tau = 0.0
     dc_spd = 0.0
     dc_lim = 0.0
@@ -1231,6 +1233,12 @@ def run_attempt(
             # Either rail. On this plant both are 2.45 Nm.
             if abs(row.signed_nm) >= act_lim - 1e-9 or abs(row.signed_nm) >= jnt_lim - 1e-9:
                 clamp_hit[row.joint] += 1
+            # MFG pass is the signed force on every leg write. The
+            # conservative sum stays logged and is not this bar.
+            if abs(row.signed_nm) > ASK_NM + 1e-9:
+                signed_over += 1
+            if row.sum_nm > ASK_NM + 1e-9:
+                sum_over += 1
             # τ and ω are this write. ω is the qvel the torque used,
             # before mj_step replaces it.
             tau = abs(row.signed_nm)
@@ -1505,6 +1513,12 @@ def run_attempt(
     clamp_joint = max(clamp_frac, key=lambda jn: clamp_frac[jn]) if clamp_frac else ""
     clamp_ok = all(clamp_n[jn] > 0 and clamp_hit[jn] == 0 for jn in LEG_JOINTS)
     dc_ok = dc_excess <= 1e-6 and dc_joint != ""
+    # Signed bar: |kp*(q_des-q) - kv*ω| <= 2.33 on every leg write.
+    # Sum bar: the conservative |kp*e|+|kv*ω| on every leg write.
+    signed_ok = bool(asks) and signed_over == 0
+    sum_ok = bool(asks) and sum_over == 0
+    signed_pass_sum_fail = bool(signed_ok and not sum_ok)
+    mfg_ok = bool(signed_ok and clamp_ok and dc_ok)
     vx_mean = vx_sum / float(vx_n) if vx_n else float("nan")
     vx_ratio = vx_mean / vx_cmd if vx_n and abs(vx_cmd) > 1e-9 else float("nan")
     cop_p5 = float(np.percentile(decl_cop_mm, 5)) if decl_cop_mm else float("nan")
@@ -1568,6 +1582,12 @@ def run_attempt(
         "signed_sum": 0.0 if signed_all is None else float(signed_all.sum_nm),
         "ask_signed": 0.0 if ask_all is None else float(ask_all.signed_nm),
         "signed_formula": "kp*(q_des-q)-kv*omega",
+        "signed_over": signed_over,
+        "signed_ok": signed_ok,
+        "sum_over": sum_over,
+        "sum_ok": sum_ok,
+        "signed_pass_sum_fail": signed_pass_sum_fail,
+        "mfg_ok": mfg_ok,
         "clamp_frac": clamp_frac,
         "clamp_max": clamp_max,
         "clamp_joint": clamp_joint,
