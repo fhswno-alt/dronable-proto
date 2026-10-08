@@ -58,6 +58,22 @@ QACC_SOURCE = (
 PERIODS = (0.80, 0.75, 0.70, 0.65, 0.60, 0.55, 0.50, 1.00, 1.20)
 SPEEDS = (0.016, 0.024, 0.032, 0.040, 0.048, 0.056)
 TERMS = ("armature·q̈", "impact/contact", "link inertia", "gravity")
+REMAINING = ("impact/contact", "link inertia", "gravity")
+CLASS_NAMES = (
+    "controller fail",
+    "unsourced-armature candidate",
+    "physics candidate",
+)
+CLASS_RULE = (
+    "Comparisons use the absolute value of the signed torque. "
+    "Exactly 2.33 stays on the low side of each greater-than test. "
+    "controller fail: |qfrc_inverse| <= 2.33 and |ask| > 2.33. "
+    "unsourced-armature candidate: |qfrc_inverse| > 2.33 and "
+    "|qfrc_inverse - 0.01*qacc| <= 2.33. Armature 0.01 has no Hiwonder source; "
+    "this bucket is not a physics candidate. "
+    "physics candidate: |qfrc_inverse - 0.01*qacc| > 2.33, named by the largest "
+    "of impact/contact, link inertia, and gravity."
+)
 
 _ORIG_MJ_STEP = mj.mj_step
 _CAPTURE: list[dict[str, np.ndarray]] = []
@@ -452,16 +468,63 @@ def _phase_label(
     return "ds"
 
 
-def _dominant(parts: dict[str, float]) -> str:
-    return max(TERMS, key=lambda name: abs(parts[name]))
+def _remaining_dominant(parts: dict[str, float]) -> str:
+    return max(REMAINING, key=lambda name: abs(parts[name]))
 
 
-def _classify(ask_abs: float, id_abs: float, parts: dict[str, float]) -> tuple[str, str]:
-    if id_abs > ASK_BAR + 1e-9:
-        return "physics candidate", _dominant(parts)
-    if ask_abs > ASK_BAR + 1e-9:
+def _worst_tick(events: list[dict[str, object]], kind: str) -> dict[str, object] | None:
+    """Largest excess inside one bucket.
+
+    Controller fail ranks on ``|ask|``. The unsourced-armature bucket ranks
+    on ``|armature·q̈|``. A physics candidate ranks on ``|ID − armature·q̈|``.
+    """
+    pool = [row for row in events if row.get("class") == kind and isinstance(row.get("id_nm"), float)]
+    if not pool:
+        return None
+
+    def _key(row: dict[str, object]) -> tuple[float, float, float]:
+        ask = abs(float(row["ask_nm"]))
+        ident = abs(float(row["id_nm"]))
+        arm = abs(float(row["armature_qacc_nm"]))
+        rest = abs(float(row["id_nm"]) - float(row["armature_qacc_nm"]))
+        if kind == "controller fail":
+            return (ask, ident, arm)
+        if kind == "unsourced-armature candidate":
+            return (arm, ident, ask)
+        return (rest, ident, ask)
+
+    row = max(pool, key=_key)
+    ident = float(row["id_nm"])
+    arm = float(row["armature_qacc_nm"])
+    return {
+        "joint": row["joint"],
+        "t_s": row["t_s"],
+        "phase": row["phase"],
+        "class": kind,
+        "dominant_term": row["dominant_term"],
+        "ask_nm": row["ask_nm"],
+        "id_nm": ident,
+        "armature_qacc_nm": arm,
+        "id_minus_armature_nm": ident - arm,
+        "contact_nm": row["contact_nm"],
+        "link_inertia_nm": row["link_inertia_nm"],
+        "gravity_nm": row["gravity_nm"],
+    }
+
+
+def _classify(ask_abs: float, id_nm: float, armature_nm: float, parts: dict[str, float]) -> tuple[str, str]:
+    """Three buckets on the absolute value of the signed torques.
+
+    Armature stays 0.01. An unsourced-armature candidate is the case where
+    removing that term brings ``|qfrc_inverse|`` back to 2.33 or under.
+    """
+    if ask_abs <= ASK_BAR + 1e-9:
+        return "under bar", ""
+    if abs(id_nm) <= ASK_BAR + 1e-9:
         return "controller fail", ""
-    return "under bar", ""
+    if abs(id_nm - armature_nm) <= ASK_BAR + 1e-9:
+        return "unsourced-armature candidate", "armature·q̈"
+    return "physics candidate", _remaining_dominant(parts)
 
 
 def _jsonable(value: object) -> object:
@@ -929,8 +992,9 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
             parts = {name: float("nan") for name in TERMS}
         else:
             parts = {name: float(blob["parts"][name]) for name in TERMS}
-            id_abs = float(blob["id_abs_nm"])
-            kind, term = _classify(abs(rec.ask_nm), id_abs, parts)
+            kind, term = _classify(
+                abs(rec.ask_nm), float(blob["id_nm"]), parts["armature·q̈"], parts,
+            )
             resid = abs(float(blob["ident_residual_nm"]))
             max_resid = max(max_resid, resid)
         events.append({
@@ -982,26 +1046,14 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
     n_ask_over = len(ask_events)
     n_qdes_over = sum(1 for rec in writes if abs(rec.signed_nm) > ASK_BAR + 1e-9)
     ask_times = {round(float(row["t_s"]), 6) for row in ask_events}
-    counts = {name: 0 for name in ("controller fail", "physics candidate", "unmeasured")}
-    term_counts = {name: 0 for name in TERMS}
+    counts = {name: 0 for name in CLASS_NAMES}
+    term_counts = {name: 0 for name in REMAINING}
     for row in ask_events:
         counts[str(row["class"])] = counts.get(str(row["class"]), 0) + 1
-        if row["class"] == "physics candidate" and row["dominant_term"]:
+        if row["class"] == "physics candidate" and row["dominant_term"] in term_counts:
             term_counts[str(row["dominant_term"])] += 1
-    worst = None
-    if ask_events:
-        measured_events = [row for row in ask_events if isinstance(row.get("id_nm"), float)]
-        pool = measured_events or ask_events
-        worst_row = max(pool, key=lambda row: abs(float(row["id_nm"] or 0.0)))
-        worst = {
-            "joint": worst_row["joint"],
-            "t_s": worst_row["t_s"],
-            "phase": worst_row["phase"],
-            "class": worst_row["class"],
-            "dominant_term": worst_row["dominant_term"],
-            "id_nm": worst_row["id_nm"],
-            "ask_nm": worst_row["ask_nm"],
-        }
+    bucket_worst = {name: _worst_tick(ask_events, name) for name in CLASS_NAMES}
+    worst = bucket_worst["unsourced-armature candidate"] or bucket_worst["physics candidate"] or bucket_worst["controller fail"]
     def _frac(count: int) -> float | None:
         if n_ask_over <= 0:
             return None
@@ -1087,8 +1139,9 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         "class_fraction": {name: _frac(counts[name]) for name in counts},
         "physics_term_counts": term_counts,
         "physics_term_fraction": {
-            name: (term_counts[name] / n_ask_over) if n_ask_over else None for name in TERMS
+            name: (term_counts[name] / n_ask_over) if n_ask_over else None for name in REMAINING
         },
+        "bucket_worst": bucket_worst,
         "worst_id": worst,
         "ident_residual_max_nm": max_resid,
         "min_up_z": float(session.min_up_z),
@@ -1169,7 +1222,7 @@ def main() -> None:
             "link_inertia": "(M*qacc - dof_armature*qacc) + (qfrc_bias(q,v) - qfrc_bias(q,0))",
             "gravity": "qfrc_bias at qvel 0",
             "passive_not_a_class": "-qfrc_passive",
-            "class_rule": "ID abs <= 2.33 and |ask| > 2.33 is controller fail; ID abs > 2.33 is a physics candidate",
+            "class_rule": CLASS_RULE,
         },
         "preview_amp_m": {f"{key:.2f}": value for key, value in sorted(cache.items())},
         "rows": rows,
