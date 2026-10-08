@@ -2,14 +2,19 @@
 """Independent score of Controls' cadence tip a5a9183 on the #102 bar set.
 
 The gait and the plant are loaded from that tip. This file does not edit
-either. Soft-pass stays off. q̈ is ``data.qacc`` from ``mj_step``, not a
-finite difference of qvel.
+either. Soft-pass stays off. q̈ is ``data.qacc`` from the ``mj_step`` that
+applied this ctrl, not a finite difference of qvel.
 
-Each control tick integrates four 2 ms substeps. An over-bar write is paired
-with the later substep of that tick whose ``|qfrc_inverse|`` on that joint is
-largest. Inverse dynamics runs at the q, q̇ that entered that ``mj_step``,
-with the contacts ``mj_inverse`` builds at that state, and with that
-substep's ``data.qacc``.
+The 2.33 Nm pass uses the ctrl the plant applies. When ``actuator_ctrllimited``
+is set, that ctrl is ``data.ctrl`` clipped to ``ctrlrange`` (±2.09). The
+control-tick sample is the max |ask| across that tick's four 2 ms substeps.
+A tick with ``|ctrl_raw| > 2.09`` fails the clip bar. ``ctrl_raw`` is the
+writer command before the ctrlrange clip when that command reproduces the
+stored ctrl; otherwise the clip fraction is ``raw ctrl unavailable``.
+
+Inverse dynamics runs on every substep whose plant |ask| exceeds 2.33, at
+the q and q̇ that entered that ``mj_step``, with the plant-clipped ctrl and
+that substep's ``data.qacc``.
 """
 from __future__ import annotations
 
@@ -41,13 +46,14 @@ import zmp_preview
 TIP_SHA = "a5a9183461105016211bebbf110051c2bb8f9df2"
 PLANT_MD5 = "207f3d5e9c6a72e16f7aa0c8d224f75e"
 ASK_BAR = 2.33
+CTRL_ABS = 2.09
+RAW_UNAVAILABLE = "raw ctrl unavailable"
 G = 9.81
 HAND_M_KG = 2.2
 HAND_L_M = 0.093
 HAND_LABEL = "hand estimate"
 QACC_SOURCE = (
-    "data.qacc from mj_step of the physics substep after the write with the "
-    "largest |qfrc_inverse| on that joint; not a finite difference of qvel"
+    "data.qacc from the mj_step that applied this ctrl; not a finite difference of qvel"
 )
 PERIODS = (0.80, 0.75, 0.70, 0.65, 0.60, 0.55, 0.50, 1.00, 1.20)
 SPEEDS = (0.016, 0.024, 0.032, 0.040, 0.048, 0.056)
@@ -61,6 +67,7 @@ _CAPTURE_ON = False
 def _capturing_step(model: mj.MjModel, data: mj.MjData) -> None:
     if _CAPTURE_ON:
         _CAPTURE.append({
+            "time": float(data.time),
             "qpos": np.array(data.qpos, dtype=np.float64, copy=True),
             "qvel": np.array(data.qvel, dtype=np.float64, copy=True),
             "ctrl": np.array(data.ctrl, dtype=np.float64, copy=True),
@@ -84,6 +91,8 @@ class Write:
     kp: float
     kv: float
     ctrl: float
+    ctrl_raw: float | None
+    raw_ok: bool
     signed_nm: float
     sum_nm: float
     ask_nm: float
@@ -96,6 +105,23 @@ class Write:
     swing_side: str
     swing_frac: float | None
     tick: int
+
+
+@dataclass
+class PlantOver:
+    t_s: float
+    joint: str
+    ask_nm: float
+    kp_e: float
+    kv_qdot: float
+    q: float
+    omega: float
+    ctrl_raw: float
+    ctrl_plant: float
+    clipped: bool
+    d2: float | None
+    tick: int
+    id_blob: dict[str, object] | None = None
 
 
 def _plant_md5() -> str:
@@ -113,10 +139,14 @@ def _forcerange_audit(model: mj.MjModel, walker: sws.lipm_gait.LipmWalker) -> di
         act = [float(model.actuator_forcerange[idx, 0]), float(model.actuator_forcerange[idx, 1])]
         jnt = [float(model.jnt_actfrcrange[jid, 0]), float(model.jnt_actfrcrange[jid, 1])]
         arm = float(model.dof_armature[int(model.jnt_dofadr[jid])])
+        lo = float(model.actuator_ctrlrange[idx, 0])
+        hi = float(model.actuator_ctrlrange[idx, 1])
+        limited = int(model.actuator_ctrllimited[idx]) != 0
         match = (
             abs(act[0] + 2.45) < 1e-9 and abs(act[1] - 2.45) < 1e-9
             and abs(jnt[0] + 2.45) < 1e-9 and abs(jnt[1] - 2.45) < 1e-9
         )
+        range_ok = abs(lo + CTRL_ABS) < 1e-9 and abs(hi - CTRL_ABS) < 1e-9
         ok = ok and match
         rows.append({
             "joint": name,
@@ -124,8 +154,17 @@ def _forcerange_audit(model: mj.MjModel, walker: sws.lipm_gait.LipmWalker) -> di
             "joint_actfrcrange": jnt,
             "dof_armature": arm,
             "pm_2_45": match,
+            "ctrllimited": limited,
+            "ctrlrange": [lo, hi],
+            "ctrlrange_pm_2_09": range_ok,
         })
-    return {"n": len(rows), "all_pm_2_45": ok, "joints": rows}
+    return {
+        "n": len(rows),
+        "all_pm_2_45": ok,
+        "ctrllimited_all": all(bool(row["ctrllimited"]) for row in rows),
+        "ctrlrange_all_pm_2_09": all(bool(row["ctrlrange_pm_2_09"]) for row in rows),
+        "joints": rows,
+    }
 
 
 def _amp(period_s: float, cache: dict[float, float]) -> float:
@@ -178,8 +217,76 @@ def _swing(op3: object) -> tuple[str, float | None]:
     return "", None
 
 
+def _range_clip(model: mj.MjModel, idx: int, cmd: float) -> float:
+    lo = float(model.actuator_ctrlrange[idx, 0])
+    hi = float(model.actuator_ctrlrange[idx, 1])
+    return min(hi, max(lo, float(cmd)))
+
+
+def _plant_ctrl(model: mj.MjModel, idx: int, raw: float) -> float:
+    """Ctrl MuJoCo uses for force when ``ctrllimited`` is set."""
+    if int(model.actuator_ctrllimited[idx]) == 0:
+        return float(raw)
+    return _range_clip(model, idx, raw)
+
+
+def _raw_outside(value: float) -> bool:
+    return abs(float(value)) > CTRL_ABS + 1e-9
+
+
+def _leg_actuators(model: mj.MjModel, walker: sws.lipm_gait.LipmWalker) -> list[dict[str, object]]:
+    rows = []
+    for name in sws.LEG_JOINTS:
+        idx = walker.act_idx.get(name + "_pos")
+        if idx is None:
+            continue
+        jid = int(mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, name))
+        rows.append({
+            "joint": name,
+            "idx": int(idx),
+            "dof": int(model.jnt_dofadr[jid]),
+            "qadr": int(model.jnt_qposadr[jid]),
+            "kp": float(model.actuator_gainprm[idx, 0]),
+            "kv": -float(model.actuator_biasprm[idx, 2]),
+        })
+    return rows
+
+
 def _install(walker: sws.lipm_gait.LipmWalker, bucket: list[Write], asks: list[sws.AskSample], tick_box: list[int]) -> None:
-    def _log(jn: str, q_des: float) -> None:
+    def _clipped_cmd(jn: str, q_des: float) -> float | None:
+        act = f"{jn}_pos"
+        if walker.act_idx.get(act) is None:
+            return None
+        if jn.endswith(("knee", "hip_pitch", "ank_pitch")):
+            return float(q_des)
+        q = float(walker.q(jn))
+        band = float(walker.e_sat.get(act, 0.0))
+        return min(q + band, max(q - band, float(q_des)))
+
+    def _limited_cmd(jn: str, q_des: float, limit_nm: float | None) -> float | None:
+        act = f"{jn}_pos"
+        idx = walker.act_idx.get(act)
+        if idx is None:
+            return None
+        q = float(walker.q(jn))
+        jid = int(mj.mj_name2id(walker.model, mj.mjtObj.mjOBJ_JOINT, jn))
+        omega = float(walker.data.qvel[int(walker.model.jnt_dofadr[jid])])
+        kp = float(walker.model.actuator_gainprm[idx, 0])
+        kv = -float(walker.model.actuator_biasprm[idx, 2])
+        tau = abs(float(walker.model.actuator_forcerange[idx, 1]))
+        limit = float(sws.lipm_gait.SAT_FRAC) * tau
+        if limit_nm is not None:
+            limit = min(limit, float(limit_nm))
+        if kp < 1e-6:
+            return float(q_des)
+        e_des = float(q_des) - q
+        e_lo = (-limit + kv * omega) / kp
+        e_hi = (limit + kv * omega) / kp
+        if e_lo > e_hi:
+            e_lo, e_hi = e_hi, e_lo
+        return q + min(e_hi, max(e_lo, e_des))
+
+    def _log(jn: str, q_des: float, raw: float | None) -> None:
         if jn not in sws.LEG_JOINTS:
             return
         idx = walker.act_idx.get(jn + "_pos")
@@ -191,9 +298,12 @@ def _install(walker: sws.lipm_gait.LipmWalker, bucket: list[Write], asks: list[s
         kp = float(walker.model.actuator_gainprm[idx, 0])
         kv = -float(walker.model.actuator_biasprm[idx, 2])
         ctrl = float(walker.data.ctrl[idx])
+        raw_ok = raw is not None and abs(_range_clip(walker.model, int(idx), raw) - ctrl) <= 1e-8
         kp_e = kp * (float(q_des) - q)
         kv_qdot = kv * omega
         signed = kp_e - kv_qdot
+        # Goal command after the writer's own range clip. The torque pass uses
+        # the ctrl at mj_step, which can be the slewed value rather than this.
         ask = kp * (ctrl - q) - kv_qdot
         side, frac = _swing(walker.op3)
         rec = Write(
@@ -205,6 +315,8 @@ def _install(walker: sws.lipm_gait.LipmWalker, bucket: list[Write], asks: list[s
             kp=kp,
             kv=kv,
             ctrl=ctrl,
+            ctrl_raw=None if not raw_ok else float(raw),
+            raw_ok=bool(raw_ok),
             signed_nm=float(signed),
             sum_nm=float(abs(kp_e) + abs(kv_qdot)),
             ask_nm=float(ask),
@@ -232,15 +344,17 @@ def _install(walker: sws.lipm_gait.LipmWalker, bucket: list[Write], asks: list[s
     orig = walker.write_clipped
 
     def wrapped(jn: str, q_des: float) -> None:
+        raw = _clipped_cmd(jn, q_des)
         orig(jn, q_des)
-        _log(jn, q_des)
+        _log(jn, q_des, raw)
 
     walker.write_clipped = wrapped  # type: ignore[method-assign]
     limited = walker.write_force_limited
 
     def wrapped_limited(jn: str, q_des: float, limit_nm: float | None = None) -> None:
+        raw = _limited_cmd(jn, q_des, limit_nm)
         limited(jn, q_des, limit_nm)
-        _log(jn, q_des)
+        _log(jn, q_des, raw)
 
     walker.write_force_limited = wrapped_limited  # type: ignore[method-assign]
 
@@ -388,8 +502,18 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         raise RuntimeError("forcerange is not ±2.45 on every leg joint")
     writes: list[Write] = []
     asks: list[sws.AskSample] = []
+    plant_asks: list[sws.AskSample] = []
+    plant_overs: list[PlantOver] = []
     tick_box = [0]
     _install(walker, writes, asks, tick_box)
+    legs = _leg_actuators(session.model, walker)
+    ctrl_hist: dict[str, list[float]] = {name: [] for name in sws.LEG_JOINTS}
+    raw_unavailable = False
+    clip_ticks = 0
+    clip_substeps = 0
+    plant_substeps = 0
+    max_step_abs = 0.0
+    max_writer_abs = 0.0
     scratch = mj.MjData(session.model)
     grav_data = mj.MjData(session.model)
     dof = {
@@ -462,9 +586,79 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         stage_name = str(getattr(walker, "preview_stage", "unknown"))
         for sample in new_asks:
             sample.stage = stage_name
-        signed_tick, sum_tick, qvel_tick, qvel_sum_tick, ask_tick, qvel_ask_tick = sws._tick_pair(
+        signed_tick, sum_tick, qvel_tick, qvel_sum_tick, _, _ = sws._tick_pair(
             new_asks, sws.LEG_JOINTS,
         )
+        plant_new: list[sws.AskSample] = []
+        tick_clipped = False
+        over_from = len(plant_overs)
+        over_shots: dict[int, list[tuple[dict[str, object], float]]] = {}
+        for si, shot in enumerate(shots):
+            raw_ctrl = shot["ctrl"]
+            qpos = shot["qpos"]
+            qvel = shot["qvel"]
+            t_step = float(shot["time"])
+            for leg in legs:
+                idx = int(leg["idx"])
+                raw = float(raw_ctrl[idx])
+                used = _plant_ctrl(session.model, idx, raw)
+                q = float(qpos[int(leg["qadr"])])
+                omega = float(qvel[int(leg["dof"])])
+                kp = float(leg["kp"])
+                kv = float(leg["kv"])
+                kp_e = kp * (used - q)
+                kv_qdot = kv * omega
+                ask = kp_e - kv_qdot
+                joint = str(leg["joint"])
+                clipped = _raw_outside(raw)
+                max_step_abs = max(max_step_abs, abs(raw))
+                plant_substeps += 1
+                if clipped:
+                    tick_clipped = True
+                    clip_substeps += 1
+                plant_new.append(sws.AskSample(
+                    t_s=t_step,
+                    joint=joint,
+                    signed_nm=float(ask),
+                    sum_nm=float(abs(kp_e) + abs(kv_qdot)),
+                    ask_nm=float(ask),
+                    stage=stage_name,
+                    qvel_abs=abs(omega),
+                ))
+                history = ctrl_hist[joint]
+                history.append(used)
+                if abs(ask) > ASK_BAR + 1e-9:
+                    d2 = None
+                    if len(history) >= 3:
+                        d2 = history[-1] - 2.0 * history[-2] + history[-3]
+                    over = PlantOver(
+                        t_s=t_step,
+                        joint=joint,
+                        ask_nm=float(ask),
+                        kp_e=float(kp_e),
+                        kv_qdot=float(kv_qdot),
+                        q=q,
+                        omega=omega,
+                        ctrl_raw=raw,
+                        ctrl_plant=float(used),
+                        clipped=clipped,
+                        d2=d2,
+                        tick=int(tick_box[0]),
+                    )
+                    plant_overs.append(over)
+                    over_shots.setdefault(si, []).append((leg, ask))
+                    setattr(over, "_shot", si)
+        for rec in new_writes:
+            if not rec.raw_ok or rec.ctrl_raw is None:
+                raw_unavailable = True
+            elif _raw_outside(rec.ctrl_raw):
+                tick_clipped = True
+            if rec.raw_ok and rec.ctrl_raw is not None:
+                max_writer_abs = max(max_writer_abs, abs(float(rec.ctrl_raw)))
+        if tick_clipped:
+            clip_ticks += 1
+        _, _, _, _, ask_tick, qvel_ask_tick = sws._tick_pair(plant_new, sws.LEG_JOINTS)
+        plant_asks.extend(plant_new)
         pair_signed.append(signed_tick)
         pair_sum.append(sum_tick)
         pair_qvel.append(qvel_tick)
@@ -537,41 +731,29 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         if stand_s - 1e-12 <= now < t_stop - 1e-12:
             body_vx_sum += float(session._body_forward_speed())
             body_vx_n += 1
-        over_idx = [
-            i for i, rec in enumerate(new_writes)
-            if abs(rec.ask_nm) > ASK_BAR + 1e-9 or abs(rec.signed_nm) > ASK_BAR + 1e-9
-        ]
-        if over_idx and shots:
-            splits = [
-                _inverse_split(session.model, scratch, grav_data, shot)
-                for shot in shots
-            ]
+        if over_shots:
+            split_cache: dict[int, dict[str, np.ndarray]] = {}
             cop_cache: dict[tuple[int, str], tuple[float | None, float | None]] = {}
-            for i in over_idx:
-                rec = new_writes[i]
-                later = [
-                    j for j, other in enumerate(new_writes)
-                    if other.joint == rec.joint and other.steps_before > rec.steps_before
-                ]
-                end = min(item.steps_before for item in (new_writes[j] for j in later)) if later else len(shots)
-                start = min(rec.steps_before, len(shots) - 1)
-                end = max(start + 1, min(end, len(shots)))
-                best_j = start
-                best_abs = -1.0
-                adr = dof[rec.joint]
-                for j in range(start, end):
-                    mag = abs(float(splits[j]["id"][adr]))
-                    if mag > best_abs:
-                        best_abs = mag
-                        best_j = j
-                split = splits[best_j]
-                # Rebuild contacts at the chosen pre-step state for the CoP.
-                scratch.qpos[:] = shots[best_j]["qpos"]
-                scratch.qvel[:] = shots[best_j]["qvel"]
+            for over in plant_overs[over_from:]:
+                si = getattr(over, "_shot", None)
+                if not isinstance(si, int) or si not in over_shots:
+                    continue
+                if si not in split_cache:
+                    shot = dict(shots[si])
+                    clipped_ctrl = np.array(shot["ctrl"], dtype=np.float64, copy=True)
+                    for leg in legs:
+                        idx = int(leg["idx"])
+                        clipped_ctrl[idx] = _plant_ctrl(session.model, idx, float(clipped_ctrl[idx]))
+                    shot["ctrl"] = clipped_ctrl
+                    split_cache[si] = _inverse_split(session.model, scratch, grav_data, shot)
+                split = split_cache[si]
+                adr = dof[over.joint]
+                scratch.qpos[:] = shots[si]["qpos"]
+                scratch.qvel[:] = shots[si]["qvel"]
                 scratch.qacc[:] = split["qacc"]
                 mj.mj_fwdPosition(session.model, scratch)
-                side = "l" if rec.joint.startswith("l_") else "r"
-                key = (best_j, side)
+                side = "l" if over.joint.startswith("l_") else "r"
+                key = (si, side)
                 if key not in cop_cache:
                     cop_cache[key] = _cop_mm(
                         session.model, scratch, foot[side], floor_gid, ankle[side],
@@ -585,9 +767,7 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
                 }
                 ident = float(split["ident"][adr])
                 id_nm = float(split["id"][adr])
-                rec_extra = getattr(rec, "id", None)
-                del rec_extra
-                setattr(rec, "id_blob", {
+                over.id_blob = {
                     "id_nm": id_nm,
                     "id_abs_nm": abs(id_nm),
                     "parts": parts,
@@ -597,11 +777,11 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
                     "armature_model_qacc_nm": float(split["arm_model"][adr]),
                     "qacc_rad_s2": float(split["qacc"][adr]),
                     "actuator_nm": float(split["actuator"][adr]),
-                    "substep": best_j,
+                    "substep": si,
                     "n_substeps": len(shots),
                     "cop_x_mm": cop_x,
                     "cop_y_mm": cop_y,
-                })
+                }
         tick_box[0] += 1
         if session.bus.fault:
             break
@@ -652,7 +832,7 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
     pair_ask_m = sws._pair_matrix(pair_ask, len(sws.LEG_JOINTS))
     pair_sum_m = sws._pair_matrix(pair_sum, len(sws.LEG_JOINTS))
     torque_bar = step_bars.signed_torque_bar(sws.LEG_JOINTS, pair_ask_m, pair_sum_m)
-    line_t, line_tau, line_w, line_stage = sws._writes_for_line(asks, sws.LEG_JOINTS)
+    line_t, line_tau, line_w, line_stage = sws._writes_for_line(plant_asks, sws.LEG_JOINTS)
     dc = step_bars.speed_torque_check(
         sws.LEG_JOINTS, line_t, line_tau, line_w, line_stage,
         no_load_speed=step_bars.DC_MOTOR_NO_LOAD_RAD_S,
@@ -702,6 +882,17 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         extra = blob.get("fail_reasons") if isinstance(blob, dict) else None
         if isinstance(extra, list):
             fail_reasons.extend(str(item) for item in extra)
+    if raw_unavailable:
+        clip_fraction: float | str = RAW_UNAVAILABLE
+        fail_reasons.append(RAW_UNAVAILABLE)
+    else:
+        clip_fraction = (clip_ticks / n) if n else 0.0
+        if clip_ticks:
+            fail_reasons.append(
+                f"ctrl clipped to ±{CTRL_ABS:.2f} on {clip_ticks}/{n} control ticks"
+            )
+    if not audit["ctrllimited_all"]:
+        fail_reasons.append("ctrllimited is off on a leg actuator")
     touchdowns: list[float] = []
     prev_l = 1
     prev_r = 1
@@ -714,20 +905,14 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
             touchdowns.append(float(row["t"]))
         prev_l, prev_r = n_l, n_r
     contact_at = {int(i): row for i, row in enumerate(tick_contact)}
-    ctrl_hist: dict[str, list[float]] = {name: [] for name in sws.LEG_JOINTS}
+    write_at: dict[tuple[int, str], Write] = {}
+    for rec in writes:
+        write_at[(rec.tick, rec.joint)] = rec
     events: list[dict[str, object]] = []
     max_resid = 0.0
-    for rec in writes:
-        ctrl_hist[rec.joint].append(rec.ctrl)
-        history = ctrl_hist[rec.joint]
-        d2 = None
-        if len(history) >= 3:
-            d2 = history[-1] - 2.0 * history[-2] + history[-3]
-        ask_over = abs(rec.ask_nm) > ASK_BAR + 1e-9
-        qdes_over = abs(rec.signed_nm) > ASK_BAR + 1e-9
-        if not (ask_over or qdes_over):
-            continue
-        blob = getattr(rec, "id_blob", None)
+    for rec in plant_overs:
+        blob = rec.id_blob
+        src = write_at.get((rec.tick, rec.joint))
         tick_row = contact_at.get(rec.tick, {})
         phase = _phase_label(
             str(tick_row.get("mode", "")),
@@ -735,15 +920,13 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
             touchdowns,
             int(tick_row.get("n_l", 0)),
             int(tick_row.get("n_r", 0)),
-            rec.swing_side,
-            rec.swing_frac,
+            "" if src is None else src.swing_side,
+            None if src is None else src.swing_frac,
         )
         hand = HAND_M_KG * G * HAND_L_M * math.sin(abs(rec.q) / 2.0)
         if not isinstance(blob, dict):
             kind, term = ("unmeasured", "")
-            id_abs = float("nan")
             parts = {name: float("nan") for name in TERMS}
-            resid = float("nan")
         else:
             parts = {name: float(blob["parts"][name]) for name in TERMS}
             id_abs = float(blob["id_abs_nm"])
@@ -754,18 +937,21 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
             "t_s": rec.t_s,
             "t_post_s": tick_row.get("t"),
             "joint": rec.joint,
-            "over_on": "both" if ask_over and qdes_over else ("ask" if ask_over else "qdes"),
+            "over_on": "ask",
             "ask_nm": rec.ask_nm,
-            "qdes_signed_nm": rec.signed_nm,
-            "sum_nm": rec.sum_nm,
-            "kp_e_nm": rec.kp_e_ctrl,
+            "qdes_signed_nm": None if src is None else src.signed_nm,
+            "sum_nm": None if src is None else src.sum_nm,
+            "kp_e_nm": rec.kp_e,
             "kv_qdot_nm": rec.kv_qdot,
-            "kp_e_qdes_nm": rec.kp * (rec.q_des - rec.q),
+            "kp_e_qdes_nm": None if src is None else src.kp * (src.q_des - src.q),
             "q_rad": rec.q,
-            "q_des_rad": rec.q_des,
+            "q_des_rad": None if src is None else src.q_des,
             "qvel_rad_s": rec.omega,
-            "ctrl_rad": rec.ctrl,
-            "ctrl_second_diff_rad": d2,
+            "ctrl_raw_rad": rec.ctrl_raw,
+            "ctrl_plant_rad": rec.ctrl_plant,
+            "ctrl_clipped": rec.clipped,
+            "ctrl_rad": rec.ctrl_plant,
+            "ctrl_second_diff_rad": rec.d2,
             "id_nm": None if not isinstance(blob, dict) else blob["id_nm"],
             "armature_qacc_nm": None if not isinstance(blob, dict) else parts["armature·q̈"],
             "armature_model_qacc_nm": None if not isinstance(blob, dict) else blob["armature_model_qacc_nm"],
@@ -781,10 +967,10 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
             "cop_x_mm": None if not isinstance(blob, dict) else blob["cop_x_mm"],
             "cop_y_mm": None if not isinstance(blob, dict) else blob["cop_y_mm"],
             "phase": phase,
-            "clock_phase": rec.phase,
-            "clock_stance": rec.stance,
-            "preview_stage": rec.stage,
-            "swing_frac": rec.swing_frac,
+            "clock_phase": "" if src is None else src.phase,
+            "clock_stance": "" if src is None else src.stance,
+            "preview_stage": "" if src is None else src.stage,
+            "swing_frac": None if src is None else src.swing_frac,
             "hand_estimate_nm": hand,
             "hand_estimate_label": HAND_LABEL,
             "hand_m_kg": HAND_M_KG,
@@ -792,7 +978,7 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
             "class": kind,
             "dominant_term": term,
         })
-    ask_events = [row for row in events if row["over_on"] in ("ask", "both")]
+    ask_events = events
     n_ask_over = len(ask_events)
     n_qdes_over = sum(1 for rec in writes if abs(rec.signed_nm) > ASK_BAR + 1e-9)
     ask_times = {round(float(row["t_s"]), 6) for row in ask_events}
@@ -822,7 +1008,8 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         return count / n_ask_over
 
     qdes_peak = max(writes, key=lambda rec: abs(rec.signed_nm)) if writes else None
-    ask_peak = max(writes, key=lambda rec: abs(rec.ask_nm)) if writes else None
+    goal_peak = max(writes, key=lambda rec: abs(rec.ask_nm)) if writes else None
+    ask_peak = max(plant_asks, key=lambda rec: abs(rec.ask_nm)) if plant_asks else None
     sum_peak = max(writes, key=lambda rec: rec.sum_nm) if writes else None
     verdict = "CLEAR" if not fail_reasons else "Prefer FAIL"
     gait = "STEPS" if int(stepping["n_scored_swings"]) > 0 and float(stepping["step_fraction"]) >= 0.50 else "SKATES"
@@ -875,6 +1062,18 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         "qdes_peak_signed_nm": None if qdes_peak is None else qdes_peak.signed_nm,
         "qdes_peak_joint": None if qdes_peak is None else qdes_peak.joint,
         "qdes_peak_t_s": None if qdes_peak is None else qdes_peak.t_s,
+        "goal_ask_peak_nm": None if goal_peak is None else abs(goal_peak.ask_nm),
+        "goal_ask_peak_joint": None if goal_peak is None else goal_peak.joint,
+        "goal_ask_peak_t_s": None if goal_peak is None else goal_peak.t_s,
+        "ctrl_clip_fraction": clip_fraction,
+        "ctrl_clip_ticks": clip_ticks,
+        "ctrl_clip_substeps": clip_substeps,
+        "max_abs_ctrl_at_step": max_step_abs,
+        "max_abs_writer_raw": None if raw_unavailable else max_writer_abs,
+        "plant_substeps": plant_substeps,
+        "ctrllimited_all": bool(audit["ctrllimited_all"]),
+        "ctrlrange_all_pm_2_09": bool(audit["ctrlrange_all_pm_2_09"]),
+        "raw_ctrl": RAW_UNAVAILABLE if raw_unavailable else "writer cmd before ctrlrange clip, and data.ctrl entering mj_step",
         "ask_peak_nm": None if ask_peak is None else abs(ask_peak.ask_nm),
         "ask_peak_joint": None if ask_peak is None else ask_peak.joint,
         "ask_peak_t_s": None if ask_peak is None else ask_peak.t_s,
@@ -904,6 +1103,8 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
     print(
         f"T {period_s:.2f} vx {vx:.3f} {verdict} {gait} "
         f"ask {row['ask_peak_nm']:.3f} {row['ask_peak_joint']} "
+        f"goal {row['goal_ask_peak_nm']:.3f} "
+        f"clip {clip_fraction} "
         f"qdes {row['qdes_peak_nm']:.3f} {row['qdes_peak_joint']} "
         f"over ask/qdes {n_ask_over}/{n_qdes_over} "
         f"note {torque_bar['note'] or '-'} resid {max_resid:.3e} "
@@ -948,7 +1149,9 @@ def main() -> None:
         "runtime_only": True,
         "qacc_source": QACC_SOURCE,
         "ask_bar_nm": ASK_BAR,
-        "ask_definition": "|kp*(ctrl-q) - kv*qvel|",
+        "ask_definition": "|kp*(ctrl_plant-q) - kv*qvel|, ctrl_plant = clip(data.ctrl, ctrlrange) when actuator_ctrllimited",
+        "ctrl_clip": "|ctrl_raw| > 2.09 on a control tick is a fail. ctrl_raw is the writer command before the ctrlrange clip when that command reproduces the stored ctrl, and data.ctrl entering mj_step.",
+        "ctrllimited_leg": all(bool(row.get("ctrllimited_all")) for row in rows),
         "qdes_definition": "kp*(q_des-q) - kv*qvel",
         "kv": "-actuator_biasprm[i,2]",
         "sum_definition": "|kp*(q_des-q)| + |kv*qvel|",

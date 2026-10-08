@@ -582,81 +582,85 @@ r_knee sample is the sum, not the pre-clamp ask.
 
 ## Signed ID a5a9183
 
-Independent score of Controls tip `a5a9183461105016211bebbf110051c2bb8f9df2` (PR #103, `cursor/declared-stance-sync-16df`). The gait is that tip's `voice056` path. This branch only scores. Soft-pass is off. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` before and after every cell. All 12 leg `forcerange` and `actuatorfrcrange` values are ±2.45 Nm. Joint armature is 0.01. No gait edit and no plant edit.
+Independent score of Controls tip `a5a9183461105016211bebbf110051c2bb8f9df2` (PR #103, `cursor/declared-stance-sync-16df`). The gait is that tip's `voice056` path. This branch only scores. Soft-pass is off. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e` before and after every cell. All 12 leg `forcerange` and `actuatorfrcrange` values are ±2.45 Nm. Joint armature is 0.01. Every leg position actuator has `ctrlrange` ±2.09. The loaded model reports `actuator_ctrllimited` = 1 on all 12 leg actuators in every cell. No gait edit and no plant edit.
 
 Bout is the cadence grid: stand 0.25 s, walk `1.00 + 2.05·T`, stop 2.40 s. dsp 0.25, swing height 8 mm, crouch 25 mm, hip pitch 15°, arm 1.00 s, preview shape 0, preview r 1e-4, y_swap 0. `x_amp = vx·T/4`. Sway amplitude is `sway_zmp_amp` with a 16 mm CoM target and a 43 mm cap: T 0.50 s → 43.00 mm, T 0.55 s → 43.00 mm, T 0.60 s → 42.94 mm, T 0.65 s → 37.46 mm, T 0.70 s → 33.54 mm, T 0.75 s → 30.59 mm, T 0.80 s → 28.31 mm, T 1.00 s → 22.85 mm, T 1.20 s → 20.23 mm.
 
-Torque pass is the signed pre-clamp ask `|kp·(ctrl−q) − kv·q̇|` ≤ 2.33 Nm on every leg joint on every tick. kv is `−actuator_biasprm[i, 2]`. On this gait the knee stores `q_des`, so the ask peak equals the q_des signed peak on every row, and the over-bar ask count equals the q_des signed count. The sum `|kp·(q_des−q)| + |kv·ω|` is a column. Clamp-active fraction is the share of control ticks with `|ask| ≥ 2.45`. The DC-motor line is `|qvel| ≤ 5.82·(1 − |ask|/3.43)` on every leg write. Peak `|qvel|` ≤ 5.82 is a separate bar. Stepping bars, declared-stance ZMP and CoM margins, whole-bout jerk under the #102 baseline, and the final-1 s stop (both feet ≥ 3 contacts, trunk within 5° of the stand median, up_z ≥ 0.90) are the rest of the CLEAR set. Trunk speed ratio is a report.
+The 2.33 Nm pass is the signed ask on the ctrl the plant uses. MuJoCo clips ctrl to `ctrlrange` before the force when `actuator_ctrllimited` is set, so `ctrl_plant = clip(data.ctrl, ±2.09)` and the ask is `|kp·(ctrl_plant−q) − kv·q̇|` at every physics substep. q and q̇ are the state that entered that `mj_step`. kv is `−actuator_biasprm[i, 2]`. The control-tick value is the max |ask| across that tick's four 2 ms substeps. A tick fails when that value is above 2.33 Nm.
 
-q̈ is `data.qacc` from `mj_step`, not a finite difference of qvel. Each control tick is four 2 ms substeps. For an over-bar write, inverse dynamics uses the later substep of that tick with the largest `|qfrc_inverse|` on that joint, at the q and q̇ that entered that `mj_step`, with the contacts of that state. `qfrc_inverse` is the ID torque. The split is armature·q̈ = `0.01·qacc` (it matches `dof_armature·qacc`), impact/contact = `−qfrc_constraint`, link inertia = `(M·qacc − armature·qacc) + (qfrc_bias(q,v) − qfrc_bias(q,0))`, gravity = `qfrc_bias` at zero velocity. Those terms plus `−qfrc_passive` reproduce `qfrc_inverse` (max residual 9e-16 Nm). The hand estimate is `m·g·L·sin(|q|/2)` with m 2.2 kg and L 0.093 m, labelled hand estimate. A write with `|ID| ≤ 2.33` and `|ask| > 2.33` is a controller fail. A write with `|ID| > 2.33` is a physics candidate, named by the largest of those four terms. This is the split. It is not a wall.
+The goal ask stays `|kp·(stored ctrl−q) − kv·q̇|` at the writer, before the hip, knee, and ankle slew. On this gait the knee stores `q_des` already inside ±2.09, so the goal peak equals the q_des signed peak. Those peaks are 3.810–6.210 Nm, every one a knee, with 22–47 over-bar q_des writes. That matches Controls (3.81–6.21 Nm, 22–47 writes). T 0.60 s / vx 0.032 m/s still peaks at 5.820 Nm on the left knee at 1.328 s. The goal ask is the Controls comparison. The torque pass is the plant ask. The writer and the slew both store a ctrl inside ±2.09, so the plant clip leaves every sample unchanged. The plant ask is lower than the goal ask because the slew reaches the goal over several ticks.
 
-Signed peaks are 3.810–6.210 Nm, every one a knee, and the over-bar write counts are 22–47. That matches Controls (3.81–6.21 Nm, 22–47 writes). The set of rows that pass signed and fail the sum is empty. Sum peaks stay 8.014–11.813 Nm, so the sum fails every row too. Signed peak, signed joint, sum peak, DC excess, and the body-forward speed ratio match Controls' 54-row table on every cell. T 0.60 s / vx 0.032 m/s is the example: signed peak 5.820 Nm on the left knee at 1.328 s, 28 over-bar writes, sum on that write 8.961 Nm. The sum peak on that row is 11.365 Nm on the right knee at 2.696 s. Body-forward ratio 1.018. DC excess on the 5.820 Nm write is 5.134 rad/s (`|qvel|` 1.077, limit −4.056). Unique control times equal the write count except on five rows, where a left-hip-pitch write shares a timestamp with a knee: T 0.55 s at 0.016 and 0.024 m/s (23 writes / 22 times, 24 / 23) and T 0.50 s at 0.016, 0.024, and 0.032 m/s (25 writes / 23 times).
+A control tick is clipped when any leg writer command before the ctrlrange clip, or any leg `data.ctrl` entering `mj_step`, has `|ctrl_raw| > 2.09`. Exactly ±2.09 is inside the range. The raw command is the writer output before that clip. When that command does not reproduce the stored ctrl, the clip fraction is the string `raw ctrl unavailable` and that string is a fail. Every write reproduced the stored ctrl, so the fraction is the share of clipped control ticks. It is 0 on all 54 rows. The largest |writer command| is 1.159 rad and the largest |data.ctrl| at `mj_step` is 1.158 rad. Any clipped tick is a fail. The clip bar passes all 54.
 
-Every row is Prefer FAIL. qvel ≤ 5.82 passes all 54. Signed, clamp, and the DC line fail all 54. Two rows are SKATES (T 1.20 s at 0.048 and 0.056 m/s, step fraction 0.482 and 0.436). The other 52 are STEPS, and every step fraction is under 0.90 (max 0.780). Slip is 0.58–1.79 mm, under 2 mm. Lowest-corner clearance over 20–80% of swing is under 8 mm on every scored swing. Declared-stance ZMP margin is negative on every row. No stop is upright on the final-1 s bar: the closest trunk pitch is 4.96° off the stand (T 0.55 s, vx 0.056 m/s) with a left-foot contact count of 2, and the largest pitch excursion is 8.96°.
+The sum `|kp·(q_des−q)| + |kv·ω|` is a column. Sum peaks stay 8.014–11.809 Nm, so the sum fails every row. Clamp-active fraction is the share of control ticks with plant `|ask| ≥ 2.45`. The DC-motor line is `|qvel| ≤ 5.82·(1 − |plant ask|/3.43)` on every plant-ask sample, labelled `DC-motor model, not datasheet (Hiwonder HX-35H page values)`. Peak `|qvel|` ≤ 5.82 is a separate bar. Stepping bars, declared-stance ZMP and CoM margins, whole-bout jerk under the #102 baseline, and the final-1 s stop (both feet ≥ 3 contacts, trunk within 5° of the stand median, up_z ≥ 0.90) are the rest of the CLEAR set. Trunk speed ratio is a report.
 
-Over-bar writes are knees, plus the left hip pitch on five rows (T 0.55 s at 0.016 and 0.024 m/s; T 0.50 s at 0.016, 0.024, and 0.032 m/s). Those hip-pitch writes are controller fails. Only T 0.50 s / 0.016 m/s reaches the 2.45 Nm clamp (ask 2.455 Nm). The other four sit between 2.33 and 2.45, so a zero clamp fraction on that joint is not a signed pass.
+q̈ is `data.qacc` from the `mj_step` that applied this ctrl, not a finite difference of qvel. Each control tick is four 2 ms substeps. Inverse dynamics runs on every substep whose plant |ask| exceeds 2.33, at the q and q̇ that entered that `mj_step`, with the plant-clipped ctrl and the contacts of that state. `qfrc_inverse` is the ID torque. The split is armature·q̈ = `0.01·qacc` (it matches `dof_armature·qacc`), impact/contact = `−qfrc_constraint`, link inertia = `(M·qacc − armature·qacc) + (qfrc_bias(q,v) − qfrc_bias(q,0))`, gravity = `qfrc_bias` at zero velocity. Those terms plus `−qfrc_passive` reproduce `qfrc_inverse` (max residual 9e-16 Nm). The hand estimate is `m·g·L·sin(|q|/2)` with m 2.2 kg and L 0.093 m, labelled hand estimate. A substep with `|ID| ≤ 2.33` and `|ask| > 2.33` is a controller fail. A substep with `|ID| > 2.33` is a physics candidate, named by the largest of those four terms. This is the split.
 
-Of 1755 over-bar writes, 1581 (90.1%) are controller fails and 174 (9.9%) are physics candidates. Among the physics candidates, 118 are impact/contact and 56 are armature·q̈. None is link inertia and none is gravity. The physics-candidate ID torque sits on the ±2.45 Nm actuator rail, except T 1.20 s / 0.016 m/s, whose worst ID is +2.38 Nm. T 0.50 s and T 0.55 s are entirely controller fails: the worst ID there is 1.85–2.02 Nm on the left knee in double support while the ask is 5.93–6.21 Nm.
+Plant peaks are 1.846–4.064 Nm, every one a knee. Twelve rows pass the plant signed ask and fail the sum: T 0.50 s and T 0.55 s at every vx from 0.016 to 0.056 m/s. Their plant peaks are 1.846–2.023 Nm and their sum peaks are 10.557–10.949 Nm. The note on each of those rows is `passes signed, fails sum`. They have no over-bar substep, so the class fractions and the worst ID are empty. The note stays visible. It is not a fail reason. Those rows stay Prefer FAIL on the other bars.
 
-On the example write (T 0.60 s, vx 0.032 m/s, left knee, 1.328 s, phase ds) the ask is +5.820 Nm, `kp·e` is +7.391 Nm, `kv·q̇` is +1.570 Nm, and ID is +1.860 Nm, so the class is controller fail. Armature·q̈ is +1.270 Nm, impact/contact +0.333 Nm, link inertia +0.038 Nm, gravity +0.087 Nm. CoP relative to the left ankle is +78.5 mm forward and −27.9 mm lateral. Ctrl second difference is −0.015 rad. The hand estimate is 0.878 Nm.
+The other 42 rows fail the plant signed ask. Those failures are 174 control ticks and 376 substeps. All 376 substeps are physics candidates. The controller-fail count is 0. Of the 376, 288 are impact/contact and 88 are armature·q̈. The link-inertia count is 0 and the gravity count is 0. 325 of the 376 ID torques sit on the ±2.45 Nm actuator rail. The other 51 lie between 2.331 and 2.446 Nm. The worst ID on each of the 42 rows is ±2.45 Nm, except T 1.20 s / 0.016 m/s, where it is +2.379 Nm (impact/contact, stop).
 
-Per-write logs, including CoP, ctrl second difference, the hand estimate, and the four ID terms, are in `previews/walk_a5a9183_signed_id.json`. Ctrl is the controller-fail fraction of that row's over-bar writes. Phys is the physics-candidate fraction. Note is `passes signed, fails sum` when that happens. The column is empty on every row here. Worst ID is the over-bar write with the largest `|ID|`.
+Every row is Prefer FAIL. qvel ≤ 5.82 passes all 54. The clip bar passes all 54. The DC line and the clamp pass on 13 rows and fail on 41. The 13 are the twelve `passes signed, fails sum` rows plus T 1.20 s / 0.016 m/s, whose plant peak is 2.379 Nm (one tick over 2.33, under 2.45, inside the DC line). Two rows are SKATES (T 1.20 s at 0.048 and 0.056 m/s, step fraction 0.482 and 0.436). The other 52 are STEPS, and every step fraction is under 0.90 (max 0.780). Slip is 0.58–1.79 mm, under 2 mm. Lowest-corner clearance over 20–80% of swing is under 8 mm on every scored swing. Declared-stance ZMP margin is negative on every row. No stop is upright on the final-1 s bar: the closest trunk pitch is 4.96° off the stand (T 0.55 s, vx 0.056 m/s) with a left-foot contact count of 2, and the largest pitch excursion is 8.96°.
 
-| T s | vx | Sgn Nm | Joint | Over | Sum Nm | Note | Ctrl | Phys | Worst ID | Phase | Term | ID Nm |
-| ---: | ---: | ---: | --- | ---: | ---: | --- | ---: | ---: | --- | --- | --- | ---: |
-| 0.80 | 0.016 | 4.56 | l_knee | 33 | 11.10 | — | 0.88 | 0.12 | r_knee | stop | impact/contact | +2.45 |
-| 0.80 | 0.024 | 4.61 | l_knee | 35 | 10.83 | — | 0.89 | 0.11 | r_knee | touchdown | impact/contact | +2.45 |
-| 0.80 | 0.032 | 4.83 | l_knee | 35 | 10.93 | — | 0.89 | 0.11 | r_knee | touchdown | impact/contact | +2.45 |
-| 0.80 | 0.040 | 4.93 | l_knee | 35 | 11.17 | — | 0.89 | 0.11 | r_knee | stop | impact/contact | +2.45 |
-| 0.80 | 0.048 | 5.03 | l_knee | 36 | 10.80 | — | 0.89 | 0.11 | r_knee | stop | impact/contact | +2.45 |
-| 0.80 | 0.056 | 5.11 | l_knee | 38 | 11.05 | — | 0.89 | 0.11 | r_knee | stop | impact/contact | +2.45 |
-| 0.75 | 0.016 | 4.86 | l_knee | 31 | 10.75 | — | 0.87 | 0.13 | r_knee | touchdown | impact/contact | +2.45 |
-| 0.75 | 0.024 | 4.91 | l_knee | 35 | 10.75 | — | 0.91 | 0.09 | r_knee | touchdown | armature·q̈ | +2.45 |
-| 0.75 | 0.032 | 4.96 | l_knee | 35 | 10.77 | — | 0.91 | 0.09 | r_knee | touchdown | armature·q̈ | +2.45 |
-| 0.75 | 0.040 | 5.03 | l_knee | 36 | 10.52 | — | 0.89 | 0.11 | r_knee | touchdown | impact/contact | +2.45 |
-| 0.75 | 0.048 | 5.14 | l_knee | 37 | 10.56 | — | 0.89 | 0.11 | r_knee | stop | impact/contact | +2.45 |
-| 0.75 | 0.056 | 5.23 | l_knee | 37 | 10.86 | — | 0.89 | 0.11 | r_knee | touchdown | armature·q̈ | +2.45 |
-| 0.70 | 0.016 | 5.05 | l_knee | 32 | 11.50 | — | 0.88 | 0.12 | r_knee | touchdown | armature·q̈ | +2.45 |
-| 0.70 | 0.024 | 5.10 | l_knee | 31 | 11.24 | — | 0.90 | 0.10 | r_knee | touchdown | impact/contact | +2.45 |
-| 0.70 | 0.032 | 5.15 | l_knee | 34 | 11.23 | — | 0.88 | 0.12 | r_knee | touchdown | impact/contact | +2.45 |
-| 0.70 | 0.040 | 5.19 | l_knee | 35 | 11.43 | — | 0.89 | 0.11 | r_knee | touchdown | armature·q̈ | +2.45 |
-| 0.70 | 0.048 | 5.23 | l_knee | 35 | 11.74 | — | 0.89 | 0.11 | r_knee | stop | armature·q̈ | +2.45 |
-| 0.70 | 0.056 | 5.34 | l_knee | 35 | 11.81 | — | 0.89 | 0.11 | r_knee | stop | armature·q̈ | +2.45 |
-| 0.65 | 0.016 | 5.25 | l_knee | 33 | 11.27 | — | 0.88 | 0.12 | r_knee | touchdown | armature·q̈ | +2.45 |
-| 0.65 | 0.024 | 5.29 | l_knee | 31 | 11.39 | — | 0.90 | 0.10 | r_knee | touchdown | armature·q̈ | +2.45 |
-| 0.65 | 0.032 | 5.34 | l_knee | 32 | 11.26 | — | 0.91 | 0.09 | r_knee | touchdown | armature·q̈ | +2.45 |
-| 0.65 | 0.040 | 5.39 | l_knee | 33 | 11.28 | — | 0.91 | 0.09 | r_knee | touchdown | impact/contact | +2.45 |
-| 0.65 | 0.048 | 5.43 | l_knee | 34 | 11.58 | — | 0.88 | 0.12 | r_knee | stop | impact/contact | +2.45 |
-| 0.65 | 0.056 | 5.48 | l_knee | 35 | 11.56 | — | 0.89 | 0.11 | r_knee | touchdown | armature·q̈ | +2.45 |
-| 0.60 | 0.016 | 5.74 | l_knee | 28 | 11.26 | — | 0.82 | 0.18 | r_knee | stop | armature·q̈ | -2.45 |
-| 0.60 | 0.024 | 5.78 | l_knee | 28 | 11.47 | — | 0.82 | 0.18 | r_knee | stop | armature·q̈ | -2.45 |
-| 0.60 | 0.032 | 5.82 | l_knee | 28 | 11.37 | — | 0.82 | 0.18 | r_knee | stop | armature·q̈ | +2.45 |
-| 0.60 | 0.040 | 5.86 | l_knee | 28 | 11.21 | — | 0.82 | 0.18 | r_knee | stop | armature·q̈ | -2.45 |
-| 0.60 | 0.048 | 5.90 | l_knee | 30 | 11.29 | — | 0.83 | 0.17 | r_knee | stop | armature·q̈ | -2.45 |
-| 0.60 | 0.056 | 5.95 | l_knee | 30 | 11.57 | — | 0.83 | 0.17 | r_knee | touchdown | armature·q̈ | +2.45 |
-| 0.55 | 0.016 | 5.93 | l_knee | 23 | 10.56 | — | 1.00 | 0.00 | l_knee | ds | — | +1.85 |
-| 0.55 | 0.024 | 5.97 | l_knee | 24 | 10.60 | — | 1.00 | 0.00 | l_knee | ds | — | +1.88 |
-| 0.55 | 0.032 | 6.01 | l_knee | 23 | 10.64 | — | 1.00 | 0.00 | l_knee | ds | — | +1.92 |
-| 0.55 | 0.040 | 6.04 | l_knee | 22 | 10.69 | — | 1.00 | 0.00 | l_knee | ds | — | +1.94 |
-| 0.55 | 0.048 | 6.08 | l_knee | 22 | 10.75 | — | 1.00 | 0.00 | l_knee | ds | — | +1.98 |
-| 0.55 | 0.056 | 6.13 | l_knee | 23 | 10.82 | — | 1.00 | 0.00 | l_knee | ds | — | +2.02 |
-| 0.50 | 0.016 | 6.01 | l_knee | 25 | 10.69 | — | 1.00 | 0.00 | l_knee | ds | — | +1.85 |
-| 0.50 | 0.024 | 6.05 | l_knee | 25 | 10.72 | — | 1.00 | 0.00 | l_knee | ds | — | +1.88 |
-| 0.50 | 0.032 | 6.09 | l_knee | 25 | 10.77 | — | 1.00 | 0.00 | l_knee | ds | — | +1.91 |
-| 0.50 | 0.040 | 6.12 | l_knee | 22 | 10.81 | — | 1.00 | 0.00 | l_knee | ds | — | +1.94 |
-| 0.50 | 0.048 | 6.16 | l_knee | 22 | 10.88 | — | 1.00 | 0.00 | l_knee | ds | — | +1.97 |
-| 0.50 | 0.056 | 6.21 | l_knee | 22 | 10.95 | — | 1.00 | 0.00 | l_knee | ds | — | +2.01 |
-| 1.00 | 0.016 | 4.12 | l_knee | 36 | 10.50 | — | 0.89 | 0.11 | r_knee | stop | impact/contact | +2.45 |
-| 1.00 | 0.024 | 4.26 | r_knee | 37 | 10.73 | — | 0.89 | 0.11 | r_knee | stop | armature·q̈ | +2.45 |
-| 1.00 | 0.032 | 4.38 | r_knee | 37 | 11.00 | — | 0.89 | 0.11 | r_knee | stop | impact/contact | +2.45 |
-| 1.00 | 0.040 | 4.51 | r_knee | 40 | 10.57 | — | 0.88 | 0.12 | r_knee | stop | impact/contact | +2.45 |
-| 1.00 | 0.048 | 4.64 | r_knee | 43 | 10.38 | — | 0.88 | 0.12 | r_knee | stop | impact/contact | +2.45 |
-| 1.00 | 0.056 | 4.78 | r_knee | 43 | 9.53 | — | 0.88 | 0.12 | r_knee | stop | impact/contact | +2.45 |
-| 1.20 | 0.016 | 3.81 | r_knee | 35 | 8.01 | — | 0.97 | 0.03 | r_knee | stop | impact/contact | +2.38 |
-| 1.20 | 0.024 | 3.94 | r_knee | 37 | 8.28 | — | 0.95 | 0.05 | r_knee | stop | impact/contact | +2.45 |
-| 1.20 | 0.032 | 4.10 | r_knee | 39 | 9.21 | — | 0.90 | 0.10 | r_knee | stop | impact/contact | +2.45 |
-| 1.20 | 0.040 | 4.34 | r_knee | 42 | 9.93 | — | 0.88 | 0.12 | r_knee | stop | impact/contact | +2.45 |
-| 1.20 | 0.048 | 4.53 | r_knee | 46 | 10.04 | — | 0.87 | 0.13 | r_knee | stop | impact/contact | +2.45 |
-| 1.20 | 0.056 | 4.74 | r_knee | 47 | 9.20 | — | 0.81 | 0.19 | r_knee | stop | impact/contact | +2.45 |
+On the example row (T 0.60 s, vx 0.032 m/s) the goal peak is still +5.820 Nm on the left knee at 1.328 s. The plant peak is +3.854 Nm on the right knee at 2.680 s, in the stop. The ctrl at that step is −0.887 rad, inside ±2.09. Five of 610 control ticks are over 2.33, across 10 substeps, and all 10 are physics candidates. On the peak substep, `kp·e` is +6.102 Nm, `kv·q̇` is +2.249 Nm, and ID is +2.450 Nm, so the class is physics candidate and the dominant term is armature·q̈. Armature·q̈ is +1.611 Nm, impact/contact +0.827 Nm, link inertia −0.015 Nm, gravity −0.097 Nm. CoP relative to the right ankle is −56.5 mm forward and −22.5 mm lateral. Ctrl second difference is +0.062 rad. The hand estimate is 0.982 Nm. The DC-line margin on that row is −2.851 rad/s on the right knee at 2.688 s (`|τ|` 3.633 Nm, `|qvel|` 2.506 rad/s, limit −0.345 rad/s). Body-forward ratio 1.018.
 
-SHA `697d53b`.
+Per-substep logs, including CoP, ctrl second difference, the hand estimate, and the four ID terms, are in `previews/walk_a5a9183_signed_id.json`. Plant is the plant-ask peak. Goal is the writer ask peak, the Controls comparison. Clip is the ctrl-clip fraction (`|ctrl_raw| > 2.09`). Ticks is the number of control ticks over 2.33. Sub is the number of over-bar substeps. Ctrl is the controller-fail fraction of Sub. Phys is the physics-candidate fraction of Sub. Note is `passes signed, fails sum` when the row passes the plant ask and fails the sum. Worst ID is the over-bar substep with the largest `|ID|`.
+
+| T s | vx | Plant Nm | Joint | Goal Nm | Clip | Ticks | Sub | Sum Nm | Note | Ctrl | Phys | Worst ID | Phase | Term | ID Nm |
+| ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | --- | --- | --- | ---: |
+| 0.80 | 0.016 | 3.383 | r_knee | 4.560 | 0 | 4 | 8 | 11.10 | — | 0.00 | 1.00 | r_knee | stop | impact/contact | +2.45 |
+| 0.80 | 0.024 | 3.259 | r_knee | 4.613 | 0 | 4 | 6 | 10.83 | — | 0.00 | 1.00 | r_knee | touchdown | impact/contact | +2.45 |
+| 0.80 | 0.032 | 3.412 | r_knee | 4.830 | 0 | 4 | 8 | 10.93 | — | 0.00 | 1.00 | r_knee | touchdown | impact/contact | +2.45 |
+| 0.80 | 0.040 | 3.703 | r_knee | 4.934 | 0 | 4 | 9 | 11.17 | — | 0.00 | 1.00 | r_knee | stop | impact/contact | +2.45 |
+| 0.80 | 0.048 | 3.726 | r_knee | 5.031 | 0 | 4 | 11 | 10.80 | — | 0.00 | 1.00 | r_knee | stop | impact/contact | +2.45 |
+| 0.80 | 0.056 | 3.923 | r_knee | 5.113 | 0 | 4 | 13 | 11.05 | — | 0.00 | 1.00 | r_knee | stop | impact/contact | +2.45 |
+| 0.75 | 0.016 | 3.025 | r_knee | 4.857 | 0 | 4 | 5 | 10.75 | — | 0.00 | 1.00 | r_knee | touchdown | impact/contact | +2.45 |
+| 0.75 | 0.024 | 2.802 | r_knee | 4.906 | 0 | 3 | 3 | 10.75 | — | 0.00 | 1.00 | r_knee | touchdown | armature·q̈ | +2.45 |
+| 0.75 | 0.032 | 2.853 | r_knee | 4.956 | 0 | 3 | 4 | 10.77 | — | 0.00 | 1.00 | r_knee | touchdown | armature·q̈ | +2.45 |
+| 0.75 | 0.040 | 3.072 | r_knee | 5.032 | 0 | 4 | 5 | 10.52 | — | 0.00 | 1.00 | r_knee | touchdown | impact/contact | +2.45 |
+| 0.75 | 0.048 | 3.434 | r_knee | 5.138 | 0 | 4 | 7 | 10.56 | — | 0.00 | 1.00 | r_knee | stop | impact/contact | +2.45 |
+| 0.75 | 0.056 | 3.862 | r_knee | 5.226 | 0 | 4 | 12 | 10.86 | — | 0.00 | 1.00 | r_knee | touchdown | armature·q̈ | +2.45 |
+| 0.70 | 0.016 | 3.678 | r_knee | 5.055 | 0 | 4 | 8 | 11.50 | — | 0.00 | 1.00 | r_knee | touchdown | armature·q̈ | +2.45 |
+| 0.70 | 0.024 | 3.408 | r_knee | 5.099 | 0 | 3 | 6 | 11.24 | — | 0.00 | 1.00 | r_knee | touchdown | impact/contact | +2.45 |
+| 0.70 | 0.032 | 3.470 | r_knee | 5.145 | 0 | 4 | 8 | 11.23 | — | 0.00 | 1.00 | r_knee | touchdown | impact/contact | +2.45 |
+| 0.70 | 0.040 | 3.706 | r_knee | 5.190 | 0 | 4 | 8 | 11.43 | — | 0.00 | 1.00 | r_knee | touchdown | armature·q̈ | +2.45 |
+| 0.70 | 0.048 | 3.919 | r_knee | 5.234 | 0 | 4 | 10 | 11.74 | — | 0.00 | 1.00 | r_knee | stop | armature·q̈ | +2.45 |
+| 0.70 | 0.056 | 4.064 | r_knee | 5.338 | 0 | 4 | 11 | 11.81 | — | 0.00 | 1.00 | r_knee | stop | armature·q̈ | +2.45 |
+| 0.65 | 0.016 | 3.428 | r_knee | 5.248 | 0 | 4 | 7 | 11.27 | — | 0.00 | 1.00 | r_knee | touchdown | armature·q̈ | +2.45 |
+| 0.65 | 0.024 | 3.575 | r_knee | 5.293 | 0 | 3 | 7 | 11.39 | — | 0.00 | 1.00 | r_knee | touchdown | armature·q̈ | +2.45 |
+| 0.65 | 0.032 | 3.389 | r_knee | 5.339 | 0 | 3 | 6 | 11.26 | — | 0.00 | 1.00 | r_knee | touchdown | armature·q̈ | +2.45 |
+| 0.65 | 0.040 | 3.568 | r_knee | 5.387 | 0 | 3 | 7 | 11.28 | — | 0.00 | 1.00 | r_knee | touchdown | impact/contact | +2.45 |
+| 0.65 | 0.048 | 3.991 | r_knee | 5.435 | 0 | 4 | 11 | 11.58 | — | 0.00 | 1.00 | r_knee | stop | impact/contact | +2.45 |
+| 0.65 | 0.056 | 4.029 | r_knee | 5.476 | 0 | 4 | 11 | 11.56 | — | 0.00 | 1.00 | r_knee | touchdown | armature·q̈ | +2.45 |
+| 0.60 | 0.016 | 3.514 | r_knee | 5.737 | 0 | 5 | 10 | 11.26 | — | 0.00 | 1.00 | r_knee | stop | armature·q̈ | -2.45 |
+| 0.60 | 0.024 | 3.846 | r_knee | 5.778 | 0 | 5 | 10 | 11.47 | — | 0.00 | 1.00 | r_knee | stop | armature·q̈ | -2.45 |
+| 0.60 | 0.032 | 3.854 | r_knee | 5.820 | 0 | 5 | 10 | 11.37 | — | 0.00 | 1.00 | r_knee | stop | armature·q̈ | +2.45 |
+| 0.60 | 0.040 | 3.843 | r_knee | 5.860 | 0 | 5 | 10 | 11.21 | — | 0.00 | 1.00 | r_knee | stop | armature·q̈ | -2.45 |
+| 0.60 | 0.048 | 3.806 | r_knee | 5.904 | 0 | 5 | 10 | 11.29 | — | 0.00 | 1.00 | r_knee | stop | armature·q̈ | -2.45 |
+| 0.60 | 0.056 | 3.971 | r_knee | 5.954 | 0 | 5 | 10 | 11.57 | — | 0.00 | 1.00 | r_knee | touchdown | armature·q̈ | +2.45 |
+| 0.55 | 0.016 | 1.846 | l_knee | 5.932 | 0 | 0 | 0 | 10.56 | passes signed, fails sum | — | — | — | — | — | — |
+| 0.55 | 0.024 | 1.881 | l_knee | 5.969 | 0 | 0 | 0 | 10.60 | passes signed, fails sum | — | — | — | — | — | — |
+| 0.55 | 0.032 | 1.917 | l_knee | 6.006 | 0 | 0 | 0 | 10.64 | passes signed, fails sum | — | — | — | — | — | — |
+| 0.55 | 0.040 | 1.944 | l_knee | 6.041 | 0 | 0 | 0 | 10.69 | passes signed, fails sum | — | — | — | — | — | — |
+| 0.55 | 0.048 | 1.982 | l_knee | 6.084 | 0 | 0 | 0 | 10.75 | passes signed, fails sum | — | — | — | — | — | — |
+| 0.55 | 0.056 | 2.023 | l_knee | 6.131 | 0 | 0 | 0 | 10.82 | passes signed, fails sum | — | — | — | — | — | — |
+| 0.50 | 0.016 | 1.850 | l_knee | 6.012 | 0 | 0 | 0 | 10.69 | passes signed, fails sum | — | — | — | — | — | — |
+| 0.50 | 0.024 | 1.883 | l_knee | 6.048 | 0 | 0 | 0 | 10.72 | passes signed, fails sum | — | — | — | — | — | — |
+| 0.50 | 0.032 | 1.915 | l_knee | 6.085 | 0 | 0 | 0 | 10.77 | passes signed, fails sum | — | — | — | — | — | — |
+| 0.50 | 0.040 | 1.938 | l_knee | 6.117 | 0 | 0 | 0 | 10.81 | passes signed, fails sum | — | — | — | — | — | — |
+| 0.50 | 0.048 | 1.974 | l_knee | 6.161 | 0 | 0 | 0 | 10.88 | passes signed, fails sum | — | — | — | — | — | — |
+| 0.50 | 0.056 | 2.012 | l_knee | 6.210 | 0 | 0 | 0 | 10.95 | passes signed, fails sum | — | — | — | — | — | — |
+| 1.00 | 0.016 | 3.306 | r_knee | 4.121 | 0 | 4 | 8 | 10.50 | — | 0.00 | 1.00 | r_knee | stop | impact/contact | +2.45 |
+| 1.00 | 0.024 | 3.346 | r_knee | 4.257 | 0 | 4 | 8 | 10.73 | — | 0.00 | 1.00 | r_knee | stop | armature·q̈ | +2.45 |
+| 1.00 | 0.032 | 3.507 | r_knee | 4.382 | 0 | 4 | 9 | 11.00 | — | 0.00 | 1.00 | r_knee | stop | impact/contact | +2.45 |
+| 1.00 | 0.040 | 3.486 | r_knee | 4.513 | 0 | 5 | 12 | 10.57 | — | 0.00 | 1.00 | r_knee | stop | impact/contact | +2.45 |
+| 1.00 | 0.048 | 3.636 | r_knee | 4.645 | 0 | 5 | 13 | 10.38 | — | 0.00 | 1.00 | r_knee | stop | impact/contact | +2.45 |
+| 1.00 | 0.056 | 3.606 | r_knee | 4.784 | 0 | 5 | 14 | 9.53 | — | 0.00 | 1.00 | r_knee | stop | impact/contact | +2.45 |
+| 1.20 | 0.016 | 2.379 | r_knee | 3.810 | 0 | 1 | 1 | 8.01 | — | 0.00 | 1.00 | r_knee | stop | impact/contact | +2.38 |
+| 1.20 | 0.024 | 2.568 | r_knee | 3.941 | 0 | 2 | 2 | 8.28 | — | 0.00 | 1.00 | r_knee | stop | impact/contact | +2.45 |
+| 1.20 | 0.032 | 2.879 | r_knee | 4.105 | 0 | 4 | 6 | 9.21 | — | 0.00 | 1.00 | r_knee | stop | impact/contact | +2.45 |
+| 1.20 | 0.040 | 3.202 | r_knee | 4.342 | 0 | 5 | 9 | 9.93 | — | 0.00 | 1.00 | r_knee | stop | impact/contact | +2.45 |
+| 1.20 | 0.048 | 3.491 | r_knee | 4.526 | 0 | 6 | 16 | 10.04 | — | 0.00 | 1.00 | r_knee | stop | impact/contact | +2.45 |
+| 1.20 | 0.056 | 3.460 | r_knee | 4.739 | 0 | 9 | 27 | 9.20 | — | 0.00 | 1.00 | r_knee | stop | impact/contact | +2.45 |
+
+Prior goal-ask score SHA `697d53b`.
