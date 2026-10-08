@@ -3812,3 +3812,34 @@ The phase clock no longer snaps onto the phase marker. Snapping bunched two samp
 On the cold plant, free root, armature 0.010, the plan runs the full bar window (stand 0.25 s, walk 4.0 s, stop 2.5 s) without an abort and without a stance-hip flag. The largest planned root residual is 4.23e-4 Nm of pitch at t = 1.256 s. Min up_z on that probe is 0.974. In the window 1.304–1.336 s the inverse root fx is −0.030 N to −0.039 N. The raw second difference there is l_knee 19.7 rad/s². A later hip-roll reference step, +0.028 rad to −0.137 rad at t = 1.76 s, has a raw second difference of 2741 rad/s². The three-sample median keeps that edge out of the inverse. The inverse fx peak on the window is −5.5 N at t = 0.48 s.
 
 Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. The plant XML is not edited.
+
+## Free-root rescore
+
+Scored with the committed entry point, tip `5a1cf8066ef939f77dfb3dc91f1f0a3c13254760`. Seed none. Soft-pass off. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. MuJoCo 3.14.0. The plan does not abort.
+
+```
+python3 scripts/score_free.py 0.01 /tmp/arm/box010.json
+python3 scripts/score_free.py 0.025 /tmp/arm/box025.json
+```
+
+That forwards T 1.00, vx 0.016, clearance 0.008, dsp 0.40, feedforward on, knee q̈ cap 40, seed none, latency 0, mass scale 1, μ none, arm 1.0 s, stand 0.25 s, walk 4.0 s, stop 2.5 s, preview shape 1, amplitude 0.016. The feedforward path raises dsp to 0.55. K_fb stays 1.0.
+
+| | armature 0.010 | armature 0.025 |
+| --- | --- | --- |
+| signed | +1.872 r_knee, t = 3.544 | +2.449 r_knee, t = 4.368 |
+| signed ≤ 2.33 | yes, 0 ticks over | no, 21 ticks (r_knee 15, l_knee 6) |
+| r_hip_roll signed | +0.935, t = 1.616, 0 over | +1.025, t = 1.616, 0 over |
+| limiter | 0 | 0 |
+| clamp | 0 | 0 |
+| DC | held, r_ank_roll excess −1.257, τ 1.563, \|ω\| 1.910, limit 3.168, t = 4.840 | held, l_knee excess −0.396, τ 2.381, \|ω\| 1.385, limit 1.780, t = 1.912 |
+| torso / stop | min up_z 0.974, stop 0.974, flat, spread 1.30 mm | min up_z 0.990, stop 0.990, flat, spread 0.99 mm |
+| steps | fail, clear −0.625 mm, peak sole 0.63 mm, 5 swings, 0 steps | fail, clear −0.884 mm, peak sole 0.54 mm, 6 swings, 0 steps |
+| slip | 0.445 mm | 0.366 mm |
+| place | −2.45 mm vs 8 mm command | −4.69 mm vs 8 mm command |
+| vx | ratio −0.154, mean −0.00246 m/s vs 0.016 | ratio −0.345, mean −0.00552 m/s vs 0.016 |
+| root residual | 4.23e-4 Nm pitch, t = 1.256 | 7.21e-4 Nm roll, t = 1.216 |
+| bare over 2.33 | none | none |
+
+Planned peaks at 0.010: r_hip_roll +0.845 Nm (bare +0.794, touchdown), l_hip_roll −0.701, r_knee +1.788 (bare +1.388, q̈ +40, stance mid). At 0.025: r_hip_roll +0.950, l_hip_roll −1.011, r_knee +2.431 (bare +1.431, q̈ +40, stop). The 0.025 knee plan is above 2.33 Nm with the bare term inside 2.33 Nm, and the applied signed force on that knee is +2.449 Nm, which is the bar miss. No stance hip flag. The 1.3 Nm hip value stays a flag only.
+
+mfg_ok is true at 0.010 because signed, clamp, and DC hold. That is not a walk pass. Both rows miss the stepping bars. The body velocity over the walk window, including the 1.0 s arm, is backward. The 0.025 row is a transfer risk: the torso, the limiter, the clamp, the DC line, and the flat stop hold, and the signed force does not. The gait is not locked. There is no video.
