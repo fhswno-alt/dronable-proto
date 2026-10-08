@@ -54,12 +54,11 @@ ID_FF_ARMATURE = 0.01
 # DC-motor model line, not a datasheet. |qvel| ≤ 5.82·(1 − |τ|/3.43).
 DC_QVEL_LIM = 5.82
 DC_STALL_NM = 3.43
-# Exact implicitfast residual. A tick is bucketed only while every
-# leg joint is inside ID_RESID_EXACT_NM. ID_RESID_NM is the reported
-# fraction threshold, not a pass band. The residual does not relax
-# the 2.33 Nm applied-ask bar.
+# Discrete implicitfast residual. A tick is bucketed only while every
+# leg joint is inside ID_RESID_EXACT_NM. There is no wider band.
+# The residual does not relax the 2.33 Nm applied-ask bar.
 ID_RESID_EXACT_NM = 1.0e-3
-ID_RESID_NM = 0.05
+ID_RESID_NM = ID_RESID_EXACT_NM
 # Stop/silence command budget for every leg joint. Hip yaw, hip roll,
 # hip pitch, knee, ankle pitch, and ankle roll share the HX-35H class.
 # The sag bar stays 2.33. Sitting the prediction on that bar measured
@@ -557,6 +556,7 @@ class LipmWalker:
         self.id_knee_up_t = 0.0
         self.id_knee_up_phase = ""
         self.id_knee_up_act = 0.0
+        self.id_knee_up_resid = 0.0
         self.id_hold_tau = 0.0
         self.id_hold_t = -1.0
         self.id_hold_act = 0.0
@@ -1188,18 +1188,20 @@ class LipmWalker:
     def audit_forward_inverse(self) -> None:
         """Inverse of the realised implicitfast step.
 
-        q̈ = (qvel_{t+1} − qvel_t) / dt on the pre-step q and q̇. That
-        difference is the acceleration mj_implicit integrated, not a
-        reference finite difference. The leg residual is
+        q̈ = (qvel_{t+1} − qvel_t) / dt on the pre-step copy. On that
+        copy only, mjENBL_INVDISCRETE makes mj_inverse interpret q̈ as
+        the discrete step, so qfrc_inverse matches (M − dt·qDeriv) q̈.
+        The leg residual is
 
-            |M q̈ + qfrc_bias − qfrc_constraint
-              − (kp(ctrl−q) − kv·qvel_end − damping·qvel_end)|
+            |qfrc_inverse − qfrc_actuator − qfrc_applied|
 
-        with the actuator term held at its qvel_t clip when the
-        forcerange is active. mjENBL_FWDINV is set only while
-        solver_fwdinv is read, then cleared. The plant XML is not edited.
-        A tick outside 1e-3 Nm is not bucketed. The residual does not
-        relax the 2.33 Nm applied-ask bar.
+        with both actuator fields taken from the forward pass on the
+        copy. The flags are restored before return. The plant XML is
+        not edited. A tick outside 1e-3 Nm is not bucketed. There is
+        no wider band. The residual does not relax the 2.33 Nm bar.
+
+        The Δqvel/dt identity (end-step damping, forward constraint)
+        stays as id_ident_max. It is a cross-check, not the bucket.
         """
         self._ensure_leg_dof()
         scratch = self._id_data
@@ -1210,7 +1212,7 @@ class LipmWalker:
         qvel1 = np.array(self.data.qvel, dtype=np.float64, copy=True)
         qacc_real = (qvel1 - qvel0) / dt
         saved = int(self.model.opt.enableflags)
-        self.model.opt.enableflags = saved | int(mj.mjtEnableBit.mjENBL_FWDINV)
+        discrete_bit = getattr(mj.mjtEnableBit, "mjENBL_INVDISCRETE", None)
         try:
             mj.mj_forward(self.model, scratch)
             con = np.array(scratch.qfrc_constraint, dtype=np.float64, copy=True)
@@ -1222,6 +1224,10 @@ class LipmWalker:
             mj.mj_mulM(self.model, scratch, ma, qacc_real)
             dyn = ma + bias
             scratch.qacc[:] = qacc_real
+            flags = saved | int(mj.mjtEnableBit.mjENBL_FWDINV)
+            if discrete_bit is not None:
+                flags |= int(discrete_bit)
+            self.model.opt.enableflags = flags
             if int(scratch.nefc) > 0:
                 mj.mj_compareFwdInv(self.model, scratch)
             else:
@@ -1254,7 +1260,7 @@ class LipmWalker:
         bal_max = float(np.max(bal)) if bal.size else 0.0
         if bal_max > self.id_root_bal_max:
             self.id_root_bal_max = bal_max
-        if root > ID_RESID_NM:
+        if root > 0.05:
             self.id_root_fail_n += 1
         step_fail = False
         step_over = False
@@ -1270,30 +1276,30 @@ class LipmWalker:
             actuator, applied = self._implicit_leg_force(
                 name, adr, q, float(qvel0[adr]), float(qvel1[adr]),
             )
-            # F_user is the implicit force the step applies:
-            # kp(ctrl−q) − kv·qvel_end − damping·qvel_end, with the
-            # actuator held at its qvel_t clip when forcerange is active.
-            # It is the residual comparison only. It is not the inverse.
+            # Cross-check: the end-step identity on Δqvel/dt. Not the bucket.
             ident = abs(float(dyn[adr]) - float(con[adr]) - float(app[adr]) - applied)
-            gap = abs(mj_tau - applied)
             if ident > self.id_ident_max:
                 self.id_ident_max = ident
+            # Inverse column is qfrc_inverse[dof]. mjENBL_INVDISCRETE
+            # already undoes M → M − dt·D. Without that flag, subtract
+            # the signed dt·(dof damping + kv)·q̈ on this joint.
+            if discrete_bit is None:
+                kv = float(self._leg_kv.get(name, 0.0))
+                damp = float(self.model.dof_damping[adr])
+                mj_tau = mj_tau - dt * (damp + kv) * float(qacc[adr])
+            tau = mj_tau
+            gap = abs(tau - float(act_fwd[adr]) - float(app[adr]))
             if gap > self.id_inv_gap_max:
                 self.id_inv_gap_max = gap
                 self.id_inv_gap_joint = name
-            # Inverse column: qfrc_inverse[dof] after mj_inverse on the
-            # pre-step copy. Not qfrc_actuator, not the forcerange clip,
-            # and not F_user. mj_inverse does not apply forcerange.
-            tau = mj_tau
             stripped = tau - arm
-            resid = ident
+            resid = gap
             prev_resid = float(self.id_tick_resid.get(name, -1.0))
             if resid > prev_resid:
                 self.id_tick_resid[name] = resid
             outside = resid > ID_RESID_EXACT_NM
-            if resid > ID_RESID_NM:
-                step_over = True
             if outside:
+                step_over = True
                 self.id_tick_ok[name] = False
                 step_fail = True
             elif abs(tau) >= abs(float(self.id_tick_tau.get(name, 0.0))):
@@ -1331,6 +1337,7 @@ class LipmWalker:
                         self.id_knee_up_t = float(self.data.time)
                         self.id_knee_up_phase = self._ff_phase(name)
                         self.id_knee_up_act = actuator
+                        self.id_knee_up_resid = resid
                 if name == "r_knee":
                     hold_dt = abs(float(self.data.time) - 2.680)
                     if hold_dt < self.id_hold_dt:
