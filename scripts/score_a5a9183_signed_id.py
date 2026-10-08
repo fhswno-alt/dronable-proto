@@ -23,10 +23,26 @@ the pre-step state, the live ``mj_step`` advances, and ``mj_inverse`` with
 the discrete flag runs on that finite-difference qacc. The inverse column
 is ``data_copy.qfrc_inverse`` only.
 
-A tick is bucketed when every leg joint and the root satisfy
-``|qfrc_inverse − (qfrc_actuator + qfrc_passive)| ≤ 1e-3`` Nm. The band and
-its 0.15 Nm cap stay in the table and do not decide the bucket. The band
-does not relax the signed applied bar of 2.33 Nm.
+The match residual is ``|qfrc_inverse − qfrc_actuator|`` on each leg joint
+and each root dof. That is the inverse-versus-applied identity under
+``mjENBL_INVDISCRETE``. 1e-3 Nm is the Prefer FAIL target. A tick is bucketed
+when that residual is ≤ 1e-2 Nm on every leg joint and the root. Counts over
+each threshold are both reported. The passive-inclusive residual and the
+0.15 Nm band stay in the table and do not decide the bucket. The band does
+not relax the signed applied bar of 2.33 Nm.
+
+A joint with ``|applied| ≥ 2.45`` Nm is ``clamped, unclassifiable``. The
+realised-motion inverse returns the clamp there, so it is not a controller,
+armature, or physics class. The pass stays the real plant: armature 0.01,
+signed applied ≤ 2.33 Nm on every tick, limiter fraction 0.
+
+An independent planned-motion inverse reads the walker's own reference
+``(q_ref, q̇_ref, q̈_ref)`` and replaces contacts with the planned ZMP wrench.
+Double support is split two ways: ZMP position along the foot-to-foot line,
+and a min-norm ankle-torque split. Both are reported, with the spread.
+``τ_req`` is printed with and without ``armature·q̈_ref``. A joint that is
+over 2.33 only before that subtraction is an unsourced-armature candidate.
+It is not a pass.
 """
 from __future__ import annotations
 
@@ -74,11 +90,15 @@ RESIDUAL_FLOOR = 0.05
 JOINT_DAMPING = 0.08
 BAND_CAP_NM = 0.15
 DISCRETE_RESIDUAL_NM = 1e-3
+BUCKET_RESIDUAL_NM = 1e-2
 RAIL_NM = 2.45
 RAIL_ATOL = 5e-4
 RESIDUAL_FAIL = "residual-fail, not bucketed"
 DISCRETE_FAIL = "discrete-residual, not bucketed"
+OVER_BUCKET = "residual over 1e-2, not bucketed"
+CLAMPED = "clamped, unclassifiable"
 UNBUCKETED = "unbucketed"
+PLAN_PHASES = ("start", "walk", "stop")
 KNEE_ID_CONTROLS_NM = 2.045
 KNEE_ID_CONTROLS_DISCRETE_NM = (0.934, 1.087)
 ROOT_DOFS = 6
@@ -97,21 +117,29 @@ CLASS_RULE = (
     "MuJoCo implicitfast solves (M + dt*D)*qacc = f. The discrete qacc is "
     "(qvel_next - qvel) / dt. mjENBL_INVDISCRETE is set on the inverse copy "
     "when mjtEnableBit has that flag, so mj_inverse matches that step. "
-    "A control tick is discrete-residual, not bucketed, when any leg joint or "
-    "any root dof has |qfrc_inverse - (qfrc_actuator + qfrc_passive)| > 1e-3 Nm. "
-    "Exactly 1e-3 stays inside. Root rows are the same residual on the free joint. "
-    "The band 0.05 + dt*(0.08 + kv)*|qacc| and its 0.15 Nm cap are logged for "
-    "comparison and do not decide the bucket. "
+    "The match residual is |qfrc_inverse - qfrc_actuator| on each leg joint and "
+    "each root dof. Exactly 1e-3 stays inside the Prefer FAIL target, and "
+    "exactly 1e-2 stays inside the bucket. A tick over 1e-3 Nm is a Prefer FAIL "
+    "count. A tick is bucketed only when every one of those residuals is "
+    "<= 1e-2 Nm. A tick over 1e-2 Nm is residual over 1e-2, not bucketed. "
+    "The passive-inclusive residual and the band 0.05 + dt*(0.08 + kv)*|qacc| "
+    "with its 0.15 Nm cap stay as comparison columns. "
     "The band does not relax the signed applied bar: |ask| > 2.33 fails that "
-    "bar on every control tick. "
-    "The three buckets use substeps on ticks that meet the 1e-3 residual. "
+    "bar on every control tick. Limiter fraction must be 0. Armature stays 0.01. "
+    "A joint with |applied| >= 2.45 Nm is clamped, unclassifiable. The "
+    "realised-motion inverse returns the clamp, so that sample is not put in "
+    "the three buckets. "
+    "On bucketed, unclamped substeps: "
     "controller fail: |qfrc_inverse| <= 2.33 and |ask| > 2.33. "
     "unsourced-armature candidate: |qfrc_inverse| > 2.33 and "
     "|qfrc_inverse - 0.01*qacc| <= 2.33. Armature 0.01 has no Hiwonder source; "
     "this bucket is not a physics candidate. "
     "physics candidate: |qfrc_inverse - 0.01*qacc| > 2.33, named by the largest "
     "of impact/contact, link inertia, and gravity. "
-    "An inverse sample whose absolute value is exactly 2.450 Nm is a column bug."
+    "An inverse sample whose absolute value is exactly 2.450 Nm is a column bug. "
+    "The planned-motion τ_req is a separate inverse of the walker's reference. "
+    "A joint that clears 2.33 only after subtracting armature·q̈_ref is an "
+    "unsourced-armature candidate, not a pass."
 )
 INTEGRATOR_NAME = {
     int(mj.mjtIntegrator.mjINT_EULER): "Euler",
@@ -734,6 +762,464 @@ def _solver_report(model: mj.MjModel) -> dict[str, object]:
     return report
 
 
+def _plan_phase(stage: str) -> str:
+    """Map the walker's preview stage onto start, walk, or stop."""
+    if stage == "walk":
+        return "walk"
+    if stage == "stop":
+        return "stop"
+    return "start"
+
+
+def _plan_support(swing: str, stance: str) -> tuple[str, str]:
+    """Single support when a swing side is set. Stance is ``l`` or ``r``."""
+    if swing in ("L", "R"):
+        side = stance.lower() if stance in ("L", "R") else ("r" if swing == "L" else "l")
+        return "ss", side
+    side = stance.lower() if stance in ("L", "R") else ""
+    return "ds", side
+
+
+def _skew(v: np.ndarray) -> np.ndarray:
+    x, y, z = (float(v[0]), float(v[1]), float(v[2]))
+    return np.array(
+        [[0.0, -z, y], [z, 0.0, -x], [-y, x, 0.0]],
+        dtype=np.float64,
+    )
+
+
+def _sole_point(model: mj.MjModel, data: mj.MjData, side: str) -> np.ndarray:
+    """World point at the bottom centre of the foot contact box."""
+    gid = int(mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, f"{side}_foot_contact"))
+    if gid < 0:
+        raise RuntimeError(f"missing {side}_foot_contact")
+    centre = np.array(data.geom_xpos[gid], dtype=np.float64)
+    rot = np.array(data.geom_xmat[gid], dtype=np.float64).reshape(3, 3)
+    half_z = float(model.geom_size[gid, 2])
+    return centre - rot[:, 2] * half_z
+
+
+def _body_point(model: mj.MjModel, data: mj.MjData, name: str) -> tuple[int, np.ndarray]:
+    bid = int(mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, name))
+    if bid < 0:
+        raise RuntimeError(f"missing body {name}")
+    return bid, np.array(data.xpos[bid], dtype=np.float64)
+
+
+def _jac_wrench(
+    model: mj.MjModel,
+    data: mj.MjData,
+    point: np.ndarray,
+    body_id: int,
+    force: np.ndarray,
+    torque: np.ndarray,
+) -> np.ndarray:
+    """Generalized force of a world wrench applied to ``body_id`` at ``point``."""
+    jacp = np.zeros((3, model.nv), dtype=np.float64)
+    jacr = np.zeros((3, model.nv), dtype=np.float64)
+    mj.mj_jac(model, data, jacp, jacr, np.asarray(point, dtype=np.float64), int(body_id))
+    return jacp.T @ np.asarray(force, dtype=np.float64) + jacr.T @ np.asarray(torque, dtype=np.float64)
+
+
+def _linear_foot_split(
+    p_l: np.ndarray,
+    p_r: np.ndarray,
+    p_zmp: np.ndarray,
+    force: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Share ``force`` by the ZMP's position along the foot-to-foot line.
+
+    The share is clamped to the segment. A ZMP past either foot puts the
+    whole wrench on that foot. The return is ``(f_l, f_r, unclamped s on R)``.
+    """
+    line = p_r[:2] - p_l[:2]
+    denom = float(line @ line)
+    if denom < 1e-12:
+        s = 0.5
+    else:
+        s = float((p_zmp[:2] - p_l[:2]) @ line) / denom
+    s_clip = min(1.0, max(0.0, s))
+    f_r = s_clip * force
+    f_l = (1.0 - s_clip) * force
+    return f_l, f_r, s
+
+
+def _min_norm_ankle_split(
+    p_l: np.ndarray,
+    p_r: np.ndarray,
+    a_l: np.ndarray,
+    a_r: np.ndarray,
+    p_zmp: np.ndarray,
+    force: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Split a ZMP wrench by minimum ankle-torque norm.
+
+    Variables are the two foot forces and the two foot moments. The wrench
+    sum equals ``force`` acting at ``p_zmp`` with zero moment about that
+    point. Among those splits, ankle moments
+    ``m + (c − a) × f`` have minimum norm. A tiny wrench penalty keeps the
+    solution unique when several splits share that minimum.
+    """
+    # x = [f_l, m_l, f_r, m_r], 12
+    eye3 = np.eye(3, dtype=np.float64)
+    z_l = _skew(p_l - p_zmp)
+    z_r = _skew(p_r - p_zmp)
+    # Moment about the ZMP: m + (c - p_zmp) × f
+    c_mat = np.zeros((6, 12), dtype=np.float64)
+    c_mat[0:3, 0:3] = eye3
+    c_mat[0:3, 6:9] = eye3
+    c_mat[3:6, 0:3] = z_l
+    c_mat[3:6, 3:6] = eye3
+    c_mat[3:6, 6:9] = z_r
+    c_mat[3:6, 9:12] = eye3
+    b = np.zeros(6, dtype=np.float64)
+    b[0:3] = force
+    # Ankle moment rows.
+    al = _skew(p_l - a_l)
+    ar = _skew(p_r - a_r)
+    a_mat = np.zeros((6, 12), dtype=np.float64)
+    a_mat[0:3, 0:3] = al
+    a_mat[0:3, 3:6] = eye3
+    a_mat[3:6, 6:9] = ar
+    a_mat[3:6, 9:12] = eye3
+    eps = 1e-8
+    hess = 2.0 * (a_mat.T @ a_mat + eps * np.eye(12, dtype=np.float64))
+    kkt = np.zeros((18, 18), dtype=np.float64)
+    kkt[0:12, 0:12] = hess
+    kkt[0:12, 12:18] = c_mat.T
+    kkt[12:18, 0:12] = c_mat
+    rhs = np.zeros(18, dtype=np.float64)
+    rhs[12:18] = b
+    try:
+        sol = np.linalg.solve(kkt, rhs)
+    except np.linalg.LinAlgError:
+        sol = np.linalg.lstsq(kkt, rhs, rcond=None)[0]
+    return sol[0:3], sol[3:6], sol[6:9], sol[9:12]
+
+
+def _contact_copy(model: mj.MjModel) -> mj.MjModel:
+    """Binary copy with contacts and inverse flags off. The source stays put."""
+    flags = int(model.opt.enableflags)
+    fd, path = tempfile.mkstemp(prefix="a5-plan-", suffix=".mjb")
+    os.close(fd)
+    try:
+        mj.mj_saveModel(model, path)
+        copied = mj.MjModel.from_binary_path(path)
+    finally:
+        os.unlink(path)
+    if int(model.opt.enableflags) != flags:
+        raise RuntimeError("the planned-motion copy changed the live enableflags")
+    copied.opt.enableflags = 0
+    copied.geom_contype[:] = 0
+    copied.geom_conaffinity[:] = 0
+    if int(model.opt.enableflags) != flags:
+        raise RuntimeError("the planned-motion copy shares enableflags with the live model")
+    return copied
+
+
+def _planned_tau(
+    model: mj.MjModel,
+    samples: list[dict[str, object]],
+    qadr: dict[str, int],
+    dofadr: dict[str, int],
+) -> dict[str, object]:
+    """τ_req from the walker's reference, contacts replaced by the ZMP wrench.
+
+    ``samples`` are one control tick each. q_ref is the walker's q_des.
+    q̇_ref and q̈_ref are backward differences at 8 ms. The floating base is
+    placed so the planned stance foot stays on its foothold and the sole
+    is on z = 0. Double support reports the linear foot-line split and the
+    min-norm ankle split. Single support has one wrench, so the spread is 0.
+    """
+    empty = {
+        "phases": {name: {} for name in PLAN_PHASES},
+        "candidates": [],
+        "root_residual_max_nm": None,
+        "n_ticks": 0,
+    }
+    if len(samples) < 3:
+        return empty
+    plan = _contact_copy(model)
+    data = mj.MjData(plan)
+    nv = int(plan.nv)
+    dt = 0.008
+    mass = float(np.sum(plan.body_mass))
+    anchor: dict[str, np.ndarray] = {}
+    held = {"support": "", "stance": ""}
+    poses: list[np.ndarray] = []
+    soles: list[dict[str, np.ndarray]] = []
+    ankles: list[dict[str, np.ndarray]] = []
+    ankle_ids: dict[str, int] = {}
+    foot_ids: dict[str, int] = {}
+    for side, body in (("l", "l_ank_roll_link"), ("r", "r_ank_roll_link")):
+        ankle_ids[side], _ = _body_point(plan, data, body)
+        gid = int(mj.mj_name2id(plan, mj.mjtObj.mjOBJ_GEOM, f"{side}_foot_contact"))
+        foot_ids[side] = int(plan.geom_bodyid[gid])
+
+    def _place(q_map: dict[str, float], support: str, stance: str) -> None:
+        data.qpos[:] = plan.qpos0
+        data.qvel[:] = 0.0
+        data.qpos[3:7] = np.array([1.0, 0.0, 0.0, 0.0])
+        for name, value in q_map.items():
+            data.qpos[qadr[name]] = float(value)
+        data.qpos[2] = 0.30
+        mj.mj_forward(plan, data)
+        sole = {side: _sole_point(plan, data, side) for side in ("l", "r")}
+        if support == "ss" and stance in sole:
+            drop = float(sole[stance][2])
+        else:
+            drop = 0.5 * (float(sole["l"][2]) + float(sole["r"][2]))
+        data.qpos[2] -= drop
+        mj.mj_forward(plan, data)
+        sole = {side: _sole_point(plan, data, side) for side in ("l", "r")}
+
+        def _shift(delta_xy: np.ndarray) -> None:
+            data.qpos[0] += float(delta_xy[0])
+            data.qpos[1] += float(delta_xy[1])
+            mj.mj_forward(plan, data)
+
+        def _soles() -> dict[str, np.ndarray]:
+            return {side: _sole_point(plan, data, side) for side in ("l", "r")}
+
+        # A foot that was swinging keeps its old foothold until it lands.
+        # The landing tick aligns the stance foot, then records the new
+        # foothold once. Later double-support ticks do not move either anchor.
+        prev_sup = held["support"]
+        prev_st = held["stance"]
+        if support == "ss" and stance in ("l", "r"):
+            if stance not in anchor:
+                anchor[stance] = sole[stance][:2].copy()
+            _shift(anchor[stance] - sole[stance][:2])
+        else:
+            landing = ""
+            if prev_sup == "ss" and prev_st in ("l", "r"):
+                landing = "r" if prev_st == "l" else "l"
+            if "l" not in anchor and "r" not in anchor:
+                anchor["l"] = sole["l"][:2].copy()
+                anchor["r"] = sole["r"][:2].copy()
+            elif landing and prev_st in anchor:
+                _shift(anchor[prev_st] - sole[prev_st][:2])
+                sole = _soles()
+                anchor[landing] = sole[landing][:2].copy()
+            elif "l" in anchor and "r" not in anchor:
+                _shift(anchor["l"] - sole["l"][:2])
+                sole = _soles()
+                anchor["r"] = sole["r"][:2].copy()
+            elif "r" in anchor and "l" not in anchor:
+                _shift(anchor["r"] - sole["r"][:2])
+                sole = _soles()
+                anchor["l"] = sole["l"][:2].copy()
+            else:
+                mid_now = 0.5 * (sole["l"][:2] + sole["r"][:2])
+                mid_anc = 0.5 * (anchor["l"] + anchor["r"])
+                _shift(mid_anc - mid_now)
+        sole = _soles()
+        held["support"] = support
+        held["stance"] = stance if stance in ("l", "r") else ""
+        poses.append(np.array(data.qpos, dtype=np.float64, copy=True))
+        soles.append(sole)
+        ankles.append({
+            side: _body_point(plan, data, f"{side}_ank_roll_link")[1] for side in ("l", "r")
+        })
+
+    used: list[dict[str, object]] = []
+    for sample in samples:
+        q_map = sample["q"]
+        if not isinstance(q_map, dict):
+            continue
+        _place(q_map, str(sample["support"]), str(sample["stance"]))
+        used.append(sample)
+    samples = used
+    n = len(poses)
+    if n < 3 or n != len(samples):
+        return empty
+    qvel = np.zeros((n, nv), dtype=np.float64)
+    qacc = np.zeros((n, nv), dtype=np.float64)
+
+    def _dt(k: int) -> float:
+        span = float(samples[k]["t"]) - float(samples[k - 1]["t"])
+        return span if span > 1e-9 else dt
+
+    for k in range(1, n):
+        step = _dt(k)
+        qvel[k, 0:3] = (poses[k][0:3] - poses[k - 1][0:3]) / step
+        for name, adr in dofadr.items():
+            qvel[k, adr] = (float(poses[k][qadr[name]]) - float(poses[k - 1][qadr[name]])) / step
+    for k in range(2, n):
+        qacc[k] = (qvel[k] - qvel[k - 1]) / _dt(k)
+    # Worst |τ| per phase, per joint. Both splits are stored at that tick.
+    worst: dict[str, dict[str, dict[str, float | str]]] = {name: {} for name in PLAN_PHASES}
+    root_max = 0.0
+    force_max = 0.0
+    qacc_max = 0.0
+    spike: dict[str, object] = {"qacc": 0.0}
+    phase_peaks: dict[str, list[float]] = {name: [] for name in PLAN_PHASES}
+    dof_name = {int(adr): name for name, adr in dofadr.items()}
+    candidate_best: dict[tuple[str, str, str], dict[str, object]] = {}
+    candidate_n = 0
+    arm = np.asarray(plan.dof_armature, dtype=np.float64)
+    for k in range(2, n):
+        sample = samples[k]
+        data.qpos[:] = poses[k]
+        data.qvel[:] = qvel[k]
+        data.qacc[:] = qacc[k]
+        mj.mj_inverse(plan, data)
+        ident = np.array(data.qfrc_inverse, dtype=np.float64, copy=True)
+        # The inverse already carries the reference's required root force.
+        # Aim that force through the planned ZMP so gravity is not applied twice.
+        force = np.array(ident[0:3], dtype=np.float64, copy=True)
+        mj.mj_fwdPosition(plan, data)
+        p_l = soles[k]["l"]
+        p_r = soles[k]["r"]
+        com = np.array(data.subtree_com[int(mj.mj_name2id(plan, mj.mjtObj.mjOBJ_BODY, "body_link"))], dtype=np.float64)
+        zmp_y = float(sample["zmp_y"])
+        p_zmp = np.array([float(com[0]), zmp_y, 0.0], dtype=np.float64)
+        support = str(sample["support"])
+        stance = str(sample["stance"])
+        zero = np.zeros(3, dtype=np.float64)
+        if support == "ss" and stance in ("l", "r"):
+            # One foot. Both labels carry the same wrench, so the spread is 0.
+            f_lin = {stance: force, "l" if stance == "r" else "r": zero}
+            m_lin = {"l": zero, "r": zero}
+            # Apply the stance force at the planned ZMP, on the stance foot body.
+            f_min = f_lin
+            m_min = m_lin
+            point = {"l": p_l, "r": p_r}
+            point[stance] = p_zmp
+            s_right = 1.0 if stance == "r" else 0.0
+        else:
+            f_l, f_r, s_right = _linear_foot_split(p_l, p_r, p_zmp, force)
+            f_lin = {"l": f_l, "r": f_r}
+            m_lin = {"l": zero, "r": zero}
+            a_l = ankles[k]["l"]
+            a_r = ankles[k]["r"]
+            mf_l, mm_l, mf_r, mm_r = _min_norm_ankle_split(p_l, p_r, a_l, a_r, p_zmp, force)
+            f_min = {"l": mf_l, "r": mf_r}
+            m_min = {"l": mm_l, "r": mm_r}
+            point = {"l": p_l, "r": p_r}
+        gen_lin = np.zeros(nv, dtype=np.float64)
+        gen_min = np.zeros(nv, dtype=np.float64)
+        for side in ("l", "r"):
+            gen_lin += _jac_wrench(plan, data, point[side] if support == "ss" and side == stance else soles[k][side], foot_ids[side], f_lin[side], m_lin[side])
+            if support == "ss":
+                gen_min += _jac_wrench(
+                    plan, data,
+                    p_zmp if side == stance else soles[k][side],
+                    foot_ids[side], f_min[side], m_min[side],
+                )
+            else:
+                gen_min += _jac_wrench(plan, data, soles[k][side], foot_ids[side], f_min[side], m_min[side])
+        tau_lin = ident - gen_lin
+        tau_min = ident - gen_min
+        force_max = max(force_max, float(np.max(np.abs(force))))
+        peak_i = int(np.argmax(np.abs(qacc[k])))
+        peak = abs(float(qacc[k][peak_i]))
+        qacc_max = max(qacc_max, peak)
+        if peak > float(spike["qacc"]):
+            dq = {
+                name: float(poses[k][qadr[name]] - poses[k - 1][qadr[name]])
+                for name in dofadr
+            }
+            spike = {
+                "qacc": peak,
+                "dof": "root" if peak_i < ROOT_DOFS else dof_name.get(peak_i, str(peak_i)),
+                "t_s": float(sample["t"]),
+                "phase": str(sample["phase"]),
+                "support": support,
+                "root_dxy_m": [
+                    float(poses[k][0] - poses[k - 1][0]),
+                    float(poses[k][1] - poses[k - 1][1]),
+                ],
+                "root_dz_m": float(poses[k][2] - poses[k - 1][2]),
+                "joint_dq_rad": dq,
+                "force_n": [float(v) for v in force],
+            }
+        root_max = max(root_max, float(np.max(np.abs(tau_lin[:ROOT_DOFS]))), float(np.max(np.abs(tau_min[:ROOT_DOFS]))))
+        phase = str(sample["phase"])
+        if phase in phase_peaks:
+            phase_peaks[phase].append(max(
+                max(abs(float(tau_lin[adr])), abs(float(tau_min[adr])))
+                for adr in dofadr.values()
+            ))
+        if phase not in worst:
+            continue
+        qdd = qacc[k]
+        for name, adr in dofadr.items():
+            with_lin = float(tau_lin[adr])
+            with_min = float(tau_min[adr])
+            strip = float(arm[adr]) * float(qdd[adr])
+            no_lin = with_lin - strip
+            no_min = with_min - strip
+            spread = abs(with_lin - with_min)
+            rank = max(abs(with_lin), abs(with_min))
+            for label, with_nm, no_nm in (
+                ("linear", with_lin, no_lin),
+                ("min-norm", with_min, no_min),
+            ):
+                if abs(with_nm) > ASK_BAR + 1e-9 and abs(no_nm) <= ASK_BAR + 1e-9:
+                    candidate_n += 1
+                    key = (name, phase, label)
+                    prev_c = candidate_best.get(key)
+                    if prev_c is None or abs(with_nm) > abs(float(prev_c["tau_nm"])):
+                        candidate_best[key] = {
+                            "joint": name,
+                            "t_s": float(sample["t"]),
+                            "phase": phase,
+                            "split": label,
+                            "tau_nm": with_nm,
+                            "tau_no_armature_nm": no_nm,
+                            "class": "unsourced-armature candidate",
+                        }
+            prev = worst[phase].get(name)
+            if prev is not None and float(prev["rank"]) >= rank:
+                continue
+            row = {
+                "joint": name,
+                "t_s": float(sample["t"]),
+                "phase": phase,
+                "support": support,
+                "tau_linear_nm": with_lin,
+                "tau_linear_no_armature_nm": no_lin,
+                "tau_minnorm_nm": with_min,
+                "tau_minnorm_no_armature_nm": no_min,
+                "spread_nm": spread,
+                "armature_qdd_nm": strip,
+                "zmp_y_m": zmp_y,
+                "right_share": float(s_right),
+                "rank": rank,
+            }
+            worst[phase][name] = row
+    for phase in PLAN_PHASES:
+        for row in worst[phase].values():
+            row.pop("rank", None)
+    return {
+        "phases": worst,
+        "candidates": list(candidate_best.values()),
+        "n_candidate_samples": candidate_n,
+        "root_residual_max_nm": root_max,
+        "force_abs_max_n": force_max,
+        "qacc_abs_max": qacc_max,
+        "qacc_spike": spike,
+        "phase_median_abs_nm": {
+            name: (float(np.median(np.asarray(vals, dtype=np.float64))) if vals else None)
+            for name, vals in phase_peaks.items()
+        },
+        "root_x_m": (
+            [min(float(p[0]) for p in poses), max(float(p[0]) for p in poses)]
+            if poses else [None, None]
+        ),
+        "n_ticks": n,
+        "mass_kg": mass,
+        "note": (
+            "τ_req is mj_inverse of the walker's q_des, with qvel and qacc "
+            "the 8 ms differences, contacts off, and the root force applied "
+            "through the planned ZMP. Double support reports the foot-line "
+            "split and the min-norm ankle split. clears-only-without-armature "
+            "is an unsourced-armature candidate, not a pass."
+        ),
+    }
+
+
 def score_cell(
     period_s: float,
     vx: float,
@@ -812,6 +1298,26 @@ def score_cell(
     residual_fail_substeps = 0
     discrete_fail_ticks = 0
     discrete_fail_substeps = 0
+    match_over_fail_ticks = 0
+    match_over_fail_substeps = 0
+    leg_over_fail_ticks = 0
+    root_over_fail_ticks = 0
+    match_over_bucket_ticks = 0
+    match_over_bucket_substeps = 0
+    match_residual_max = 0.0
+    leg_match_max = 0.0
+    root_match_max = 0.0
+    plan_samples: list[dict[str, object]] = []
+    zmp_calls: list[float] = []
+    preview_step = zmp_preview.ZmpPreview.step
+
+    def _preview_step(self: object, future: object) -> float:
+        arr = np.asarray(future, dtype=np.float64).reshape(-1)
+        if arr.size:
+            zmp_calls.append(float(arr[0]))
+        return preview_step(self, future)
+
+    zmp_preview.ZmpPreview.step = _preview_step  # type: ignore[method-assign]
     band_max = 0.0
     band_cap_ticks = 0
     band_and_residual_ticks = 0
@@ -858,6 +1364,10 @@ def score_cell(
         name: int(session.model.jnt_dofadr[mj.mj_name2id(session.model, mj.mjtObj.mjOBJ_JOINT, name)])
         for name in sws.LEG_JOINTS
     }
+    qadr = {
+        name: int(session.model.jnt_qposadr[mj.mj_name2id(session.model, mj.mjtObj.mjOBJ_JOINT, name)])
+        for name in sws.LEG_JOINTS
+    }
     ankle = {
         "l": int(mj.mj_name2id(session.model, mj.mjtObj.mjOBJ_BODY, "l_ank_pitch_link")),
         "r": int(mj.mj_name2id(session.model, mj.mjtObj.mjOBJ_BODY, "r_ank_pitch_link")),
@@ -897,370 +1407,447 @@ def score_cell(
     stop_sent = False
     ctrl_dt = float(session.ctrl_dt)
     vx_cmd = float(vx)
-    while float(session.data.time) < t_end - 1e-12:
-        now = float(session.data.time)
-        if now + 1e-12 < stand_s:
-            mode = "stand"
-        elif now + 1e-12 < t_stop:
-            mode = "move"
-            if last_send < 0.0 or (now - last_send) >= (sws.steer_walk.VEL_RESEND_S - 1e-12):
-                session.bus.vel(vx_cmd, 0.0, now)
-                last_send = now
-        else:
-            mode = "stop"
-            if not stop_sent:
-                session.bus.stop(now)
-                stop_sent = True
-        ctrl_before = np.array(session.data.ctrl, dtype=np.float64, copy=True)
-        n_ask = len(asks)
-        _CAPTURE.clear()
-        _CAPTURE_ON = True
-        try:
-            session.step()
-        finally:
-            _CAPTURE_ON = False
-        shots = list(_CAPTURE)
-        new_writes = writes[n_ask:]
-        new_asks = asks[n_ask:]
-        stage_name = str(getattr(walker, "preview_stage", "unknown"))
-        for sample in new_asks:
-            sample.stage = stage_name
-        signed_tick, sum_tick, qvel_tick, qvel_sum_tick, _, _ = sws._tick_pair(
-            new_asks, sws.LEG_JOINTS,
-        )
-        plant_new: list[sws.AskSample] = []
-        tick_clipped = False
-        over_from = len(plant_overs)
-        over_shots: dict[int, list[tuple[dict[str, object], float]]] = {}
-        for si, shot in enumerate(shots):
-            raw_ctrl = shot["ctrl"]
-            qpos = shot["qpos"]
-            qvel = shot["qvel"]
-            t_step = float(shot["time"])
-            for leg in legs:
-                idx = int(leg["idx"])
-                raw = float(raw_ctrl[idx])
-                used = _plant_ctrl(session.model, idx, raw)
-                q = float(qpos[int(leg["qadr"])])
-                omega = float(qvel[int(leg["dof"])])
-                kp = float(leg["kp"])
-                kv = float(leg["kv"])
-                kp_e = kp * (used - q)
-                kv_qdot = kv * omega
-                ask = kp_e - kv_qdot
-                joint = str(leg["joint"])
-                clipped = _raw_outside(raw)
-                max_step_abs = max(max_step_abs, abs(raw))
-                plant_substeps += 1
-                if clipped:
-                    tick_clipped = True
-                    clip_substeps += 1
-                plant_new.append(sws.AskSample(
-                    t_s=t_step,
-                    joint=joint,
-                    signed_nm=float(ask),
-                    sum_nm=float(abs(kp_e) + abs(kv_qdot)),
-                    ask_nm=float(ask),
-                    stage=stage_name,
-                    qvel_abs=abs(omega),
-                ))
-                history = ctrl_hist[joint]
-                history.append(used)
-                if abs(ask) > ASK_BAR + 1e-9:
-                    d2 = None
-                    if len(history) >= 3:
-                        d2 = history[-1] - 2.0 * history[-2] + history[-3]
-                    over = PlantOver(
+    last_q: dict[str, float] | None = None
+    try:
+        while float(session.data.time) < t_end - 1e-12:
+            now = float(session.data.time)
+            zmp_mark = len(zmp_calls)
+            if now + 1e-12 < stand_s:
+                mode = "stand"
+            elif now + 1e-12 < t_stop:
+                mode = "move"
+                if last_send < 0.0 or (now - last_send) >= (sws.steer_walk.VEL_RESEND_S - 1e-12):
+                    session.bus.vel(vx_cmd, 0.0, now)
+                    last_send = now
+            else:
+                mode = "stop"
+                if not stop_sent:
+                    session.bus.stop(now)
+                    stop_sent = True
+            ctrl_before = np.array(session.data.ctrl, dtype=np.float64, copy=True)
+            n_ask = len(asks)
+            _CAPTURE.clear()
+            _CAPTURE_ON = True
+            try:
+                session.step()
+            finally:
+                _CAPTURE_ON = False
+            shots = list(_CAPTURE)
+            new_writes = writes[n_ask:]
+            new_asks = asks[n_ask:]
+            stage_name = str(getattr(walker, "preview_stage", "unknown"))
+            for sample in new_asks:
+                sample.stage = stage_name
+            signed_tick, sum_tick, qvel_tick, qvel_sum_tick, _, _ = sws._tick_pair(
+                new_asks, sws.LEG_JOINTS,
+            )
+            plant_new: list[sws.AskSample] = []
+            tick_clipped = False
+            over_from = len(plant_overs)
+            over_shots: dict[int, list[tuple[dict[str, object], float]]] = {}
+            for si, shot in enumerate(shots):
+                raw_ctrl = shot["ctrl"]
+                qpos = shot["qpos"]
+                qvel = shot["qvel"]
+                t_step = float(shot["time"])
+                for leg in legs:
+                    idx = int(leg["idx"])
+                    raw = float(raw_ctrl[idx])
+                    used = _plant_ctrl(session.model, idx, raw)
+                    q = float(qpos[int(leg["qadr"])])
+                    omega = float(qvel[int(leg["dof"])])
+                    kp = float(leg["kp"])
+                    kv = float(leg["kv"])
+                    kp_e = kp * (used - q)
+                    kv_qdot = kv * omega
+                    ask = kp_e - kv_qdot
+                    joint = str(leg["joint"])
+                    clipped = _raw_outside(raw)
+                    max_step_abs = max(max_step_abs, abs(raw))
+                    plant_substeps += 1
+                    if clipped:
+                        tick_clipped = True
+                        clip_substeps += 1
+                    plant_new.append(sws.AskSample(
                         t_s=t_step,
                         joint=joint,
+                        signed_nm=float(ask),
+                        sum_nm=float(abs(kp_e) + abs(kv_qdot)),
                         ask_nm=float(ask),
-                        kp_e=float(kp_e),
-                        kv_qdot=float(kv_qdot),
-                        q=q,
-                        omega=omega,
-                        ctrl_raw=raw,
-                        ctrl_plant=float(used),
-                        clipped=clipped,
-                        d2=d2,
-                        tick=int(tick_box[0]),
-                    )
-                    plant_overs.append(over)
-                    over_shots.setdefault(si, []).append((leg, ask))
-                    setattr(over, "_shot", si)
-        tick_fail = False
-        tick_discrete = False
-        tick_band_max = 0.0
-        fwd0 = 0.0
-        fwd1 = 0.0
-        root_tick = 0.0
-        substep_fail: list[bool] = []
-        substep_discrete: list[bool] = []
-        for shot in shots:
-            ident = shot["id"]
-            actuator = shot["actuator"]
-            passive = shot["passive"]
-            qvel = shot["qvel"]
-            qacc_fwd = shot["qacc_fwd"]
-            fwd = shot["fwdinv"]
-            fwd0 = max(fwd0, abs(float(fwd[0])))
-            fwd1 = max(fwd1, abs(float(fwd[1])))
-            root_slice = slice(root_adr, root_adr + ROOT_DOFS)
-            root_raw = ident[root_slice] - (actuator[root_slice] + passive[root_slice])
-            root_resid = float(np.max(np.abs(root_raw)))
-            root_resid_max = max(root_resid_max, root_resid)
-            root_abs = float(np.max(np.abs(ident[root_slice])))
-            root_tick = max(root_tick, root_abs)
-            root_id_max = max(root_id_max, root_abs)
-            this_fail = False
-            this_discrete = root_resid > DISCRETE_RESIDUAL_NM + 1e-12
-            for leg in legs:
-                adr = int(leg["dof"])
-                joint = str(leg["joint"])
-                raw = float(ident[adr] - (actuator[adr] + passive[adr]))
-                resid = abs(raw)
-                # Band stays on the forward qacc so the comparison column matches
-                # the previous score. The inverse itself used the discrete qacc.
-                offset, band = _implicit_terms(physics_dt, float(leg["kv"]), float(qacc_fwd[adr]))
-                adjusted = raw - offset
-                act_gap = abs(float(ident[adr] - actuator[adr]))
-                speed = abs(float(qvel[adr]))
-                max_id_minus_act = max(max_id_minus_act, act_gap)
-                slope_num += resid * speed
-                slope_den += speed * speed
-                if resid > max_leg_resid:
-                    max_leg_resid = resid
-                    max_leg_resid_joint = joint
-                    max_leg_resid_qvel = speed
-                    max_leg_resid_passive = abs(float(passive[adr]))
-                if resid > raw_peak_abs:
-                    raw_peak_abs = resid
-                    raw_peak_signed = raw
-                    raw_peak_offset = offset
-                    raw_peak_adjusted = adjusted
-                    raw_peak_band = band
-                    raw_peak_joint = joint
-                    raw_peak_t = float(shot["time"])
-                adj_max_abs = max(adj_max_abs, abs(adjusted))
-                offset_max_abs = max(offset_max_abs, abs(offset))
-                tick_band_max = max(tick_band_max, band)
-                band_max = max(band_max, band)
-                if resid > band + 1e-9:
-                    this_fail = True
-                    tick_fail = True
-                gate = resid if use_invdiscrete else abs(adjusted)
-                if gate > DISCRETE_RESIDUAL_NM + 1e-12:
-                    this_discrete = True
-                signed_id = float(ident[adr])
-                if joint.endswith("knee"):
-                    if _rail_exact(signed_id):
-                        knee_rail_count += 1
-                    if abs(signed_id) > knee_id_peak:
-                        knee_id_peak = abs(signed_id)
-                        knee_id_signed = signed_id
-                        knee_id_joint = joint
-                        knee_id_t = float(shot["time"])
-            if this_fail:
-                residual_fail_substeps += 1
-            if this_discrete:
-                discrete_fail_substeps += 1
-                tick_discrete = True
-            substep_fail.append(this_fail)
-            substep_discrete.append(this_discrete)
-        # The 0.15 Nm cap is a comparison count. It does not unbucket the tick.
-        tick_capped = tick_band_max > BAND_CAP_NM + 1e-9
-        if tick_capped:
-            band_cap_ticks += 1
-        if tick_capped and tick_fail:
-            band_and_residual_ticks += 1
-        if not tick_discrete:
-            for shot, failed in zip(shots, substep_discrete):
-                if failed:
-                    continue
-                ident_pass = shot["id"]
+                        stage=stage_name,
+                        qvel_abs=abs(omega),
+                    ))
+                    history = ctrl_hist[joint]
+                    history.append(used)
+                    if abs(ask) > ASK_BAR + 1e-9:
+                        d2 = None
+                        if len(history) >= 3:
+                            d2 = history[-1] - 2.0 * history[-2] + history[-3]
+                        over = PlantOver(
+                            t_s=t_step,
+                            joint=joint,
+                            ask_nm=float(ask),
+                            kp_e=float(kp_e),
+                            kv_qdot=float(kv_qdot),
+                            q=q,
+                            omega=omega,
+                            ctrl_raw=raw,
+                            ctrl_plant=float(used),
+                            clipped=clipped,
+                            d2=d2,
+                            tick=int(tick_box[0]),
+                        )
+                        plant_overs.append(over)
+                        over_shots.setdefault(si, []).append((leg, ask))
+                        setattr(over, "_shot", si)
+            tick_fail = False
+            tick_discrete = False
+            tick_over_fail = False
+            tick_leg_over = False
+            tick_root_over = False
+            tick_over_bucket = False
+            tick_band_max = 0.0
+            fwd0 = 0.0
+            fwd1 = 0.0
+            root_tick = 0.0
+            substep_fail: list[bool] = []
+            substep_discrete: list[bool] = []
+            substep_over_bucket: list[bool] = []
+            for shot in shots:
+                ident = shot["id"]
+                actuator = shot["actuator"]
+                passive = shot["passive"]
+                qvel = shot["qvel"]
+                qacc_fwd = shot["qacc_fwd"]
+                fwd = shot["fwdinv"]
+                fwd0 = max(fwd0, abs(float(fwd[0])))
+                fwd1 = max(fwd1, abs(float(fwd[1])))
+                root_slice = slice(root_adr, root_adr + ROOT_DOFS)
+                root_raw = ident[root_slice] - (actuator[root_slice] + passive[root_slice])
+                root_resid = float(np.max(np.abs(root_raw)))
+                root_resid_max = max(root_resid_max, root_resid)
+                root_abs = float(np.max(np.abs(ident[root_slice])))
+                root_tick = max(root_tick, root_abs)
+                root_id_max = max(root_id_max, root_abs)
+                this_fail = False
+                root_match = ident[root_slice] - actuator[root_slice]
+                root_match_abs = float(np.max(np.abs(root_match)))
+                match_residual_max = max(match_residual_max, root_match_abs)
+                root_match_max = max(root_match_max, root_match_abs)
+                this_over_fail = root_match_abs > DISCRETE_RESIDUAL_NM + 1e-12
+                this_root_over = this_over_fail
+                this_leg_over = False
+                this_over_bucket = root_match_abs > BUCKET_RESIDUAL_NM + 1e-12
+                this_discrete = root_resid > DISCRETE_RESIDUAL_NM + 1e-12
                 for leg in legs:
+                    adr = int(leg["dof"])
                     joint = str(leg["joint"])
-                    if not joint.endswith("knee"):
+                    raw = float(ident[adr] - (actuator[adr] + passive[adr]))
+                    resid = abs(raw)
+                    # Band stays on the forward qacc so the comparison column matches
+                    # the previous score. The inverse itself used the discrete qacc.
+                    offset, band = _implicit_terms(physics_dt, float(leg["kv"]), float(qacc_fwd[adr]))
+                    adjusted = raw - offset
+                    act_gap = abs(float(ident[adr] - actuator[adr]))
+                    speed = abs(float(qvel[adr]))
+                    max_id_minus_act = max(max_id_minus_act, act_gap)
+                    match_residual_max = max(match_residual_max, act_gap)
+                    leg_match_max = max(leg_match_max, act_gap)
+                    if act_gap > DISCRETE_RESIDUAL_NM + 1e-12:
+                        this_over_fail = True
+                        this_leg_over = True
+                    if act_gap > BUCKET_RESIDUAL_NM + 1e-12:
+                        this_over_bucket = True
+                    slope_num += resid * speed
+                    slope_den += speed * speed
+                    if resid > max_leg_resid:
+                        max_leg_resid = resid
+                        max_leg_resid_joint = joint
+                        max_leg_resid_qvel = speed
+                        max_leg_resid_passive = abs(float(passive[adr]))
+                    if resid > raw_peak_abs:
+                        raw_peak_abs = resid
+                        raw_peak_signed = raw
+                        raw_peak_offset = offset
+                        raw_peak_adjusted = adjusted
+                        raw_peak_band = band
+                        raw_peak_joint = joint
+                        raw_peak_t = float(shot["time"])
+                    adj_max_abs = max(adj_max_abs, abs(adjusted))
+                    offset_max_abs = max(offset_max_abs, abs(offset))
+                    tick_band_max = max(tick_band_max, band)
+                    band_max = max(band_max, band)
+                    if resid > band + 1e-9:
+                        this_fail = True
+                        tick_fail = True
+                    gate = resid if use_invdiscrete else abs(adjusted)
+                    if gate > DISCRETE_RESIDUAL_NM + 1e-12:
+                        this_discrete = True
+                    signed_id = float(ident[adr])
+                    if joint.endswith("knee"):
+                        if _rail_exact(signed_id):
+                            knee_rail_count += 1
+                        if abs(signed_id) > knee_id_peak:
+                            knee_id_peak = abs(signed_id)
+                            knee_id_signed = signed_id
+                            knee_id_joint = joint
+                            knee_id_t = float(shot["time"])
+                if this_fail:
+                    residual_fail_substeps += 1
+                if this_discrete:
+                    discrete_fail_substeps += 1
+                    tick_discrete = True
+                if this_over_fail:
+                    match_over_fail_substeps += 1
+                    tick_over_fail = True
+                if this_leg_over:
+                    tick_leg_over = True
+                if this_root_over:
+                    tick_root_over = True
+                if this_over_bucket:
+                    match_over_bucket_substeps += 1
+                    tick_over_bucket = True
+                substep_fail.append(this_fail)
+                substep_discrete.append(this_discrete)
+                substep_over_bucket.append(this_over_bucket)
+            # The 0.15 Nm cap is a comparison count. It does not unbucket the tick.
+            tick_capped = tick_band_max > BAND_CAP_NM + 1e-9
+            if tick_capped:
+                band_cap_ticks += 1
+            if tick_capped and tick_fail:
+                band_and_residual_ticks += 1
+            if not tick_discrete:
+                for shot, failed in zip(shots, substep_discrete):
+                    if failed:
                         continue
-                    signed_id = float(ident_pass[int(leg["dof"])])
-                    if abs(signed_id) > knee_id_pass_peak:
-                        knee_id_pass_peak = abs(signed_id)
-                        knee_id_pass_signed = signed_id
-                        knee_id_pass_joint = joint
-                        knee_id_pass_t = float(shot["time"])
-        for over in plant_overs[over_from:]:
-            si = getattr(over, "_shot", None)
-            setattr(over, "_sub_fail", True if not isinstance(si, int) else substep_fail[si])
-            setattr(over, "_discrete_fail", tick_discrete)
-            setattr(over, "_band_cap", tick_capped)
-            setattr(over, "_tick_band_max", tick_band_max)
-        if tick_fail:
-            residual_fail_ticks += 1
-        if tick_discrete:
-            discrete_fail_ticks += 1
-        tick_residual_fail.append(tick_fail)
-        fwdinv_ticks.append([fwd0, fwd1])
-        root_id_ticks.append(root_tick)
-        limited = any(
-            rec.limiter_bound and rec.joint in sws.LEG_JOINTS for rec in new_writes
-        )
-        if mode == "move":
-            goal_ctrl = {rec.joint: float(rec.ctrl) for rec in new_writes if rec.joint in move_idx}
-            for joint, idx in move_idx.items():
-                if joint not in goal_ctrl:
-                    continue
-                if abs((goal_ctrl[joint] - float(ctrl_before[idx])) * slew_frac) > slew_rad + 1e-9:
-                    limited = True
-                    break
-        if limited:
-            limiter_ticks += 1
-        for rec in new_writes:
-            if not rec.raw_ok or rec.ctrl_raw is None:
-                raw_unavailable = True
-            elif _raw_outside(rec.ctrl_raw):
-                tick_clipped = True
-            if rec.raw_ok and rec.ctrl_raw is not None:
-                max_writer_abs = max(max_writer_abs, abs(float(rec.ctrl_raw)))
-        if tick_clipped:
-            clip_ticks += 1
-        _, _, _, _, ask_tick, qvel_ask_tick = sws._tick_pair(plant_new, sws.LEG_JOINTS)
-        plant_asks.extend(plant_new)
-        pair_signed.append(signed_tick)
-        pair_sum.append(sum_tick)
-        pair_qvel.append(qvel_tick)
-        pair_qvel_sum.append(qvel_sum_tick)
-        pair_ask.append(ask_tick)
-        pair_qvel_ask.append(qvel_ask_tick)
-        if walker.op3.y_swap_cmd != 0.0:
-            raise RuntimeError("y_swap_cmd changed")
-        if session.bus.fault and session.bus.fault_reason and session.bus.fault_reason not in reasons:
-            reasons.append(session.bus.fault_reason)
-        tick = sws.sample_zmp(session, walker)
-        t_post = float(session.data.time)
-        phases[tick.phase].add(tick, t_post)
-        names, q = sws.actuated_q(session.model, session.data)
-        if not joint_names:
-            joint_names = names
-        com_rows.append(np.asarray(session.data.subtree_com[walker.bid_body], dtype=np.float64).copy())
-        q_rows.append(q)
-        times.append(t_post)
-        pre_times.append(now)
-        grounds = sws._ground_gids(session, walker)
-        n_l = sws._contact_count(session.data, int(walker.gid["L"]), grounds)
-        n_r = sws._contact_count(session.data, int(walker.gid["R"]), grounds)
-        x_l, y_l, z_l, roll_l, pitch_l = sws._foot_box_sample(
-            session.model, session.data, int(walker.gid["L"]), None,
-        )
-        x_r, y_r, z_r, roll_r, pitch_r = sws._foot_box_sample(
-            session.model, session.data, int(walker.gid["R"]), None,
-        )
-        roll, pitch, up_z = sws._trunk_angles(session.data, int(walker.bid_body))
-        rot = np.asarray(session.data.xmat[int(walker.bid_body)], dtype=np.float64).reshape(3, 3)
-        origin = np.asarray(session.data.xpos[int(walker.bid_body)], dtype=np.float64)
-        qv = session.data.qvel
-        qvel_abs_rows.append([abs(float(qv[dof[name]])) for name in sws.LEG_JOINTS])
-        stage_ticks.append(stage_name)
-        trunk_x.append(float(origin[0]))
-        trunk_y.append(float(origin[1]))
-        trunk_yaw.append(math.atan2(float(rot[1, 0]), float(rot[0, 0])))
-        zmp_act, com_act = sws._actual_margins(session, walker, grounds, n_l, n_r)
-        step_cols["t"].append(t_post)
-        step_cols["x_l"].append(x_l)
-        step_cols["x_r"].append(x_r)
-        step_cols["y_l"].append(y_l)
-        step_cols["y_r"].append(y_r)
-        step_cols["n_l"].append(n_l)
-        step_cols["n_r"].append(n_r)
-        step_cols["z_l"].append(z_l)
-        step_cols["z_r"].append(z_r)
-        step_cols["declared"].append(tick.phase)
-        step_cols["mode"].append(mode)
-        step_cols["roll"].append(roll)
-        step_cols["pitch"].append(pitch)
-        step_cols["roll_l"].append(roll_l)
-        step_cols["pitch_l"].append(pitch_l)
-        step_cols["roll_r"].append(roll_r)
-        step_cols["pitch_r"].append(pitch_r)
-        step_cols["up_z"].append(up_z)
-        step_cols["zmp_act"].append(zmp_act)
-        step_cols["com_act"].append(com_act)
-        step_cols["cop_l"].append(sws._foot_cop_margin(session, walker, "L", grounds))
-        step_cols["cop_r"].append(sws._foot_cop_margin(session, walker, "R", grounds))
-        q_stand_rows.append(sws._leg_q(session.model, session.data))
-        tick_contact.append({
-            "t": t_post,
-            "t_pre": now,
-            "mode": mode,
-            "n_l": n_l,
-            "n_r": n_r,
-        })
-        if stand_s - 1e-12 <= now < t_stop - 1e-12:
-            body_vx_sum += float(session._body_forward_speed())
-            body_vx_n += 1
-        if over_shots:
-            split_cache: dict[int, dict[str, np.ndarray]] = {}
-            cop_cache: dict[tuple[int, str], tuple[float | None, float | None]] = {}
+                    ident_pass = shot["id"]
+                    for leg in legs:
+                        joint = str(leg["joint"])
+                        if not joint.endswith("knee"):
+                            continue
+                        signed_id = float(ident_pass[int(leg["dof"])])
+                        if abs(signed_id) > knee_id_pass_peak:
+                            knee_id_pass_peak = abs(signed_id)
+                            knee_id_pass_signed = signed_id
+                            knee_id_pass_joint = joint
+                            knee_id_pass_t = float(shot["time"])
             for over in plant_overs[over_from:]:
                 si = getattr(over, "_shot", None)
-                if not isinstance(si, int) or si not in over_shots:
-                    continue
-                if si not in split_cache:
-                    split_cache[si] = _inverse_split(session.model, scratch, grav_data, shots[si])
-                split = split_cache[si]
-                adr = dof[over.joint]
-                scratch.qpos[:] = shots[si]["qpos"]
-                scratch.qvel[:] = shots[si]["qvel"]
-                scratch.qacc[:] = split["qacc"]
-                mj.mj_fwdPosition(session.model, scratch)
-                side = "l" if over.joint.startswith("l_") else "r"
-                key = (si, side)
-                if key not in cop_cache:
-                    cop_cache[key] = _cop_mm(
-                        session.model, scratch, foot[side], floor_gid, ankle[side],
-                    )
-                cop_x, cop_y = cop_cache[key]
-                parts = {
-                    "armature·q̈": float(split["arm_001"][adr]),
-                    "impact/contact": float(split["contact"][adr]),
-                    "link inertia": float(split["link"][adr]),
-                    "gravity": float(split["gravity"][adr]),
-                }
-                ident = float(split["ident"][adr])
-                id_nm = float(split["id"][adr])
-                actuator_nm = float(split["actuator"][adr])
-                qfrc_passive = float(split["passive_raw"][adr])
-                qacc_i = float(split["qacc"][adr])
-                raw_i = id_nm - (actuator_nm + qfrc_passive)
-                offset_i, band_i = _implicit_terms(physics_dt, kv_of[over.joint], qacc_i)
-                force_resid = abs(raw_i)
-                fwd = shots[si]["fwdinv"]
-                over.id_blob = {
-                    "id_nm": id_nm,
-                    "id_abs_nm": abs(id_nm),
-                    "parts": parts,
-                    "passive_nm": float(split["passive"][adr]),
-                    "qfrc_passive_nm": qfrc_passive,
-                    "ident_nm": ident,
-                    "ident_residual_nm": id_nm - ident,
-                    "force_residual_nm": force_resid,
-                    "residual_raw_nm": raw_i,
-                    "implicitfast_offset_nm": offset_i,
-                    "residual_adjusted_nm": raw_i - offset_i,
-                    "residual_band_nm": band_i,
-                    "armature_model_qacc_nm": float(split["arm_model"][adr]),
-                    "qacc_rad_s2": float(split["qacc"][adr]),
-                    "actuator_nm": actuator_nm,
-                    "solver_fwdinv": [float(fwd[0]), float(fwd[1])],
-                    "substep": si,
-                    "n_substeps": len(shots),
-                    "cop_x_mm": cop_x,
-                    "cop_y_mm": cop_y,
-                }
-        tick_box[0] += 1
-        if session.bus.fault:
-            break
+                setattr(over, "_sub_fail", True if not isinstance(si, int) else substep_fail[si])
+                setattr(over, "_discrete_fail", tick_discrete)
+                setattr(over, "_over_fail", tick_over_fail)
+                setattr(over, "_over_bucket", tick_over_bucket)
+                setattr(over, "_band_cap", tick_capped)
+                setattr(over, "_tick_band_max", tick_band_max)
+            if tick_fail:
+                residual_fail_ticks += 1
+            if tick_discrete:
+                discrete_fail_ticks += 1
+            if tick_over_fail:
+                match_over_fail_ticks += 1
+            if tick_leg_over:
+                leg_over_fail_ticks += 1
+            if tick_root_over:
+                root_over_fail_ticks += 1
+            if tick_over_bucket:
+                match_over_bucket_ticks += 1
+            tick_residual_fail.append(tick_fail)
+            fwdinv_ticks.append([fwd0, fwd1])
+            root_id_ticks.append(root_tick)
+            limited = any(
+                rec.limiter_bound and rec.joint in sws.LEG_JOINTS for rec in new_writes
+            )
+            if mode == "move":
+                goal_ctrl = {rec.joint: float(rec.ctrl) for rec in new_writes if rec.joint in move_idx}
+                for joint, idx in move_idx.items():
+                    if joint not in goal_ctrl:
+                        continue
+                    if abs((goal_ctrl[joint] - float(ctrl_before[idx])) * slew_frac) > slew_rad + 1e-9:
+                        limited = True
+                        break
+            if limited:
+                limiter_ticks += 1
+            for rec in new_writes:
+                if not rec.raw_ok or rec.ctrl_raw is None:
+                    raw_unavailable = True
+                elif _raw_outside(rec.ctrl_raw):
+                    tick_clipped = True
+                if rec.raw_ok and rec.ctrl_raw is not None:
+                    max_writer_abs = max(max_writer_abs, abs(float(rec.ctrl_raw)))
+            if tick_clipped:
+                clip_ticks += 1
+            _, _, _, _, ask_tick, qvel_ask_tick = sws._tick_pair(plant_new, sws.LEG_JOINTS)
+            plant_asks.extend(plant_new)
+            pair_signed.append(signed_tick)
+            pair_sum.append(sum_tick)
+            pair_qvel.append(qvel_tick)
+            pair_qvel_sum.append(qvel_sum_tick)
+            pair_ask.append(ask_tick)
+            pair_qvel_ask.append(qvel_ask_tick)
+            if walker.op3.y_swap_cmd != 0.0:
+                raise RuntimeError("y_swap_cmd changed")
+            if session.bus.fault and session.bus.fault_reason and session.bus.fault_reason not in reasons:
+                reasons.append(session.bus.fault_reason)
+            tick = sws.sample_zmp(session, walker)
+            t_post = float(session.data.time)
+            phases[tick.phase].add(tick, t_post)
+            names, q = sws.actuated_q(session.model, session.data)
+            if not joint_names:
+                joint_names = names
+            com_rows.append(np.asarray(session.data.subtree_com[walker.bid_body], dtype=np.float64).copy())
+            q_rows.append(q)
+            times.append(t_post)
+            pre_times.append(now)
+            grounds = sws._ground_gids(session, walker)
+            n_l = sws._contact_count(session.data, int(walker.gid["L"]), grounds)
+            n_r = sws._contact_count(session.data, int(walker.gid["R"]), grounds)
+            x_l, y_l, z_l, roll_l, pitch_l = sws._foot_box_sample(
+                session.model, session.data, int(walker.gid["L"]), None,
+            )
+            x_r, y_r, z_r, roll_r, pitch_r = sws._foot_box_sample(
+                session.model, session.data, int(walker.gid["R"]), None,
+            )
+            roll, pitch, up_z = sws._trunk_angles(session.data, int(walker.bid_body))
+            rot = np.asarray(session.data.xmat[int(walker.bid_body)], dtype=np.float64).reshape(3, 3)
+            origin = np.asarray(session.data.xpos[int(walker.bid_body)], dtype=np.float64)
+            qv = session.data.qvel
+            qvel_abs_rows.append([abs(float(qv[dof[name]])) for name in sws.LEG_JOINTS])
+            stage_ticks.append(stage_name)
+            trunk_x.append(float(origin[0]))
+            trunk_y.append(float(origin[1]))
+            trunk_yaw.append(math.atan2(float(rot[1, 0]), float(rot[0, 0])))
+            zmp_act, com_act = sws._actual_margins(session, walker, grounds, n_l, n_r)
+            step_cols["t"].append(t_post)
+            step_cols["x_l"].append(x_l)
+            step_cols["x_r"].append(x_r)
+            step_cols["y_l"].append(y_l)
+            step_cols["y_r"].append(y_r)
+            step_cols["n_l"].append(n_l)
+            step_cols["n_r"].append(n_r)
+            step_cols["z_l"].append(z_l)
+            step_cols["z_r"].append(z_r)
+            step_cols["declared"].append(tick.phase)
+            step_cols["mode"].append(mode)
+            step_cols["roll"].append(roll)
+            step_cols["pitch"].append(pitch)
+            step_cols["roll_l"].append(roll_l)
+            step_cols["pitch_l"].append(pitch_l)
+            step_cols["roll_r"].append(roll_r)
+            step_cols["pitch_r"].append(pitch_r)
+            step_cols["up_z"].append(up_z)
+            step_cols["zmp_act"].append(zmp_act)
+            step_cols["com_act"].append(com_act)
+            step_cols["cop_l"].append(sws._foot_cop_margin(session, walker, "L", grounds))
+            step_cols["cop_r"].append(sws._foot_cop_margin(session, walker, "R", grounds))
+            q_stand_rows.append(sws._leg_q(session.model, session.data))
+            tick_contact.append({
+                "t": t_post,
+                "t_pre": now,
+                "mode": mode,
+                "n_l": n_l,
+                "n_r": n_r,
+            })
+            if stand_s - 1e-12 <= now < t_stop - 1e-12:
+                body_vx_sum += float(session._body_forward_speed())
+                body_vx_n += 1
+            if over_shots:
+                split_cache: dict[int, dict[str, np.ndarray]] = {}
+                cop_cache: dict[tuple[int, str], tuple[float | None, float | None]] = {}
+                for over in plant_overs[over_from:]:
+                    si = getattr(over, "_shot", None)
+                    if not isinstance(si, int) or si not in over_shots:
+                        continue
+                    if si not in split_cache:
+                        split_cache[si] = _inverse_split(session.model, scratch, grav_data, shots[si])
+                    split = split_cache[si]
+                    adr = dof[over.joint]
+                    scratch.qpos[:] = shots[si]["qpos"]
+                    scratch.qvel[:] = shots[si]["qvel"]
+                    scratch.qacc[:] = split["qacc"]
+                    mj.mj_fwdPosition(session.model, scratch)
+                    side = "l" if over.joint.startswith("l_") else "r"
+                    key = (si, side)
+                    if key not in cop_cache:
+                        cop_cache[key] = _cop_mm(
+                            session.model, scratch, foot[side], floor_gid, ankle[side],
+                        )
+                    cop_x, cop_y = cop_cache[key]
+                    parts = {
+                        "armature·q̈": float(split["arm_001"][adr]),
+                        "impact/contact": float(split["contact"][adr]),
+                        "link inertia": float(split["link"][adr]),
+                        "gravity": float(split["gravity"][adr]),
+                    }
+                    ident = float(split["ident"][adr])
+                    id_nm = float(split["id"][adr])
+                    actuator_nm = float(split["actuator"][adr])
+                    qfrc_passive = float(split["passive_raw"][adr])
+                    qacc_i = float(split["qacc"][adr])
+                    raw_i = id_nm - (actuator_nm + qfrc_passive)
+                    offset_i, band_i = _implicit_terms(physics_dt, kv_of[over.joint], qacc_i)
+                    force_resid = abs(raw_i)
+                    fwd = shots[si]["fwdinv"]
+                    over.id_blob = {
+                        "id_nm": id_nm,
+                        "id_abs_nm": abs(id_nm),
+                        "parts": parts,
+                        "passive_nm": float(split["passive"][adr]),
+                        "qfrc_passive_nm": qfrc_passive,
+                        "ident_nm": ident,
+                        "ident_residual_nm": id_nm - ident,
+                        "force_residual_nm": force_resid,
+                        "residual_raw_nm": raw_i,
+                        "implicitfast_offset_nm": offset_i,
+                        "residual_adjusted_nm": raw_i - offset_i,
+                        "residual_band_nm": band_i,
+                        "armature_model_qacc_nm": float(split["arm_model"][adr]),
+                        "qacc_rad_s2": float(split["qacc"][adr]),
+                        "actuator_nm": actuator_nm,
+                        "solver_fwdinv": [float(fwd[0]), float(fwd[1])],
+                        "substep": si,
+                        "n_substeps": len(shots),
+                        "cop_x_mm": cop_x,
+                        "cop_y_mm": cop_y,
+                    }
+            q_map = {
+                rec.joint: float(rec.q_des)
+                for rec in new_writes
+                if rec.joint in sws.LEG_JOINTS
+            }
+            swing = ""
+            stance = ""
+            if new_writes:
+                swing = new_writes[-1].swing_side
+                stance = new_writes[-1].stance
+            if len(q_map) == len(sws.LEG_JOINTS):
+                last_q = q_map
+            elif last_q is not None:
+                filled = dict(last_q)
+                filled.update(q_map)
+                q_map = filled
+            if len(q_map) == len(sws.LEG_JOINTS):
+                support, stance_side = _plan_support(swing, stance)
+                zmp_y = float(zmp_calls[-1]) if len(zmp_calls) > zmp_mark else 0.0
+                plan_samples.append({
+                    "t": now,
+                    "phase": _plan_phase(stage_name),
+                    "support": support,
+                    "stance": stance_side,
+                    "q": q_map,
+                    "zmp_y": zmp_y,
+                    "com_y": float(getattr(walker, "preview_com_y", 0.0)),
+                })
+            tick_box[0] += 1
+            if session.bus.fault:
+                break
+    finally:
+        zmp_preview.ZmpPreview.step = preview_step  # type: ignore[method-assign]
     session.assert_plant_unchanged()
     if int(session.model.opt.enableflags) != 0:
         raise RuntimeError("live enableflags were set during the bout")
+    planned = _planned_tau(session.model, plan_samples, qadr, dof)
+    if int(session.model.opt.enableflags) != 0:
+        raise RuntimeError("planned-motion copy changed the live enableflags")
     digest_after = _plant_md5()
     n = len(times)
     dt = sws._uniform_dt(np.asarray(times, dtype=np.float64)) if n else None
@@ -1373,6 +1960,15 @@ def score_cell(
             )
     if not audit["ctrllimited_all"]:
         fail_reasons.append("ctrllimited is off on a leg actuator")
+    if match_over_fail_ticks:
+        fail_reasons.append(
+            f"match residual |qfrc_inverse - qfrc_actuator| over 1e-3 Nm "
+            f"on {match_over_fail_ticks}/{n} control ticks"
+        )
+    if limiter_ticks:
+        fail_reasons.append(
+            f"limiter active on {limiter_ticks}/{n} control ticks"
+        )
     touchdowns: list[float] = []
     prev_l = 1
     prev_r = 1
@@ -1407,21 +2003,36 @@ def score_cell(
         gated = bool(getattr(rec, "_sub_fail", True))
         capped = bool(getattr(rec, "_band_cap", False))
         discrete_gated = bool(getattr(rec, "_discrete_fail", True))
+        tick_over_bucket = bool(getattr(rec, "_over_bucket", False))
+        tick_over_fail = bool(getattr(rec, "_over_fail", False))
+        stripped: float | None = None
+        joint_match: float | None = None
+        clamped = False
         if not isinstance(blob, dict):
             kind, term = ("unmeasured", "")
             parts = {name: float("nan") for name in TERMS}
-        elif discrete_gated:
-            parts = {name: float(blob["parts"][name]) for name in TERMS}
-            kind, term = DISCRETE_FAIL, ""
-            resid = abs(float(blob["ident_residual_nm"]))
-            max_resid = max(max_resid, resid)
         else:
             parts = {name: float(blob["parts"][name]) for name in TERMS}
-            kind, term = _classify(
-                abs(rec.ask_nm), float(blob["id_nm"]), parts["armature·q̈"], parts,
+            id_nm = float(blob["id_nm"])
+            actuator_nm = float(blob["actuator_nm"])
+            stripped = id_nm - parts["armature·q̈"]
+            joint_match = abs(id_nm - actuator_nm)
+            # The realised inverse returns the actuator rail, so a clamped
+            # joint cannot be sorted into the three buckets.
+            clamped = (
+                abs(rec.ask_nm) >= RAIL_NM - 1e-9
+                or abs(actuator_nm) >= RAIL_NM - 1e-6
             )
             resid = abs(float(blob["ident_residual_nm"]))
             max_resid = max(max_resid, resid)
+            if clamped:
+                kind, term = CLAMPED, ""
+            elif tick_over_bucket:
+                kind, term = OVER_BUCKET, ""
+            else:
+                kind, term = _classify(
+                    abs(rec.ask_nm), id_nm, parts["armature·q̈"], parts,
+                )
         events.append({
             "t_s": rec.t_s,
             "t_post_s": tick_row.get("t"),
@@ -1458,6 +2069,11 @@ def score_cell(
             "solver_fwdinv": None if not isinstance(blob, dict) else blob["solver_fwdinv"],
             "residual_gated": gated,
             "discrete_gated": discrete_gated,
+            "match_over_1e-3": tick_over_fail,
+            "match_over_1e-2": tick_over_bucket,
+            "joint_match_residual_nm": joint_match,
+            "id_minus_armature_nm": stripped,
+            "clamped": clamped,
             "band_capped": capped,
             "tick_band_max_nm": float(getattr(rec, "_tick_band_max", float("nan"))),
             "qacc_rad_s2": None if not isinstance(blob, dict) else blob["qacc_rad_s2"],
@@ -1487,12 +2103,20 @@ def score_cell(
     n_residual_over = 0
     n_unbucketed = 0
     n_discrete_over = 0
+    n_clamped = 0
+    n_over_bucket = 0
     for row in ask_events:
         if row["class"] == UNBUCKETED:
             n_unbucketed += 1
             continue
         if row["class"] == DISCRETE_FAIL:
             n_discrete_over += 1
+            continue
+        if row["class"] == CLAMPED:
+            n_clamped += 1
+            continue
+        if row["class"] == OVER_BUCKET:
+            n_over_bucket += 1
             continue
         if row["class"] == RESIDUAL_FAIL:
             n_residual_over += 1
@@ -1595,6 +2219,22 @@ def score_cell(
         "discrete_fail_ticks": discrete_fail_ticks,
         "discrete_fail_substeps": discrete_fail_substeps,
         "discrete_fail_over_bar": n_discrete_over,
+        "match_residual_nm": DISCRETE_RESIDUAL_NM,
+        "bucket_residual_nm": BUCKET_RESIDUAL_NM,
+        "match_over_1e-3_ticks": match_over_fail_ticks,
+        "match_over_1e-3_substeps": match_over_fail_substeps,
+        "leg_over_1e-3_ticks": leg_over_fail_ticks,
+        "root_over_1e-3_ticks": root_over_fail_ticks,
+        "match_over_1e-2_ticks": match_over_bucket_ticks,
+        "match_over_1e-2_substeps": match_over_bucket_substeps,
+        "match_residual_max_nm": match_residual_max,
+        "leg_match_residual_max_nm": leg_match_max,
+        "root_match_residual_max_nm": root_match_max,
+        "clamped_label": CLAMPED,
+        "clamped_over_bar": n_clamped,
+        "over_bucket_label": OVER_BUCKET,
+        "over_bucket_over_bar": n_over_bucket,
+        "planned": planned,
         "root_residual_max_nm": root_resid_max,
         "knee_id_rail_nm": RAIL_NM,
         "knee_id_rail_bug": knee_rail_count > 0 or _rail_exact(knee_id_peak),
@@ -1688,6 +2328,36 @@ def score_cell(
     row["stop"] = stop
     row["stepping_passes"] = bool(stepping.get("passes"))
     row["n_scored_swings"] = stepping.get("n_scored_swings")
+    plan_abs = 0.0
+    plan_name = "-"
+    plan_root = float(planned.get("root_residual_max_nm") or 0.0) if isinstance(planned, dict) else 0.0
+    phases_plan = planned.get("phases") if isinstance(planned, dict) else None
+    if isinstance(phases_plan, dict):
+        for block in phases_plan.values():
+            if not isinstance(block, dict):
+                continue
+            for item in block.values():
+                if not isinstance(item, dict):
+                    continue
+                for key in ("tau_linear_nm", "tau_minnorm_nm"):
+                    val = abs(float(item[key]))
+                    if val > plan_abs:
+                        plan_abs = val
+                        plan_name = f"{item['phase']}:{item['joint']}"
+    clamp_pick: dict[str, object] | None = None
+    for ev in events:
+        if ev.get("class") != CLAMPED or not str(ev.get("joint", "")).endswith("knee"):
+            continue
+        if clamp_pick is None or abs(float(ev["t_s"]) - 2.69) < abs(float(clamp_pick["t_s"]) - 2.69):
+            clamp_pick = ev
+    if clamp_pick is None:
+        clamp_note = "-"
+    else:
+        clamp_note = (
+            f"{clamp_pick['joint']} {float(clamp_pick['id_nm']):+.3f} "
+            f"at {float(clamp_pick['t_s']):.3f}s "
+            f"strip {float(clamp_pick['id_minus_armature_nm']):+.3f}"
+        )
     print(
         f"T {period_s:.2f} vx {vx:.3f} {verdict} {gait} "
         f"ask {row['ask_peak_nm']:.3f} {row['ask_peak_joint']} "
@@ -1698,12 +2368,17 @@ def score_cell(
         f"adjmax {adj_max_abs:.4f} "
         f"root {root_id_max:.3e} rootR {root_resid_max:.3e} "
         f"dresid {max_leg_resid:.4f} dfail {discrete_fail_ticks}/{n} "
+        f"match {match_residual_max:.3e} leg {leg_match_max:.3e} rootM {root_match_max:.3e} "
+        f"over1e-3 {match_over_fail_ticks}/{n} over1e-2 {match_over_bucket_ticks}/{n} "
         f"rail {knee_rail_count} "
         f"bandmax {band_max:.4f} "
         f"cap {band_cap_ticks}/{n} resfail {residual_fail_ticks}/{n} "
         f"qdes {row['qdes_peak_nm']:.3f} {row['qdes_peak_joint']} "
-        f"over ask/qdes {n_ask_over}/{n_qdes_over} bucketed {n_bucketed} "
+        f"over ask/qdes {n_ask_over}/{n_qdes_over} "
+        f"clamped {n_clamped} unbucketed {n_over_bucket} bucketed {n_bucketed} "
+        f"plan {plan_abs:.3f} {plan_name} rootP {plan_root:.3e} "
         f"note {torque_bar['note'] or '-'} resid {max_resid:.3e} "
+        f"clampEx {clamp_note} "
         f"class {counts}",
         flush=True,
     )
@@ -1784,17 +2459,35 @@ def main() -> None:
         "invdiscrete": _invdiscrete_bit() is not None,
         "invdiscrete_flag": "mjtEnableBit.mjENBL_INVDISCRETE",
         "discrete_residual_nm": DISCRETE_RESIDUAL_NM,
+        "match_residual_nm": DISCRETE_RESIDUAL_NM,
+        "bucket_residual_nm": BUCKET_RESIDUAL_NM,
+        "match_residual_definition": (
+            "|qfrc_inverse - qfrc_actuator| on each leg joint and each root dof. "
+            "Exactly 1e-3 stays inside the Prefer FAIL target. Exactly 1e-2 stays "
+            "inside the bucket. Counts over each threshold are both reported."
+        ),
         "discrete_rule": (
             "mujoco.__version__ is checked for mjtEnableBit.mjENBL_INVDISCRETE. "
             "On this build the flag exists and is set on the inverse copy only. "
-            "qacc is (qvel_next - qvel) / dt. A control tick is bucketed when "
-            "every leg joint and every root dof has "
-            "|qfrc_inverse - (qfrc_actuator + qfrc_passive)| <= 1e-3 Nm. "
+            "qacc is (qvel_next - qvel) / dt. The match residual is "
+            "|qfrc_inverse - qfrc_actuator| on each leg joint and each root dof. "
+            "A tick over 1e-3 Nm is a Prefer FAIL count. A tick is bucketed when "
+            "every one of those residuals is <= 1e-2 Nm. A tick over 1e-2 Nm is "
+            "residual over 1e-2, not bucketed. A joint with |applied| >= 2.45 Nm "
+            "is clamped, unclassifiable, because the realised inverse returns "
+            "the clamp. The passive-inclusive residual stays a comparison column. "
             "The inverse column is data_copy.qfrc_inverse only. "
             "A knee inverse value exactly ±2.450 Nm is a column bug. "
-            "If the flag were absent, the gate would be the residual after "
-            "subtracting the signed dt*(damping+kv)*qacc term from the qDeriv "
-            "diagonal, still against 1e-3."
+            "The planned-motion τ_req does not change the pass. A joint that "
+            "clears 2.33 only after subtracting armature·q̈_ref is an "
+            "unsourced-armature candidate."
+        ),
+        "planned_motion": (
+            "τ_req is mj_inverse on the walker's q_des with 8 ms qvel and qacc, "
+            "contacts off, and the root force applied through the planned ZMP. "
+            "Double support reports the foot-line split and the min-norm ankle "
+            "split, plus the spread. Each leg joint is printed with and without "
+            "armature·q̈_ref, worst tick per start, walk, and stop."
         ),
         "band_cap_nm": BAND_CAP_NM,
         "band_cap_rule": (
@@ -1804,7 +2497,7 @@ def main() -> None:
             "The band does not relax the signed applied bar of 2.33 Nm."
         ),
         "residual_band": "0.05 + dt*(0.08 + kv)*|qacc| per leg joint per 0.002 s step",
-        "residual_definition": "signed qfrc_inverse - (qfrc_actuator + qfrc_passive) per leg joint",
+        "residual_definition": "signed qfrc_inverse - (qfrc_actuator + qfrc_passive) per leg joint; comparison column, not the bucket",
         "implicitfast_offset": "signed dt*(0.08 + kv)*qacc; kv = -actuator_biasprm[i,2]; 0.08 is leg joint damping",
         "residual_adjusted": "signed raw residual minus the implicitfast offset",
         "fwdinv": (
