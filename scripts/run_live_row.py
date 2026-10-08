@@ -2,7 +2,9 @@
 """One live voice056 row. The arguments are the whole rollout.
 
 Writes JSON with the git tip, the plant md5, the MuJoCo version, every
-argument, the right hip-roll signed force, the tip, and the DC line.
+argument, the compiled plant (leg armature, kv, kp, force and control
+ranges, and compiled_md5), the right hip-roll signed force, the tip,
+and the DC line.
 """
 from __future__ import annotations
 
@@ -16,6 +18,7 @@ from pathlib import Path
 import mujoco as mj
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import compiled_manifest as plant_manifest
 import lipm_gait
 import score_com_zmp as sc
 import steer_walk as sw
@@ -172,10 +175,17 @@ def main(argv: list[str] | None = None) -> int:
         payload["r_hip_roll_signed"] = None
         payload["tip_ok"] = None
         payload["dc_ok"] = None
+        plant_manifest.merge_compiled(payload, plant_manifest.manifest_from_traceback(exc))
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(payload, indent=2, default=str) + "\n")
-        print(json.dumps(payload, default=str), flush=True)
+        print(
+            f"tip {payload['tip_sha']} abort {exc} "
+            f"compiled_md5 {payload.get('compiled_md5')}",
+            flush=True,
+        )
         return 2
+    manifest = result.pop("compiled_manifest", None) if isinstance(result, dict) else None
+    plant_manifest.merge_compiled(payload, manifest)
     joint = result.get("joint_signed") or {}
     hip = joint.get("r_hip_roll") if isinstance(joint, dict) else None
     payload["abort"] = None
@@ -205,7 +215,8 @@ def main(argv: list[str] | None = None) -> int:
         f"r_hip_roll {payload['r_hip_roll_signed']} over {payload['r_hip_roll_over']} "
         f"signed_over {payload['signed_over']} tip_ok {payload['tip_ok']} "
         f"dc_ok {payload['dc_ok']} dc {payload['dc_joint']} "
-        f"{payload['dc_excess']} fault {payload['fault']!r}",
+        f"{payload['dc_excess']} fault {payload['fault']!r} "
+        f"compiled_md5 {payload.get('compiled_md5')}",
         flush=True,
     )
     return 0

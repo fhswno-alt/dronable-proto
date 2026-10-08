@@ -31,6 +31,7 @@ _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
+import compiled_manifest as plant_manifest
 import lipm_gait
 import steer_walk as sw
 
@@ -1163,6 +1164,12 @@ def run_attempt(
     lipm = session.lipm
     if lipm is None or lipm.op3 is None:
         raise SystemExit("walker did not build")
+    lipm.compiled_manifest = plant_manifest.compiled_manifest(
+        session.model,
+        xml_md5=md5_before,
+        compile=plant_manifest.compile_note(session.leg_armature),
+        perturbation=plant_manifest.perturbation_note(session.leg_armature, perturb),
+    )
     if not kit_baseline and lipm.op3.y_swap_cmd != 0.0:
         raise SystemExit("y_swap_cmd is not 0")
     if kit_baseline:
@@ -2088,6 +2095,7 @@ def run_attempt(
         "applied_vx_settle": _applied_settle(session, t_stop),
         "select_gait": bool(select_gait),
         "perturb": perturb_info,
+        "compiled_manifest": getattr(lipm, "compiled_manifest", None),
         "rug_peak_n": rug_peak,
         "diag": diag,
         "worst_diag": worst_diag,
