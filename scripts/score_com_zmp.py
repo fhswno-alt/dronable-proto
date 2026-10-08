@@ -1087,6 +1087,7 @@ def run_attempt(
     spring_nm: float = 0.0,
     honor_vx: bool = False,
     id_ff: bool = False,
+    leg_armature: float = 0.01,
 ) -> dict[str, object]:
     md5_before = _plant_md5()
     if md5_before != sw.PLANT_MD5:
@@ -1141,7 +1142,9 @@ def run_attempt(
     scene = None
     if perturb is not None and perturb.rug:
         scene = sw.ROOT / "mujoco" / "room_entrance.xml"
-    session = sw.SteerSession(video=False, lipm=cfg, scene_xml=scene)
+    session = sw.SteerSession(
+        video=False, lipm=cfg, scene_xml=scene, leg_armature=float(leg_armature),
+    )
     perturb_info: dict[str, object] = {}
     if perturb is not None:
         perturb_info = _apply_perturb(session, perturb)
@@ -1864,6 +1867,9 @@ def run_attempt(
         "id_real_cop_t_l": float(getattr(lipm, "id_real_cop_t", {}).get("L", 0.0)),
         "id_real_cop_t_r": float(getattr(lipm, "id_real_cop_t", {}).get("R", 0.0)),
         "id_split_bias_max": float(getattr(lipm, "id_split_bias_max", 0.0)),
+        "leg_armature": float(getattr(lipm, "leg_armature", leg_armature)),
+        "leg_kv": sw.leg_kv_map(session.model),
+        "leg_kv_side": sw.leg_kv_side_by_side(),
         "id_stop_span": float(getattr(lipm, "id_stop_span", 0.0)),
         "id_stop_qdd": float(getattr(lipm, "id_stop_qdd", 0.0)),
         "id_bind_joint": bind_joint,

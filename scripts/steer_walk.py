@@ -254,6 +254,11 @@ PLANT_XML = ROOT / "mujoco" / "ainex_hiwonder" / "ainex_controls_m2_145.xml"
 # Plant thaw from cursor/plant-thaw-legs-foot-6f10 (PR #43): legs ±2.45 Nm,
 # foot contact 135×76 mm. Was 71b2c86d… at ±2.1 and 145×86.
 PLANT_MD5 = "207f3d5e9c6a72e16f7aa0c8d224f75e"
+# Leg joints only. Arms and the head stay at the file armature.
+LEG_JOINT_NAMES = (
+    "l_hip_yaw", "l_hip_roll", "l_hip_pitch", "l_knee", "l_ank_pitch", "l_ank_roll",
+    "r_hip_yaw", "r_hip_roll", "r_hip_pitch", "r_knee", "r_ank_pitch", "r_ank_roll",
+)
 KIT_CAM_POS = (0.050, 0.019, 0.007)
 KIT_CAM_FOVY = 104.82
 # xyaxes "0 -1 0 0 0 1" → camera-frame columns (x, y, z). Look is −Z = +X.
@@ -1194,6 +1199,52 @@ def _kit_cam_problems(model: mj.MjModel, *, extra_sites: bool = False) -> list[s
     return problems
 
 
+def compile_plant(xml_path: Path, leg_armature: float) -> mj.MjModel:
+    """Compile with leg armature set on the spec, before dampratio writes kv.
+
+    A position actuator with dampratio=1 stores kv in actuator_biasprm from
+    the inertia, including armature, at compile time. Writing dof_armature
+    afterwards leaves that kv at the file value. Arms and the head are not
+    touched. The XML file is not written.
+    """
+    spec = mj.MjSpec.from_file(str(xml_path))
+    touched = 0
+    for joint in spec.joints:
+        name = joint.name or ""
+        if name not in LEG_JOINT_NAMES:
+            continue
+        joint.armature = float(leg_armature)
+        touched += 1
+    if touched != len(LEG_JOINT_NAMES):
+        raise RuntimeError(f"leg armature override touched {touched} joints in {xml_path}")
+    return spec.compile()
+
+
+def leg_kv_map(model: mj.MjModel) -> dict[str, float]:
+    """Compiled kv, −actuator_biasprm[:, 2], for each leg position servo."""
+    out: dict[str, float] = {}
+    for i in range(model.nu):
+        name = mj.mj_id2name(model, mj.mjtObj.mjOBJ_ACTUATOR, i) or ""
+        if not name.endswith("_pos"):
+            continue
+        joint = name[: -len("_pos")]
+        if joint not in LEG_JOINT_NAMES:
+            continue
+        out[joint] = float(-model.actuator_biasprm[i, 2])
+    if len(out) != len(LEG_JOINT_NAMES):
+        raise RuntimeError(f"leg kv map has {len(out)} joints")
+    return out
+
+
+def leg_kv_side_by_side(xml_path: Path = PLANT_XML) -> dict[str, dict[str, float]]:
+    """kv at the file armature and at the 0.025 load-time override."""
+    tables: dict[str, dict[str, float]] = {}
+    for arm in (0.01, 0.025):
+        model = compile_plant(xml_path, arm)
+        tables[f"{arm:.3f}"] = leg_kv_map(model)
+    return tables
+
+
 def plant_problems(
     model: mj.MjModel,
     xml_path: Path = PLANT_XML,
@@ -1304,6 +1355,7 @@ class SteerSession:
         cam_azimuth: float = 135.0,
         cam_elevation: float = -18.0,
         lipm: LipmConfig | None = None,
+        leg_armature: float | None = None,
     ) -> None:
         problems = []
         if not PLANT_XML.is_file():
@@ -1318,7 +1370,13 @@ class SteerSession:
         self.scene_xml = scene_xml
         self._initial_yaw = float(initial_yaw)
         load_path = PLANT_XML if scene_xml is None else scene_xml
-        self.model = mj.MjModel.from_xml_path(str(load_path))
+        # None keeps the historical from_xml_path load. A number, including
+        # the file's own 0.01, goes through MjSpec so kv matches that armature.
+        self.leg_armature = None if leg_armature is None else float(leg_armature)
+        if self.leg_armature is None:
+            self.model = mj.MjModel.from_xml_path(str(load_path))
+        else:
+            self.model = compile_plant(load_path, self.leg_armature)
         self.data = mj.MjData(self.model)
         problems = plant_problems(
             self.model, PLANT_XML, extra_sites=scene_xml is not None,

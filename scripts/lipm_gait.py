@@ -48,10 +48,16 @@ KNEE_SAG_NM = 2.33
 # This is not the plant actuator kp. The XML gain stays 45 / 40 / 35.
 # 1 Nm/rad is small beside those gains. It is not a torque cap.
 ID_FF_KP = 1.0
-# Not a measured motor inertia. The same 0.01 sits on the plant joints.
-# It is the diagnosis column. It is not the reflected inertia: a planted
-# hip pitch is about 0.2 kg·m², so 2.33/0.01 is not a legal q̈.
+# File value on every joint. A load-time leg override replaces it on the
+# walker with the compiled dof_armature. The strip has to use that number:
+# mj_inverse already includes whatever armature the spec was compiled with.
+# 0.01 is not a measured motor inertia. A planted hip pitch is about
+# 0.2 kg·m², so 2.33/0.01 is not a legal q̈.
 ID_FF_ARMATURE = 0.01
+_LEG_JOINT_NAMES = (
+    "l_hip_yaw", "l_hip_roll", "l_hip_pitch", "l_knee", "l_ank_pitch", "l_ank_roll",
+    "r_hip_yaw", "r_hip_roll", "r_hip_pitch", "r_knee", "r_ank_pitch", "r_ank_roll",
+)
 # DC-motor model line, not a datasheet. |qvel| ≤ 5.82·(1 − |τ|/3.43).
 DC_QVEL_LIM = 5.82
 DC_STALL_NM = 3.43
@@ -369,6 +375,19 @@ def bezier_foot(s: float, p0: np.ndarray, p3: np.ndarray, clear_m: float) -> np.
     return u**3 * p0 + 3.0 * u**2 * s * p1 + 3.0 * u * s**2 * p2 + s**3 * p3
 
 
+def _compiled_leg_armature(model: mj.MjModel) -> float:
+    """Armature on the twelve leg joints. They share one compiled value."""
+    vals: list[float] = []
+    for name in _LEG_JOINT_NAMES:
+        jid = int(mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, name))
+        if jid < 0:
+            raise RuntimeError(f"missing joint {name}")
+        vals.append(float(model.dof_armature[int(model.jnt_dofadr[jid])]))
+    if max(vals) - min(vals) > 1e-9:
+        raise RuntimeError(f"leg armatures differ: {min(vals)} .. {max(vals)}")
+    return float(vals[0])
+
+
 def bezier_peak_z(p0_z: float, clear_m: float) -> float:
     """Peak of bezier_foot when the landing z equals the liftoff z."""
     return p0_z + clear_m
@@ -386,6 +405,7 @@ class LipmWalker:
         q_stand: dict[str, float],
     ) -> None:
         self.model = model
+        self.leg_armature = _compiled_leg_armature(model)
         self.data = data
         self.act_idx = act_idx
         self.cfg = cfg
@@ -1167,7 +1187,7 @@ class LipmWalker:
         scratch.qvel[:] = qvel
         scratch.qacc[:] = qacc
         inertial = float(full[adr] - bias[adr])
-        arm = ID_FF_ARMATURE * float(qacc[adr])
+        arm = self.leg_armature * float(qacc[adr])
         qdd = inertial - arm
         cor = float(bias[adr] - grav_v[adr])
         contact = -float(con[adr])
@@ -1243,7 +1263,7 @@ class LipmWalker:
             if name not in names:
                 continue
             tau = float(inv[adr])
-            arm = 0.0 if qacc is None else ID_FF_ARMATURE * float(qacc[adr])
+            arm = 0.0 if qacc is None else self.leg_armature * float(qacc[adr])
             stripped = tau - arm
             if abs(stripped) > sag + 1e-9:
                 if abs(stripped) > wall_abs:
@@ -1470,7 +1490,7 @@ class LipmWalker:
         terms = self._leg_terms(scratch, qacc, con)
         for name, adr in self._leg_dof.items():
             mj_tau = float(inv[adr])
-            arm = ID_FF_ARMATURE * float(qacc[adr])
+            arm = self.leg_armature * float(qacc[adr])
             jid = int(mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, name))
             q = float(scratch.qpos[int(self.model.jnt_qposadr[jid])])
             actuator, applied = self._implicit_leg_force(
@@ -1621,8 +1641,8 @@ class LipmWalker:
         terms: dict[str, str] = {}
         for name, adr in self._leg_dof.items():
             inertial = float(full[adr] - bias[adr])
-            arm = abs(ID_FF_ARMATURE * float(qacc[adr]))
-            qdd = abs(inertial - ID_FF_ARMATURE * float(qacc[adr]))
+            arm = abs(self.leg_armature * float(qacc[adr]))
+            qdd = abs(inertial - self.leg_armature * float(qacc[adr]))
             cor = abs(float(bias[adr] - grav[adr]))
             contact = abs(float(con[adr]))
             scores = {
@@ -1797,7 +1817,7 @@ class LipmWalker:
             tau = float(inv[adr] - applied[adr])
             out[name] = tau
             qdd_i = float(qdd.get(name, 0.0))
-            bare = tau - ID_FF_ARMATURE * qdd_i
+            bare = tau - self.leg_armature * qdd_i
             phase = self._ff_phase(name)
             phase_of[name] = phase
             self._note_planned_req(
@@ -1953,7 +1973,7 @@ class LipmWalker:
         target = np.array(scratch.qfrc_applied[free_dofs], dtype=np.float64, copy=True)
         bare0 = np.array(
             [
-                float(inv[self._leg_dof[name]]) - ID_FF_ARMATURE * float(qdd.get(name, 0.0))
+                float(inv[self._leg_dof[name]]) - self.leg_armature * float(qdd.get(name, 0.0))
                 for name in names
             ],
             dtype=np.float64,
@@ -2240,8 +2260,8 @@ class LipmWalker:
         scratch.qvel[:] = qvel
         scratch.qacc[:] = qacc
         inertial = float(full[adr] - bias[adr])
-        arm = abs(ID_FF_ARMATURE * float(qacc[adr]))
-        qdd = abs(inertial - ID_FF_ARMATURE * float(qacc[adr]))
+        arm = abs(self.leg_armature * float(qacc[adr]))
+        qdd = abs(inertial - self.leg_armature * float(qacc[adr]))
         cor = abs(float(bias[adr] - grav[adr]))
         wrench = abs(float(scratch.qfrc_applied[adr]))
         scores = {
