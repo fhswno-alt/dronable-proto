@@ -71,6 +71,13 @@ PLAN_KNEE_TAU_NM = 2.0
 # 0.01·q̈ at this cap is 0.25 Nm, inside the 2.0 Nm knee budget.
 STOP_KNEE_QDD_MAX = 25.0
 STOP_BLEND_MIN_S = 0.5
+# The position servo does not command the double-support load split.
+# Each tick both feet are loaded, move the ZMP/CoM plan by a fraction of
+# (α_qp − α_real) times the foot span, so the contact solver's normals
+# are pulled toward the QP share. The bias is capped at 20 mm.
+SPLIT_TRACK_STEP = 0.25
+SPLIT_TRACK_STEP_M = 0.0015
+SPLIT_TRACK_BIAS_M = 0.020
 # Stop/silence command budget for every leg joint. Hip yaw, hip roll,
 # hip pitch, knee, ankle pitch, and ankle roll share the HX-35H class.
 # The sag bar stays 2.33. Sitting the prediction on that bar measured
@@ -657,6 +664,33 @@ class LipmWalker:
         self.id_split_stop_bare: dict[str, dict[str, dict[str, float | str]]] = {
             "a": {}, "b": {}, "c": {},
         }
+        # QP CoP margin to the declared 135×76 edge, per loaded foot.
+        self.id_qp_margin_n = {"L": 0, "R": 0}
+        self.id_qp_margin_sum = {"L": 0.0, "R": 0.0}
+        self.id_qp_margin_min = {"L": 1.0, "R": 1.0}
+        self.id_qp_margin_min_t = {"L": 0.0, "R": 0.0}
+        # |α_qp − α_line| on solved QP ticks. The line share is the ZMP's
+        # barycentric weight; the QP may leave it by using the CoP box.
+        self.id_qp_line_n = 0
+        self.id_qp_line_sum = 0.0
+        self.id_qp_line_max = 0.0
+        # Realised contact split against the QP, both feet above 5 N.
+        self.id_real_n = 0
+        self.id_real_split_sum = 0.0
+        self.id_real_split_max = 0.0
+        self.id_real_split_t = 0.0
+        self.id_real_split_qp = 0.0
+        self.id_real_split_fn = 0.0
+        self.id_real_qp_sum = 0.0
+        self.id_real_fn_sum = 0.0
+        self.id_real_cop_n = {"L": 0, "R": 0}
+        self.id_real_cop_sum = {"L": 0.0, "R": 0.0}
+        self.id_real_cop_max = {"L": 0.0, "R": 0.0}
+        self.id_real_cop_t = {"L": 0.0, "R": 0.0}
+        self._qp_sample: dict | None = None
+        self._split_zmp_bias = 0.0
+        self._split_zmp_applied = 0.0
+        self.id_split_bias_max = 0.0
         self.id_ff_resid = 0.0
         self._id_qvel0: np.ndarray | None = None
         self.id_tick_offset: dict[str, float] = {}
@@ -888,8 +922,52 @@ class LipmWalker:
         )
 
     def _step_preview(self, preview: zmp_preview.ZmpPreview, future: np.ndarray) -> float:
+        self._apply_split_bias(future)
         self._zmp_cmd = float(future[0]) if len(future) else 0.0
         return preview.step(future)
+
+    def _apply_split_bias(self, future: np.ndarray) -> None:
+        """Shift the ZMP plan toward the foot the QP is under-loaded on.
+
+        The same shift is stored so the stop's CoM quintic can move with
+        the ZMP and the planned lateral acceleration stays put. Each
+        sample is then clamped into the inset support of the feet that
+        are actually loaded.
+        """
+        if len(future) == 0:
+            self._split_zmp_applied = 0.0
+            return
+        raw0 = float(future[0])
+        bias = float(self._split_zmp_bias)
+        for i in range(len(future)):
+            future[i] = self._clamp_support_y(float(future[i]) + bias)
+        self._split_zmp_applied = float(future[0]) - raw0
+
+    def _inset_y_limits(self, sides: tuple[str, ...]) -> tuple[float, float]:
+        """World-y extent of the inset contact boxes on ``sides``."""
+        ys: list[float] = []
+        inset = float(ds_split.COP_INSET_M)
+        for side in sides:
+            gid = int(self.gid[side])
+            center = np.array(self.data.geom_xpos[gid], dtype=np.float64)
+            rot = np.array(self.data.geom_xmat[gid], dtype=np.float64).reshape(3, 3)
+            half = np.array(self.model.geom_size[gid], dtype=np.float64)
+            hx = max(float(half[0]) - inset, 1e-4)
+            hy = max(float(half[1]) - inset, 1e-4)
+            for sx in (-1.0, 1.0):
+                for sy in (-1.0, 1.0):
+                    local = np.array([sx * hx, sy * hy, -float(half[2])], dtype=np.float64)
+                    ys.append(float((center + rot @ local)[1]))
+        if not ys:
+            return -0.070, 0.070
+        return min(ys), max(ys)
+
+    def _clamp_support_y(self, y: float) -> float:
+        """Keep a planned ZMP inside the inset boxes of the loaded feet."""
+        loaded = tuple(side for side in ("L", "R") if self.foot_normal(side) >= 1.0)
+        sides = loaded if loaded else ("L", "R")
+        lo, hi = self._inset_y_limits(sides)
+        return min(hi, max(lo, float(y)))
 
     def _zmp_at(self, t_s: float) -> float:
         if t_s < 0.0:
@@ -1259,6 +1337,7 @@ class LipmWalker:
         self.id_tick_offset = {}
         self.id_tick_band = {}
         self._limit_this_tick = False
+        self._qp_sample = None
 
     def finish_id_tick(self) -> None:
         self.ctrl_ticks += 1
@@ -1640,6 +1719,7 @@ class LipmWalker:
         """
         self._plan_term_name = ""
         self._plan_term_phase = ""
+        self._qp_sample = None
         qd, qdd = self._ref_derivatives(joints)
         if self._plan_data is None:
             self._plan_data = mj.MjData(self.model)
@@ -1812,9 +1892,11 @@ class LipmWalker:
     ) -> None:
         """Write the double-support wrench. Feedforward is split (c) when it solves.
 
-        (a) is the line split, (b) is minimum-norm ankle torque, (c) minimises
-        the maximum |bare leg torque|. All three are asked to sum to the same
-        planned wrench. (c) is the one that can name a wall.
+        (a) is the line split on the full declared box. (b) is minimum-norm
+        ankle torque and (c) minimises the maximum |bare leg torque|. (b)
+        and (c) keep each CoP inside the declared box shrunk by 5 mm on
+        every side. All three sum to the same planned wrench. (c) is the
+        one that can name a wall.
         """
         names = list(self._leg_dof)
         dofs = [int(self._leg_dof[name]) for name in names]
@@ -1853,8 +1935,10 @@ class LipmWalker:
             return np.column_stack(cols)
 
         maps = [probe(feet[i][0], feet[i][3]) for i in (0, 1)]
+        full = [(float(feet[i][2][0]), float(feet[i][2][1])) for i in (0, 1)]
+        inner = [ds_split.inset_half(hx, hy) for hx, hy in full]
         blocks = [
-            ds_split.corner_wrench_map(feet[i][1], feet[i][2][0], feet[i][2][1]) for i in (0, 1)
+            ds_split.corner_wrench_map(feet[i][1], inner[i][0], inner[i][1]) for i in (0, 1)
         ]
         J = np.concatenate(
             [maps[i][np.ix_(dofs, range(6))] @ blocks[i] for i in (0, 1)], axis=1,
@@ -1890,7 +1974,7 @@ class LipmWalker:
         self.id_split_a_resid_m = max(
             self.id_split_a_resid_m, float(linear["residual_m"]),
         )
-        x0 = ds_split.barycentric_forces(linear, [feet[0][1], feet[1][1]], [feet[0][2], feet[1][2]])
+        x0 = ds_split.barycentric_forces(linear, [feet[0][1], feet[1][1]], inner)
         x_c, _t_c = ds_split.solve_minimax(J, bare0, geq, target, x0)
         ankle = [i for i, name in enumerate(names) if name.endswith(("ank_pitch", "ank_roll"))]
         x_b = ds_split.solve_ankle_norm(J[ankle, :], bare0[ankle], geq, target, x0)
@@ -1912,6 +1996,7 @@ class LipmWalker:
             taus["c"] = tau0 - J @ x_c
             chosen = x_c
             self._ds_count_wall = True
+            self._note_qp_cop(x_c, inner, full, float(linear["alpha"]))
         else:
             self.id_split_infeas += 1
             self._ds_count_wall = False
@@ -1930,11 +2015,44 @@ class LipmWalker:
                 f_s = chosen[12 * foot_i + 3 * k : 12 * foot_i + 3 * k + 3]
                 if float(np.linalg.norm(f_s)) < 1e-10:
                     continue
-                r = np.array([sx * foot[2][0], sy * foot[2][1], 0.0], dtype=np.float64)
+                r = np.array(
+                    [sx * inner[foot_i][0], sy * inner[foot_i][1], 0.0], dtype=np.float64,
+                )
                 mj.mj_applyFT(
                     self.model, scratch, rot @ f_s, rot @ np.cross(r, f_s),
                     foot[0], foot[3], scratch.qfrc_applied,
                 )
+
+    def _note_qp_cop(
+        self,
+        x: np.ndarray,
+        inner: list[tuple[float, float]],
+        full: list[tuple[float, float]],
+        alpha_line: float,
+    ) -> None:
+        """QP CoP margin to the declared box, and the sample observe() compares."""
+        cops: list[np.ndarray] = []
+        fzs: list[float] = []
+        for i, side in enumerate(("L", "R")):
+            cop, fz = ds_split.foot_cop(x[12 * i : 12 * i + 12], inner[i][0], inner[i][1])
+            cops.append(cop)
+            fzs.append(float(fz))
+            if fz <= 1.0:
+                continue
+            margin = ds_split.declared_margin(cop, full[i][0], full[i][1])
+            self.id_qp_margin_n[side] += 1
+            self.id_qp_margin_sum[side] += margin
+            if margin < self.id_qp_margin_min[side]:
+                self.id_qp_margin_min[side] = float(margin)
+                self.id_qp_margin_min_t[side] = float(self.data.time)
+        total = fzs[0] + fzs[1]
+        alpha = fzs[0] / total if total > 1e-6 else 0.5
+        gap_line = abs(alpha - float(alpha_line))
+        self.id_qp_line_n += 1
+        self.id_qp_line_sum += gap_line
+        if gap_line > self.id_qp_line_max:
+            self.id_qp_line_max = gap_line
+        self._qp_sample = {"alpha": float(alpha), "fz": fzs, "cop": cops}
 
     def _note_ds_spread(
         self,
@@ -2796,6 +2914,9 @@ class LipmWalker:
             com = float(self.preview_com_y)
         else:
             com, _vel, _acc = self._com_quintic(t_now, span)
+            # Same shift the ZMP just took, so the stop acceleration stays
+            # the quintic's and the weight moves with the plan.
+            com = float(com) + float(self._split_zmp_applied)
         self.preview_com_y = com
         self._zmp_cmd = float(future[0])
         walker.time = self._freeze_time
@@ -3526,6 +3647,85 @@ class LipmWalker:
             total += float(force[0])
         return total
 
+    def _cop_sole(self, side: Side) -> np.ndarray | None:
+        """Contact CoP in the sole geom frame, floor and any extra ground.
+
+        The QP CoP is in this same frame: geom centre, geom axes. Rug
+        contacts count. Foot-foot contacts do not.
+        """
+        gid = self.gid[side]
+        num = np.zeros(3, dtype=np.float64)
+        den = 0.0
+        for i in range(self.data.ncon):
+            c = self.data.contact[i]
+            g1, g2 = int(c.geom1), int(c.geom2)
+            if not self._on_ground(g1, g2, gid):
+                continue
+            force = np.zeros(6, dtype=np.float64)
+            mj.mj_contactForce(self.model, self.data, i, force)
+            fn = float(force[0])
+            if fn <= 1e-6:
+                continue
+            num += fn * np.asarray(c.pos, dtype=np.float64)
+            den += fn
+        if den <= 1e-6:
+            return None
+        world = num / den
+        rot = np.asarray(self.data.geom_xmat[gid], dtype=np.float64).reshape(3, 3)
+        center = np.asarray(self.data.geom_xpos[gid], dtype=np.float64)
+        local = rot.T @ (world - center)
+        return local[:2]
+
+    def _note_realised_split(self) -> None:
+        """Contact-solver split and CoP against the QP sample from this tick.
+
+        Both feet have to be carrying weight. A light foot is not a
+        share the position servo failed to command. The gap updates the
+        ZMP bias used on the next tick.
+        """
+        pending = self._qp_sample
+        if pending is None:
+            return
+        fn_l = self.foot_normal("L")
+        fn_r = self.foot_normal("R")
+        if fn_l < 5.0 or fn_r < 5.0:
+            return
+        alpha_real = fn_l / (fn_l + fn_r)
+        alpha_qp = float(pending["alpha"])
+        gap = abs(alpha_real - alpha_qp)
+        self.id_real_n += 1
+        self.id_real_split_sum += gap
+        self.id_real_qp_sum += alpha_qp
+        self.id_real_fn_sum += alpha_real
+        if gap > self.id_real_split_max:
+            self.id_real_split_max = gap
+            self.id_real_split_t = float(self.data.time)
+            self.id_real_split_qp = alpha_qp
+            self.id_real_split_fn = alpha_real
+        for i, side in enumerate(("L", "R")):
+            if float(pending["fz"][i]) <= 1.0:
+                continue
+            real = self._cop_sole(side)
+            if real is None:
+                continue
+            dist = float(np.linalg.norm(real - np.asarray(pending["cop"][i], dtype=np.float64)))
+            self.id_real_cop_n[side] += 1
+            self.id_real_cop_sum[side] += dist
+            if dist > self.id_real_cop_max[side]:
+                self.id_real_cop_max[side] = dist
+                self.id_real_cop_t[side] = float(self.data.time)
+        y_l = float(self.data.geom_xpos[int(self.gid["L"]), 1])
+        y_r = float(self.data.geom_xpos[int(self.gid["R"]), 1])
+        span = y_l - y_r
+        if abs(span) < 1e-4:
+            return
+        err = alpha_qp - alpha_real
+        step = SPLIT_TRACK_STEP * err * span
+        step = min(SPLIT_TRACK_STEP_M, max(-SPLIT_TRACK_STEP_M, step))
+        bias = float(self._split_zmp_bias) + step
+        self._split_zmp_bias = min(SPLIT_TRACK_BIAS_M, max(-SPLIT_TRACK_BIAS_M, bias))
+        self.id_split_bias_max = max(self.id_split_bias_max, abs(float(self._split_zmp_bias)))
+
     def _cop_local(self, side: Side) -> np.ndarray | None:
         gid = self.gid[side]
         bid = self.bid[side]
@@ -3626,6 +3826,7 @@ class LipmWalker:
 
     def observe(self, up_z: float) -> None:
         self._declare_stop_contact()
+        self._note_realised_split()
         swing = ""
         if self.phase == "swing":
             swing = self.other(self.stance)

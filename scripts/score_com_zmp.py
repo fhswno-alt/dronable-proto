@@ -1822,6 +1822,48 @@ def run_attempt(
         "id_split_a_resid_m": float(getattr(lipm, "id_split_a_resid_m", 0.0)),
         "id_split_bare": {k: dict(v) for k, v in getattr(lipm, "id_split_bare", {}).items()},
         "id_split_stop_bare": {k: dict(v) for k, v in getattr(lipm, "id_split_stop_bare", {}).items()},
+        "id_qp_margin_n_l": int(getattr(lipm, "id_qp_margin_n", {}).get("L", 0)),
+        "id_qp_margin_n_r": int(getattr(lipm, "id_qp_margin_n", {}).get("R", 0)),
+        "id_qp_margin_min_l": _margin_min(lipm, "L"),
+        "id_qp_margin_min_r": _margin_min(lipm, "R"),
+        "id_qp_margin_mean_l": _margin_mean(lipm, "L"),
+        "id_qp_margin_mean_r": _margin_mean(lipm, "R"),
+        "id_qp_margin_min_t_l": float(getattr(lipm, "id_qp_margin_min_t", {}).get("L", 0.0)),
+        "id_qp_margin_min_t_r": float(getattr(lipm, "id_qp_margin_min_t", {}).get("R", 0.0)),
+        "id_qp_line_n": int(getattr(lipm, "id_qp_line_n", 0)),
+        "id_qp_line_max": float(getattr(lipm, "id_qp_line_max", 0.0)),
+        "id_qp_line_mean": _ratio(
+            float(getattr(lipm, "id_qp_line_sum", 0.0)), int(getattr(lipm, "id_qp_line_n", 0)),
+        ),
+        "id_real_n": int(getattr(lipm, "id_real_n", 0)),
+        "id_real_split_max": float(getattr(lipm, "id_real_split_max", 0.0)),
+        "id_real_split_mean": _ratio(
+            float(getattr(lipm, "id_real_split_sum", 0.0)), int(getattr(lipm, "id_real_n", 0)),
+        ),
+        "id_real_split_t": float(getattr(lipm, "id_real_split_t", 0.0)),
+        "id_real_split_qp": float(getattr(lipm, "id_real_split_qp", 0.0)),
+        "id_real_split_fn": float(getattr(lipm, "id_real_split_fn", 0.0)),
+        "id_real_qp_mean": _ratio(
+            float(getattr(lipm, "id_real_qp_sum", 0.0)), int(getattr(lipm, "id_real_n", 0)),
+        ),
+        "id_real_fn_mean": _ratio(
+            float(getattr(lipm, "id_real_fn_sum", 0.0)), int(getattr(lipm, "id_real_n", 0)),
+        ),
+        "id_real_cop_n_l": int(getattr(lipm, "id_real_cop_n", {}).get("L", 0)),
+        "id_real_cop_n_r": int(getattr(lipm, "id_real_cop_n", {}).get("R", 0)),
+        "id_real_cop_max_l": float(getattr(lipm, "id_real_cop_max", {}).get("L", 0.0)),
+        "id_real_cop_max_r": float(getattr(lipm, "id_real_cop_max", {}).get("R", 0.0)),
+        "id_real_cop_mean_l": _ratio(
+            float(getattr(lipm, "id_real_cop_sum", {}).get("L", 0.0)),
+            int(getattr(lipm, "id_real_cop_n", {}).get("L", 0)),
+        ),
+        "id_real_cop_mean_r": _ratio(
+            float(getattr(lipm, "id_real_cop_sum", {}).get("R", 0.0)),
+            int(getattr(lipm, "id_real_cop_n", {}).get("R", 0)),
+        ),
+        "id_real_cop_t_l": float(getattr(lipm, "id_real_cop_t", {}).get("L", 0.0)),
+        "id_real_cop_t_r": float(getattr(lipm, "id_real_cop_t", {}).get("R", 0.0)),
+        "id_split_bias_max": float(getattr(lipm, "id_split_bias_max", 0.0)),
         "id_stop_span": float(getattr(lipm, "id_stop_span", 0.0)),
         "id_stop_qdd": float(getattr(lipm, "id_stop_qdd", 0.0)),
         "id_bind_joint": bind_joint,
@@ -2011,6 +2053,25 @@ def run_attempt(
         "stages": by_stage,
     }
     return result
+
+
+def _ratio(total: float, n: int) -> float:
+    if n <= 0:
+        return 0.0
+    return float(total) / float(n)
+
+
+def _margin_min(lipm: object, side: str) -> float:
+    n = int(getattr(lipm, "id_qp_margin_n", {}).get(side, 0))
+    if n <= 0:
+        return -1.0
+    return float(getattr(lipm, "id_qp_margin_min", {}).get(side, -1.0))
+
+
+def _margin_mean(lipm: object, side: str) -> float:
+    n = int(getattr(lipm, "id_qp_margin_n", {}).get(side, 0))
+    total = float(getattr(lipm, "id_qp_margin_sum", {}).get(side, 0.0))
+    return _ratio(total, n)
 
 
 def _frac_dict(stats: dict[str, SideFrac]) -> dict[str, dict[str, float]]:

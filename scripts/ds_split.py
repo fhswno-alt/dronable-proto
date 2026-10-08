@@ -10,11 +10,16 @@ the share. Three shares are computed for the same wrench:
     armature term removed
 
 (c) is a linear program: minimise t subject to |τ_bare| ≤ t, each
-foot's CoP inside its box, a four-sided friction pyramid of coefficient
-μ, unilateral normals, and the summed wrench equal to the planned one.
-The pyramid is the cone the QP can enforce with linear inequalities.
-A wall is a tick where this t exceeds the sag bar. Splits (a) and (b)
-do not name one.
+foot's CoP inside the box passed in as corner half-sizes, a four-sided
+friction pyramid of coefficient μ, unilateral normals, and the summed
+wrench equal to the planned one. The pyramid is the cone the QP can
+enforce with linear inequalities. A wall is a tick where this t exceeds
+the sag bar. Splits (a) and (b) do not name one.
+
+The gait passes the declared box shrunk by COP_INSET_M on every side
+for (b) and (c). That is 125×66 mm on the 135×76 mm sole. (a) stays on
+the full declared box. The CoP of a corner solution is the fz-weighted
+corner, so it cannot leave the rectangle those corners span.
 """
 
 from __future__ import annotations
@@ -25,6 +30,9 @@ from scipy.optimize import LinearConstraint, minimize, linprog
 # Declared contact box, metres. Half-sizes, matching the plant geom.
 BOX_HX_M = 0.0675
 BOX_HY_M = 0.038
+# Clearly-inside margin from the #102 sole rule, every side. The QP
+# rectangle is the declared box minus this, 125×66 mm, half 0.0625×0.033.
+COP_INSET_M = 0.005
 # Friction coefficient of the planned cone. The plant geom is 1.6.
 # This is the constraint on the split, not a geom edit.
 DS_FRICTION_MU = 1.2
@@ -71,6 +79,32 @@ def corner_wrench_map(rot: np.ndarray, hx: float, hy: float) -> np.ndarray:
         block[3:, :] = rot @ skew
         blocks.append(block)
     return np.concatenate(blocks, axis=1)
+
+
+def inset_half(hx: float, hy: float, inset: float = COP_INSET_M) -> tuple[float, float]:
+    """Half-sizes of the box after ``inset`` metres is taken off every side."""
+    return max(float(hx) - float(inset), 1e-4), max(float(hy) - float(inset), 1e-4)
+
+
+def foot_cop(x_foot: np.ndarray, hx: float, hy: float) -> tuple[np.ndarray, float]:
+    """Sole-frame CoP and fz from four corner forces ordered as ``_CORNERS``."""
+    cop = np.zeros(2, dtype=np.float64)
+    fz = 0.0
+    forces = np.asarray(x_foot, dtype=np.float64).reshape(-1)
+    for k, (sx, sy) in enumerate(_CORNERS):
+        w = float(forces[3 * k + 2])
+        fz += w
+        cop[0] += w * sx * float(hx)
+        cop[1] += w * sy * float(hy)
+    if abs(fz) > 1e-8:
+        cop /= fz
+    return cop, float(fz)
+
+
+def declared_margin(cop: np.ndarray, hx: float, hy: float) -> float:
+    """Metres from this CoP to the declared-box edge. Positive is inside."""
+    point = np.asarray(cop, dtype=np.float64)
+    return float(min(float(hx) - abs(float(point[0])), float(hy) - abs(float(point[1]))))
 
 
 def _clamp_cop(local_xy: np.ndarray, hx: float, hy: float) -> np.ndarray:
