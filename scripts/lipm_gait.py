@@ -45,7 +45,8 @@ SAT_FRAC = 0.98
 KNEE_SAG_NM = 2.33
 # Feedback on (q_ref − q) when the inverse-dynamics feedforward is on.
 # This is not the plant actuator kp. The XML gain stays 45 / 40 / 35.
-ID_FF_KP = 8.0
+# 1 Nm/rad is small beside those gains. It is not a torque cap.
+ID_FF_KP = 1.0
 # Not a measured motor inertia. The same 0.01 sits on the plant joints.
 # It is the diagnosis column. It is not the reflected inertia: a planted
 # hip pitch is about 0.2 kg·m², so 2.33/0.01 is not a legal q̈.
@@ -53,13 +54,12 @@ ID_FF_ARMATURE = 0.01
 # DC-motor model line, not a datasheet. |qvel| ≤ 5.82·(1 − |τ|/3.43).
 DC_QVEL_LIM = 5.82
 DC_STALL_NM = 3.43
-# Solver tolerance for a matched forward/inverse pair. A tick is not
-# bucketed while the leg residual is above its band. The band is
-# ID_RESID_NM plus the implicit offset. A band above ID_BAND_CAP_NM
-# does not bucket and does not count as passed. The band never
-# relaxes the 2.33 Nm applied-ask bar.
+# Exact implicitfast residual. A tick is bucketed only while every
+# leg joint is inside ID_RESID_EXACT_NM. ID_RESID_NM is the reported
+# fraction threshold, not a pass band. The residual does not relax
+# the 2.33 Nm applied-ask bar.
+ID_RESID_EXACT_NM = 1.0e-3
 ID_RESID_NM = 0.05
-ID_BAND_CAP_NM = 0.15
 # Stop/silence command budget for every leg joint. Hip yaw, hip roll,
 # hip pitch, knee, ankle pitch, and ankle roll share the HX-35H class.
 # The sag bar stays 2.33. Sitting the prediction on that bar measured
@@ -251,11 +251,11 @@ class LipmConfig:
     # torque clamp.
     gm_spring_nm: float = 0.0
     # Inverse-dynamics feedforward through the position servo. Off leaves
-    # the IK target. On, every leg ctrl is q + (τ + kv·ω) / kp so the
-    # applied ask kp·(ctrl−q) − kv·ω equals τ. τ is the inverse-dynamics
-    # torque of a capped reference acceleration plus a low-gain position
-    # error, and it is built inside ±KNEE_SAG_NM before the write. The
-    # plant actuator kp is not edited.
+    # the IK target. On, every leg ctrl is
+    # q + (τ_ff + kv·q̇ + K_fb·(q_ref−q)) / kp. τ_ff is the inverse of
+    # the planned gait (q_ref, q̇_ref, q̈_ref) with the planned contact
+    # wrench. It is not saturated into ±KNEE_SAG_NM. The plant kp stays
+    # in the XML.
     gm_id_ff: bool = False
 
 
@@ -509,6 +509,25 @@ class LipmWalker:
         self.id_root_t = 0.0
         self.id_root_dof = -1
         self.id_root_fail_n = 0
+        self.id_root_bal_max = 0.0
+        self.id_ident_max = 0.0
+        self.id_inv_gap_max = 0.0
+        self.id_inv_gap_joint = ""
+        self.id_mj_abs = 0.0
+        self.id_mj_tau = 0.0
+        self.id_mj_joint = ""
+        self.id_mj_t = 0.0
+        self._plan_data: mj.MjData | None = None
+        self._plan_q_hist: list[dict[str, float]] = []
+        self._zmp_cmd = 0.0
+        self.id_plan_tau = 0.0
+        self.id_plan_abs = 0.0
+        self.id_plan_ask = 0.0
+        self.id_plan_joint = ""
+        self.id_plan_phase = ""
+        self.id_plan_term = ""
+        self.id_plan_t = 0.0
+        self.id_tick_term: dict[str, str] = {}
         self.id_tick_root = 0.0
         self.id_fwdinv0_max = 0.0
         self.id_fwdinv1_max = 0.0
@@ -518,8 +537,10 @@ class LipmWalker:
         self.id_impl_max = 0.0
         self.id_impl_at_resid = 0.0
         self.id_band_at_resid = ID_RESID_NM
-        self.id_band_max = 0.0
-        self.id_band_hi_n = 0
+        self.id_resid_over_n = 0
+        self.id_rail_n = 0
+        self.id_ff_resid = 0.0
+        self._id_qvel0: np.ndarray | None = None
         self.id_tick_offset: dict[str, float] = {}
         self.id_tick_band: dict[str, float] = {}
         self._leg_kv: dict[str, float] = {}
@@ -527,6 +548,7 @@ class LipmWalker:
         self.id_knee_ok_tau = 0.0
         self.id_knee_ok_joint = ""
         self.id_knee_ok_t = 0.0
+        self.id_knee_act = 0.0
         self.id_knee_ok_n = 0
         self.id_resid_vs_pas = 0.0
         self.id_wall_phys_n = 0
@@ -731,6 +753,10 @@ class LipmWalker:
             self.cfg.preview_amp_m,
             float(self.cfg.preview_shape),
         )
+
+    def _step_preview(self, preview: zmp_preview.ZmpPreview, future: np.ndarray) -> float:
+        self._zmp_cmd = float(future[0]) if len(future) else 0.0
+        return preview.step(future)
 
     def _zmp_at(self, t_s: float) -> float:
         if t_s < 0.0:
@@ -1092,6 +1118,7 @@ class LipmWalker:
         self.id_tick_resid = {}
         self.id_tick_resid_pas = {}
         self.id_tick_ok = {name: True for name in self._leg_dof}
+        self.id_tick_term = {}
         self.id_tick_root = 0.0
         self.id_tick_fwdinv0 = 0.0
         self.id_tick_fwdinv1 = 0.0
@@ -1104,42 +1131,93 @@ class LipmWalker:
         if self._limit_this_tick:
             self.limit_ticks += 1
 
-    def audit_forward_inverse(self) -> None:
-        """Inverse on a copy taken before mj_step.
-
-        mjENBL_FWDINV is set only for this copy, then cleared. The
-        plant XML is not edited. mj_forward runs on the copy, then
-        mj_inverse. solver_fwdinv is MuJoCo's forward/inverse norm.
-        The free-joint wrench qfrc_inverse[0:6] is recorded first.
-        The leg residual is
-        |qfrc_inverse − (qfrc_actuator + qfrc_passive + qfrc_applied)|.
-        implicitfast folds joint damping and actuator kv into the
-        velocity derivative, so the band is
-        0.05 + dt·(damping + kv)·|q̈|. The offset is logged on its
-        own. A joint outside that band is counted and not bucketed.
-        A band above 0.15 Nm is unbucketed and is not a pass. The
-        band does not relax the 2.33 Nm applied-ask bar.
-        """
+    def capture_pre_step(self) -> None:
+        """Copy the state the live mj_step is about to integrate."""
         self._ensure_leg_dof()
         if self._id_data is None:
             self._id_data = mj.MjData(self.model)
+        mj.mj_copyData(self._id_data, self.model, self.data)
+        self._id_qvel0 = np.array(self.data.qvel, dtype=np.float64, copy=True)
+
+    def _implicit_leg_force(self, name: str, adr: int, q: float, v0: float, v1: float) -> tuple[float, float]:
+        """Force the implicitfast step applies at one leg joint.
+
+        MuJoCo 3.14 implicitfast builds qH = M − dt·qDeriv with
+        mjd_smooth_vel(flg_bias=0). qDeriv holds joint damping and the
+        actuator velocity gain. A force-clamped actuator is omitted
+        from qDeriv (actuatorDerivSkip), so its force stays at the
+        value computed from qvel_t. Joint damping is not skipped: it
+        acts on qvel_{t+1}. Returns (actuator force, actuator+damping).
+        """
+        act_name = name + "_pos"
+        idx = self.act_idx.get(act_name)
+        if idx is None:
+            return 0.0, 0.0
+        kp = float(self.model.actuator_gainprm[idx, 0])
+        kv = float(self._leg_kv.get(name, 0.0))
+        ctrl = float(self.data.ctrl[idx])
+        lo_c = float(self.model.actuator_ctrlrange[idx, 0])
+        hi_c = float(self.model.actuator_ctrlrange[idx, 1])
+        if int(self.model.actuator_ctrllimited[idx]):
+            ctrl = min(hi_c, max(lo_c, ctrl))
+        spring = kp * (ctrl - q)
+        raw_t = spring - kv * v0
+        lo_f = float(self.model.actuator_forcerange[idx, 0])
+        hi_f = float(self.model.actuator_forcerange[idx, 1])
+        if int(self.model.actuator_forcelimited[idx]) and (raw_t >= hi_f or raw_t <= lo_f):
+            actuator = min(hi_f, max(lo_f, raw_t))
+        else:
+            actuator = spring - kv * v1
+        damp = float(self.model.dof_damping[adr]) * v1
+        return actuator, actuator - damp
+
+    def audit_forward_inverse(self) -> None:
+        """Inverse of the realised implicitfast step.
+
+        q̈ = (qvel_{t+1} − qvel_t) / dt on the pre-step q and q̇. That
+        difference is the acceleration mj_implicit integrated, not a
+        reference finite difference. The leg residual is
+
+            |M q̈ + qfrc_bias − qfrc_constraint
+              − (kp(ctrl−q) − kv·qvel_end − damping·qvel_end)|
+
+        with the actuator term held at its qvel_t clip when the
+        forcerange is active. mjENBL_FWDINV is set only while
+        solver_fwdinv is read, then cleared. The plant XML is not edited.
+        A tick outside 1e-3 Nm is not bucketed. The residual does not
+        relax the 2.33 Nm applied-ask bar.
+        """
+        self._ensure_leg_dof()
         scratch = self._id_data
+        qvel0 = self._id_qvel0
+        if scratch is None or qvel0 is None:
+            return
+        dt = float(self.model.opt.timestep)
+        qvel1 = np.array(self.data.qvel, dtype=np.float64, copy=True)
+        qacc_real = (qvel1 - qvel0) / dt
         saved = int(self.model.opt.enableflags)
         self.model.opt.enableflags = saved | int(mj.mjtEnableBit.mjENBL_FWDINV)
         try:
-            mj.mj_copyData(scratch, self.model, self.data)
             mj.mj_forward(self.model, scratch)
-            act = np.array(scratch.qfrc_actuator, dtype=np.float64, copy=True)
+            con = np.array(scratch.qfrc_constraint, dtype=np.float64, copy=True)
             app = np.array(scratch.qfrc_applied, dtype=np.float64, copy=True)
-            pas = np.array(scratch.qfrc_passive, dtype=np.float64, copy=True)
-            qacc = np.array(scratch.qacc, dtype=np.float64, copy=True)
-            mj.mj_compareFwdInv(self.model, scratch)
+            act_fwd = np.array(scratch.qfrc_actuator, dtype=np.float64, copy=True)
+            bias = np.zeros(int(self.model.nv), dtype=np.float64)
+            mj.mj_rne(self.model, scratch, 0, bias)
+            ma = np.zeros(int(self.model.nv), dtype=np.float64)
+            mj.mj_mulM(self.model, scratch, ma, qacc_real)
+            dyn = ma + bias
+            scratch.qacc[:] = qacc_real
+            if int(scratch.nefc) > 0:
+                mj.mj_compareFwdInv(self.model, scratch)
+            else:
+                mj.mj_inverse(self.model, scratch)
             fwd0 = float(scratch.solver_fwdinv[0])
             fwd1 = float(scratch.solver_fwdinv[1])
-            mj.mj_inverse(self.model, scratch)
             inv = np.array(scratch.qfrc_inverse, dtype=np.float64, copy=True)
         finally:
             self.model.opt.enableflags = saved
+        qacc = qacc_real
         self.id_phys_n += 1
         if fwd0 > self.id_tick_fwdinv0:
             self.id_tick_fwdinv0 = fwd0
@@ -1150,7 +1228,6 @@ class LipmWalker:
         if fwd1 > self.id_fwdinv1_max:
             self.id_fwdinv1_max = fwd1
             self.id_fwdinv_t = float(self.data.time)
-        dt = float(self.model.opt.timestep)
         root_abs = np.abs(inv[:6])
         root = float(np.max(root_abs)) if root_abs.size else 0.0
         if root > self.id_tick_root:
@@ -1159,49 +1236,66 @@ class LipmWalker:
             self.id_root_max = root
             self.id_root_t = float(self.data.time)
             self.id_root_dof = int(np.argmax(root_abs))
-        root_bad = root > ID_RESID_NM
-        if root_bad:
+        bal = np.abs(dyn[:6] - con[:6] - app[:6])
+        bal_max = float(np.max(bal)) if bal.size else 0.0
+        if bal_max > self.id_root_bal_max:
+            self.id_root_bal_max = bal_max
+        if root > ID_RESID_NM:
             self.id_root_fail_n += 1
-        step_fail = root_bad
-        step_wide = False
+        step_fail = False
+        step_over = False
         rot = np.array(self.data.xmat[self.bid_body], dtype=np.float64).reshape(3, 3)
         upright = float(rot[2, 2]) >= 0.92
         sag = float(KNEE_SAG_NM)
+        terms = self._leg_terms(scratch, qacc, con)
         for name, adr in self._leg_dof.items():
-            tau = float(inv[adr])
+            mj_tau = float(inv[adr])
             arm = ID_FF_ARMATURE * float(qacc[adr])
+            jid = int(mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, name))
+            q = float(scratch.qpos[int(self.model.jnt_qposadr[jid])])
+            actuator, applied = self._implicit_leg_force(
+                name, adr, q, float(qvel0[adr]), float(qvel1[adr]),
+            )
+            # F_user is the implicit force the user named:
+            # kp(ctrl−q) − kv·qvel_end − damping·qvel_end, with the
+            # actuator held at its qvel_t clip when forcerange is active.
+            # qfrc_inverse subtracts qfrc_passive and re-solves the
+            # constraint, so |qfrc_inverse − F_user| is not that step.
+            # The integrator identity below is the exact comparison.
+            ident = abs(float(dyn[adr]) - float(con[adr]) - float(app[adr]) - applied)
+            gap = abs(mj_tau - applied)
+            if ident > self.id_ident_max:
+                self.id_ident_max = ident
+            if gap > self.id_inv_gap_max:
+                self.id_inv_gap_max = gap
+                self.id_inv_gap_joint = name
+            # The step's inverse is F_user. qfrc_inverse is the re-solved
+            # vector and is not the bucket. A wall uses F_user.
+            tau = applied
             stripped = tau - arm
-            forward = float(act[adr]) + float(pas[adr]) + float(app[adr])
-            resid = abs(tau - forward)
-            damp = float(self.model.dof_damping[adr])
-            kv = float(self._leg_kv.get(name, 0.0))
-            offset = dt * (damp + kv) * abs(float(qacc[adr]))
-            band = ID_RESID_NM + offset
-            prev_off = float(self.id_tick_offset.get(name, -1.0))
-            if offset > prev_off:
-                self.id_tick_offset[name] = offset
-                self.id_tick_band[name] = band
-            if offset > self.id_impl_max:
-                self.id_impl_max = offset
+            resid = ident
             prev_resid = float(self.id_tick_resid.get(name, -1.0))
             if resid > prev_resid:
                 self.id_tick_resid[name] = resid
-            if band > self.id_band_max:
-                self.id_band_max = band
-            outside = resid > band
-            wide = band > ID_BAND_CAP_NM
-            if wide:
-                step_wide = True
+            outside = resid > ID_RESID_EXACT_NM
+            if resid > ID_RESID_NM:
+                step_over = True
             if outside:
                 self.id_tick_ok[name] = False
                 step_fail = True
-            elif wide:
-                self.id_tick_ok[name] = False
             elif abs(tau) >= abs(float(self.id_tick_tau.get(name, 0.0))):
                 self.id_tick_tau[name] = tau
                 self.id_tick_arm[name] = arm
                 self.id_tick_stripped[name] = stripped
-            passed = (not outside) and (not wide) and (not root_bad)
+                self.id_tick_term[name] = terms.get(name, "")
+            if abs(mj_tau) > self.id_mj_abs:
+                self.id_mj_abs = abs(mj_tau)
+                self.id_mj_tau = mj_tau
+                self.id_mj_joint = name
+                self.id_mj_t = float(self.data.time)
+            if abs(abs(actuator) - 2.45) <= 1.0e-6:
+                self.id_rail_n += 1
+            passed = not outside
             if passed:
                 self._consistent_tau[name] = tau
                 if name.endswith("knee"):
@@ -1211,25 +1305,18 @@ class LipmWalker:
                         self.id_knee_ok_tau = tau
                         self.id_knee_ok_joint = name
                         self.id_knee_ok_t = float(self.data.time)
+                        self.id_knee_act = actuator
             if resid > self.id_resid_max:
                 self.id_resid_max = resid
                 self.id_resid_joint = name
-                self.id_impl_at_resid = offset
-                self.id_band_at_resid = band
-            if root_bad or outside or wide or not upright:
+            if outside or not upright:
                 continue
             if abs(stripped) > sag + 1e-9:
                 self.id_wall_phys_n += 1
                 if abs(stripped) <= self.id_ff_stripped_abs and self.id_ff_bucket == "wall":
                     continue
                 phase = self._ff_phase(name)
-                side = "l" if name.startswith("l_") else "r"
-                other = "r" if side == "l" else "l"
-                cop = self._ankle_cop_mm(side)
-                if cop is None:
-                    cop = self._ankle_cop_mm(other)
-                cop_h = None if cop is None else cop[2]
-                term = self._id_dominant(scratch, adr, phase, cop_h)
+                term = terms.get(name, "")
                 self.id_ff_bucket = "wall"
                 self.id_ff_peak_abs = abs(tau)
                 self.id_ff_peak_joint = name
@@ -1240,6 +1327,7 @@ class LipmWalker:
                 self.id_ff_arm = arm
                 self.id_ff_stripped = stripped
                 self.id_ff_stripped_abs = abs(stripped)
+                self.id_ff_resid = resid
             elif abs(tau) > sag + 1e-9:
                 self.id_arm_phys_n += 1
                 if self.id_ff_bucket == "wall" or abs(tau) <= self.id_ff_peak_abs:
@@ -1254,30 +1342,73 @@ class LipmWalker:
                 self.id_ff_arm = arm
                 self.id_ff_stripped = stripped
                 self.id_ff_stripped_abs = abs(stripped)
-        if root_bad:
-            for name in self.id_tick_ok:
-                self.id_tick_ok[name] = False
-        if step_wide:
-            self.id_band_hi_n += 1
+        if step_over:
+            self.id_resid_over_n += 1
         if step_fail:
             self.id_resid_fail_n += 1
 
+    def _leg_terms(self, scratch: mj.MjData, qacc: np.ndarray, con: np.ndarray) -> dict[str, str]:
+        """Name the largest piece of the exact step force at each leg joint.
+
+        q̈ is the inertia excluding armature, plus the velocity product.
+        Armature is 0.01·q̈. Contact is the forward constraint. The label
+        does not use qfrc_inverse, which re-solves that constraint.
+        """
+        nv = int(self.model.nv)
+        qvel = np.array(scratch.qvel, dtype=np.float64, copy=True)
+        qacc_saved = np.array(scratch.qacc, dtype=np.float64, copy=True)
+        full = np.zeros(nv, dtype=np.float64)
+        bias = np.zeros(nv, dtype=np.float64)
+        mj.mj_rne(self.model, scratch, 1, full)
+        scratch.qacc[:] = 0.0
+        mj.mj_rne(self.model, scratch, 0, bias)
+        scratch.qvel[:] = 0.0
+        mj.mj_fwdVelocity(self.model, scratch)
+        grav = np.zeros(nv, dtype=np.float64)
+        scratch.qacc[:] = 0.0
+        mj.mj_rne(self.model, scratch, 0, grav)
+        scratch.qvel[:] = qvel
+        scratch.qacc[:] = qacc_saved
+        terms: dict[str, str] = {}
+        for name, adr in self._leg_dof.items():
+            inertial = float(full[adr] - bias[adr])
+            arm = abs(ID_FF_ARMATURE * float(qacc[adr]))
+            qdd = abs(inertial - ID_FF_ARMATURE * float(qacc[adr]))
+            cor = abs(float(bias[adr] - grav[adr]))
+            contact = abs(float(con[adr]))
+            scores = {
+                "q̈": qdd + cor,
+                "armature": arm,
+                "gravity": abs(float(grav[adr])),
+                "contact": contact,
+            }
+            label = max(scores, key=lambda key: scores[key])
+            if label == "contact":
+                phase = self._ff_phase(name)
+                cop = self._ankle_cop_mm("l" if name.startswith("l_") else "r")
+                if phase == "touchdown impact":
+                    label = "impact"
+                elif cop is not None and cop[2] >= 15.0:
+                    label = "CoP"
+            terms[name] = label
+        return terms
+
     def _id_feedforward(self, joints: dict[str, float]) -> None:
-        """Replace each leg target with the ctrl that applies τ.
+        """ctrl from the planned gait, not from the realised inverse.
 
-        A position actuator applies kp·(ctrl−q) − kv·q̇. kv is
-        −actuator_biasprm[i, 2]. The plant kp stays in the XML:
+        τ_ff = ID(q_ref, q̇_ref, q̈_ref) with the LIPM wrench inside the
+        declared foot box. Then
 
-            ctrl = q + (τ_des + kv·q̇) / kp
+            ctrl = q + (τ_ff + kv·q̇ + K_fb·(q_ref−q)) / kp
 
-        τ_des is the last matched inverse plus ID_FF_KP·(q_ref−q).
-        The sum is not saturated and not clipped into ±2.33 Nm. A
-        limiter that pulls the command onto that bar is a hard-cap.
-        ctrl is not pulled into ctrlrange here.
+        q̇ is the measured joint velocity. K_fb is ID_FF_KP. The sum is
+        not saturated and not clipped into ±2.33 Nm. ctrl is not pulled
+        into ctrlrange here. A later limiter that changes it is a fail.
         """
         if not self.cfg.gm_id_ff:
             return
         self._ensure_leg_dof()
+        tau_ff = self._planned_tau(joints)
         for name, adr in self._leg_dof.items():
             if name not in joints:
                 continue
@@ -1292,10 +1423,222 @@ class LipmWalker:
                 continue
             q = self.q(name)
             omega = float(self.data.qvel[adr])
-            tau_ff = float(self._consistent_tau.get(name, 0.0))
-            fb = ID_FF_KP * (float(joints[name]) - q)
-            tau = tau_ff + fb
+            q_ref = float(joints[name])
+            fb = ID_FF_KP * (q_ref - q)
+            tau = float(tau_ff.get(name, 0.0)) + fb
+            if abs(tau) > self.id_plan_ask:
+                self.id_plan_ask = abs(tau)
+                self.id_plan_tau = float(tau_ff.get(name, 0.0))
+                self.id_plan_abs = abs(self.id_plan_tau)
+                self.id_plan_joint = name
+                self.id_plan_phase = self._ff_phase(name)
+                self.id_plan_term = self._plan_term_name
+                self.id_plan_t = float(self.data.time)
             joints[name] = q + (tau + kv * omega) / kp
+
+    def _ref_derivatives(self, joints: dict[str, float]) -> tuple[dict[str, float], dict[str, float]]:
+        """Central difference of the planned joint targets. dt is the 8 ms plan."""
+        sample = {name: float(val) for name, val in joints.items()}
+        self._plan_q_hist.append(sample)
+        if len(self._plan_q_hist) > 3:
+            self._plan_q_hist.pop(0)
+        dt = float(op3_walk.OP3_CTRL_S)
+        qd: dict[str, float] = {}
+        qdd: dict[str, float] = {}
+        hist = self._plan_q_hist
+        for name in sample:
+            if len(hist) >= 3 and name in hist[-2] and name in hist[-3]:
+                q0 = float(hist[-3][name])
+                q1 = float(hist[-2][name])
+                q2 = float(sample[name])
+                qd[name] = (q2 - q0) / (2.0 * dt)
+                qdd[name] = (q2 - 2.0 * q1 + q0) / (dt * dt)
+            elif len(hist) >= 2 and name in hist[-2]:
+                qd[name] = (float(sample[name]) - float(hist[-2][name])) / dt
+                qdd[name] = 0.0
+            else:
+                qd[name] = 0.0
+                qdd[name] = 0.0
+        return qd, qdd
+
+    def _planned_tau(self, joints: dict[str, float]) -> dict[str, float]:
+        """Inverse of the planned pose, with the LIPM wrench and no contacts.
+
+        Contacts are disabled on the shared model only for this call and
+        restored before return. The wrench is written on the scratch
+        data, not on the live step. The plant XML is not edited.
+        """
+        self._plan_term_name = ""
+        qd, qdd = self._ref_derivatives(joints)
+        if self._plan_data is None:
+            self._plan_data = mj.MjData(self.model)
+        scratch = self._plan_data
+        mj.mj_resetData(self.model, scratch)
+        scratch.qpos[:] = self.data.qpos
+        scratch.qvel[:] = 0.0
+        for name, val in joints.items():
+            jid = int(mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, name))
+            if jid < 0:
+                continue
+            qadr = int(self.model.jnt_qposadr[jid])
+            vadr = int(self.model.jnt_dofadr[jid])
+            scratch.qpos[qadr] = float(val)
+            scratch.qvel[vadr] = float(qd.get(name, 0.0))
+            scratch.qacc[vadr] = float(qdd.get(name, 0.0))
+        zc = float(self._preview_zc) if self._preview_zc > 0.05 else 0.18
+        zmp_y = float(self._zmp_cmd)
+        com_y = float(self.preview_com_y)
+        ay = (com_y - zmp_y) * G / zc
+        vy = 0.0
+        if self._preview is not None:
+            vy = float(self._preview.com_vel_m_s)
+        free = self._free_dof()
+        scratch.qvel[free + 0] = float(self.cmd_vx)
+        scratch.qvel[free + 1] = vy
+        scratch.qacc[free + 1] = ay
+        saved_aff = np.array(self.model.geom_conaffinity, copy=True)
+        saved_typ = np.array(self.model.geom_contype, copy=True)
+        self.model.geom_conaffinity[:] = 0
+        self.model.geom_contype[:] = 0
+        try:
+            mj.mj_forward(self.model, scratch)
+            self._apply_planned_wrench(scratch, zmp_y)
+            for name, val in qdd.items():
+                jid = int(mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, name))
+                if jid < 0:
+                    continue
+                vadr = int(self.model.jnt_dofadr[jid])
+                scratch.qacc[vadr] = float(val)
+            scratch.qacc[free + 0] = 0.0
+            scratch.qacc[free + 1] = ay
+            scratch.qacc[free + 2] = 0.0
+            scratch.qacc[free + 3] = 0.0
+            scratch.qacc[free + 4] = 0.0
+            scratch.qacc[free + 5] = 0.0
+            mj.mj_inverse(self.model, scratch)
+            applied = np.array(scratch.qfrc_applied, dtype=np.float64, copy=True)
+            inv = np.array(scratch.qfrc_inverse, dtype=np.float64, copy=True)
+        finally:
+            self.model.geom_conaffinity[:] = saved_aff
+            self.model.geom_contype[:] = saved_typ
+        out: dict[str, float] = {}
+        worst = 0.0
+        worst_name = ""
+        for name, adr in self._leg_dof.items():
+            # mj_inverse does not subtract qfrc_applied. With contacts
+            # off, the actuator that realises the plan is inverse − wrench.
+            tau = float(inv[adr] - applied[adr])
+            out[name] = tau
+            if abs(tau) > worst:
+                worst = abs(tau)
+                worst_name = name
+        if worst_name:
+            self._plan_term_name = self._planned_term(scratch, self._leg_dof[worst_name])
+        return out
+
+    def _free_dof(self) -> int:
+        for jid in range(int(self.model.njnt)):
+            if int(self.model.jnt_type[jid]) == int(mj.mjtJoint.mjJNT_FREE):
+                return int(self.model.jnt_dofadr[jid])
+        return 0
+
+    def _apply_planned_wrench(self, scratch: mj.MjData, zmp_y: float) -> None:
+        """LIPM wrench. Single support uses the stance box. Double support splits."""
+        mass = float(self.model.body_subtreemass[self.bid_body])
+        if mass < 1e-6:
+            mass = float(np.sum(self.model.body_mass))
+        zc = float(self._preview_zc) if self._preview_zc > 0.05 else 0.18
+        ay = (float(self.preview_com_y) - float(zmp_y)) * G / zc
+        force = np.array([0.0, mass * ay, mass * G], dtype=np.float64)
+        torque = np.zeros(3, dtype=np.float64)
+        scratch.qfrc_applied[:] = 0.0
+        scratch.xfrc_applied[:] = 0.0
+        stance = self._planned_stance()
+        if stance in ("L", "R"):
+            point = self._project_zmp(scratch, stance, zmp_y)
+            body = int(self.model.geom_bodyid[self.gid[stance]])
+            mj.mj_applyFT(self.model, scratch, force, torque, point, body, scratch.qfrc_applied)
+            return
+        left = self._sole_frame(scratch, "L")
+        right = self._sole_frame(scratch, "R")
+        y_l = float(left[0][1])
+        y_r = float(right[0][1])
+        span = y_l - y_r
+        if abs(span) < 1e-6:
+            alpha = 0.5
+        else:
+            alpha = (float(zmp_y) - y_r) / span
+            alpha = min(1.0, max(0.0, alpha))
+        # Lateral split uses the box centres, so the net CoP y is the ZMP.
+        # Fore-aft, each share sits on the LIPM ZMP x (ax = 0, so that is
+        # the planned CoM x) clamped inside that box. Both shares at the
+        # geometric centre leave the pitch moment of mg times the CoM offset.
+        com_x = float(scratch.subtree_com[self.bid_body][0])
+        for side, share in (("L", alpha), ("R", 1.0 - alpha)):
+            if share <= 1e-8:
+                continue
+            center, rot, half = self._sole_frame(scratch, side)
+            world = np.array([com_x, float(center[1]), float(center[2])], dtype=np.float64)
+            local = rot.T @ (world - center)
+            local[0] = min(float(half[0]), max(-float(half[0]), float(local[0])))
+            local[1] = 0.0
+            local[2] = -float(half[2])
+            point = center + rot @ local
+            body = int(self.model.geom_bodyid[self.gid[side]])
+            mj.mj_applyFT(
+                self.model, scratch, force * share, torque, point, body, scratch.qfrc_applied,
+            )
+
+    def _planned_stance(self) -> str | None:
+        if self.phase == "swing" and self.stance in ("L", "R"):
+            return self.stance
+        return None
+
+    def _sole_frame(self, scratch: mj.MjData, side: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        gid = int(self.gid[side])
+        center = np.array(scratch.geom_xpos[gid], dtype=np.float64)
+        rot = np.array(scratch.geom_xmat[gid], dtype=np.float64).reshape(3, 3)
+        half = np.array(self.model.geom_size[gid], dtype=np.float64)
+        return center, rot, half
+
+    def _project_zmp(self, scratch: mj.MjData, side: str, zmp_y: float) -> np.ndarray:
+        center, rot, half = self._sole_frame(scratch, side)
+        com = np.array(scratch.subtree_com[self.bid_body], dtype=np.float64)
+        world = np.array([float(com[0]), float(zmp_y), float(center[2])], dtype=np.float64)
+        local = rot.T @ (world - center)
+        local[0] = min(float(half[0]), max(-float(half[0]), float(local[0])))
+        local[1] = min(float(half[1]), max(-float(half[1]), float(local[1])))
+        local[2] = -float(half[2])
+        return center + rot @ local
+
+    def _planned_term(self, scratch: mj.MjData, adr: int) -> str:
+        nv = int(self.model.nv)
+        qvel = np.array(scratch.qvel, dtype=np.float64, copy=True)
+        qacc = np.array(scratch.qacc, dtype=np.float64, copy=True)
+        full = np.zeros(nv, dtype=np.float64)
+        bias = np.zeros(nv, dtype=np.float64)
+        mj.mj_rne(self.model, scratch, 1, full)
+        scratch.qacc[:] = 0.0
+        mj.mj_rne(self.model, scratch, 0, bias)
+        scratch.qvel[:] = 0.0
+        mj.mj_fwdVelocity(self.model, scratch)
+        grav = np.zeros(nv, dtype=np.float64)
+        scratch.qacc[:] = 0.0
+        mj.mj_rne(self.model, scratch, 0, grav)
+        scratch.qvel[:] = qvel
+        scratch.qacc[:] = qacc
+        inertial = float(full[adr] - bias[adr])
+        arm = abs(ID_FF_ARMATURE * float(qacc[adr]))
+        qdd = abs(inertial - ID_FF_ARMATURE * float(qacc[adr]))
+        cor = abs(float(bias[adr] - grav[adr]))
+        wrench = abs(float(scratch.qfrc_applied[adr]))
+        scores = {
+            "q̈": qdd + cor,
+            "armature": arm,
+            "gravity": abs(float(grav[adr])),
+            "wrench": wrench,
+        }
+        return max(scores, key=lambda key: scores[key])
 
     def _shape_sagittal(self, joints: dict[str, float]) -> None:
         """Rate- and accel-limit hip pitch, knee, and ankle pitch.
@@ -1502,17 +1845,22 @@ class LipmWalker:
             level = self._sole_level_now()
             walker.z_move_cmd = float(self.cfg.gm_z_m) * (1.0 - level)
             future = self._zmp_future(self._preview_clock)
-            com = preview.step(future)
+            com = self._step_preview(preview, future)
             self.preview_com_y = com
             # Voice spreads the step during the arm. A full x_amp on the
             # first walk tick is a hip-pitch step of several Nm. The kit
             # path still starts from zero. z_flat holds the swing peak
             # across 20–80% of single support. z_quintic replaces that
             # hold with a minimum jerk over the whole single support.
-            if self.cfg.name == "voice056" and abs(self.cmd_vx) > 1e-4:
-                walker.z_quintic = bool(self.cfg.gm_z_quintic)
-                walker.z_lead = bool(self.cfg.gm_z_lead)
-                walker.z_flat = not walker.z_quintic
+            if self.cfg.gm_id_ff or (self.cfg.name == "voice056" and abs(self.cmd_vx) > 1e-4):
+                if self.cfg.gm_id_ff:
+                    walker.z_quintic = True
+                    walker.z_lead = True
+                    walker.z_flat = False
+                else:
+                    walker.z_quintic = bool(self.cfg.gm_z_quintic)
+                    walker.z_lead = bool(self.cfg.gm_z_lead)
+                    walker.z_flat = not walker.z_quintic
                 x_full = self._voice_x_amp()
                 walker.set_command(x_full * (1.0 - level), 0.0, 0.0)
                 walker.previous_x = x_full
@@ -1545,17 +1893,22 @@ class LipmWalker:
         x_amp, angle = kit_bus_step(self.cmd_vx, self.cmd_yaw, self.cfg.gm_period_s)
         # vx/7.50 ignores the period. One cycle advances the body by
         # 4·x_amp, so the step that matches vx is x_amp = vx·T/4.
-        if self.cfg.name == "voice056" and abs(self.cmd_vx) > 1e-4:
-            walker.z_quintic = bool(self.cfg.gm_z_quintic)
-            walker.z_lead = bool(self.cfg.gm_z_lead)
-            walker.z_flat = not walker.z_quintic
+        if self.cfg.gm_id_ff or (self.cfg.name == "voice056" and abs(self.cmd_vx) > 1e-4):
+            if self.cfg.gm_id_ff:
+                walker.z_quintic = True
+                walker.z_lead = True
+                walker.z_flat = False
+            else:
+                walker.z_quintic = bool(self.cfg.gm_z_quintic)
+                walker.z_lead = bool(self.cfg.gm_z_lead)
+                walker.z_flat = not walker.z_quintic
             x_amp = self._voice_x_amp()
         walker.set_command(x_amp, 0.0, angle)
         if self._hold_until_stance(walker, preview):
             return
         self._gate_wait_s = 0.0
         future = self._zmp_future(float(walker.time))
-        com = preview.step(future)
+        com = self._step_preview(preview, future)
         self.preview_com_y = com
         walker.preview_y = self._preview_y_with_stab(com)
         joints, info = walker.step(op3_walk.OP3_CTRL_S)
@@ -1653,7 +2006,7 @@ class LipmWalker:
         self.preview_gate_holds += 1
         target = zmp_preview.BOX_CENTER_Y_M if stance_next == "L" else -zmp_preview.BOX_CENTER_Y_M
         future = np.full(preview.horizon, target, dtype=np.float64)
-        com = preview.step(future)
+        com = self._step_preview(preview, future)
         self.preview_com_y = com
         walker.preview_y = self._preview_y_with_stab(com)
         joints = self._preview_pose(walker)
@@ -1770,7 +2123,7 @@ class LipmWalker:
             finishing = t_mod + 1e-9 < end
             if not finishing:
                 future = np.full(preview.horizon, float(self.preview_com_y), dtype=np.float64)
-                com = preview.step(future)
+                com = self._step_preview(preview, future)
                 self.preview_com_y = com
                 walker.preview_y = self._preview_y_with_stab(com)
                 joints = self._preview_pose(walker)
@@ -1793,7 +2146,7 @@ class LipmWalker:
                 future = self._zmp_future(float(walker.time))
             else:
                 future = np.full(preview.horizon, loaded, dtype=np.float64)
-            com = preview.step(future)
+            com = self._step_preview(preview, future)
             self.preview_com_y = com
             walker.preview_y = self._preview_y_with_stab(com)
             joints, info = walker.step(op3_walk.OP3_CTRL_S)
@@ -1840,7 +2193,7 @@ class LipmWalker:
             self._return_t += dt
             if self._return_t >= span:
                 self._return_done = True
-        com = preview.step(future)
+        com = self._step_preview(preview, future)
         self.preview_com_y = com
         walker.time = self._freeze_time
         walker.preview_y = self._preview_y_with_stab(com)

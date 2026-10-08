@@ -1243,6 +1243,14 @@ def run_attempt(
     dc_t = 0.0
     vx_sum = 0.0
     vx_n = 0
+    bind_abs = -1.0
+    bind_joint = ""
+    bind_phase = ""
+    bind_term = ""
+    bind_tau = 0.0
+    bind_t = 0.0
+    bind_resid = float("nan")
+    bind_inside = False
     historical_torque_identity(session.model)
 
     def _body_id(name: str) -> int:
@@ -1299,6 +1307,16 @@ def run_attempt(
                 clamp_hit[row.joint] += 1
             # MFG pass is the signed force on every leg write. The
             # conservative sum stays logged and is not this bar.
+            if abs(row.signed_nm) > bind_abs:
+                bind_abs = abs(row.signed_nm)
+                bind_joint = row.joint
+                bind_t = float(row.t)
+                bind_phase = lipm._ff_phase(row.joint)
+                bind_term = str(lipm.id_tick_term.get(row.joint, ""))
+                raw_tau = lipm.id_tick_tau.get(row.joint)
+                bind_tau = float("nan") if raw_tau is None else float(raw_tau)
+                bind_resid = float(lipm.id_tick_resid.get(row.joint, float("inf")))
+                bind_inside = bool(lipm.id_tick_ok.get(row.joint, False)) and bind_resid <= lipm_gait.ID_RESID_EXACT_NM
             if abs(row.signed_nm) > ASK_NM + 1e-9:
                 signed_over += 1
             if row.sum_nm > ASK_NM + 1e-9:
@@ -1310,20 +1328,15 @@ def run_attempt(
             clo, chi = ctrl_lim[row.joint]
             if row.q_des < clo - 1e-9 or row.q_des > chi + 1e-9:
                 ctrl_clip[row.joint] += 1
-            # The band chooses a bucket. It does not relax the 2.33 Nm
-            # applied-ask bar, which is signed_over above. A band above
-            # 0.15 Nm is unbucketed and is not a pass.
+            # The residual chooses a bucket. It does not relax the
+            # 2.33 Nm applied-ask bar, which is signed_over above.
+            # A tick outside 1e-3 Nm stays unbucketed.
             tau_id = lipm.id_tick_tau.get(row.joint)
             resid_id = float(lipm.id_tick_resid.get(row.joint, float("inf")))
-            band_id = float(lipm.id_tick_band.get(row.joint, lipm_gait.ID_RESID_NM))
             ok_id = bool(lipm.id_tick_ok.get(row.joint, False)) and tau_id is not None
             if abs(row.signed_nm) > ASK_NM + 1e-9:
                 id_over_signed += 1
-            if (
-                not ok_id
-                or resid_id > band_id
-                or band_id > lipm_gait.ID_BAND_CAP_NM
-            ):
+            if not ok_id or resid_id > lipm_gait.ID_RESID_EXACT_NM:
                 id_skip_n += 1
             else:
                 stripped_id = float(lipm.id_tick_stripped.get(row.joint, float(tau_id)))
@@ -1736,15 +1749,41 @@ def run_attempt(
         "id_root_t": float(getattr(lipm, "id_root_t", 0.0)),
         "id_root_dof": int(getattr(lipm, "id_root_dof", -1)),
         "id_root_fail_n": int(getattr(lipm, "id_root_fail_n", 0)),
+        "id_root_bal_max": float(getattr(lipm, "id_root_bal_max", 0.0)),
+        "id_ident_max": float(getattr(lipm, "id_ident_max", 0.0)),
+        "id_inv_gap_max": float(getattr(lipm, "id_inv_gap_max", 0.0)),
+        "id_inv_gap_joint": str(getattr(lipm, "id_inv_gap_joint", "")),
+        "id_mj_abs": float(getattr(lipm, "id_mj_abs", 0.0)),
+        "id_mj_tau": float(getattr(lipm, "id_mj_tau", 0.0)),
+        "id_mj_joint": str(getattr(lipm, "id_mj_joint", "")),
+        "id_mj_t": float(getattr(lipm, "id_mj_t", 0.0)),
+        "id_plan_tau": float(getattr(lipm, "id_plan_tau", 0.0)),
+        "id_plan_abs": float(getattr(lipm, "id_plan_abs", 0.0)),
+        "id_plan_ask": float(getattr(lipm, "id_plan_ask", 0.0)),
+        "id_plan_joint": str(getattr(lipm, "id_plan_joint", "")),
+        "id_plan_phase": str(getattr(lipm, "id_plan_phase", "")),
+        "id_plan_term": str(getattr(lipm, "id_plan_term", "")),
+        "id_plan_t": float(getattr(lipm, "id_plan_t", 0.0)),
+        "id_bind_joint": bind_joint,
+        "id_bind_phase": bind_phase,
+        "id_bind_term": bind_term,
+        "id_bind_tau": bind_tau,
+        "id_bind_t": bind_t,
+        "id_bind_resid": bind_resid,
+        "id_bind_inside": bind_inside,
         "id_fwdinv0_max": float(getattr(lipm, "id_fwdinv0_max", 0.0)),
         "id_fwdinv1_max": float(getattr(lipm, "id_fwdinv1_max", 0.0)),
         "id_fwdinv_t": float(getattr(lipm, "id_fwdinv_t", 0.0)),
         "id_impl_max": float(getattr(lipm, "id_impl_max", 0.0)),
-        "id_impl_at_resid": float(getattr(lipm, "id_impl_at_resid", 0.0)),
-        "id_band_at_resid": float(getattr(lipm, "id_band_at_resid", 0.0)),
-        "id_band_max": float(getattr(lipm, "id_band_max", 0.0)),
-        "id_band_hi_n": int(getattr(lipm, "id_band_hi_n", 0)),
         "id_resid_max": float(getattr(lipm, "id_resid_max", 0.0)),
+        "id_resid_over_n": int(getattr(lipm, "id_resid_over_n", 0)),
+        "id_resid_over_frac": (
+            float(getattr(lipm, "id_resid_over_n", 0)) / float(lipm.id_phys_n)
+            if int(getattr(lipm, "id_phys_n", 0)) else float("nan")
+        ),
+        "id_rail_n": int(getattr(lipm, "id_rail_n", 0)),
+        "id_knee_act": float(getattr(lipm, "id_knee_act", 0.0)),
+        "id_ff_resid": float(getattr(lipm, "id_ff_resid", 0.0)),
         "id_resid_joint": str(getattr(lipm, "id_resid_joint", "")),
         "id_resid_pas_max": float(getattr(lipm, "id_resid_pas_max", 0.0)),
         "id_resid_fail_n": int(getattr(lipm, "id_resid_fail_n", 0)),

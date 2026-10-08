@@ -1976,11 +1976,13 @@ class SteerSession:
                         self.lipm.write_force_limited(jn, val)
             self.data.qfrc_applied[:] = 0.0
             self.data.xfrc_applied[:] = 0.0
-            # Inverse on a copy of this pre-step state. The live step
-            # stays mj_step (implicitfast). The plant XML is not edited.
+            # Realised q̈ is (qvel after − qvel before) / dt. The live
+            # step stays mj_step (implicitfast). The plant XML is not edited.
+            if self.lipm is not None:
+                self.lipm.capture_pre_step()
+            mj.mj_step(self.model, self.data)
             if self.lipm is not None:
                 self.lipm.audit_forward_inverse()
-            mj.mj_step(self.model, self.data)
         if self.lipm is not None:
             self.lipm.finish_id_tick()
 

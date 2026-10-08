@@ -2793,39 +2793,49 @@ The largest ask is +5.820 Nm on the left knee at 1.328 s, swing lift, error +0.1
 
 ## Inverse-dynamics feedforward
 
-The position servo applies `kp·(ctrl−q) − kv·q̇`. kv is `−actuator_biasprm[i, 2]`, the same value the scorer uses. kp is the plant actuator gain and stays in the XML (knee and hip pitch 45, hip roll 40, ankle 35). The torque command is
+The 0.15 Nm band is retired. The integrator is MuJoCo 3.14 `implicitfast` at 0.002 s. Realised q̈ is `(qvel_{t+1} − qvel_t) / dt` on the pre-step q and q̇. That difference is the acceleration `mj_implicit` integrated. It is not a reference finite difference.
 
-`ctrl = q + (τ_des + kv·q̇) / kp`
+Joint damping acts on the end-of-step velocity. `mjd_smooth_vel` puts dof damping and the actuator velocity gain into `qDeriv`, and implicitfast solves `qH = M − dt·qDeriv`. A force-clamped actuator is omitted from `qDeriv` (`actuatorDerivSkip`), so its force stays at the value computed from `qvel_t`. Joint damping is not skipped. The identity that uses that rule is
 
-so the applied ask equals τ_des. Leaving out `kv·q̇` lets the damping eat the feedforward once the joint is moving. τ_des is the last matched inverse plus `8·(q_ref−q)`. The sum is not saturated and not clipped into ±2.33 Nm. A controller limiter that changes the command is a hard-cap, and a fraction above 0 is a fail. The command is not pulled back into ctrlrange. MuJoCo clips ctrl to ±2.09 before the force is computed, so any tick whose commanded ctrl is outside that range is a fail. Max `|ctrl|` is logged on each leg joint. The 20 ms position blend is not applied to this ctrl. The plant forcerange is not edited, and this is not a post-hoc force clamp.
+`M(q_t)·q̈ + qfrc_bias − qfrc_constraint_forward − qfrc_applied = kp(ctrl−q) − kv·qvel_{t+1} − 0.08·qvel_{t+1}`
 
-The bar on these rows is the applied ask ≤ 2.33 Nm on every tick, clamp-active fraction 0, the DC line, and zero ctrlrange clips. The conservative sum `|kp·e| + |kv·ω|` is the Ask column and is not the pass. The historical mfg flag stays signed + clamp + DC, so a non-feedforward row whose IK target sits outside ±2.09 is not rewritten.
+with the actuator held at its `qvel_t` clip when `forcerange` is active. On every row below the leg residual of that identity is at most 1.9×10⁻¹⁴ Nm. The fraction of physics steps with any leg joint over 0.05 Nm is 0. Every tick is inside 1×10⁻³ Nm. The root balance of the same identity, `max |dyn[0:6] − con[0:6] − app[0:6]|`, is at most 3.5×10⁻¹⁴ Nm.
 
-The signed ask on these rows is `kp·(ctrl−q) − kv·q̇` with ctrl after the ±2.09 clip, which is the command MuJoCo uses once `ctrllimited` is set. The clip fraction is the share of leg writes whose pre-clip command sits outside that range. `ctrllimited` is set on every leg actuator.
+`mj_inverse` is a different vector. In 3.14 it sets `qfrc_inverse = M·q̈ + bias − qfrc_passive − qfrc_constraint` after re-solving the constraint (`engine_inverse.c`). Passive is the stored-velocity damping, not the end-step damping, and the constraint is not the one the integrator used. `mj_compareFwdInv` therefore reports a large `solver_fwdinv`: component 0 is the constraint mismatch and component 1 is the force mismatch. `|qfrc_inverse − F_user|` is that mismatch. It is not the integrator residual, and it is not a pass band.
 
-A tick whose `mj_inverse` is over 2.33 Nm only because of armature·q̈ — `mj_inverse − 0.01·q̈` still inside ±2.33 — is an unsourced-armature candidate. The 0.01 has no source and is not changed. A wall is only a tick where `mj_inverse − 0.01·q̈` is still over 2.33 Nm. On a wall the dominant piece is named. q̈ is the inertia excluding armature, plus the velocity product. Armature is `0.01·q̈`. Impact is the contact torque at touchdown. CoP is the contact torque when that foot's centre of pressure is at least 15 mm from the ankle. Any other contact is counted with gravity. The peak is taken while the torso up component is at least 0.92, so a fallen pose does not supply the name.
+| Row | ident resid | over 0.05 | root balance | `|qfrc_inverse[0:6]|` | `|qfrc_inverse − F_user|` | fwdinv0 | fwdinv1 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| T 0.60 / 0.032, knee gait | 1.0e-14 | 0 | 3.3e-14 | 6.49 | 1.98 | 7.92 | 7.96 |
+| T 0.60 / 0.032, planned | 1.6e-14 | 0 | 1.3e-14 | 11.08 | 1.94 | 11.58 | 11.61 |
+| T 1.00 / 0.016, planned | 1.3e-14 | 0 | 1.2e-14 | 10.30 | 1.61 | 10.97 | 10.99 |
+| T 1.20 / 0.024, planned | 1.3e-14 | 0 | 1.1e-14 | — | 1.90 | 10.00 | 10.03 |
+| T 4 / 0.016, planned | 1.7e-14 | 0 | 3.5e-14 | — | 1.62 | 9.98 | 10.11 |
 
-The inverse copy is taken before `mj_step`. `mjENBL_FWDINV` is set on that copy only and cleared before the live step, so the plant XML is untouched. The copy runs `mj_forward`, then `mj_inverse`. `solver_fwdinv` is the forward/inverse norm from that copy: component 0 is the constraint difference and component 1 is the force difference. The integrator is implicitfast at 0.002 s. Joint damping 0.08 and each leg actuator's kv enter the implicit velocity derivative, so the logged offset is `dt·(0.08 + kv)·|q̈|`. The band on a leg joint is `0.05 + offset`. A joint outside that band is counted and not bucketed. A band above 0.15 Nm is counted in the max-band column and is not a pass: that tick stays unbucketed. The band chooses the bucket. The applied-ask bar stays ≤2.33 Nm on `kp·(clip(ctrl, ±2.09) − q) − kv·ω`, and the band is not an input to that bar.
+A wall is only `|F_user − 0.01·q̈| > 2.33` on a tick inside the identity, with the torso up component at least 0.92. The 0.01 has no source and is not changed. None of these rows have one.
 
-Root rows first. `max |qfrc_inverse[0:6]|` stays under 5.3×10⁻⁴ Nm on the eight rows. No physics step is over 0.05 Nm. `solver_fwdinv[0]` stays under 6×10⁻¹⁴ and `solver_fwdinv[1]` under 6.4×10⁻⁴.
+The T 4 left-hip-pitch +2.395 and T 20 right-hip-pitch −2.355 figures were the 0.15 Nm band's stripped `qfrc_inverse`. They are not the force of the implicit step, so they were not walls on bucketed ticks of this residual. An exact-residual rescore of the previous realised-state feedforward, before the planned rebuild, also did not reproduce them. T 4 had no wall. T 20's re-solved inverse spiked on the right hip pitch at 2.962 s, double-support transfer, `qfrc_inverse` −3.649 Nm, stripped −3.408 Nm. The RNE split of that re-solved vector did not close, so the label was unsplit. That spike is the re-solved inverse, and it is not called a wall of the step.
 
-| Row | root max | root t | root dof | fwdinv0 | fwdinv1 | impl offset | resid | band at resid | outside | max band | band>0.15 | knee ID |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| T 0.60 / 0.032, feedforward | 5.3e-4 | 0.728 | x | 4.4e-14 | 6.3e-4 | 0.784 | 0.357 | 0.087 | 926 | 0.834 | 911 | +1.876 |
-| T 1.00 / 0.016, feedforward | 6.4e-8 | 0.932 | x | 4.7e-14 | 3.7e-5 | 0.887 | 0.338 | 0.068 | 518 | 0.937 | 499 | +2.450 |
-| T 1.20 / 0.024, feedforward | 5.1e-4 | 0.318 | x | 2.4e-14 | 6.0e-4 | 0.695 | 0.289 | 0.072 | 638 | 0.745 | 667 | +2.006 |
-| T 4 / 0.016, feedforward | 4.5e-4 | 2.938 | y | 5.9e-14 | 5.6e-4 | 1.193 | 0.514 | 0.124 | 1146 | 1.243 | 1190 | +1.941 |
-| T 20 / 0.0042, feedforward | 2.2e-4 | 0.456 | x | 4.9e-14 | 2.7e-4 | 0.715 | 0.411 | 0.133 | 584 | 0.765 | 730 | −2.450 |
-| T 0.60 / 0.032, knee gait | 4.4e-4 | 4.656 | y | 1.9e-14 | 5.3e-4 | 0.667 | 0.266 | 0.060 | 424 | 0.717 | 301 | +0.934 |
-| T 1.00 / 0.016, knee gait | 1.5e-4 | 1.860 | x | 2.2e-14 | 1.7e-4 | 0.389 | 0.241 | 0.109 | 469 | 0.439 | 294 | −1.492 |
-| T 1.20 / 0.024, knee gait | 5.2e-4 | 5.416 | y | 1.5e-14 | 6.4e-4 | 0.347 | 0.186 | 0.052 | 402 | 0.397 | 276 | +1.543 |
+`mj_inverse` does not apply `forcerange`. On the T 0.60 knee gait the re-solved knee inverse peaks at +3.058 Nm on the right knee, while the implicit actuator on the matching knee sample sits on the plant rail at −2.450 Nm (10 rail samples). The exact step force subtracts `0.08·qvel_end` from that actuator, so it reads −2.388 Nm rather than the rail. ±2.450 is the `forcerange` clamp in `mj_fwdActuation`, applied before the implicit solve. When the clamp is active, `actuatorDerivSkip` keeps that clipped force, and recovering the actuator prints ±2.450. An inverse of the planned motion is not passed through `forcerange`.
 
-`impl offset` is the largest `dt·(0.08 + kv)·|q̈|` on that row. The residual and the band beside it are the leg joint where the residual itself is largest. Outside is the number of physics steps with a leg joint over its own band. Max band is the largest `0.05 + offset` on any leg joint. `band>0.15` is the number of physics steps with at least one leg joint over 0.15 Nm. Those steps are not bucketed and are not passes. Knee ID is the largest knee inverse on a step whose residual is inside its band and whose band is at most 0.15 Nm.
+The feedforward is the planned gait, not the realised inverse. `τ_ff = ID(q_ref, q̇_ref, q̈_ref)` on a scratch data with contacts disabled, restored before the live step. The wrench is the LIPM force `m·(0, a_y, g)` with `a_y = (com_y − zmp_y)·g/z_c`, applied by `mj_applyFT`. In single support the whole wrench is projected into the stance box. In double support the vertical split uses the box-centre y so the net CoP y is the ZMP, and each share's x is the planned CoM x clamped inside that box. `q̈_ref` is the central difference of the IK reference at 8 ms. The swing is a quintic with the rise started at the previous touchdown, clearance 8 mm, preview jerk weight 1×10⁻⁴, double support 0.40, and a 1.0 s CoM pre-shift. Then
 
-The knee gaits stay up. Their capped knee inverses are +0.934 Nm (right knee, 1.358 s), −1.492 Nm (left knee, 2.882 s), and +1.543 Nm (right knee, 2.456 s). The T 0.60 knee gait, with mass scaled ±5% on the body inertias and ten hinge seeds at each scale, stays between 0.885 Nm and 0.986 Nm. The entrance rug is 1.062 Nm, and the rug at +5% mass is 1.087 Nm on the left knee at 2.482 s. That is the worst case. The root wrench on the sweep stays under 7.8×10⁻⁴ Nm, with no step over 0.05 Nm, and the max band on the sweep is 0.776 Nm. 1.543 Nm and 1.087 Nm are both under 2.33 Nm, so the feedforward path is worth building.
+`ctrl = q + (τ_ff + kv·q̇ + K_fb·(q_ref−q)) / kp`
 
-The applied ask on those same knee gaits is still over the bar: +5.820 Nm, −4.121 Nm, and +3.941 Nm, all knees, with 28, 36, and 37 writes over 2.33 Nm. Limiter fractions are 0.464, 0.534, and 0.565. `signed_ok` is false on every row. The 0.15 Nm cap did not move that bar.
+with `K_fb = 1` Nm/rad and `q̇` the measured joint velocity. The sum is not saturated and not clipped into ±2.33 Nm. A limiter fraction above 0, or a ctrlrange clip fraction above 0, is a hard-cap fail. `K_fb` of 2, 4, and 6 on the 1.00 s row push the signed ask to +2.464, −2.787, and −2.849 Nm and still tip, so the gain stays 1.
 
-The feedforward rows tip. Two of their capped knee inverses sit on the plant rail: +2.450 Nm on the right knee at 1.416 s (T 1.00) and −2.450 Nm on the left knee at 3.696 s (T 20). While the torso up component is at least 0.92, T 4 has a wall on the left hip pitch at 3.856 s, stance edge, CoP, inverse +2.157 Nm, stripped +2.395 Nm. T 20 has a wall on the right hip pitch at 3.276 s, double-support transfer, CoP, inverse −2.104 Nm, stripped −2.355 Nm. The three knee gaits have no wall and no unsourced-armature candidate. Their signed asks still fail, and their limiter fractions are above 0.
+At a quiet stand the planned hip pitch, knee, and ankle pitch match the holding actuator to about 0.002 Nm. Hip roll does not. The plan is about ±0.197 Nm and the holding actuator is about ±0.074 Nm: the real contact CoP is not the box-centre split.
 
-Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0.
+No planned row walks. Limiter fraction 0 and clip fraction 0 on every one. The measured applied ask stays under 2.33 Nm. On T 4 the feedforward term alone is −2.650 Nm; feedback opposes it and the applied ask is −2.267 Nm. That is not a saturator. The DC line fails on that row. Clearance is −4.4 mm, slip is 25.8 mm, phase mismatch is 0.22, and the torso tips.
+
+| Row | signed Nm | joint | signed | limit | clip | DC | min up | steps | vx ratio | stop up | bind |
+| --- | ---: | --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- |
+| T 0.60 / 0.032 | +1.624 | r_knee | pass | 0 | 0 | pass | 0.655 | 0 | 0.68 | — | r_knee, DS transfer, armature |
+| T 1.00 / 0.016 | +1.280 | r_hip_roll | pass | 0 | 0 | pass | 0.646 | 0 | 1.06 | — | r_hip_roll, DS transfer, CoP |
+| T 1.20 / 0.024 | +1.145 | r_hip_roll | pass | 0 | 0 | pass | 0.654 | 0 | 0.73 | — | r_hip_roll, DS transfer, CoP |
+| T 4 / 0.016 | −2.267 | r_hip_roll | pass | 0 | 0 | fail | 0.591 | 0 | −0.48 | — | r_hip_roll, stance edge, CoP |
+
+The T 1.00 / 0.016 row is the one whose torque bars pass and whose inside-residual term is a contact, so the perturbations use it. All of them tip in the first transfer. Mass +5% signs +1.239 Nm on the left knee, swing lift, armature. Mass −5% signs +1.345 Nm on the right hip roll, DS transfer, CoP. μ = 1.0 and μ = 0.8 sign +1.217 and +1.218 Nm on the left knee, swing lift, armature. The entrance rug reproduces the nominal tip, signed +1.280 Nm on the right hip roll, DS transfer, CoP. The fall is in that transfer, before a later step would meet the mat. Limiter fraction 0 and clip fraction 0 on all five. None pass, so there is no side, front, or foot video.
+
+The binding joint is the right hip roll, in double-support transfer. The inside-residual term is CoP. On that nominal tick the planned inverse's largest piece is the contact wrench, `τ_ff` +1.639 Nm, and the applied ask is +1.280 Nm. The step-force inverse at the same write is +0.912 Nm, inside a residual of 4×10⁻¹⁵ Nm.
+
+Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0. The plant XML is not edited.
