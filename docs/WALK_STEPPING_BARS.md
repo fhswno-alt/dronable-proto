@@ -208,14 +208,14 @@ CoM jerk 88.853 / 2.987 m/s³. Joint jerk vector 779.752 / 50.612 rad/s³, large
 
 Stop returns to the stand pose. Final trunk pitch +1.67 deg against stand +1.61 deg (off +0.06 deg). Final 1 s contacts L/R 4/4, min up_z 1.000.
 
-Bus `vx·T` at 0.056 m/s and 20 s is 1.12 m. Both airborne advances are 76 mm, so the ±20% stride bar fails. Step fraction 0.794 is under 0.90 because 0.040 m of forward travel happens in contact. Clearance, slip, stance contacts, declared and actual margins, jerk, unclamped ask, and the stop pose pass. The hinge-speed bar is in the fail list when a leg hinge exceeds 5.82 rad/s. The row is STEPS and Prefer FAIL. The cadence grid is not on this commit, so there is no second row.
+Bus `vx·T` at 0.056 m/s and 20 s is 1.12 m. Both airborne advances are 76 mm, so the ±20% stride bar fails. Step fraction 0.794 is under 0.90 because 0.040 m of forward travel happens in contact. The hinge-speed bar, the speed-torque line, and the clamp-active bar are in the fail list when they fail. The cadence grid is not on this commit, so there is no second row.
 
 Against the posted row: unclamped right hip roll 2.2567 Nm at 2.832 s matches. Declared CoM minimum +15.10 mm matches the posted +15.11 mm. Declared whole-bout ZMP minimum +0.002 mm matches the posted contact-CoP minimum. Declared single-support ZMP minima are +6.34 mm (ss_L) and +6.36 mm (ss_R). Stance contacts stay at 4. The right-foot peak clearance is 10.80 mm. The airborne-window minima are 8.41 mm and 8.60 mm, above the posted 8.08 mm, because this scorer's swing is the contact-off interval (5.06 s) and the posted window is the longer clocked single support. Stance-slip path is 0.27 mm, and the whole-bout step fraction is 0.794 with phase mismatch 0.094. Those three are this scorer's definitions. The feet do leave the floor: 633 and 632 ticks with zero contacts, zero force, and every box corner above the plane.
 
 Fail reasons: step fraction 0.794 is under 0.90 (airborne forward 0.1536 m, contact forward 0.0399 m); airborne advance 0.0763 m on L at 5.224 s is outside ±20% of vx·T (1.1200 m). vx·T/2 is the stance-to-stance spacing (0.5600 m), not this travel.
 
 Hinge speed and trunk vx:
-speed-torque line pending HW datasheet
+DC-motor model, not datasheet (Hiwonder HX-35H page values)
 Period T 20.000 s, commanded vx 0.0560 m/s, actual trunk vx 0.0060 m/s (forward 0.1321 m over 22.000 s along the trunk heading), ratio 0.107.
 Peak |qvel| bar 5.82 rad/s passes. The plant has no velocity cap.
 
@@ -252,26 +252,46 @@ The 2.33 Nm unclamped-ask bar is unchanged. It scores the sum
 that sum: on `d6e8b5e`, r_hip_roll 2.2567 Nm at 2.832 s is the sum.
 The signed torque on that same write is +0.2545 Nm.
 
-Each leg hinge logs both numbers, plus `|qvel|`, in
-`previews/walk_hinge_speed.json`. `tau_signed_nm` is
-`|kp·(q_des−q) − kv·ω|`, the physical servo torque of the unclamped
-target. `tau_sum_nm` is the sum, kept as the conservative column.
-The speed-torque check and the `|τ| ≥ 2` Nm corner use the signed
-magnitude. `no_load_speed`, `stall_torque`, and `voltage` are unset,
-so the line is pending the HW datasheet. While it is pending, each
-joint reports the tick with the largest `|qvel|` at signed `|τ| ≥ 2`
-Nm and the tick with the largest signed `|τ|` at `|qvel| ≥ 4` rad/s.
-When the line is set, a tick fails when `|qvel|` exceeds
-`no_load·(1 − |τ|/stall)` using that signed `|τ|`.
+`tau_signed_nm` is `|kp·(q_des−q) − kv·ω|` of the unclamped target.
+`tau_sum_nm` is the sum. `tau_ask_nm` is the signed pre-clamp ask
+`|kp·(ctrl−q) − kv·q̇|` of the written ctrl. kv is
+`−model.actuator_biasprm[i, 2]`.
 
-A tick is forcerange-clamped when `actuator_force` after the control
-tick sits within 0.001 Nm of the actuator rail. The fraction is over
-every tick of the bout.
+The speed-torque line is a hard bar. The label is
+`DC-motor model, not datasheet (Hiwonder HX-35H page values)`.
+no_load_speed 5.82 rad/s, stall_torque 3.43 Nm, voltage 11.1 V.
+Every leg write must satisfy `|qvel| ≤ 5.82·(1 − |signed ask|/3.43)`.
+Voltage is recorded and does not scale the line.
 
-`d6e8b5e` `voice-20` STEPS, Prefer FAIL. Hinge-speed bar passes. Plant `207f3d5e9c6a72e16f7aa0c8d224f75e` before and `207f3d5e9c6a72e16f7aa0c8d224f75e` after.
-speed-torque line pending HW datasheet
+Clamp-active fraction is the share of control ticks where
+`|signed ask| ≥ 2.45` Nm. That fraction must be 0 on every leg
+joint. The applied-force table is a separate measurement.
 
-| Joint | Largest \|qvel\| at signed \|τ\|≥2 Nm | Largest signed \|τ\| at \|qvel\|≥4 rad/s |
+`d6e8b5e` `voice-20` STEPS, Prefer FAIL. Hinge-speed bar passes. Speed-torque passes. Clamp-active passes. Plant `207f3d5e9c6a72e16f7aa0c8d224f75e` before and `207f3d5e9c6a72e16f7aa0c8d224f75e` after.
+Fail reasons: step fraction 0.794 is under 0.90 (airborne forward 0.1536 m, contact forward 0.0399 m); airborne advance 0.0763 m on L at 5.224 s is outside ±20% of vx·T (1.1200 m). vx·T/2 is the stance-to-stance spacing (0.5600 m), not this travel.
+
+kv is `−model.actuator_biasprm[i, 2]`, read per actuator. Legs use dampratio=1.
+
+| Joint | kp | kv |
+| --- | ---: | ---: |
+| l_hip_yaw | 40.0 | 1.291860 |
+| l_hip_roll | 40.0 | 1.702690 |
+| l_hip_pitch | 45.0 | 1.810179 |
+| l_knee | 45.0 | 1.457342 |
+| l_ank_pitch | 35.0 | 1.198019 |
+| l_ank_roll | 35.0 | 1.187611 |
+| r_hip_yaw | 40.0 | 1.291860 |
+| r_hip_roll | 40.0 | 1.702689 |
+| r_hip_pitch | 45.0 | 1.810178 |
+| r_knee | 45.0 | 1.457341 |
+| r_ank_pitch | 35.0 | 1.198019 |
+| r_ank_roll | 35.0 | 1.187611 |
+
+Line `|qvel| ≤ 5.82·(1 − |τ|/3.43)`. Voltage 11.1 V is recorded and is not a scale. Writes checked: 49456. The line passes. Worst margin 3.6184 rad/s on l_knee at 24.072 s stage stop (|τ| 1.2447 Nm, |qvel| 0.0896 rad/s, limit 3.7080 rad/s).
+
+DC-motor model, not datasheet (Hiwonder HX-35H page values)
+
+| Joint | Largest \|qvel\| at pre-clamp \|ask\|≥2 Nm | Largest pre-clamp \|ask\| at \|qvel\|≥4 rad/s |
 | --- | --- | --- |
 | l_hip_yaw | none | none |
 | l_hip_roll | none | none |
@@ -301,7 +321,41 @@ speed-torque line pending HW datasheet
 | r_ank_pitch | 0.7200 | 10.288 | 1.5032 | 24.464 |
 | r_ank_roll | 0.6120 | 2.744 | 1.9795 | 2.824 |
 
-Forcerange clamp, applied `actuator_force` on the rail:
+Peak signed pre-clamp ask `|kp·(ctrl−q) − kv·q̇|`:
+
+| Joint | Peak |ask| Nm | t s |
+| --- | ---: | ---: |
+| l_hip_yaw | 0.5564 | 23.576 |
+| l_hip_roll | 0.8093 | 15.296 |
+| l_hip_pitch | 1.0807 | 1.800 |
+| l_knee | 1.2456 | 24.096 |
+| l_ank_pitch | 0.7184 | 20.296 |
+| l_ank_roll | 0.4764 | 20.896 |
+| r_hip_yaw | 0.4111 | 2.400 |
+| r_hip_roll | 0.8079 | 5.296 |
+| r_hip_pitch | 0.9065 | 1.680 |
+| r_knee | 0.9832 | 1.640 |
+| r_ank_pitch | 0.7200 | 10.288 |
+| r_ank_roll | 0.6120 | 2.744 |
+
+Clamp-active fraction, `|signed ask| ≥ 2.45` Nm. Hard bar passes.
+
+| Joint | Peak |ask| Nm | Clamped ticks | Fraction |
+| --- | ---: | ---: | ---: |
+| l_hip_yaw | 0.5564 | 0/3801 | 0.0000 |
+| l_hip_roll | 0.8093 | 0/3801 | 0.0000 |
+| l_hip_pitch | 1.0807 | 0/3801 | 0.0000 |
+| l_knee | 1.2456 | 0/3801 | 0.0000 |
+| l_ank_pitch | 0.7184 | 0/3801 | 0.0000 |
+| l_ank_roll | 0.4764 | 0/3801 | 0.0000 |
+| r_hip_yaw | 0.4111 | 0/3801 | 0.0000 |
+| r_hip_roll | 0.8079 | 0/3801 | 0.0000 |
+| r_hip_pitch | 0.9065 | 0/3801 | 0.0000 |
+| r_knee | 0.9832 | 0/3801 | 0.0000 |
+| r_ank_pitch | 0.7200 | 0/3801 | 0.0000 |
+| r_ank_roll | 0.6120 | 0/3801 | 0.0000 |
+
+Applied `actuator_force` on the rail. This measurement is not the clamp bar:
 
 | Joint | Rail Nm | Peak applied Nm | Clamped ticks | Fraction |
 | --- | ---: | ---: | ---: | ---: |
@@ -335,23 +389,27 @@ Period T 20.000 s, commanded vx 0.0560 m/s, actual trunk vx 0.0060 m/s (forward 
 | r_hip_yaw | 0.0516 | 23.520 | stop | 5.7684 |
 | l_hip_yaw | 0.0405 | 23.520 | stop | 5.7795 |
 
-`51ae123` `kitchen-m90` STEPS, other bars not re-judged. Hinge-speed bar passes. Plant `207f3d5e9c6a72e16f7aa0c8d224f75e` before and `207f3d5e9c6a72e16f7aa0c8d224f75e` after.
-speed-torque line pending HW datasheet
+`51ae123` `kitchen-m90` STEPS, Prefer FAIL. Hinge-speed bar passes. Speed-torque fails. Clamp-active fails. Plant `207f3d5e9c6a72e16f7aa0c8d224f75e` before and `207f3d5e9c6a72e16f7aa0c8d224f75e` after.
+Fail reasons: worst stance slip 3.44 mm is over 2 mm; sole clearance min 2.08 mm is under 8 mm; honest max of the per-step minima is 7.88 mm; airborne advance -0.0016 m on L at 16.760 s is outside ±20% of vx·T (0.0280 m). vx·T/2 is the stance-to-stance spacing (0.0140 m), not this travel; stance contact count min 2 is under 3; stop does not end upright: final 1 s min up_z 0.957, contacts L/R 0/0, trunk pitch off the stand by 16.50 deg, roll off by 8.07 deg; actual-stance ZMP margin -4.50785144216012e-05 outside 0.0006545930613135501; actual-stance CoM margin -0.017595349834986795 outside 0.11673576260091643; speed-torque margin -4.5545 rad/s on l_knee at 13.416 s stage ds (|τ| 6.1105 Nm, |qvel| 0.0061 rad/s, limit -4.5483 rad/s); clamp-active fraction 0.0041 on l_hip_pitch is not 0 (19/4583 ticks with |signed ask| ≥ 2.45 Nm); clamp-active fraction 0.2540 on l_knee is not 0 (1164/4583 ticks with |signed ask| ≥ 2.45 Nm); clamp-active fraction 0.0041 on l_ank_pitch is not 0 (19/4583 ticks with |signed ask| ≥ 2.45 Nm); clamp-active fraction 0.0041 on r_hip_pitch is not 0 (19/4583 ticks with |signed ask| ≥ 2.45 Nm); clamp-active fraction 0.2717 on r_knee is not 0 (1245/4583 ticks with |signed ask| ≥ 2.45 Nm); clamp-active fraction 0.0041 on r_ank_pitch is not 0 (19/4583 ticks with |signed ask| ≥ 2.45 Nm).
 
-| Joint | Largest \|qvel\| at signed \|τ\|≥2 Nm | Largest signed \|τ\| at \|qvel\|≥4 rad/s |
+Line `|qvel| ≤ 5.82·(1 − |τ|/3.43)`. Voltage 11.1 V is recorded and is not a scale. Writes checked: 141300. The line fails. Worst margin -4.5545 rad/s on l_knee at 13.416 s stage ds (|τ| 6.1105 Nm, |qvel| 0.0061 rad/s, limit -4.5483 rad/s).
+
+DC-motor model, not datasheet (Hiwonder HX-35H page values)
+
+| Joint | Largest \|qvel\| at pre-clamp \|ask\|≥2 Nm | Largest pre-clamp \|ask\| at \|qvel\|≥4 rad/s |
 | --- | --- | --- |
 | l_hip_yaw | none | none |
-| l_hip_roll | |qvel| 2.0518 rad/s, |τ| 4.7889 Nm at 3.104 s stand | none |
-| l_hip_pitch | |qvel| 1.2093 rad/s, |τ| 2.1597 Nm at 4.680 s ss_L | none |
-| l_knee | |qvel| 2.5403 rad/s, |τ| 4.1416 Nm at 4.808 s stand | none |
-| l_ank_pitch | |qvel| 1.8105 rad/s, |τ| 3.1508 Nm at 8.216 s stand | none |
-| l_ank_roll | |qvel| 1.6343 rad/s, |τ| 2.5005 Nm at 1.568 s ss_R | none |
+| l_hip_roll | |qvel| 2.0518 rad/s, |τ| 2.2800 Nm at 3.096 s stand | none |
+| l_hip_pitch | |qvel| 1.2093 rad/s, |τ| 2.1597 Nm at 4.672 s ss_L | none |
+| l_knee | |qvel| 2.5403 rad/s, |τ| 2.2800 Nm at 4.800 s stand | none |
+| l_ank_pitch | |qvel| 1.8105 rad/s, |τ| 2.2800 Nm at 8.208 s stand | none |
+| l_ank_roll | |qvel| 0.0274 rad/s, |τ| 2.2673 Nm at 8.920 s ds | none |
 | r_hip_yaw | none | none |
-| r_hip_roll | |qvel| 2.6157 rad/s, |τ| 5.6216 Nm at 17.216 s stand | none |
-| r_hip_pitch | |qvel| 1.2460 rad/s, |τ| 2.2293 Nm at 8.224 s stand | none |
-| r_knee | |qvel| 2.4710 rad/s, |τ| 2.0963 Nm at 1.640 s ss_R | none |
-| r_ank_pitch | |qvel| 0.3016 rad/s, |τ| 2.0864 Nm at 1.016 s ds | none |
-| r_ank_roll | |qvel| 1.6507 rad/s, |τ| 2.0048 Nm at 15.960 s ss_L | none |
+| r_hip_roll | |qvel| 2.6157 rad/s, |τ| 2.2800 Nm at 17.208 s stand | none |
+| r_hip_pitch | |qvel| 1.2460 rad/s, |τ| 2.2293 Nm at 8.216 s stand | none |
+| r_knee | |qvel| 2.8032 rad/s, |τ| 2.2800 Nm at 14.422 s stand | none |
+| r_ank_pitch | |qvel| 0.3016 rad/s, |τ| 2.0864 Nm at 1.008 s ds | none |
+| r_ank_roll | |qvel| 1.6073 rad/s, |τ| 2.2800 Nm at 3.096 s stand | none |
 
 | Joint | Peak signed \|τ\| Nm | t s | Peak sum Nm | t s |
 | --- | ---: | ---: | ---: | ---: |
@@ -368,7 +426,41 @@ speed-torque line pending HW datasheet
 | r_ank_pitch | 2.5290 | 1.008 | 5.2431 | 14.160 |
 | r_ank_roll | 4.7939 | 10.224 | 6.9000 | 9.200 |
 
-Forcerange clamp, applied `actuator_force` on the rail:
+Peak signed pre-clamp ask `|kp·(ctrl−q) − kv·q̇|`:
+
+| Joint | Peak |ask| Nm | t s |
+| --- | ---: | ---: |
+| l_hip_yaw | 0.6967 | 9.304 |
+| l_hip_roll | 2.3833 | 3.816 |
+| l_hip_pitch | 2.9328 | 1.008 |
+| l_knee | 6.1105 | 13.424 |
+| l_ank_pitch | 2.5290 | 1.008 |
+| l_ank_roll | 2.2695 | 17.928 |
+| r_hip_yaw | 0.6624 | 2.152 |
+| r_hip_roll | 2.4194 | 17.928 |
+| r_hip_pitch | 2.9385 | 19.624 |
+| r_knee | 6.1034 | 5.512 |
+| r_ank_pitch | 2.5290 | 1.008 |
+| r_ank_roll | 2.2800 | 3.104 |
+
+Clamp-active fraction, `|signed ask| ≥ 2.45` Nm. Hard bar fails.
+
+| Joint | Peak |ask| Nm | Clamped ticks | Fraction |
+| --- | ---: | ---: | ---: |
+| l_hip_yaw | 0.6967 | 0/4583 | 0.0000 |
+| l_hip_roll | 2.3833 | 0/4583 | 0.0000 |
+| l_hip_pitch | 2.9328 | 19/4583 | 0.0041 |
+| l_knee | 6.1105 | 1164/4583 | 0.2540 |
+| l_ank_pitch | 2.5290 | 19/4583 | 0.0041 |
+| l_ank_roll | 2.2695 | 0/4583 | 0.0000 |
+| r_hip_yaw | 0.6624 | 0/4583 | 0.0000 |
+| r_hip_roll | 2.4194 | 0/4583 | 0.0000 |
+| r_hip_pitch | 2.9385 | 19/4583 | 0.0041 |
+| r_knee | 6.1034 | 1245/4583 | 0.2717 |
+| r_ank_pitch | 2.5290 | 19/4583 | 0.0041 |
+| r_ank_roll | 2.2800 | 0/4583 | 0.0000 |
+
+Applied `actuator_force` on the rail. This measurement is not the clamp bar:
 
 | Joint | Rail Nm | Peak applied Nm | Clamped ticks | Fraction |
 | --- | ---: | ---: | ---: | ---: |
@@ -385,11 +477,9 @@ Forcerange clamp, applied `actuator_force` on the rail:
 | r_ank_pitch | -2.45 to 2.45 | 1.2602 | 0/4583 | 0.000 |
 | r_ank_roll | -2.45 to 2.45 | 1.7556 | 0/4583 | 0.000 |
 
-Largest sum on `r_knee` is 10.8373 Nm at 14.432 s, stage stand. Signed |τ| on that tick is 1.5977 Nm. |qvel| at the signed write is 3.1507 rad/s. |qvel| at the sum write is 3.3992 rad/s. stop from a straight walk. The previous second was moving forward, then the bus snapped to stand and the gait holds the stand pose.
+Largest sum on `r_knee` is 10.8373 Nm at 14.432 s, stage stand. Signed |τ| on that tick is 1.5977 Nm. Signed pre-clamp ask is 1.5977 Nm. |qvel| at the signed write is 3.1507 rad/s. |qvel| at the sum write is 3.3992 rad/s. stop from a straight walk. The previous second was moving forward, then the bus snapped to stand and the gait holds the stand pose.
 Bus mode stand, applied vx 0.0000 m/s, applied yaw 0.0000 rad/s, fault False. That mode runs 14.424–15.120 s. The previous 1 s peaked at |vx| 0.0560 m/s and |yaw| 0.0000 rad/s. Contacts L/R 2/0.
-Applied actuator force -0.0190 Nm. Written-ctrl prediction 1.5977 Nm. Forcerange -2.45 to 2.45 Nm. Clamp active on that tick: False.
-
-The 10.17 Nm / 3.61 rad/s sample is the next tick, 14.440 s. Its sum is 10.1742 Nm and the |qvel| on that sum write is 3.6088 rad/s. Signed |τ| on that same tick is 0.9135 Nm, with |qvel| 3.3577 rad/s on the signed write. The stand run is 14.424–15.120 s, 0.696 s, the kitchen script's 0.70 s settle (`vel(0, 0)` snaps the bus to stand). The previous second was straight forward at 0.056 m/s with yaw 0. It is not an in-place turn and not a fault recovery. `hold_stand` is why the stage column says stand. The right foot still has no floor contact at 14.432 s, so the settle arrived during a right swing. Peak applied |force| on r_knee over the bout is 2.2800 Nm, the 2.28 Nm stop budget, and 0 of 4583 ticks sit on the ±2.45 forcerange.
+Applied actuator force -0.0190 Nm. Signed pre-clamp ask 1.5977 Nm. Forcerange -2.45 to 2.45 Nm. Applied force on the rail: False. Signed-ask clamp (|ask| ≥ 2.45): False.
 
 Period T 0.500 s, commanded vx 0.0560 m/s, actual trunk vx 0.0240 m/s (forward 0.5316 m over 22.128 s), ratio 0.429.
 
@@ -407,3 +497,30 @@ Period T 0.500 s, commanded vx 0.0560 m/s, actual trunk vx 0.0240 m/s (forward 0
 | l_hip_pitch | 1.4463 | 18.808 | ss_L | 4.3737 |
 | r_hip_yaw | 0.5870 | 1.680 | ss_R | 5.2330 |
 | l_hip_yaw | 0.5529 | 1.672 | ss_R | 5.2671 |
+
+### Torque signal audit
+
+The #102 scorer's own unclamped-ask numbers so far are the sum
+`|kp·(q_des−q)| + |kv·ω|`. kv is `−model.actuator_biasprm[i, 2]`,
+read per actuator. The signed column is `kp·(q_des−q) − kv·ω` on
+that same write. The 2.33 Nm bar was not switched to the signed value.
+
+| Row | Posted Nm | Joint | t s | Sum Nm | Signed Nm |
+| --- | ---: | --- | ---: | ---: | ---: |
+| d6e8b5e voice-20 | 2.2567 | r_hip_roll | 2.832 | 2.2567 | +0.2545 |
+| d7b06e7 shape1-3.60 | 2.311 | r_hip_roll | 8.176 | 2.3106 | +0.2587 |
+| d7b06e7 shape0-3.60 | 2.042 | r_knee | 9.256 | 2.0415 | +0.7653 |
+| d7b06e7 shape0-3.57 | 2.054 | r_knee | 9.248 | 2.0535 | +0.7655 |
+| ac81435 voice-3.60 | 2.3135 | r_hip_roll | 8.176 | 2.3135 | +0.2607 |
+| ac81435 voice-3.70 | 2.2619 | r_hip_roll | 8.352 | 2.2619 | +0.2534 |
+| 58ce1d8 slow | 1.979 | r_hip_roll | 2.816 | 1.9792 | +0.2486 |
+
+Controls' posted 2.2567 on `d6e8b5e` is that sum. The signed torque
+on the same write is +0.2545 Nm.
+
+PRs #82, #88, #90, #98, and #99 did not claim a torque CLEAR. Their
+CLEARs are wall-stop CLEARs. #82 and #88 post in-place hip-roll
+unclamped asks around ±4 Nm and treat that as over ±2.33 Nm. #90
+says hip roll stays unclamped. `51ae123` kitchen is the representative
+bout: its sum, q_des signed, and pre-clamp ask are the tables above.
+The 10.17 Nm / 3.61 rad/s r_knee sample is the sum, not the pre-clamp ask.

@@ -1220,6 +1220,7 @@ class AskSample:
     joint: str
     signed_nm: float
     sum_nm: float
+    ask_nm: float
     stage: str = ""
     qvel_abs: float = 0.0
 
@@ -1266,12 +1267,13 @@ class PhaseScore:
 
 
 def _install_ask_log(walker: lipm_gait.LipmWalker, bucket: list[AskSample]) -> None:
-    """Log both torque definitions before the writer slews ctrl.
+    """Log the unclamped target and the written-ctrl ask. The command is unchanged.
 
-    ``signed_nm`` is ``kp·(q_des−q) − kv·ω``, the physical servo torque of
-    the unclamped target. ``sum_nm`` is ``|kp·e| + |kv·ω|``, the upper bound.
-    The 2.33 Nm bar uses the sum. That is also the number Controls posts.
-    The hook does not change the command that is written.
+    ``signed_nm`` is ``kp·(q_des−q) − kv·ω`` of the unclamped target.
+    ``sum_nm`` is ``|kp·e| + |kv·ω|``. The 2.33 Nm bar uses the sum. That
+    is also the number Controls posts. ``ask_nm`` is the signed pre-clamp
+    ask ``kp·(ctrl−q) − kv·q̇`` after the writer stores ctrl. ``kv`` is
+    ``−actuator_biasprm[i, 2]``.
     """
     def _log(jn: str, q_des: float) -> None:
         if jn not in LEG_JOINTS:
@@ -1285,28 +1287,31 @@ def _install_ask_log(walker: lipm_gait.LipmWalker, bucket: list[AskSample]) -> N
         omega = float(walker.data.qvel[int(walker.model.jnt_dofadr[jid])])
         kp = float(walker.model.actuator_gainprm[idx, 0])
         kv = -float(walker.model.actuator_biasprm[idx, 2])
+        ctrl = float(walker.data.ctrl[idx])
         kp_term = kp * (float(q_des) - q)
         signed = kp_term - kv * omega
+        ask = kp * (ctrl - q) - kv * omega
         bucket.append(AskSample(
             t_s=float(walker.data.time),
             joint=jn,
             signed_nm=float(signed),
             sum_nm=float(abs(kp_term) + abs(kv * omega)),
+            ask_nm=float(ask),
             qvel_abs=abs(omega),
         ))
 
     orig = walker.write_clipped
 
     def wrapped(jn: str, q_des: float) -> None:
-        _log(jn, q_des)
         orig(jn, q_des)
+        _log(jn, q_des)
 
     walker.write_clipped = wrapped  # type: ignore[method-assign]
     limited = getattr(walker, "write_force_limited", None)
     if limited is not None:
         def wrapped_limited(jn: str, q_des: float, limit_nm: float | None = None) -> None:
-            _log(jn, q_des)
             limited(jn, q_des, limit_nm)
+            _log(jn, q_des)
 
         walker.write_force_limited = wrapped_limited  # type: ignore[method-assign]
 
@@ -1458,16 +1463,26 @@ def _apply_perturb(session: steer_walk.SteerSession, perturb: Perturb) -> None:
 def _tick_pair(
     asks: list[AskSample],
     names: tuple[str, ...],
-) -> tuple[list[float | None], list[float | None], list[float | None], list[float | None]]:
-    """Signed |τ|, the sum, and the |qvel| of each of those writes.
+) -> tuple[
+    list[float | None],
+    list[float | None],
+    list[float | None],
+    list[float | None],
+    list[float | None],
+    list[float | None],
+]:
+    """Per control tick: q_des signed, the sum, and the pre-clamp ask.
 
     Signed |τ| is ``|kp·(q_des−q) − kv·ω|``. The sum is
-    ``|kp·e| + |kv·ω|`` on the write with the largest sum. ``qvel`` is the
-    speed at the largest signed write. ``qvel_at_sum`` is the speed at the
-    largest-sum write. The 2.33 Nm bar is not read from this pair.
+    ``|kp·e| + |kv·ω|`` on the write with the largest sum. The ask is
+    ``|kp·(ctrl−q) − kv·q̇|`` on the write with the largest ask. Each
+    column keeps the ``|qvel|`` of its own write. The 2.33 Nm bar is the
+    sum. The speed-torque line and the clamp bar use every ask write, not
+    only this per-tick maximum.
     """
     best_signed: dict[str, AskSample] = {}
     best_sum: dict[str, AskSample] = {}
+    best_ask: dict[str, AskSample] = {}
     for sample in asks:
         prev = best_signed.get(sample.joint)
         if prev is None or abs(sample.signed_nm) > abs(prev.signed_nm):
@@ -1475,24 +1490,72 @@ def _tick_pair(
         prev_sum = best_sum.get(sample.joint)
         if prev_sum is None or sample.sum_nm > prev_sum.sum_nm:
             best_sum[sample.joint] = sample
+        prev_ask = best_ask.get(sample.joint)
+        if prev_ask is None or abs(sample.ask_nm) > abs(prev_ask.ask_nm):
+            best_ask[sample.joint] = sample
     signed: list[float | None] = []
     summed: list[float | None] = []
     qvel: list[float | None] = []
     qvel_sum: list[float | None] = []
+    ask: list[float | None] = []
+    qvel_ask: list[float | None] = []
     for name in names:
         sample = best_signed.get(name)
         summed_sample = best_sum.get(name)
-        if sample is None or summed_sample is None:
+        ask_sample = best_ask.get(name)
+        if sample is None or summed_sample is None or ask_sample is None:
             signed.append(None)
             summed.append(None)
             qvel.append(None)
             qvel_sum.append(None)
+            ask.append(None)
+            qvel_ask.append(None)
         else:
             signed.append(abs(float(sample.signed_nm)))
             summed.append(float(summed_sample.sum_nm))
             qvel.append(float(sample.qvel_abs))
             qvel_sum.append(float(summed_sample.qvel_abs))
-    return signed, summed, qvel, qvel_sum
+            ask.append(abs(float(ask_sample.ask_nm)))
+            qvel_ask.append(float(ask_sample.qvel_abs))
+    return signed, summed, qvel, qvel_sum, ask, qvel_ask
+
+
+def _writes_for_line(
+    asks: list[AskSample],
+    names: tuple[str, ...],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """One row per leg write. The line sees every write, not the tick max."""
+    n = len(asks)
+    index = {name: i for i, name in enumerate(names)}
+    times = np.zeros(n, dtype=np.float64)
+    tau = np.full((n, len(names)), np.nan, dtype=np.float64)
+    omega = np.full((n, len(names)), np.nan, dtype=np.float64)
+    stage = np.empty(n, dtype=object)
+    for i, sample in enumerate(asks):
+        times[i] = float(sample.t_s)
+        stage[i] = sample.stage or ""
+        col = index.get(sample.joint)
+        if col is None:
+            continue
+        tau[i, col] = abs(float(sample.ask_nm))
+        omega[i, col] = float(sample.qvel_abs)
+    return times, tau, omega, stage
+
+
+def _leg_kv(walker: lipm_gait.LipmWalker) -> list[dict[str, object]]:
+    """kv = −actuator_biasprm[i, 2], read per leg actuator."""
+    rows: list[dict[str, object]] = []
+    for name in LEG_JOINTS:
+        idx = walker.act_idx.get(name + "_pos")
+        if idx is None:
+            rows.append({"joint": name, "kp": None, "kv": None})
+            continue
+        rows.append({
+            "joint": name,
+            "kp": float(walker.model.actuator_gainprm[idx, 0]),
+            "kv": -float(walker.model.actuator_biasprm[idx, 2]),
+        })
+    return rows
 
 
 def _actuator_force_row(walker: lipm_gait.LipmWalker) -> list[float]:
@@ -1831,6 +1894,8 @@ def run_preview_row(
     pair_sum: list[list[float | None]] = []
     pair_qvel: list[list[float | None]] = []
     pair_qvel_sum: list[list[float | None]] = []
+    pair_ask: list[list[float | None]] = []
+    pair_qvel_ask: list[list[float | None]] = []
     pair_force: list[list[float]] = []
     stage_ticks: list[str] = []
     trunk_x: list[float] = []
@@ -1868,11 +1933,15 @@ def run_preview_row(
         n_ask = len(asks)
         session.step()
         stage_name = str(getattr(walker, "preview_stage", "unknown"))
-        signed_tick, sum_tick, qvel_tick, qvel_sum_tick = _tick_pair(asks[n_ask:], LEG_JOINTS)
+        signed_tick, sum_tick, qvel_tick, qvel_sum_tick, ask_tick, qvel_ask_tick = _tick_pair(
+            asks[n_ask:], LEG_JOINTS,
+        )
         pair_signed.append(signed_tick)
         pair_sum.append(sum_tick)
         pair_qvel.append(qvel_tick)
         pair_qvel_sum.append(qvel_sum_tick)
+        pair_ask.append(ask_tick)
+        pair_qvel_ask.append(qvel_ask_tick)
         pair_force.append(_actuator_force_row(walker))
         for sample in asks[n_ask:]:
             sample.stage = stage_name
@@ -2042,21 +2111,34 @@ def run_preview_row(
     qvel_reasons = qvel_report.get("fail_reasons")
     if isinstance(qvel_reasons, list):
         fail_reasons.extend(str(reason) for reason in qvel_reasons)
-    pair_signed_m = _pair_matrix(pair_signed, len(LEG_JOINTS))
-    pair_qvel_m = _pair_matrix(pair_qvel, len(LEG_JOINTS))
+    write_t, write_tau, write_qv, write_stage = _writes_for_line(asks, LEG_JOINTS)
     speed_torque = step_bars.speed_torque_check(
         LEG_JOINTS,
-        np.asarray(times, dtype=np.float64),
-        pair_signed_m,
-        pair_qvel_m,
-        np.asarray(stage_ticks, dtype=object),
-        no_load_speed=None,
-        stall_torque=None,
-        voltage=None,
+        write_t,
+        write_tau,
+        write_qv,
+        write_stage,
+        no_load_speed=step_bars.DC_MOTOR_NO_LOAD_RAD_S,
+        stall_torque=step_bars.DC_MOTOR_STALL_NM,
+        voltage=step_bars.DC_MOTOR_VOLTAGE_V,
+        label=step_bars.DC_MOTOR_LABEL,
     )
+    speed_torque["n_writes"] = len(asks)
     torque_reasons = speed_torque.get("fail_reasons")
     if isinstance(torque_reasons, list):
         fail_reasons.extend(str(reason) for reason in torque_reasons)
+    pair_ask_m = _pair_matrix(pair_ask, len(LEG_JOINTS))
+    clamp_bar = step_bars.signed_ask_clamp_bar(LEG_JOINTS, pair_ask_m)
+    clamp_reasons = clamp_bar.get("fail_reasons")
+    if isinstance(clamp_reasons, list):
+        fail_reasons.extend(str(reason) for reason in clamp_reasons)
+    kv_rows = _leg_kv(walker)
+    print(
+        "[kv] " + ", ".join(
+            f"{row['joint']} kp={row['kp']} kv={row['kv']}" for row in kv_rows
+        ),
+        flush=True,
+    )
     hinge_pairs = {
         "t_s": times,
         "tau_signed_nm": {
@@ -2065,14 +2147,23 @@ def run_preview_row(
         "tau_sum_nm": {
             name: [row[i] for row in pair_sum] for i, name in enumerate(LEG_JOINTS)
         },
+        "tau_ask_nm": {
+            name: [row[i] for row in pair_ask] for i, name in enumerate(LEG_JOINTS)
+        },
         "qvel_rad_s": {name: [row[i] for row in pair_qvel] for i, name in enumerate(LEG_JOINTS)},
         "qvel_at_sum_rad_s": {
             name: [row[i] for row in pair_qvel_sum] for i, name in enumerate(LEG_JOINTS)
         },
+        "qvel_at_ask_rad_s": {
+            name: [row[i] for row in pair_qvel_ask] for i, name in enumerate(LEG_JOINTS)
+        },
         "definitions": {
             "signed": "|kp*(q_des-q) - kv*omega|",
             "sum": "|kp*(q_des-q)| + |kv*omega|",
-            "speed_torque_uses": "signed",
+            "ask": "|kp*(ctrl-q) - kv*qvel|",
+            "kv": "-actuator_biasprm[i,2]",
+            "speed_torque_uses": "ask",
+            "clamp_bar_uses": "ask",
             "bar_2_33_nm_uses": "sum",
         },
     }
@@ -2172,6 +2263,8 @@ def run_preview_row(
         "speed_torque": speed_torque,
         "hinge_pairs": hinge_pairs,
         "clamp": clamp,
+        "clamp_bar": clamp_bar,
+        "kv": kv_rows,
     }
 
 
@@ -3306,11 +3399,13 @@ def render_stepping_md(payloads: list[dict[str, object]]) -> str:
         "  (HX-35H no-load, 0.18 s/60°). The plant has no velocity cap. Headroom is",
         "  5.82 − peak. A miss names the joint, the peak, the time, and the stage.",
         "  Preview rows use `preview_stage`. A voice bout with no preview stage uses",
-        "  the gait phase. Each tick logs signed `|kp·(q_des−q) − kv·ω|`, the sum",
-        "  `|kp·e| + |kv·ω|`, and `|qvel|`. The 2.33 Nm unclamped-ask bar stays on",
-        "  the sum. The speed-torque line uses the signed magnitude.",
-        "  That line (`|qvel| ≤ no_load·(1 − |τ|/stall)`) stays unset until a",
-        "  datasheet supplies `no_load_speed`, `stall_torque`, and `voltage`.",
+        "  the gait phase. Each tick logs the q_des signed torque, the sum",
+        "  `|kp·e| + |kv·ω|`, and the signed pre-clamp ask `|kp·(ctrl−q) − kv·q̇|`.",
+        "  kv is `−actuator_biasprm[i, 2]`. The 2.33 Nm unclamped-ask bar stays on",
+        "  the sum. The speed-torque line is the DC-motor model (not a datasheet):",
+        "  `|qvel| ≤ 5.82·(1 − |signed ask|/3.43)`, voltage 11.1 V recorded and",
+        "  not a scale. Clamp-active fraction is the share of ticks with",
+        "  `|signed ask| ≥ 2.45`. That fraction must be 0 on every leg joint.",
         "",
         "Each row also reports period T, commanded vx, actual trunk vx, and the",
         "ratio. Actual trunk vx is the trunk origin's heading-frame forward",

@@ -312,11 +312,10 @@ def _row_prose(row: dict[str, object]) -> list[str]:
         "",
         "Bus `vx·T` at 0.056 m/s and 20 s is 1.12 m. Both airborne advances are "
         "76 mm, so the ±20% stride bar fails. Step fraction 0.794 is under 0.90 "
-        "because 0.040 m of forward travel happens in contact. Clearance, slip, "
-        "stance contacts, declared and actual margins, jerk, unclamped ask, and "
-        "the stop pose pass. The hinge-speed bar is in the fail list when a "
-        "leg hinge exceeds 5.82 rad/s. The row is STEPS and Prefer FAIL. "
-        "The cadence grid is not on this commit, so there is no second row.",
+        "because 0.040 m of forward travel happens in contact. The hinge-speed "
+        "bar, the speed-torque line, and the clamp-active bar are in the fail "
+        "list when they fail. The cadence grid is not on this commit, so there "
+        "is no second row.",
         "",
         "Against the posted row: unclamped right hip roll 2.2567 Nm at 2.832 s "
         "matches. Declared CoM minimum +15.10 mm matches the posted +15.11 mm. "
@@ -614,7 +613,16 @@ def main() -> None:
     speed_torque = row.get("speed_torque") if isinstance(row.get("speed_torque"), dict) else {}
     hinge_pairs = row.get("hinge_pairs") if isinstance(row.get("hinge_pairs"), dict) else {}
     torque_reasons = list(speed_torque.get("fail_reasons") or [])
-    fail = mfg + step_reasons + [str(item) for item in qvel_reasons] + [str(item) for item in torque_reasons]
+    clamp_bar = row.get("clamp_bar") if isinstance(row.get("clamp_bar"), dict) else {}
+    clamp_reasons = list(clamp_bar.get("fail_reasons") or [])
+    kv_rows = row.get("kv") if isinstance(row.get("kv"), list) else []
+    fail = (
+        mfg
+        + step_reasons
+        + [str(item) for item in qvel_reasons]
+        + [str(item) for item in torque_reasons]
+        + [str(item) for item in clamp_reasons]
+    )
     verdict = "CLEAR" if not fail else "Prefer FAIL"
     gait = _gait_label(strict)
     note = _note(row, strict, contact_only, swings, counts, disagree, meta, cop_ok, gait, verdict, fail)
@@ -658,6 +666,8 @@ def main() -> None:
         "speed_torque": _jsonable(speed_torque),
         "hinge_pairs": _jsonable(hinge_pairs),
         "clamp": _jsonable(row.get("clamp")),
+        "clamp_bar": _jsonable(clamp_bar),
+        "kv": _jsonable(kv_rows),
         "stepping": _jsonable(strict),
         "stepping_contact_count": _jsonable(contact_only),
         "swings": swings,
@@ -706,6 +716,9 @@ def main() -> None:
         "speed_torque": payload_row["speed_torque"],
         "hinge_pairs": payload_row["hinge_pairs"],
         "clamp": payload_row.get("clamp"),
+        "clamp_bar": payload_row.get("clamp_bar"),
+        "kv": payload_row.get("kv"),
+        "fail_reasons": payload_row.get("fail_reasons"),
     })
     retro.splice_hinge_doc()
 

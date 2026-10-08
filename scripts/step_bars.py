@@ -42,6 +42,15 @@ LEG_QVEL_BAR = 5.82
 TAU_CORNER_NM = 2.0
 QVEL_CORNER_RAD_S = 4.0
 SPEED_TORQUE_PENDING = "speed-torque line pending HW datasheet"
+# Page values for the Hiwonder HX-35H, used as a DC-motor model. Not a
+# datasheet curve. Voltage is recorded with the line and does not scale it.
+DC_MOTOR_NO_LOAD_RAD_S = 5.82
+DC_MOTOR_STALL_NM = 3.43
+DC_MOTOR_VOLTAGE_V = 11.1
+DC_MOTOR_LABEL = "DC-motor model, not datasheet (Hiwonder HX-35H page values)"
+# Plant forcerange rail. A tick is clamp-active when the signed pre-clamp
+# ask is at or beyond this magnitude.
+CLAMP_ASK_NM = 2.45
 
 
 def hinge_speed_report(
@@ -128,22 +137,23 @@ def speed_torque_check(
     no_load_speed: float | None = None,
     stall_torque: float | None = None,
     voltage: float | None = None,
+    label: str | None = None,
 ) -> dict[str, object]:
-    """Speed-torque check. The motor line stays unset until HW supplies it.
+    """Speed-torque check.
 
-    ``tau_abs`` is the physical servo torque ``|kp·(q_des−q) − kv·ω|``.
+    ``tau_abs`` is the signed pre-clamp ask ``|kp·(ctrl−q) − kv·q̇|``.
     The sum ``|kp·e| + |kv·ω|`` is a separate conservative column and is
-    not what this check compares.
+    not what this check compares. ``kv`` is ``−actuator_biasprm[i, 2]``.
 
     With ``no_load_speed``, ``stall_torque``, or ``voltage`` left None, the
     status is ``SPEED_TORQUE_PENDING`` and nothing is failed. Each joint
-    still reports the tick with the largest ``|qvel|`` at signed ``|τ| ≥ 2``
-    Nm and the tick with the largest signed ``|τ|`` at ``|qvel| ≥ 4`` rad/s.
+    still reports the sample with the largest ``|qvel|`` at ``|τ| ≥ 2`` Nm
+    and the sample with the largest ``|τ|`` at ``|qvel| ≥ 4`` rad/s.
 
-    When all three are set, each tick must satisfy
-    ``|qvel| ≤ no_load_speed * (1 − |τ| / stall_torque)`` with that signed
-    ``|τ|``. Voltage is recorded and does not scale that line. The worst
-    margin is folded into the row verdict.
+    When all three are set, each sample must satisfy
+    ``|qvel| ≤ no_load_speed * (1 − |τ| / stall_torque)``. Voltage is
+    recorded and does not scale that line. ``label`` is the status string
+    when the line is on. The worst margin is folded into the row verdict.
     """
     labels = [str(name) for name in names]
     times = np.asarray(t, dtype=np.float64)
@@ -152,7 +162,8 @@ def speed_torque_check(
     stages = np.asarray(stage, dtype=object)
     pending = no_load_speed is None or stall_torque is None or voltage is None
     empty: dict[str, object] = {
-        "status": SPEED_TORQUE_PENDING if pending else "speed-torque line",
+        "status": SPEED_TORQUE_PENDING if pending else (label or "speed-torque line"),
+        "label": None if pending else label,
         "no_load_speed": no_load_speed,
         "stall_torque": stall_torque,
         "voltage": voltage,
@@ -282,6 +293,76 @@ def forcerange_clamp_report(
             "peak_abs_nm": peak,
         })
     return rows
+
+
+def signed_ask_clamp_bar(
+    names: tuple[str, ...] | list[str],
+    tau_abs: np.ndarray,
+    *,
+    bar_nm: float = CLAMP_ASK_NM,
+) -> dict[str, object]:
+    """Hard bar: every leg joint's clamp-active fraction must be 0.
+
+    ``tau_abs`` is the signed pre-clamp ask ``|kp·(ctrl−q) − kv·q̇|`` on
+    each control tick, shape ``(n_ticks, n_joints)``. A tick is clamp-active
+    when that ask is at least ``bar_nm`` (2.45 Nm, the plant forcerange).
+    The denominator is every control tick. A missing sample is not active.
+    A joint with no samples fails.
+    """
+    labels = [str(name) for name in names]
+    tau = np.asarray(tau_abs, dtype=np.float64)
+    n = int(tau.shape[0]) if tau.ndim == 2 else 0
+    joints: list[dict[str, object]] = []
+    reasons: list[str] = []
+    for col, name in enumerate(labels):
+        if tau.ndim != 2 or tau.shape[1] <= col or n < 1:
+            reasons.append(f"no signed-ask samples on {name}")
+            joints.append({
+                "joint": name,
+                "bar_nm": bar_nm,
+                "peak_nm": None,
+                "n_clamped": 0,
+                "n_ticks": n,
+                "fraction": None,
+            })
+            continue
+        series = tau[:, col]
+        known = np.isfinite(series)
+        if not np.any(known):
+            reasons.append(f"no signed-ask samples on {name}")
+            joints.append({
+                "joint": name,
+                "bar_nm": bar_nm,
+                "peak_nm": None,
+                "n_clamped": 0,
+                "n_ticks": n,
+                "fraction": None,
+            })
+            continue
+        over = known & (series >= float(bar_nm) - 1e-12)
+        n_clamped = int(np.sum(over))
+        fraction = float(n_clamped / n)
+        peak = float(np.max(series[known]))
+        joints.append({
+            "joint": name,
+            "bar_nm": bar_nm,
+            "peak_nm": peak,
+            "n_clamped": n_clamped,
+            "n_ticks": n,
+            "fraction": fraction,
+        })
+        if n_clamped > 0:
+            reasons.append(
+                f"clamp-active fraction {fraction:.4f} on {name} is not 0 "
+                f"({n_clamped}/{n} ticks with |signed ask| ≥ {float(bar_nm):.2f} Nm)"
+            )
+    return {
+        "bar_nm": float(bar_nm),
+        "definition": "|kp*(ctrl-q) - kv*qvel| >= 2.45",
+        "joints": joints,
+        "fail_reasons": reasons,
+        "passes": not reasons,
+    }
 
 
 def trunk_speed_line(
@@ -827,6 +908,29 @@ def self_test() -> int:
     expect(isinstance(worst, dict) and worst["joint"] == "l_knee", "worst joint is named")
     expect(isinstance(worst, dict) and abs(float(worst["t_s"]) - 0.2) < 1e-12, "worst tick is named")
     expect(isinstance(worst, dict) and float(worst["margin_rad_s"]) < 0.0, "worst margin is negative")
+    labeled = speed_torque_check(
+        ("l_knee",),
+        np.array([0.1], dtype=np.float64),
+        np.array([[0.1]], dtype=np.float64),
+        np.array([[0.1]], dtype=np.float64),
+        np.array(["walk"], dtype=object),
+        no_load_speed=DC_MOTOR_NO_LOAD_RAD_S,
+        stall_torque=DC_MOTOR_STALL_NM,
+        voltage=DC_MOTOR_VOLTAGE_V,
+        label=DC_MOTOR_LABEL,
+    )
+    expect(labeled["status"] == DC_MOTOR_LABEL, "the DC-motor label is the status")
+    expect(labeled["passes"] is True, "a small ask on the DC-motor line passes")
+    expect(labeled["voltage"] == DC_MOTOR_VOLTAGE_V, "voltage is recorded")
+    on_rail = signed_ask_clamp_bar(
+        ("r_knee", "l_knee"),
+        np.array([[2.45, 2.449], [0.0, 1.0]], dtype=np.float64),
+    )
+    expect(on_rail["passes"] is False, "2.45 Nm ask fails the clamp bar")
+    expect(any("r_knee" in str(item) for item in on_rail["fail_reasons"]), "clamp fail names r_knee")
+    expect(all("l_knee" not in str(item) for item in on_rail["fail_reasons"]), "2.449 Nm is under the rail")
+    under = signed_ask_clamp_bar(("r_knee",), np.array([[2.449]], dtype=np.float64))
+    expect(under["passes"] is True, "just under 2.45 passes the clamp bar")
     if failures:
         for msg in failures:
             print(f"FAIL {msg}")
