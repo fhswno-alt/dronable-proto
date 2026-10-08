@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -37,6 +38,23 @@ def _plant_md5() -> str:
     digest = hashlib.md5()
     digest.update(sw.PLANT_XML.read_bytes())
     return digest.hexdigest()
+
+
+def _cmd(argv: list[str] | None) -> str:
+    parts = ["python3", "scripts/run_live_row.py"]
+    raw = list(sys.argv[1:] if argv is None else argv)
+    parts.extend(shlex.quote(part) for part in raw)
+    return " ".join(parts)
+
+
+def _report(payload: dict[str, object]) -> str:
+    refs = plant_manifest.REFERENCE_COMPILED_MD5
+    return (
+        f"ref armature_0.01 {refs['armature_0.01']} "
+        f"armature_0.025 {refs['armature_0.025']} "
+        f"compiled_md5 {payload.get('compiled_md5')} "
+        f"perturbation {payload.get('perturbation')}"
+    )
 
 
 def _opt_float(text: str) -> float | None:
@@ -140,12 +158,16 @@ def main(argv: list[str] | None = None) -> int:
         "hip_pitch_deg": float(args.hip_pitch_deg),
         "gait": str(args.gait),
     }
+    sha = _tip_sha()
     payload: dict[str, object] = {
-        "tip_sha": _tip_sha(),
+        "tip_sha": sha,
+        "scorer_sha": sha,
+        "seed": seed,
+        "args": recorded,
+        "cmd": _cmd(argv),
         "plant_md5": _plant_md5(),
         "mujoco_version": mj.__version__,
         "soft_pass": 0,
-        "args": recorded,
     }
     try:
         result = sc.run_attempt(
@@ -179,8 +201,8 @@ def main(argv: list[str] | None = None) -> int:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(payload, indent=2, default=str) + "\n")
         print(
-            f"tip {payload['tip_sha']} abort {exc} "
-            f"compiled_md5 {payload.get('compiled_md5')}",
+            f"tip {payload['tip_sha']} scorer {payload['scorer_sha']} "
+            f"abort {exc} {_report(payload)}",
             flush=True,
         )
         return 2
@@ -216,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
         f"signed_over {payload['signed_over']} tip_ok {payload['tip_ok']} "
         f"dc_ok {payload['dc_ok']} dc {payload['dc_joint']} "
         f"{payload['dc_excess']} fault {payload['fault']!r} "
-        f"compiled_md5 {payload.get('compiled_md5')}",
+        f"{_report(payload)}",
         flush=True,
     )
     return 0
