@@ -658,3 +658,5 @@ Per-write logs, including CoP, ctrl second difference, the hand estimate, and th
 | 1.20 | 0.040 | 4.34 | r_knee | 42 | 9.93 | — | 0.88 | 0.12 | r_knee | stop | impact/contact | +2.45 |
 | 1.20 | 0.048 | 4.53 | r_knee | 46 | 10.04 | — | 0.87 | 0.13 | r_knee | stop | impact/contact | +2.45 |
 | 1.20 | 0.056 | 4.74 | r_knee | 47 | 9.20 | — | 0.81 | 0.19 | r_knee | stop | impact/contact | +2.45 |
+
+SHA `697d53b`.
