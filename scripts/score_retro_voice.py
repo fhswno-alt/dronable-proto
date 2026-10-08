@@ -374,7 +374,13 @@ def _hinge_block(step_bars, rec: Recorder, period: float, vx: float) -> dict[str
         for j, ask in enumerate(ask_row):
             if ask is not None:
                 ask_m[i, j] = float(ask)
+    sum_m = np.full((len(rec.pair_sum), len(LEG_JOINTS)), np.nan, dtype=np.float64)
+    for i, sum_row in enumerate(rec.pair_sum):
+        for j, total in enumerate(sum_row):
+            if total is not None:
+                sum_m[i, j] = float(total)
     clamp_bar = step_bars.signed_ask_clamp_bar(LEG_JOINTS, ask_m)
+    torque_bar = step_bars.signed_torque_bar(LEG_JOINTS, ask_m, sum_m)
     pairs = {
         "t_s": [float(item) for item in rec.cols["t"]],
         "tau_signed_nm": {
@@ -402,7 +408,9 @@ def _hinge_block(step_bars, rec: Recorder, period: float, vx: float) -> dict[str
             "kv": "-actuator_biasprm[i,2]",
             "speed_torque_uses": "ask",
             "clamp_bar_uses": "ask",
-            "bar_2_33_nm_uses": "sum",
+            "bar_2_33_nm_uses": "ask",
+            "sum_column": "sum",
+            "signed_sum_note": "passes signed, fails sum",
         },
     }
     context = _sum_peak_context(rec, "r_knee")
@@ -432,6 +440,7 @@ def _hinge_block(step_bars, rec: Recorder, period: float, vx: float) -> dict[str
         "hinge_pairs": pairs,
         "clamp": _clamp_rows(step_bars, rec),
         "clamp_bar": clamp_bar,
+        "torque_bar": torque_bar,
         "kv": rec.kv_rows,
         "sum_peak_context": context,
     }
@@ -1538,46 +1547,94 @@ def _line_lines(speed_torque: object) -> list[str]:
     return [" ".join(bits), ""]
 
 
-def _audit_lines() -> list[str]:
-    """Posted torque CLEARs, recomputed from the stored #102 ask samples.
+def _torque_bar_lines(torque_bar: object) -> list[str]:
+    if not isinstance(torque_bar, dict):
+        return []
+    joints = torque_bar.get("joints")
+    if not isinstance(joints, list) or not joints:
+        return []
+    passed = "passes" if torque_bar.get("passes") else "fails"
+    sum_passed = "passes" if torque_bar.get("sum_passes") else "fails"
+    note = str(torque_bar.get("note") or "")
+    lines = [
+        f"Torque pass, signed pre-clamp ask ≤ {_num(torque_bar.get('bar_nm'), 2)} Nm. "
+        f"The ask {passed}. The sum column {sum_passed}.",
+    ]
+    if note:
+        lines.append(f"Note: {note}.")
+    lines.extend([
+        "",
+        "| Joint | Peak \\|ask\\| Nm | Ask ticks over 2.33 | Peak sum Nm | Sum ticks over 2.33 | Note |",
+        "| --- | ---: | ---: | ---: | ---: | --- |",
+    ])
+    for row in joints:
+        if not isinstance(row, dict):
+            continue
+        lines.append(
+            f"| {row.get('joint')} | {_num(row.get('peak_ask_nm'), 4)} | "
+            f"{row.get('n_over')}/{row.get('n_ticks')} | {_num(row.get('peak_sum_nm'), 4)} | "
+            f"{row.get('n_sum_over')}/{row.get('n_ticks')} | {row.get('note') or ''} |"
+        )
+    lines.append("")
+    return lines
 
-    Each posted number is the sum on that write. Signed is
-    ``kp·(q_des−q) − kv·ω`` on the same write. kv is
-    ``−actuator_biasprm[i, 2]``.
+
+def _audit_lines() -> list[str]:
+    """Posted torque numbers under the signed-ask pass.
+
+    The posted number on each older row is the sum
+    ``|kp·(q_des−q)| + |kv·ω|``. The signed column on that same write is
+    ``kp·(q_des−q) − kv·ω``. Those files do not store the pre-clamp ask
+    series, so a signed pass is not awarded there. ``d6e8b5e`` is scored
+    from the logged series in the tables above.
     """
     rows = (
-        ("d6e8b5e voice-20", "2.2567", "r_hip_roll", "2.832", "2.2567", "+0.2545"),
-        ("d7b06e7 shape1-3.60", "2.311", "r_hip_roll", "8.176", "2.3106", "+0.2587"),
-        ("d7b06e7 shape0-3.60", "2.042", "r_knee", "9.256", "2.0415", "+0.7653"),
-        ("d7b06e7 shape0-3.57", "2.054", "r_knee", "9.248", "2.0535", "+0.7655"),
-        ("ac81435 voice-3.60", "2.3135", "r_hip_roll", "8.176", "2.3135", "+0.2607"),
-        ("ac81435 voice-3.70", "2.2619", "r_hip_roll", "8.352", "2.2619", "+0.2534"),
-        ("58ce1d8 slow", "1.979", "r_hip_roll", "2.816", "1.9792", "+0.2486"),
+        ("d6e8b5e voice-20", "2.2567", "r_hip_roll", "2.832", "2.2567", "+0.2545", "pass", "pass", ""),
+        ("d7b06e7 shape1-3.60", "2.311", "r_hip_roll", "8.176", "2.3106", "+0.2587", "not logged", "pass", ""),
+        ("d7b06e7 shape0-3.60", "2.042", "r_knee", "9.256", "2.0415", "+0.7653", "not logged", "pass", ""),
+        ("d7b06e7 shape0-3.57", "2.054", "r_knee", "9.248", "2.0535", "+0.7655", "not logged", "pass", ""),
+        ("ac81435 voice-3.60", "2.3135", "r_hip_roll", "8.176", "2.3135", "+0.2607", "not logged", "pass", ""),
+        ("ac81435 voice-3.70", "2.2619", "r_hip_roll", "8.352", "2.2619", "+0.2534", "not logged", "pass", ""),
+        ("58ce1d8 slow", "1.979", "r_hip_roll", "2.816", "1.9792", "+0.2486", "not logged", "pass", ""),
     )
     lines = [
         "### Torque signal audit",
         "",
-        "The #102 scorer's own unclamped-ask numbers so far are the sum",
-        "`|kp·(q_des−q)| + |kv·ω|`. kv is `−model.actuator_biasprm[i, 2]`,",
-        "read per actuator. The signed column is `kp·(q_des−q) − kv·ω` on",
-        "that same write. The 2.33 Nm bar was not switched to the signed value.",
+        "Torque pass is `|kp·(ctrl−q) − kv·q̇|` ≤ 2.33 Nm on every leg joint",
+        "on every tick. kv is `−actuator_biasprm[i, 2]`. The sum column is",
+        "`|kp·(q_des−q)| + |kv·ω|`. The #102 scorer's own unclamped-ask",
+        "numbers so far are that sum. The signed column below is",
+        "`kp·(q_des−q) − kv·ω` on the same posted write, not the pre-clamp ask.",
         "",
-        "| Row | Posted Nm | Joint | t s | Sum Nm | Signed Nm |",
-        "| --- | ---: | --- | ---: | ---: | ---: |",
+        "A stored row whose peak sum is ≤ 2.33 and whose over-tick count is 0",
+        "passes the sum column. Those older files did not log the pre-clamp",
+        "ask, so the signed-ask column says `not logged` and the note is",
+        "empty. None of them is `passes signed, fails sum`: the stored sum",
+        "does not fail, and a signed pass is not invented.",
+        "",
+        "| Row | Posted Nm | Joint | t s | Sum Nm | q_des signed Nm | Signed ask ≤ 2.33 | Sum ≤ 2.33 | Note |",
+        "| --- | ---: | --- | ---: | ---: | ---: | --- | --- | --- |",
     ]
-    for label, posted, joint, t_s, total, signed in rows:
-        lines.append(f"| {label} | {posted} | {joint} | {t_s} | {total} | {signed} |")
+    for label, posted, joint, t_s, total, signed, ask_pass, sum_pass, note in rows:
+        lines.append(
+            f"| {label} | {posted} | {joint} | {t_s} | {total} | {signed} | "
+            f"{ask_pass} | {sum_pass} | {note} |"
+        )
     lines.extend([
         "",
-        "Controls' posted 2.2567 on `d6e8b5e` is that sum. The signed torque",
-        "on the same write is +0.2545 Nm.",
+        "`d6e8b5e` is the exception: the logged pre-clamp series passes",
+        "≤ 2.33 on every leg joint, and the sum column also passes (peak",
+        "2.2567 Nm, 0 ticks over). There is no `passes signed, fails sum` note.",
+        "Controls' posted 2.2567 is the sum. The q_des signed value on that",
+        "write is +0.2545 Nm.",
         "",
         "PRs #82, #88, #90, #98, and #99 did not claim a torque CLEAR. Their",
         "CLEARs are wall-stop CLEARs. #82 and #88 post in-place hip-roll",
         "unclamped asks around ±4 Nm and treat that as over ±2.33 Nm. #90",
         "says hip roll stays unclamped. `51ae123` kitchen is the representative",
-        "bout: its sum, q_des signed, and pre-clamp ask are the tables above.",
-        "The 10.17 Nm / 3.61 rad/s r_knee sample is the sum, not the pre-clamp ask.",
+        "bout. Its signed-ask pass, sum column, and any `passes signed, fails sum`",
+        "joint notes are in the kitchen table above. The 10.17 Nm / 3.61 rad/s",
+        "r_knee sample is the sum, not the pre-clamp ask.",
         "",
     ])
     return lines
@@ -1608,15 +1665,20 @@ def hinge_markdown(payload: dict[str, object] | None = None) -> str:
         "displacement over the bus `move` window, divided by that window's",
         "duration. The ratio is reported. It is not a separate cutoff.",
         "",
-        "The 2.33 Nm unclamped-ask bar is unchanged. It scores the sum",
-        "`|kp·(q_des−q)| + |kv·ω|`. Controls' posted unclamped numbers match",
-        "that sum: on `d6e8b5e`, r_hip_roll 2.2567 Nm at 2.832 s is the sum.",
-        "The signed torque on that same write is +0.2545 Nm.",
+        "Torque pass is the signed pre-clamp ask `|kp·(ctrl−q) − kv·q̇|`",
+        "≤ 2.33 Nm on every leg joint on every tick. kv is",
+        "`−model.actuator_biasprm[i, 2]`. The sum `|kp·(q_des−q)| + |kv·ω|`",
+        "stays a column. A joint or a bout that passes the signed ask and",
+        "fails the sum is marked `passes signed, fails sum`. That note is",
+        "not a fail by itself, and it is not dropped.",
+        "",
+        "Controls' posted unclamped numbers are the sum. On `d6e8b5e`,",
+        "r_hip_roll 2.2567 Nm at 2.832 s is that sum. The q_des signed torque",
+        "on the same write is +0.2545 Nm.",
         "",
         "`tau_signed_nm` is `|kp·(q_des−q) − kv·ω|` of the unclamped target.",
         "`tau_sum_nm` is the sum. `tau_ask_nm` is the signed pre-clamp ask",
-        "`|kp·(ctrl−q) − kv·q̇|` of the written ctrl. kv is",
-        "`−model.actuator_biasprm[i, 2]`.",
+        "of the written ctrl.",
         "",
         "The speed-torque line is a hard bar. The label is",
         "`DC-motor model, not datasheet (Hiwonder HX-35H page values)`.",
@@ -1626,7 +1688,9 @@ def hinge_markdown(payload: dict[str, object] | None = None) -> str:
         "",
         "Clamp-active fraction is the share of control ticks where",
         "`|signed ask| ≥ 2.45` Nm. That fraction must be 0 on every leg",
-        "joint. The applied-force table is a separate measurement.",
+        "joint. A zero fraction is not a torque pass: the 2.33 Nm signed",
+        "ask is still required. The applied-force table is a separate",
+        "measurement.",
         "",
     ]
     kv_printed = False
@@ -1642,9 +1706,14 @@ def hinge_markdown(payload: dict[str, object] | None = None) -> str:
         passed = "passes" if qvel.get("passes") else "fails"
         torque = row.get("speed_torque") if isinstance(row.get("speed_torque"), dict) else {}
         clamp_bar = row.get("clamp_bar") if isinstance(row.get("clamp_bar"), dict) else {}
+        torque_bar = row.get("torque_bar") if isinstance(row.get("torque_bar"), dict) else {}
+        note = str(torque_bar.get("note") or "")
+        note_bit = f" Note: {note}." if note else ""
         lines.append(
             f"`{row.get('tip')}` `{row.get('bout')}` {row.get('gait')}, {row.get('verdict')}. "
             f"Hinge-speed bar {passed}. "
+            f"Signed ask ≤ 2.33 {'passes' if torque_bar.get('passes') else 'fails'}. "
+            f"Sum column {'passes' if torque_bar.get('sum_passes') else 'fails'}.{note_bit} "
             f"Speed-torque {'passes' if torque.get('passes') else 'fails'}. "
             f"Clamp-active {'passes' if clamp_bar.get('passes') else 'fails'}. "
             f"Plant `{row.get('plant_md5_before')}` before and `{row.get('plant_md5')}` after."
@@ -1662,6 +1731,7 @@ def hinge_markdown(payload: dict[str, object] | None = None) -> str:
         lines.extend(_corner_lines(torque))
         lines.extend(_peak_lines(row.get("hinge_pairs")))
         lines.extend(_ask_peak_lines(row.get("hinge_pairs")))
+        lines.extend(_torque_bar_lines(torque_bar))
         lines.extend(_clamp_bar_lines(clamp_bar))
         lines.extend(_clamp_lines(row.get("clamp")))
         lines.extend(_context_lines(row.get("sum_peak_context")))
@@ -1758,11 +1828,13 @@ def main() -> None:
             stepping = row.get("stepping") if isinstance(row.get("stepping"), dict) else {}
             torque = row.get("speed_torque") if isinstance(row.get("speed_torque"), dict) else {}
             clamp_bar = row.get("clamp_bar") if isinstance(row.get("clamp_bar"), dict) else {}
+            torque_bar = row.get("torque_bar") if isinstance(row.get("torque_bar"), dict) else {}
             fail = (
                 [str(item) for item in (stepping.get("fail_reasons") or [])]
                 + [str(item) for item in (qvel.get("fail_reasons") or [])]
                 + [str(item) for item in (torque.get("fail_reasons") or [])]
                 + [str(item) for item in (clamp_bar.get("fail_reasons") or [])]
+                + [str(item) for item in (torque_bar.get("fail_reasons") or [])]
             )
             merge_hinge_row({
                 "tip": args.label,
@@ -1780,6 +1852,7 @@ def main() -> None:
                 "hinge_pairs": row.get("hinge_pairs"),
                 "clamp": row.get("clamp"),
                 "clamp_bar": clamp_bar,
+                "torque_bar": torque_bar,
                 "kv": row.get("kv"),
                 "sum_peak_context": row.get("sum_peak_context"),
             })

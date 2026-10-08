@@ -49,8 +49,13 @@ DC_MOTOR_STALL_NM = 3.43
 DC_MOTOR_VOLTAGE_V = 11.1
 DC_MOTOR_LABEL = "DC-motor model, not datasheet (Hiwonder HX-35H page values)"
 # Plant forcerange rail. A tick is clamp-active when the signed pre-clamp
-# ask is at or beyond this magnitude.
+# ask is at or beyond this magnitude. A zero clamp fraction is not a
+# torque pass: the pass is the 2.33 Nm signed ask below.
 CLAMP_ASK_NM = 2.45
+# Torque pass. Signed pre-clamp ask |kp·(ctrl−q) − kv·q̇| on every leg
+# joint on every tick. The sum |kp·e| + |kv·ω| is a column, not this bar.
+TORQUE_ASK_NM = 2.33
+SIGNED_SUM_NOTE = "passes signed, fails sum"
 
 
 def hinge_speed_report(
@@ -362,6 +367,117 @@ def signed_ask_clamp_bar(
         "joints": joints,
         "fail_reasons": reasons,
         "passes": not reasons,
+    }
+
+
+def signed_torque_bar(
+    names: tuple[str, ...] | list[str],
+    ask: np.ndarray,
+    summed: np.ndarray,
+    *,
+    bar_nm: float = TORQUE_ASK_NM,
+) -> dict[str, object]:
+    """Torque pass: signed pre-clamp ask ≤ 2.33 Nm on every leg tick.
+
+    ``ask`` is ``|kp·(ctrl−q) − kv·q̇|`` per control tick, and ``summed``
+    is ``|kp·(q_des−q)| + |kv·ω|`` on the same ticks. Both are shaped
+    ``(n_ticks, n_joints)``. The pass is the ask. The sum is a column.
+    A row that passes the ask and fails the sum carries the note
+    ``passes signed, fails sum``. That note is not itself a fail.
+    A joint with a missing ask fails. Exactly ``bar_nm`` passes.
+    """
+    labels = [str(name) for name in names]
+    asked = np.asarray(ask, dtype=np.float64)
+    total = np.asarray(summed, dtype=np.float64)
+    n = int(asked.shape[0]) if asked.ndim == 2 else 0
+    joints: list[dict[str, object]] = []
+    reasons: list[str] = []
+    notes: list[str] = []
+    for col, name in enumerate(labels):
+        if asked.ndim != 2 or asked.shape[1] <= col or n < 1:
+            reasons.append(f"no signed-ask samples on {name}")
+            joints.append({
+                "joint": name,
+                "bar_nm": bar_nm,
+                "peak_ask_nm": None,
+                "n_over": 0,
+                "n_ticks": n,
+                "signed_passes": False,
+                "peak_sum_nm": None,
+                "n_sum_over": 0,
+                "sum_passes": False,
+                "note": "",
+            })
+            continue
+        series = asked[:, col]
+        known = np.isfinite(series)
+        if not np.any(known):
+            reasons.append(f"no signed-ask samples on {name}")
+            joints.append({
+                "joint": name,
+                "bar_nm": bar_nm,
+                "peak_ask_nm": None,
+                "n_over": 0,
+                "n_ticks": n,
+                "signed_passes": False,
+                "peak_sum_nm": None,
+                "n_sum_over": 0,
+                "sum_passes": False,
+                "note": "",
+            })
+            continue
+        missing = int(np.sum(~known))
+        over = known & (series > float(bar_nm) + 1e-9)
+        n_over = int(np.sum(over))
+        peak_ask = float(np.max(series[known]))
+        signed_passes = n_over == 0 and missing == 0
+        if missing:
+            reasons.append(f"signed pre-clamp ask unmeasured on {name} ({missing} ticks)")
+        if n_over:
+            reasons.append(
+                f"signed pre-clamp ask {peak_ask:.4f} Nm on {name}, "
+                f"{n_over}/{n} ticks over {float(bar_nm):.2f}"
+            )
+        sum_series = total[:, col] if total.ndim == 2 and total.shape[1] > col and total.shape[0] == n else None
+        if sum_series is None:
+            peak_sum = None
+            n_sum_over = 0
+            sum_passes = False
+        else:
+            sum_known = np.isfinite(sum_series)
+            n_sum_over = int(np.sum(sum_known & (sum_series > float(bar_nm) + 1e-9)))
+            peak_sum = float(np.max(sum_series[sum_known])) if np.any(sum_known) else None
+            sum_passes = bool(np.any(sum_known)) and n_sum_over == 0 and int(np.sum(~sum_known)) == 0
+        note = SIGNED_SUM_NOTE if signed_passes and n_sum_over > 0 else ""
+        if note:
+            notes.append(f"{name}: {note}")
+        joints.append({
+            "joint": name,
+            "bar_nm": bar_nm,
+            "peak_ask_nm": peak_ask,
+            "n_over": n_over,
+            "n_missing": missing,
+            "n_ticks": n,
+            "signed_passes": signed_passes,
+            "peak_sum_nm": peak_sum,
+            "n_sum_over": n_sum_over,
+            "sum_passes": sum_passes,
+            "note": note,
+        })
+    passes = not reasons
+    sum_passes = bool(joints) and all(bool(row["sum_passes"]) for row in joints)
+    sum_over = any(int(row["n_sum_over"]) > 0 for row in joints)
+    row_note = SIGNED_SUM_NOTE if passes and sum_over else ""
+    return {
+        "bar_nm": float(bar_nm),
+        "definition": "|kp*(ctrl-q) - kv*qvel| <= 2.33",
+        "sum_definition": "|kp*(q_des-q)| + |kv*omega|",
+        "joints": joints,
+        "fail_reasons": reasons,
+        "joint_notes": notes,
+        "note": row_note,
+        "passes": passes,
+        "sum_passes": sum_passes,
     }
 
 
@@ -931,6 +1047,25 @@ def self_test() -> int:
     expect(all("l_knee" not in str(item) for item in on_rail["fail_reasons"]), "2.449 Nm is under the rail")
     under = signed_ask_clamp_bar(("r_knee",), np.array([[2.449]], dtype=np.float64))
     expect(under["passes"] is True, "just under 2.45 passes the clamp bar")
+    both = signed_torque_bar(
+        ("l_knee", "r_knee"),
+        np.array([[2.33, 1.0], [2.0, 1.2]], dtype=np.float64),
+        np.array([[2.34, 1.1], [2.1, 1.3]], dtype=np.float64),
+    )
+    expect(both["passes"] is True, "2.33 Nm signed ask passes the torque bar")
+    expect(both["sum_passes"] is False, "a sum over 2.33 fails the column")
+    expect(both["note"] == SIGNED_SUM_NOTE, "a signed pass with a sum fail is flagged")
+    expect(any(row["note"] == SIGNED_SUM_NOTE for row in both["joints"]), "the joint row keeps the flag")
+    over_ask = signed_torque_bar(
+        ("l_hip_roll", "l_ank_roll"),
+        np.array([[2.3833, 2.2695]], dtype=np.float64),
+        np.array([[9.2, 7.07]], dtype=np.float64),
+    )
+    expect(over_ask["passes"] is False, "2.3833 Nm fails 2.33 even though it is under 2.45")
+    expect(over_ask["note"] == "", "a signed fail does not take the row flag")
+    ank = [row for row in over_ask["joints"] if row["joint"] == "l_ank_roll"][0]
+    expect(ank["note"] == SIGNED_SUM_NOTE, "the ankle that passes signed and fails sum is flagged")
+    expect(any("l_hip_roll" in str(item) for item in over_ask["fail_reasons"]), "the 2.33 fail names the joint")
     if failures:
         for msg in failures:
             print(f"FAIL {msg}")

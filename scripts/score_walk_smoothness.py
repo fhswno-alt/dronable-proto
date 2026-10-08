@@ -1270,10 +1270,10 @@ def _install_ask_log(walker: lipm_gait.LipmWalker, bucket: list[AskSample]) -> N
     """Log the unclamped target and the written-ctrl ask. The command is unchanged.
 
     ``signed_nm`` is ``kp·(q_des−q) − kv·ω`` of the unclamped target.
-    ``sum_nm`` is ``|kp·e| + |kv·ω|``. The 2.33 Nm bar uses the sum. That
-    is also the number Controls posts. ``ask_nm`` is the signed pre-clamp
-    ask ``kp·(ctrl−q) − kv·q̇`` after the writer stores ctrl. ``kv`` is
-    ``−actuator_biasprm[i, 2]``.
+    ``sum_nm`` is ``|kp·e| + |kv·ω|``. That sum is the number Controls
+    posts, and it stays a column. ``ask_nm`` is the signed pre-clamp ask
+    ``kp·(ctrl−q) − kv·q̇`` after the writer stores ctrl. The 2.33 Nm
+    torque pass uses that ask. ``kv`` is ``−actuator_biasprm[i, 2]``.
     """
     def _log(jn: str, q_des: float) -> None:
         if jn not in LEG_JOINTS:
@@ -1374,7 +1374,14 @@ def _mfg_reasons(
     com_rms: float | None,
     joint_peak: float | None,
     joint_rms: float | None,
+    torque_reasons: list[str] | None = None,
 ) -> list[str]:
+    """Manufacturing gate. The 2.33 Nm torque pass is not the sum.
+
+    ``ask_nm`` and ``ask_over_ticks`` stay in the signature so callers can
+    still hand in the sum column. They do not decide this gate. The signed
+    pre-clamp ask failures arrive in ``torque_reasons``.
+    """
     reasons: list[str] = []
     if not measured:
         reasons.append("bout unmeasured or plant md5 moved")
@@ -1388,10 +1395,8 @@ def _mfg_reasons(
         reasons.append(f"CoM outside fraction {com_frac:.3f} is not 0")
     if tipped:
         reasons.append("tipped or bus fault")
-    if ask_nm > SAG_BAR_NM + 1e-9 or ask_over_ticks > 0:
-        reasons.append(
-            f"unclamped ask {ask_nm:.3f} Nm, {ask_over_ticks} ticks over {SAG_BAR_NM:.2f}"
-        )
+    if torque_reasons:
+        reasons.extend(torque_reasons)
     if com_peak is None or not strictly_below(com_peak, BASE_COM_JERK_PEAK, COM_JERK_TOL):
         reasons.append(
             f"whole-bout CoM jerk peak {com_peak} is not below {BASE_COM_JERK_PEAK} "
@@ -1476,9 +1481,9 @@ def _tick_pair(
     Signed |τ| is ``|kp·(q_des−q) − kv·ω|``. The sum is
     ``|kp·e| + |kv·ω|`` on the write with the largest sum. The ask is
     ``|kp·(ctrl−q) − kv·q̇|`` on the write with the largest ask. Each
-    column keeps the ``|qvel|`` of its own write. The 2.33 Nm bar is the
-    sum. The speed-torque line and the clamp bar use every ask write, not
-    only this per-tick maximum.
+    column keeps the ``|qvel|`` of its own write. The 2.33 Nm torque pass
+    is the per-tick ask. The sum is a column. The speed-torque line uses
+    every ask write, not only this per-tick maximum.
     """
     best_signed: dict[str, AskSample] = {}
     best_sum: dict[str, AskSample] = {}
@@ -1598,10 +1603,9 @@ def _pair_matrix(rows: list[list[float | None]], n_joints: int) -> np.ndarray:
 
 
 def _asks_by_joint(asks: list[AskSample]) -> list[dict[str, object]]:
-    """Peak of the 2.33 Nm bar. The bar is the sum, not |signed|.
+    """Peak of the sum column. Controls' posted unclamped numbers match it.
 
-    Controls' posted unclamped numbers match this sum. Do not switch the
-    comparison to ``|signed_nm|``.
+    The 2.33 Nm torque pass is the signed pre-clamp ask, not this sum.
     """
     best: dict[str, AskSample] = {}
     for sample in asks:
@@ -2085,6 +2089,10 @@ def run_preview_row(
             f"contact box half-length {half_x * 1000.0:.2f} mm is not 67.5 mm"
         )
         stepping["passes"] = False
+    pair_ask_m = _pair_matrix(pair_ask, len(LEG_JOINTS))
+    pair_sum_m = _pair_matrix(pair_sum, len(LEG_JOINTS))
+    torque_bar = step_bars.signed_torque_bar(LEG_JOINTS, pair_ask_m, pair_sum_m)
+    signed_reasons = torque_bar.get("fail_reasons")
     fail_reasons = _mfg_reasons(
         measured=measured,
         zmp_min_m=zmp_min,
@@ -2098,6 +2106,7 @@ def run_preview_row(
         com_rms=None if com_jerk is None else com_jerk.rms_l2,
         joint_peak=None if joint_jerk is None else joint_jerk.peak_l2,
         joint_rms=None if joint_jerk is None else joint_jerk.rms_l2,
+        torque_reasons=[str(item) for item in signed_reasons] if isinstance(signed_reasons, list) else [],
     )
     step_reasons = stepping.get("fail_reasons")
     if isinstance(step_reasons, list):
@@ -2127,7 +2136,6 @@ def run_preview_row(
     torque_reasons = speed_torque.get("fail_reasons")
     if isinstance(torque_reasons, list):
         fail_reasons.extend(str(reason) for reason in torque_reasons)
-    pair_ask_m = _pair_matrix(pair_ask, len(LEG_JOINTS))
     clamp_bar = step_bars.signed_ask_clamp_bar(LEG_JOINTS, pair_ask_m)
     clamp_reasons = clamp_bar.get("fail_reasons")
     if isinstance(clamp_reasons, list):
@@ -2164,7 +2172,9 @@ def run_preview_row(
             "kv": "-actuator_biasprm[i,2]",
             "speed_torque_uses": "ask",
             "clamp_bar_uses": "ask",
-            "bar_2_33_nm_uses": "sum",
+            "bar_2_33_nm_uses": "ask",
+            "sum_column": "sum",
+            "signed_sum_note": "passes signed, fails sum",
         },
     }
     clamp = _clamp_from_force(walker, pair_force)
@@ -2264,6 +2274,7 @@ def run_preview_row(
         "hinge_pairs": hinge_pairs,
         "clamp": clamp,
         "clamp_bar": clamp_bar,
+        "torque_bar": torque_bar,
         "kv": kv_rows,
     }
 
@@ -3390,7 +3401,10 @@ def render_stepping_md(payloads: list[dict[str, object]]) -> str:
         "- Airborne advance of each move-window swing within ±20% of `vx·T`.",
         "- Single support, from contact: stance contact count ≥ 3 on every tick.",
         "- Declared-stance and actual-stance contact CoP and CoM margins ≥ 0, outside",
-        "  fraction 0. Jerk strictly below the kit baseline. Unclamped ask ≤ 2.33 Nm.",
+        "  fraction 0. Jerk strictly below the kit baseline. Torque pass is the",
+        "  signed pre-clamp ask `|kp·(ctrl−q) − kv·q̇|` ≤ 2.33 Nm on every leg",
+        "  joint on every tick. The sum `|kp·e| + |kv·ω|` stays a column. A row",
+        "  that passes signed and fails the sum is flagged `passes signed, fails sum`.",
         "- Final 1 s: both feet have at least 3 contacts on every tick, trunk pitch and",
         "  roll stay within 5° of the stand median, and `up_z` stays at least 0.90.",
         "  The pose line says whether that window returns to the stand joints or",
@@ -3401,11 +3415,12 @@ def render_stepping_md(payloads: list[dict[str, object]]) -> str:
         "  Preview rows use `preview_stage`. A voice bout with no preview stage uses",
         "  the gait phase. Each tick logs the q_des signed torque, the sum",
         "  `|kp·e| + |kv·ω|`, and the signed pre-clamp ask `|kp·(ctrl−q) − kv·q̇|`.",
-        "  kv is `−actuator_biasprm[i, 2]`. The 2.33 Nm unclamped-ask bar stays on",
-        "  the sum. The speed-torque line is the DC-motor model (not a datasheet):",
-        "  `|qvel| ≤ 5.82·(1 − |signed ask|/3.43)`, voltage 11.1 V recorded and",
-        "  not a scale. Clamp-active fraction is the share of ticks with",
-        "  `|signed ask| ≥ 2.45`. That fraction must be 0 on every leg joint.",
+        "  kv is `−actuator_biasprm[i, 2]`. The 2.33 Nm torque pass is that",
+        "  signed ask, not the sum. The speed-torque line is the DC-motor model",
+        "  (not a datasheet): `|qvel| ≤ 5.82·(1 − |signed ask|/3.43)`, voltage",
+        "  11.1 V recorded and not a scale. Clamp-active fraction is the share",
+        "  of ticks with `|signed ask| ≥ 2.45`. That fraction must be 0 on every",
+        "  leg joint, and a zero fraction is not a torque pass by itself.",
         "",
         "Each row also reports period T, commanded vx, actual trunk vx, and the",
         "ratio. Actual trunk vx is the trunk origin's heading-frame forward",

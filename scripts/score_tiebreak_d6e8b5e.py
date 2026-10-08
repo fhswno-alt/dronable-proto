@@ -298,7 +298,7 @@ def _row_prose(row: dict[str, object]) -> list[str]:
         f"{_n(row.get('joint_jerk_peak'), 3)} / {_n(row.get('joint_jerk_rms'), 3)} rad/s³, "
         f"largest hinge {row.get('worst_joint')} "
         f"{_n(row.get('worst_joint_peak'), 3)} / {_n(row.get('worst_joint_rms'), 3)}. "
-        "Unclamped peak "
+        "Sum column "
         f"{row.get('ask_joint')} {_n(row.get('ask_nm'), 4)} Nm at "
         f"{_n(row.get('ask_t_s'), 3)} s, headroom {_n(row.get('ask_headroom_nm'), 4)} Nm. "
         "Leg asks: " + "; ".join(ask_lines) + ".",
@@ -312,10 +312,13 @@ def _row_prose(row: dict[str, object]) -> list[str]:
         "",
         "Bus `vx·T` at 0.056 m/s and 20 s is 1.12 m. Both airborne advances are "
         "76 mm, so the ±20% stride bar fails. Step fraction 0.794 is under 0.90 "
-        "because 0.040 m of forward travel happens in contact. The hinge-speed "
-        "bar, the speed-torque line, and the clamp-active bar are in the fail "
-        "list when they fail. The cadence grid is not on this commit, so there "
-        "is no second row.",
+        "because 0.040 m of forward travel happens in contact. The signed "
+        "pre-clamp ask must stay ≤ 2.33 Nm on every leg joint. A zero "
+        "clamp-active fraction is not that pass. The sum stays a column, and "
+        "a signed pass that fails the sum is marked `passes signed, fails sum`. "
+        "The hinge-speed bar, the speed-torque line, and the clamp-active bar "
+        "are in the fail list when they fail. The cadence grid is not on this "
+        "commit, so there is no second row.",
         "",
         "Against the posted row: unclamped right hip roll 2.2567 Nm at 2.832 s "
         "matches. Declared CoM minimum +15.10 mm matches the posted +15.11 mm. "
@@ -615,6 +618,8 @@ def main() -> None:
     torque_reasons = list(speed_torque.get("fail_reasons") or [])
     clamp_bar = row.get("clamp_bar") if isinstance(row.get("clamp_bar"), dict) else {}
     clamp_reasons = list(clamp_bar.get("fail_reasons") or [])
+    torque_bar = row.get("torque_bar") if isinstance(row.get("torque_bar"), dict) else {}
+    signed_reasons = list(torque_bar.get("fail_reasons") or [])
     kv_rows = row.get("kv") if isinstance(row.get("kv"), list) else []
     fail = (
         mfg
@@ -622,6 +627,7 @@ def main() -> None:
         + [str(item) for item in qvel_reasons]
         + [str(item) for item in torque_reasons]
         + [str(item) for item in clamp_reasons]
+        + [str(item) for item in signed_reasons]
     )
     verdict = "CLEAR" if not fail else "Prefer FAIL"
     gait = _gait_label(strict)
@@ -667,6 +673,7 @@ def main() -> None:
         "hinge_pairs": _jsonable(hinge_pairs),
         "clamp": _jsonable(row.get("clamp")),
         "clamp_bar": _jsonable(clamp_bar),
+        "torque_bar": _jsonable(torque_bar),
         "kv": _jsonable(kv_rows),
         "stepping": _jsonable(strict),
         "stepping_contact_count": _jsonable(contact_only),
@@ -717,6 +724,7 @@ def main() -> None:
         "hinge_pairs": payload_row["hinge_pairs"],
         "clamp": payload_row.get("clamp"),
         "clamp_bar": payload_row.get("clamp_bar"),
+        "torque_bar": payload_row.get("torque_bar"),
         "kv": payload_row.get("kv"),
         "fail_reasons": payload_row.get("fail_reasons"),
     })
@@ -756,7 +764,7 @@ def _note(row, strict, contact_only, swings, counts, disagree, meta, cop_ok, gai
         f"sole tilt max {ss.get('tilt_max_rad')} fraction over 1 deg {ss.get('tilt_over_1deg')}.",
         f"CoM jerk {row['com_jerk_whole_peak']} / {row['com_jerk_whole_rms']}. "
         f"Joint jerk {row['joint_jerk_peak']} / {row['joint_jerk_rms']} worst {row['worst_joint']}. "
-        f"Unclamped {row['ask_joint']} {float(row['ask_nm']):.4f} Nm at {row['ask_t_s']} s, "
+        f"Sum column {row['ask_joint']} {float(row['ask_nm']):.4f} Nm at {row['ask_t_s']} s, "
         f"headroom {2.33 - float(row['ask_nm']):+.4f} Nm. "
         f"Hinge |qvel| bar {qvel.get('bar_rad_s')} passes={qvel.get('passes')}. "
         f"Trunk speed T {trunk_speed.get('period_s')} s, commanded "
