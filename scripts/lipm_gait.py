@@ -75,7 +75,13 @@ ID_RESID_NM = ID_RESID_BUCKET_NM
 # acceleration keeps this budget. It is not a command clip.
 PLAN_KNEE_TAU_NM = 2.0
 # 0.01·q̈ at this cap is 0.25 Nm, inside the 2.0 Nm knee budget.
+# At the 0.025 load-time armature the same cap is 0.625 Nm.
 STOP_KNEE_QDD_MAX = 25.0
+# Walk-reference knee acceleration. The double-support kink measured
+# −109 rad/s². At armature 0.01 that is −1.66 Nm and the applied force
+# stays inside 2.33. At 0.025 the same q̈ is −3.30 Nm. 40 rad/s² is
+# 1.0 Nm at 0.025, which leaves room for the bare term.
+WALK_KNEE_QDD_MAX = 40.0
 STOP_BLEND_MIN_S = 0.5
 # The position servo does not command the double-support load split.
 # Each tick both feet are loaded, move the ZMP/CoM plan by a fraction of
@@ -406,6 +412,7 @@ class LipmWalker:
     ) -> None:
         self.model = model
         self.leg_armature = _compiled_leg_armature(model)
+        self._knee_ref: dict[str, list[float]] = {}
         self.data = data
         self.act_idx = act_idx
         self.cfg = cfg
@@ -2338,6 +2345,33 @@ class LipmWalker:
             self._shape_vel[name] = vel
             joints[name] = pos
 
+    def _limit_knee_qdd(self, joints: dict[str, float]) -> None:
+        """Keep the knee reference inside WALK_KNEE_QDD_MAX.
+
+        The cap is on the planned samples, before inverse dynamics. It is
+        not a torque clip. A single-tick kink at −109 rad/s² fits in 2.33 Nm
+        at armature 0.01 and does not fit at 0.025.
+        """
+        dt = float(op3_walk.OP3_CTRL_S)
+        if dt <= 0.0:
+            return
+        cap = float(WALK_KNEE_QDD_MAX)
+        for name in ("l_knee", "r_knee"):
+            if name not in joints:
+                continue
+            q_new = float(joints[name])
+            prev = self._knee_ref.setdefault(name, [])
+            if len(prev) >= 2:
+                q0 = float(prev[-2])
+                q1 = float(prev[-1])
+                qdd = (q_new - 2.0 * q1 + q0) / (dt * dt)
+                if abs(qdd) > cap:
+                    q_new = 2.0 * q1 - q0 + math.copysign(cap * dt * dt, qdd)
+                    joints[name] = q_new
+            prev.append(q_new)
+            if len(prev) > 4:
+                del prev[0]
+
     def _write_preview_joints(self, joints: dict[str, float] | None) -> None:
         for jn in (
             "l_sho_roll", "r_sho_roll", "l_el_pitch", "r_el_pitch",
@@ -2382,6 +2416,7 @@ class LipmWalker:
             if abs(want - gait) > 1e-6:
                 joints[jn] = want
         if self.cfg.gm_id_ff:
+            self._limit_knee_qdd(joints)
             # The hip-roll offset is part of the reference the torque
             # command tracks. A second write after the feedforward would
             # log the unshaped ask.
