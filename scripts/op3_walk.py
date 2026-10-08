@@ -265,8 +265,13 @@ class Op3Walker:
         self.sole_level = 0.0
         # Voice only. The kit sine leaves the sole near the floor at 20%
         # and 80% of the swing. The hold keeps the peak height across that
-        # window. Kit stays off.
+        # window. Kit stays off. z_quintic replaces that hold with a
+        # rest-to-rest minimum jerk over the whole single support.
         self.z_flat = False
+        self.z_quintic = False
+        # Rise through the double support before the swing, still a
+        # rest-to-rest quintic, so the 20% point is not the start of the lift.
+        self.z_lead = False
         self.z_swap_cmd = float(z_swap_m)
         self.step_fb = float(step_fb)
         self.pelvis_offset = math.radians(pelvis_deg)
@@ -640,6 +645,23 @@ class Op3Walker:
         # helper above used phase_t for z as well. Rebuild those z terms so
         # the frozen foot matches computeLegAngle, which passes r_ssp_start
         # as both the sample time and the phase for the right z channel.
+        if self.z_quintic:
+            # Swing x is already a sine with zero velocity at lift and at
+            # touchdown, and a nonzero acceleration there. The quintic
+            # matches those end positions and zeroes the acceleration, so
+            # the sole meets the floor with no velocity step.
+            if self.l_ssp_start < t <= self.l_ssp_end:
+                x0 = self._leg_move(self.l_ssp_start, self.l_ssp_start, self.l_ssp_start, 1.0, False)[0]
+                x1 = self._leg_move(self.l_ssp_end, self.l_ssp_end, self.l_ssp_start, 1.0, False)[0]
+                span = self.l_ssp_end - self.l_ssp_start
+                s = self._minjerk((t - self.l_ssp_start) / span) if span > 1e-9 else 1.0
+                left = (x0 + (x1 - x0) * s, left[1], left[2], left[3])
+            elif self.r_ssp_start < t <= self.r_ssp_end:
+                x0 = self._leg_move(self.r_ssp_start, self.r_ssp_start, self.r_ssp_start, -1.0, True)[0]
+                x1 = self._leg_move(self.r_ssp_end, self.r_ssp_end, self.r_ssp_start, -1.0, True)[0]
+                span = self.r_ssp_end - self.r_ssp_start
+                s = self._minjerk((t - self.r_ssp_start) / span) if span > 1e-9 else 1.0
+                right = (x0 + (x1 - x0) * s, right[1], right[2], right[3])
         right_z = self._right_z(t)
         left_z = self._left_z(t)
         leg = self.lengths.thigh_m + self.lengths.calf_m + self.lengths.ankle_m
@@ -694,35 +716,77 @@ class Op3Walker:
         z_phase = math.pi / 2.0 + 2.0 * math.pi / max(self.z_move_period, 1e-6) * phase_t
         return wsin(t_z, self.z_move_period, z_phase, self._z_move, self._z_move_shift)
 
+    @staticmethod
+    def _minjerk(u: float) -> float:
+        """Rest-to-rest quintic. Zero value, slope, and curvature at 0 and 1."""
+        u = min(1.0, max(0.0, float(u)))
+        return u * u * u * (u * (u * 6.0 - 15.0) + 10.0)
+
     def _swing_z(self, t: float, start: float, end: float, phase_t: float) -> float:
-        """OP3 sine, or a flat peak across 20–80% of single support.
+        """OP3 sine, a 20–80% hold, or a minimum-jerk rise and fall.
 
         The sine gap is z·sin(πf)². At 20% and 80% of the swing that is
         35% of the peak, so a 4 mm peak is 1.4 mm and an 18 mm peak is
-        6 mm. The loaded sole does not clear either. The voice walk
+        6 mm. The loaded sole does not clear either. The flat voice walk
         rises with a smootherstep over the first 20% and holds the peak
-        until 80%. Kit leaves ``z_flat`` off and keeps the sine.
+        until 80%. Those two corners are a step in command acceleration.
+        ``z_quintic`` spends the first half of single support on a
+        rest-to-rest quintic up to the same peak and the second half on
+        the matching descent, so lift-off, the peak, and touchdown all
+        have zero velocity and zero acceleration. Kit leaves both flags
+        off and keeps the sine.
         """
-        if not self.z_flat or end <= start + 1e-9:
+        if end <= start + 1e-9:
+            return self._z_at(t, phase_t)
+        if not self.z_flat and not self.z_quintic:
             return self._z_at(t, phase_t)
         z_lo = self._z_at(start, phase_t)
         z_hi = self._z_at(start + 0.5 * (end - start), phase_t)
         frac = (float(t) - start) / (end - start)
+        if self.z_quintic:
+            if frac <= 0.5:
+                scale = self._minjerk(frac / 0.5)
+            else:
+                scale = 1.0 - self._minjerk((frac - 0.5) / 0.5)
+            return z_lo + (z_hi - z_lo) * scale
         rise = 0.20
-
-        def smoother(u: float) -> float:
-            u = min(1.0, max(0.0, u))
-            return u * u * u * (u * (u * 6.0 - 15.0) + 10.0)
-
         if frac <= rise:
-            scale = smoother(frac / rise)
+            scale = self._minjerk(frac / rise)
         elif frac >= 1.0 - rise:
-            scale = smoother((1.0 - frac) / rise)
+            scale = self._minjerk((1.0 - frac) / rise)
         else:
             scale = 1.0
         return z_lo + (z_hi - z_lo) * scale
 
+    def _elapsed(self, t: float, origin: float) -> float:
+        period = float(self.period)
+        if period <= 1e-9:
+            return 0.0
+        return (float(t) - float(origin)) % period
+
+    def _lead_scale(self, t: float, rise_origin: float, mid: float, fall_end: float) -> float:
+        """Minimum jerk up from the previous touchdown to mid-swing, then down.
+
+        Velocity and acceleration are zero at the start of the rise, at
+        the peak, and at touchdown. There is no flat hold.
+        """
+        rise_len = self._elapsed(mid, rise_origin)
+        el = self._elapsed(t, rise_origin)
+        if rise_len > 1e-9 and el <= rise_len + 1e-12:
+            return self._minjerk(el / rise_len)
+        fall_len = self._elapsed(fall_end, mid)
+        el_fall = self._elapsed(t, mid)
+        if fall_len > 1e-9 and el_fall <= fall_len + 1e-12:
+            return 1.0 - self._minjerk(el_fall / fall_len)
+        return 0.0
+
     def _right_z(self, t: float) -> float:
+        if self.z_quintic and self.z_lead and self.period > 1e-9:
+            mid = 0.5 * (self.r_ssp_start + self.r_ssp_end)
+            z_lo = self._z_at(self.r_ssp_start, self.r_ssp_start)
+            z_hi = self._z_at(mid, self.r_ssp_start)
+            scale = self._lead_scale(t, self.l_ssp_end, mid, self.r_ssp_end)
+            return z_lo + (z_hi - z_lo) * scale
         if t <= self.r_ssp_start:
             return self._z_at(self.r_ssp_start, self.r_ssp_start)
         if t <= self.r_ssp_end:
@@ -730,6 +794,12 @@ class Op3Walker:
         return self._z_at(self.r_ssp_end, self.r_ssp_start)
 
     def _left_z(self, t: float) -> float:
+        if self.z_quintic and self.z_lead and self.period > 1e-9:
+            mid = 0.5 * (self.l_ssp_start + self.l_ssp_end)
+            z_lo = self._z_at(self.l_ssp_start, self.l_ssp_start)
+            z_hi = self._z_at(mid, self.l_ssp_start)
+            scale = self._lead_scale(t, self.r_ssp_end, mid, self.l_ssp_end)
+            return z_lo + (z_hi - z_lo) * scale
         if t <= self.l_ssp_start:
             return self._z_at(self.l_ssp_start, self.l_ssp_start)
         if t <= self.l_ssp_end:

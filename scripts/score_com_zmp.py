@@ -1048,6 +1048,10 @@ def run_attempt(
     crouch_m: float = 0.025,
     hip_pitch_deg: float = 15.0,
     gait_name: str = "preview",
+    z_quintic: bool = False,
+    z_lead: bool = False,
+    spring_nm: float = 0.0,
+    honor_vx: bool = False,
 ) -> dict[str, object]:
     md5_before = _plant_md5()
     if md5_before != sw.PLANT_MD5:
@@ -1094,6 +1098,9 @@ def run_attempt(
             preview_arm_s=arm_s,
             preview_r=preview_r,
             preview_shape=preview_shape,
+            gm_z_quintic=bool(z_quintic),
+            gm_z_lead=bool(z_lead),
+            gm_spring_nm=float(spring_nm),
         )
     scene = None
     if perturb is not None and perturb.rug:
@@ -1176,7 +1183,10 @@ def run_attempt(
     clamp_lim = _clamp_limits(lipm)
     clamp_n = {jn: 0 for jn in LEG_JOINTS}
     clamp_hit = {jn: 0 for jn in LEG_JOINTS}
-    dc_excess = -1.0
+    # A large negative sentinel so a row that stays inside the line
+    # still records a joint. -1 would ignore every tick more than 1 rad/s
+    # inside the line and then fail the bar for an empty joint.
+    dc_excess = -1.0e9
     dc_joint = ""
     signed_over = 0
     sum_over = 0
@@ -1207,6 +1217,13 @@ def run_attempt(
         elif now + 1e-12 < t_stop:
             if last_send < 0.0 or (now - last_send) >= (sw.VEL_RESEND_S - 1e-12):
                 session.bus.vel(vx_cmd, 0.0, now)
+                # The stick deadband is 0.012 m/s. A frontier row below
+                # that is a gait command, not a joystick zero.
+                if honor_vx and abs(vx_cmd) >= 1e-6 and abs(session.bus.target_vx) < 1e-12:
+                    session.bus.target_vx = float(vx_cmd)
+                    session.bus._snapped = False
+                    session.bus.mode = "move"
+                    session.bus.last_cmd_time = now
                 last_send = now
         elif not stop_sent:
             session.bus.stop(now)
@@ -1512,7 +1529,7 @@ def run_attempt(
     clamp_max = max(clamp_frac.values()) if clamp_frac else float("nan")
     clamp_joint = max(clamp_frac, key=lambda jn: clamp_frac[jn]) if clamp_frac else ""
     clamp_ok = all(clamp_n[jn] > 0 and clamp_hit[jn] == 0 for jn in LEG_JOINTS)
-    dc_ok = dc_excess <= 1e-6 and dc_joint != ""
+    dc_ok = dc_excess > -1.0e8 and dc_excess <= 1e-6 and dc_joint != ""
     # Signed bar: |kp*(q_des-q) - kv*ω| <= 2.33 on every leg write.
     # Sum bar: the conservative |kp*e|+|kv*ω| on every leg write.
     signed_ok = bool(asks) and signed_over == 0

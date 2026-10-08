@@ -222,6 +222,17 @@ class LipmConfig:
     # 1 is the raised-cosine sway. Lower spends the double support closer
     # to a steady hip-roll rate. 0 is a straight ramp.
     preview_shape: float = 1.0
+    # Rest-to-rest swing z and swing x. Off keeps z_flat / the sine.
+    gm_z_quintic: bool = False
+    # Start that quintic at the previous touchdown so the rise covers
+    # double support plus the first half of single support.
+    gm_z_lead: bool = False
+    # Spring budget for the sagittal command, Nm. 0 leaves the IK target.
+    # A positive value rate- and accel-limits hip pitch, knee, and ankle
+    # pitch, and keeps |ctrl−q| inside budget/kp so kp·|e| cannot exceed
+    # the budget. ω is not part of that projection: this is not a signed
+    # torque clamp.
+    gm_spring_nm: float = 0.0
 
 
 @dataclass
@@ -420,6 +431,10 @@ class LipmWalker:
         self._stab_hip = 0.0
         self._stab_roll = {"L": 0.0, "R": 0.0}
         self._stab_pitch = {"L": 0.0, "R": 0.0}
+        # Sagittal command shaper. Position and velocity of ctrl, not a
+        # torque projection.
+        self._shape_pos: dict[str, float] = {}
+        self._shape_vel: dict[str, float] = {}
 
     def other(self, side: Side) -> Side:
         return "R" if side == "L" else "L"
@@ -689,6 +704,72 @@ class LipmWalker:
             if abs(self._stab_hip) > 1e-6:
                 self.write_clipped(name, float(self.data.ctrl[idx]) + self._stab_hip)
 
+    def _shape_sagittal(self, joints: dict[str, float]) -> None:
+        """Rate- and accel-limit hip pitch, knee, and ankle pitch.
+
+        The published ctrl stays inside |ctrl−q| ≤ budget/kp, so the
+        spring term kp·|e| cannot exceed ``gm_spring_nm``. The limit is
+        that position band plus a velocity cap of budget/kv and an
+        acceleration cap that reaches the velocity cap in four servo
+        time constants (kv/kp). Measured ω only stops the command
+        velocity from winding up against the band. The signed force
+        kp·e − kv·ω is not projected onto ±budget.
+        """
+        budget = float(self.cfg.gm_spring_nm)
+        if budget <= 0.0:
+            return
+        dt = float(op3_walk.OP3_CTRL_S)
+        for name in list(joints):
+            if not name.endswith(("hip_pitch", "knee", "ank_pitch")):
+                continue
+            act = name + "_pos"
+            idx = self.act_idx.get(act)
+            if idx is None:
+                continue
+            kp = float(self.model.actuator_gainprm[idx, 0])
+            kv = -float(self.model.actuator_biasprm[idx, 2])
+            if kp < 1e-6 or kv < 1e-6:
+                continue
+            q = self.q(name)
+            jid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, name)
+            omega = float(self.data.qvel[int(self.model.jnt_dofadr[jid])])
+            e_max = budget / kp
+            v_max = budget / kv
+            a_max = v_max * kp / (4.0 * kv)
+            if name not in self._shape_pos:
+                self._shape_pos[name] = q
+                self._shape_vel[name] = 0.0
+            pos = float(self._shape_pos[name])
+            vel = float(self._shape_vel[name])
+            err = float(joints[name]) - pos
+            wn = kp / (4.0 * kv)
+            acc = wn * wn * err - 2.0 * wn * vel
+            if acc > a_max:
+                acc = a_max
+            elif acc < -a_max:
+                acc = -a_max
+            vel = vel + acc * dt
+            if vel > v_max:
+                vel = v_max
+            elif vel < -v_max:
+                vel = -v_max
+            pos = pos + vel * dt
+            hi = q + e_max
+            lo = q - e_max
+            if pos > hi:
+                pos = hi
+                cap = max(0.0, omega)
+                if vel > cap:
+                    vel = cap
+            elif pos < lo:
+                pos = lo
+                cap = min(0.0, omega)
+                if vel < cap:
+                    vel = cap
+            self._shape_pos[name] = pos
+            self._shape_vel[name] = vel
+            joints[name] = pos
+
     def _write_preview_joints(self, joints: dict[str, float] | None) -> None:
         for jn in (
             "l_sho_roll", "r_sho_roll", "l_el_pitch", "r_el_pitch",
@@ -722,6 +803,7 @@ class LipmWalker:
                     want = q + math.copysign(0.016, gap)
             if abs(want - gait) > 1e-6:
                 joints[jn] = want
+        self._shape_sagittal(joints)
         for name, val in joints.items():
             # Straight preview walk. No yaw budget, no ±2.33 solve.
             # write_clipped still keeps non-sagittal joints inside the
@@ -817,9 +899,12 @@ class LipmWalker:
             # Voice spreads the step during the arm. A full x_amp on the
             # first walk tick is a hip-pitch step of several Nm. The kit
             # path still starts from zero. z_flat holds the swing peak
-            # across 20–80% of single support.
+            # across 20–80% of single support. z_quintic replaces that
+            # hold with a minimum jerk over the whole single support.
             if self.cfg.name == "voice056" and abs(self.cmd_vx) > 1e-4:
-                walker.z_flat = True
+                walker.z_quintic = bool(self.cfg.gm_z_quintic)
+                walker.z_lead = bool(self.cfg.gm_z_lead)
+                walker.z_flat = not walker.z_quintic
                 x_full = self._voice_x_amp()
                 walker.set_command(x_full * (1.0 - level), 0.0, 0.0)
                 walker.previous_x = x_full
@@ -853,7 +938,9 @@ class LipmWalker:
         # vx/7.50 ignores the period. One cycle advances the body by
         # 4·x_amp, so the step that matches vx is x_amp = vx·T/4.
         if self.cfg.name == "voice056" and abs(self.cmd_vx) > 1e-4:
-            walker.z_flat = True
+            walker.z_quintic = bool(self.cfg.gm_z_quintic)
+            walker.z_lead = bool(self.cfg.gm_z_lead)
+            walker.z_flat = not walker.z_quintic
             x_amp = self._voice_x_amp()
         walker.set_command(x_amp, 0.0, angle)
         if self._hold_until_stance(walker, preview):

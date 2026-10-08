@@ -2602,3 +2602,76 @@ The lowest Abs is still T 1.20 s at 0.016 m/s, 8.014 Nm on the left knee at 1.40
 Trunk ratio runs from 0.598 (T 1.20 s, vx 0.056 m/s) to 1.629 (T 0.55 s, vx 0.016 m/s). The short slow rows run faster than the command. The long fast rows run slower. The 0.60 s / 0.032 m/s row is the one nearest 1.
 
 The clip is unchanged. It is still the highest clearance window. Its signed peak is 5.82 Nm, so it misses the signed bar, the clamp fraction, and the DC-motor line. Not kit-safe. Not go-anywhere.
+
+## Knee phase on the flat hold
+
+The signed spikes are the swing knee. Stance mid and double-support transfer produced no tick over 2.33 Nm on the three rows below. A settled stand at the 25 mm crouch, both feet down, is left knee −0.598 Nm and right knee +0.598 Nm. The spring term is ±0.59 Nm from 0.013 rad of sag. The damper is 0.03 Nm. A frozen mid-swing pose at the same crouch, held as a shift so the stand solver does not wipe it, is swing knee −0.284 Nm and stance knee +0.855 Nm, up_z 0.998. The static crouch is not the bar.
+
+Walk-stage ticks with |signed| over 2.33 Nm, flat 20–80% hold, z command 8 mm. `kp·e` is the spring, `kv·ω` is the damper, and signed is `kp·e − kv·ω`. `e` is ctrl − q on the IK target the scorer logs. The actuator then slews that target, so the scored ctrl leads the applied ctrl by 0.05–0.10 rad.
+
+| Row | Overs | Phase | n | peak signed | kp·e | kv·ω | e rad | where |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T 0.60 / 0.032 | 23 | lift ramp | 7 | +5.82 | +7.39 | +1.57 | +0.164 | frac 0.19, the 20% corner |
+| | | held swing | 6 | +4.84 | +7.54 | +2.70 | +0.168 | frac 0.22, just after the corner |
+| | | descent | 7 | −4.58 | −5.70 | −1.12 | −0.127 | frac 1.00 |
+| | | touchdown | 3 | −3.32 | −5.51 | −2.19 | −0.123 | next tick |
+| T 1.00 / 0.016 | 32 | lift ramp | 17 | +4.00 | +5.37 | +1.38 | +0.119 | frac 0.15 |
+| | | descent | 12 | −4.12 | −5.60 | −1.48 | −0.124 | frac 0.97 |
+| | | touchdown | 3 | −3.02 | — | — | — | no held-swing overs |
+| T 1.20 / 0.024 | 35 | lift ramp | 17 | +3.57 | +5.28 | +1.70 | +0.117 | frac 0.15 |
+| | | descent | 18 | +3.94 | +5.58 | +1.64 | +0.124 | frac 0.96 |
+
+The 0.60 s row is the only one with held-swing overs. Lengthening the period removes the hold and the touchdown, and the lift and the descent stay over 2.33 Nm because the rise is still the first and last 20% of single support. On that 0.60 s lift the command steps about 0.044 rad in one 8 ms tick, and the second difference flips sign by about 0.03 rad at the 20% corner and at the end of the swing. That is a kink in ctrl, not a smooth ramp. The spring is the spike: 45 N·m/rad times 0.16 rad is about 7 Nm, and the damper only gives back part of it.
+
+## Quintic frontier
+
+The flat hold's corners are replaced by a rest-to-rest quintic over the whole single support. Velocity and acceleration are zero at lift, at the peak, and at touchdown. Swing x uses the same quintic between the sine's end positions, which already had zero velocity and a nonzero acceleration. The peak command stays 8 mm. A second shape starts that rise at the previous touchdown so double support is part of the lift. Neither shape holds the sole flat.
+
+Sagittal ctrl (hip pitch, knee, ankle pitch) can also be rate- and accel-limited inside `|ctrl−q| ≤ 2.33/kp`. That bounds the spring term. It does not project the signed force `kp·e − kv·ω`, and it does not clip the actuator. The limit is off on the grid below.
+
+The teleop deadband is 0.012 m/s. A frontier command under that is written onto the gait after the stick zero, so 0.004 m/s is the step that ran. The DC score records the worst excess even when that excess is negative. A sentinel of −1 rad/s had been leaving those rows with an empty joint and a false fail. Rows that already exceeded the line are unchanged.
+
+No period in {1.6, 2, 3, 4, 6, 10} s has a vx in {0.004, 0.012, 0.020, 0.030} m/s that passes every bar. The bars are signed ≤ 2.33 Nm, clamp fraction 0, the DC line, 20–80% clearance ≥ 8 mm, slip ≤ 2 mm, and contact-off fraction ≥ 0.90. Trunk ratio is reported and is not a cutoff. The maximum honest vx at each of those periods is none.
+
+Quintic, z 8 mm, crouch 25 mm, spring limit off. Clearance is the window minimum. cmax is the highest corner inside that window.
+
+| T | vx | signed | joint | mfg | clear | cmax | slip | off | vx ratio |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1.6 | 0.004 | 1.55 | l_knee | yes | −1.45 | 2.30 | 1.07 | 0.00 | 2.80 |
+| 1.6 | 0.012 | 1.67 | r_knee | yes | −1.71 | 3.15 | 1.33 | 0.00 | 1.21 |
+| 1.6 | 0.020 | 1.82 | r_knee | yes | −1.92 | 4.10 | 1.70 | 0.00 | 0.91 |
+| 1.6 | 0.030 | 2.14 | r_knee | yes | −1.82 | 4.06 | 2.99 | 0.03 | 0.74 |
+| 2.0 | 0.004 | 1.28 | r_knee | yes | −1.13 | 1.48 | 1.15 | 0.00 | 2.32 |
+| 2.0 | 0.012 | 1.33 | r_knee | yes | −1.67 | 2.15 | 1.98 | 0.00 | 1.08 |
+| 2.0 | 0.020 | 1.49 | r_knee | yes | −1.89 | 2.87 | 2.78 | 0.04 | 0.87 |
+| 2.0 | 0.030 | 2.06 | l_hip_pitch | yes | −1.89 | 2.73 | 4.21 | 0.00 | 0.76 |
+| 3.0 | 0.004 | 0.75 | r_knee | yes | −0.74 | 0.01 | 1.21 | 0.00 | 1.78 |
+| 3.0 | 0.012 | 1.03 | l_ank_roll | yes | −1.10 | 0.01 | 2.95 | 0.00 | 0.92 |
+| 3.0 | 0.020 | 1.43 | l_hip_pitch | yes | −1.44 | 0.39 | 4.10 | 0.17 | 0.83 |
+| 3.0 | 0.030 | 1.94 | l_hip_pitch | yes | −1.76 | 1.46 | 5.92 | 0.10 | 0.78 |
+| 4.0 | 0.004 | 0.81 | r_hip_pitch | yes | −0.76 | −0.45 | 1.77 | 0.00 | 1.50 |
+| 4.0 | 0.012 | 1.25 | l_hip_pitch | yes | −1.24 | −0.28 | 4.33 | 0.00 | 0.87 |
+| 4.0 | 0.020 | 1.68 | l_hip_pitch | yes | −1.57 | 0.42 | 6.20 | 0.00 | 0.80 |
+| 4.0 | 0.030 | 2.70 | l_ank_roll | no | −1.82 | 0.04 | 9.49 | 0.08 | 0.78 |
+| 6.0 | 0.004 | 0.98 | l_hip_pitch | yes | −0.81 | −0.36 | 3.00 | 0.00 | 1.12 |
+| 6.0 | 0.012 | 1.58 | l_hip_pitch | yes | −1.22 | −0.39 | 7.88 | 0.00 | 0.81 |
+| 6.0 | 0.020 | 2.25 | l_ank_roll | yes | −1.60 | 0.49 | 10.53 | 0.04 | 0.77 |
+| 6.0 | 0.030 | 2.92 | l_ank_roll | no | −2.12 | 0.02 | 18.20 | 0.04 | 0.61 |
+| 10.0 | 0.004 | 1.58 | l_hip_pitch | yes | −0.81 | −0.51 | 5.61 | 0.00 | 0.96 |
+| 10.0 | 0.012 | 1.99 | l_ank_roll | yes | −0.99 | −0.29 | 14.41 | 0.00 | 0.76 |
+| 10.0 | 0.020 | 2.19 | l_hip_pitch | yes | — | — | — | — | −1.56 |
+| 10.0 | 0.030 | 14.04 | l_hip_pitch | no | — | — | — | — | −0.31 |
+
+The two T 10 s rows at 0.020 and 0.030 m/s tip. Signed on the 0.030 m/s row is the fall. At 0.004 m/s the signed bar, the clamp, and the DC line all pass, from T 1.6 s through T 10 s, and the sole still does not clear. The best corner inside any 20–80% window is 4.10 mm. Contact-off fraction stays under 0.17. A quintic that peaks at 8 mm is only 2.54 mm at 20% of the swing (`s(0.40) = 0.317`), so the window minimum cannot be 8 mm on kinematics alone.
+
+The flat 8 mm hold, which does command 8 mm across that window, was measured at T 4 s and 0.016 m/s. Signed peak 1.87 Nm on the right knee, mfg pass, window minimum −1.54 mm, window peak 1.28 mm. During the hold the knee error is about 0.00–0.03 rad and the lowest corner is still on the floor, with a few newtons on the swing foot. The joints are on the IK target. The 8 mm hip-frame gap is not an 8 mm corner.
+
+Shallower crouch on that same flat row raises the knee and does not lift the corner. At 20 mm, signed 2.06 Nm and the window peak is 1.42 mm. At 15 mm, signed 2.38 Nm. At 10 mm, signed 3.04 Nm and the window peak is 0.52 mm. IK still solves. A straighter knee is a larger swing rate, which is the earlier diary result, and the sole stays down.
+
+The spring limit on the T 6 s / 0.012 m/s quintic keeps signed at 1.47 Nm and then tips (margin −0.063, trunk ratio −1.11).
+
+`d6e8b5e` on this scorer, flat 18 mm, T 20 s, dsp 0.35, x_amp 21 mm, preview 0.043 m, arm 2.40 s, stand 0.40 s, walk 22 s: window 9.19 mm, slip 0.52 mm, contact-off fraction 0.96, trunk ratio 0.90. Signed peak 4.74 Nm on the left hip pitch at 2.792 s, which is the arm-to-walk boundary. That tick is over the 3.43 Nm stall, so the DC line is negative and the excess is 2.25 rad/s at `|qvel|` 0.023. Clamp fraction 0.005. The slow swing clears. The entry step does not.
+
+Putting the spring limit on that same 18 mm hold drops the signed peak to 1.25 Nm, clamp 0, DC excess −3.53 rad/s, and the foot still reaches 10.4 mm inside the window. The window minimum is −0.003 mm. The rise is legal and it is not finished when the 20% sample opens. A lead quintic at 18 mm splits the same way: 4.73 Nm on the left hip pitch with the limit off, or 1.41 Nm and a −0.40 mm window minimum with the limit on.
+
+This is a wall. No period from 1.6 s to 10 s, and not the 20 s / 18 mm gait, clears every bar even at the smallest vx. On the 8 mm command the binding bar is the lowest sole corner through 20–80% of the swing, and the signed force is already under 2.33 Nm. On the 18 mm command that does clear, the binding joint is the left hip pitch at the start of the step, 4.74 Nm, because the sole has to be up before the window opens. Spreading that rise to stay under 2.33 Nm puts the sole back on the floor at 20%. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0.
