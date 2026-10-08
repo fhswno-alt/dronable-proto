@@ -623,6 +623,7 @@ class LipmWalker:
         # and (b) are the spread, not a wall.
         self.id_split_ds_n = 0
         self.id_split_stop_n = 0
+        self.id_split_stop_infeas = 0
         self.id_split_infeas = 0
         self.id_split_knee_spread = 0.0
         self.id_split_knee_joint = ""
@@ -1943,13 +1944,14 @@ class LipmWalker:
         qdd: dict[str, float],
     ) -> None:
         """Record the same-tick spread of the three double-support shares."""
-        if bares.get("c") is None:
-            return
-        self.id_split_ds_n += 1
         phase = self._ff_phase(names[0])
         t = float(self.data.time)
-        if phase == "stop":
-            self.id_split_stop_n += 1
+        if bares.get("c") is not None:
+            self.id_split_ds_n += 1
+            if phase == "stop":
+                self.id_split_stop_n += 1
+        elif phase == "stop":
+            self.id_split_stop_infeas += 1
         present = [key for key in ("a", "b", "c") if bares.get(key) is not None]
         for key in present:
             bare = bares[key]
@@ -1983,7 +1985,9 @@ class LipmWalker:
                 self.id_split_peak_t = t
                 self.id_split_peak_a = float(np.max(np.abs(bares["a"]))) if bares.get("a") is not None else 0.0
                 self.id_split_peak_b = float(np.max(np.abs(bares["b"]))) if bares.get("b") is not None else 0.0
-                self.id_split_peak_c = float(np.max(np.abs(bares["c"])))
+                self.id_split_peak_c = (
+                    float(np.max(np.abs(bares["c"]))) if bares.get("c") is not None else 0.0
+                )
         for i, name in enumerate(names):
             if not name.endswith("knee"):
                 continue
@@ -2003,14 +2007,14 @@ class LipmWalker:
                 self.id_split_knee_t = t
                 self.id_split_knee_a = float(bares["a"][i]) if bares.get("a") is not None else 0.0
                 self.id_split_knee_b = float(bares["b"][i]) if bares.get("b") is not None else 0.0
-                self.id_split_knee_c = float(bares["c"][i])
+                self.id_split_knee_c = float(bares["c"][i]) if bares.get("c") is not None else 0.0
             if phase == "stop" and spread > self.id_split_stop_knee_spread:
                 self.id_split_stop_knee_spread = spread
                 self.id_split_stop_knee_joint = name
                 self.id_split_stop_knee_t = t
                 self.id_split_stop_knee_a = float(bares["a"][i]) if bares.get("a") is not None else 0.0
                 self.id_split_stop_knee_b = float(bares["b"][i]) if bares.get("b") is not None else 0.0
-                self.id_split_stop_knee_c = float(bares["c"][i])
+                self.id_split_stop_knee_c = float(bares["c"][i]) if bares.get("c") is not None else 0.0
 
     def _note_split_peak(
         self, key: str, name: str, tau: float, bare: float, qdd: float, phase: str,

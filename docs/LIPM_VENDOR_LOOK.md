@@ -3449,3 +3449,55 @@ Applied signed +1.239 Nm on l_knee, signed_ok True, clamp_ok True, limiter 0.000
 | r_ank_pitch | +0.869 | +0.837 | +3.15 | 1.680 | touchdown impact | inside |
 | r_ank_roll | -0.611 | -0.533 | -7.78 | 1.392 | stance edge | inside |
 | r_ank_roll bare peak | -0.557 | -0.537 | -2.06 | 1.408 | stance edge | inside |
+
+## Double-support split
+
+The planned ZMP wrench does not fix how the two feet share it, and the knee torque follows the share. On each double-support tick the same wrench is split three ways. (a) shares the force by where the ZMP sits on the foot-to-foot line, then clamps each CoP into its box. (b) minimises the Euclidean norm of the four ankle torques. (c) minimises the maximum |leg-joint torque| with the armature removed. The contact constraints on (b) and (c) are the declared 135×76 mm box, a four-sided friction pyramid of coefficient 1.2 (the inner approximation of the cone that keeps the program linear), unilateral normals, and equality with the planned wrench. A pyramid solution inside 2.33 Nm is a cone solution inside 2.33 Nm.
+
+A wall is a tick where (c) still needs more than 2.33 Nm without armature. No solved tick does. The largest (c) bare torque on a live row is +1.642 Nm, left hip roll, latency +1. Feedforward uses (c) on every tick the program solves. A tick the pyramid cannot represent keeps the line split; that count is below, and it is not a wall.
+
+The knee columns are the signed bare torques on the single tick with the widest knee spread. The peak columns are the largest |bare| of each split on one tick, which is usually a different tick and usually the right hip pitch under (b). (b) reaches 2.392 Nm bare. (c) on that same tick is about 0.4 Nm. The pass rule is unchanged: applied signed force on the real plant, armature 0.01 included, ≤ 2.33 Nm on every tick, limiter fraction 0, clamp fraction 0.
+
+| Row | knee (a) | knee (b) | knee (c) | knee spread | peak (a) | peak (b) | peak (c) | (c) max | infeas | signed | up |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| T 0.60 / 0.032 | +0.770 | −0.474 | +0.525 | 1.244 | 0.690 | 2.080 | 0.468 | 0.757 l_hip_roll | 0 | +2.198 | 0.628 |
+| T 1.00 / 0.016 | +0.495 | −0.641 | +0.441 | 1.136 | 0.439 | 2.325 | 0.403 | 0.567 l_knee | 11 | +1.824 | 0.585 |
+| T 1.20 / 0.024 | +0.514 | −0.619 | +0.474 | 1.133 | 0.437 | 2.349 | 0.382 | 0.663 r_ank_pitch | 0 | +1.219 | 0.681 |
+| T 4 / 0.016 | +0.536 | −0.643 | +0.520 | 1.179 | 0.547 | 2.232 | 0.395 | 0.567 l_hip_yaw | 0 | −1.567 | 0.670 |
+| mass +5% s0 | +0.508 | −0.639 | +0.468 | 1.147 | 0.465 | 2.378 | 0.417 | 0.598 l_knee | 6 | +2.136 | 0.577 |
+| mass +5% s1 | +0.498 | −0.649 | +0.464 | 1.147 | 0.457 | 2.370 | 0.404 | 0.598 l_knee | 6 | +2.125 | 0.580 |
+| mass +5% s2 | +0.518 | −0.642 | +0.471 | 1.160 | 0.452 | 2.381 | 0.404 | 0.598 l_knee | 7 | +2.157 | 0.560 |
+| mass −5% s0 | +0.496 | −0.609 | +0.424 | 1.105 | 0.459 | 2.230 | 0.400 | 0.966 r_hip_roll | 0 | +1.381 | 0.641 |
+| mass −5% s1 | +0.474 | −0.625 | +0.410 | 1.099 | 0.443 | 2.220 | 0.389 | 0.802 r_hip_yaw | 0 | +1.355 | 0.652 |
+| mass −5% s2 | +0.493 | −0.615 | +0.420 | 1.108 | 0.457 | 2.219 | 0.395 | 0.546 r_hip_roll | 0 | +1.331 | 0.655 |
+| μ = 1.0 | +0.541 | −0.617 | +0.503 | 1.159 | 0.436 | 2.293 | 0.399 | 0.563 r_hip_yaw | 7 | +1.785 | 0.596 |
+| μ = 0.8 | +0.527 | −0.596 | +0.520 | 1.123 | 0.418 | 2.249 | 0.384 | 0.562 r_hip_roll | 3 | +1.984 | 0.591 |
+| latency −1 | +0.385 | +1.209 | +0.074 | 1.135 | 0.528 | 2.049 | 0.323 | 0.953 r_hip_roll | 6 | +2.441 | 0.385 |
+| latency +1 | +0.780 | −0.328 | +0.526 | 1.107 | 0.421 | 2.165 | 0.343 | 1.642 l_hip_roll | 37 | +1.826 | 0.637 |
+| rug | +0.495 | −0.641 | +0.441 | 1.136 | 0.439 | 2.325 | 0.403 | 0.567 l_knee | 11 | +1.824 | 0.585 |
+| rug, mass +5% | +0.508 | −0.639 | +0.468 | 1.147 | 0.465 | 2.378 | 0.417 | 0.598 l_knee | 6 | +2.136 | 0.577 |
+
+The knee spread is 1.10 to 1.24 Nm. It is the right knee at the start on every live row. The line split's clamped CoP misses the planned ZMP by up to 8.6 cm on latency −1, 5.3 cm at μ = 0.8, and 3.0 cm on T 1.00. T 4 misses by 0.4 mm.
+
+The live rows tip in the first transfer, so the scheduled stop does not produce a (c) sample. The stop table is the T 1.00 reference on a fixed upright root, where (c) solves for 541 stop ticks and the pyramid rejects none. The same-tick knee spread there is 0.789 Nm on the right knee: (a) −0.046, (b) +0.743, (c) +0.508. Peak |bare| during that stop, and the with-armature value on the same tick:
+
+| joint | (a) bare | (a) with | (b) bare | (b) with | (c) bare | (c) with |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| l_hip_yaw | −0.024 | −0.024 | −0.708 | −0.708 | −0.545 | −0.545 |
+| l_hip_roll | −0.230 | −0.231 | +1.364 | +1.364 | +0.547 | +0.565 |
+| l_hip_pitch | +0.153 | +0.153 | +1.370 | +1.370 | +0.535 | +0.533 |
+| l_knee | −1.109 | −1.095 | −0.815 | −0.826 | −0.547 | −0.555 |
+| l_ank_pitch | +0.694 | +0.686 | +0.433 | +0.231 | +0.535 | +0.491 |
+| l_ank_roll | −0.347 | −0.397 | −0.335 | −0.386 | −0.535 | −0.585 |
+| r_hip_yaw | +0.009 | +0.009 | +0.818 | +0.818 | +0.547 | +0.547 |
+| r_hip_roll | −0.204 | −0.203 | −1.364 | −1.364 | −0.547 | −0.529 |
+| r_hip_pitch | +0.102 | +0.102 | +1.329 | +1.327 | +0.518 | +0.498 |
+| r_knee | +0.731 | +0.703 | +1.218 | +1.204 | +0.547 | +0.536 |
+| r_ank_pitch | −0.433 | −0.507 | −0.322 | −0.261 | −0.329 | −0.398 |
+| r_ank_roll | +0.165 | +0.190 | −0.203 | −0.250 | −0.272 | −0.324 |
+
+(c) on that stop stays inside 0.59 Nm with the armature included. The fixed-root T 0.60 stop is a different case: the pyramid rejects 563 stop ticks because the commanded ZMP sits outside the tilted soles, and (c) has no stop sample there. The ticks it does solve peak at 1.121 Nm bare on the right knee.
+
+Limiter fraction is 0 on every row. Clamp fraction is 0 on every row. Latency −1 is the applied-force failure, signed +2.441 Nm on the right hip roll, min up 0.385. The other rows keep the applied force inside 2.33 Nm and the torso tips, so none pass. There is no side, front, or foot video.
+
+Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0. The plant XML is not edited.

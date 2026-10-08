@@ -1792,6 +1792,7 @@ def run_attempt(
         "id_req_knee_bare": float(getattr(lipm, "id_req_knee_bare", 0.0)),
         "id_split_ds_n": int(getattr(lipm, "id_split_ds_n", 0)),
         "id_split_stop_n": int(getattr(lipm, "id_split_stop_n", 0)),
+        "id_split_stop_infeas": int(getattr(lipm, "id_split_stop_infeas", 0)),
         "id_split_infeas": int(getattr(lipm, "id_split_infeas", 0)),
         "id_split_knee_spread": float(getattr(lipm, "id_split_knee_spread", 0.0)),
         "id_split_knee_joint": str(getattr(lipm, "id_split_knee_joint", "")),
