@@ -3641,6 +3641,69 @@ Live planned peaks, τ and the bare torque of that same sample. The hip-roll wal
 | r_ank_pitch | −0.568 | −0.555 | −0.593 | −0.518 |
 | r_ank_roll | −0.793 | −0.746 | +0.736 | +0.518 |
 
-The upright force bars, which cleared only at 0.01 before the knee cap, now hold at 0.025 as well. The live row does not clear at either armature. The gait is not locked. There is no video.
+The upright force bars, which cleared only at 0.01 before the knee cap, now hold at 0.025 as well. The live row in the table above does not clear at either armature. That table is the gait before the hip-roll check below.
+
+## Free-root hip-roll check
+
+The +2.754 Nm bare sample is r_hip_roll at stance mid, t = 1.576 s, right stance, left swing, armature 0.010, q̈ +0.12 rad/s². The six root rows of that planned inverse, the planned contact wrench, and the residual (inverse − wrench) are:
+
+| | fx N | fy N | fz N | tx Nm | ty Nm | tz Nm |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| inverse | −0.162 | +0.599 | +22.676 | +0.444 | +0.025 | +0.254 |
+| wrench | 0 | +1.108 | +23.029 | +3.218 | +0.274 | +1.016 |
+| residual | −0.162 | −0.509 | −0.353 | −2.774 | −0.249 | −0.763 |
+
+The roll residual is −2.774 Nm. On that hip dof the joint inverse is −0.334 Nm and the wrench is −3.089 Nm, so the planned joint torque is +2.755 Nm. The joint is absorbing the root moment the wrench did not balance.
+
+Preview CoM y is −0.0111 m and the planned ZMP y is −0.0198 m. Lateral acceleration is +0.472 m/s², equal to ω²(y_com − y_zmp) at z_c 0.181 m. The pose that was inverted has CoM y −0.1187 m (live CoM y −0.1213 m). ω² of that gap against the same ZMP is −5.35 m/s². Stance foot centre y is −0.0027 m. Stance hip y is −0.1588 m. The CoM of the inverted pose is 11 cm off the preview, and the foot centre has drifted to the midline.
+
+On that hip dof the gravity term is −0.315 Nm, coriolis is 0, the inertial term is −0.011 Nm, and the swing-leg term is +0.00004 Nm. The wrench is −3.089 Nm. Gravity matches the hand estimate: a 15 mm lever and about 2 kg is 0.3–0.6 Nm. The 2.75 Nm is the unbalanced wrench.
+
+Swing sole clearance at that tick is 65.4 mm. Torso roll is +0.937 rad, pitch is +0.249 rad, and up_z is 0.574. Live r_hip_roll speed is +5.072 rad/s.
+
+The DC line that failed at 0.010 with excess 3.51 is this same sample: joint r_hip_roll, phase stance mid, t = 1.576 s, signed +2.508 Nm, |ω| 5.072 rad/s, limit about 1.56 rad/s. That speed is the fall. The feedforward double-support fraction is 0.55, so on the 1.00 s period each transfer is 0.275 s and each single support is 0.225 s. The frozen `gm_dsp` field stays 0.40.
+
+The CoM is the Kajita preview of the foot-centre ZMP. The horizon is 1.6 s. z_c is the pelvis subtree CoM height above the sole, measured when the preview is built. Single support holds the ZMP at the foot centre, ±0.043 m, inside the 5 mm inset. Double support is a raised cosine between the feet. The wrench ZMP tracks the preview CoM, ay = ay_ref + 2ω(v_ref − v) + ω²(y_ref − y), then stays inside the inset boxes of the feet that carry at least 1 N. A nose-down torso moves the fore-aft ZMP toward the toe, at most 40 mm. Capture-point error slews the next foot placement at 0.015 m/s, capped at 25 mm. Ankle roll and pitch add a measured-CoP torque, 40 Nm/m, capped at 0.50 Nm. Planned inverse dynamics remains the feedforward. K_fb stays 1.0. The limiter stays off. The inverse uses the measured root. Planned leg q̈ is clipped at 40 rad/s². The 20 mm ZMP/α bias stays off on this path.
+
+Free-root scores after that change. Period 1.00 s, vx 0.016 m/s, foot height 8 mm, stand 0.25 s, walk 4.0 s, stop 2.5 s. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off.
+
+| | armature 0.010 | armature 0.025 |
+| --- | --- | --- |
+| signed | −2.103 l_knee, t = 2.912 | −2.608 l_knee, t = 3.072 |
+| signed ≤ 2.33 | yes | no, over by 0.278 |
+| limiter | 0 | 0 |
+| clamp | 0 | l_knee 0.0144, r_knee 0.00617 |
+| DC | held, l_knee excess −1.29 | held, r_knee excess −0.18 |
+| torso / stop | 0.996, flat, spread 1.33 mm | 0.993, flat, spread 0.80 mm |
+| steps | fail, clear −0.76 mm | fail, clear −1.30 mm |
+| vx ratio | 0.481 | 0.530 |
+| bare over 2.33 | none | none |
+
+The 0.010 DC sample that sets the (negative) excess is l_knee at t = 3.152 s, τ 1.987 Nm, |ω| 1.155 rad/s, limit 2.449 rad/s. At 0.025 it is r_knee at t = 2.560 s, τ 2.422 Nm, |ω| 1.526 rad/s, limit 1.710 rad/s. The old r_hip_roll excess of 3.51 is gone on these rows.
+
+Largest planned |τ| on the free-root bout, with the bare torque of that same sample. τ includes armature·q̈.
+
+| joint | 0.010 τ | 0.010 bare | 0.025 τ | 0.025 bare |
+| --- | ---: | ---: | ---: | ---: |
+| l_hip_yaw | +0.628 | +0.628 | −0.629 | −0.629 |
+| l_hip_roll | −0.897 | −0.883 | −1.350 | −0.749 |
+| l_hip_pitch | −0.806 | −0.504 | −1.292 | −0.521 |
+| l_knee | −1.990 | −1.590 | −2.502 | −1.502 |
+| l_ank_pitch | +1.235 | +1.108 | +1.620 | +0.769 |
+| l_ank_roll | −0.688 | −0.485 | −1.058 | −0.343 |
+| r_hip_yaw | +0.657 | +0.657 | +0.639 | +0.639 |
+| r_hip_roll | −0.876 | −0.639 | +1.482 | +0.832 |
+| r_hip_pitch | +0.835 | +0.524 | +1.265 | +0.494 |
+| r_knee | +1.919 | +1.519 | +2.456 | +1.456 |
+| r_ank_pitch | −1.260 | −1.136 | −1.420 | −1.103 |
+| r_ank_roll | +0.735 | +0.502 | +1.015 | +0.467 |
+
+At 0.025 the left knee plan at the stance edge is −2.502 Nm, bare −1.502 Nm, q̈ −40 rad/s², t = 3.072 s. That is the applied −2.608 Nm tick. The piece above the bare term is the armature at the cap. The torso stays up, the DC line holds, and the stop is flat. The signed force and the knee clamp fraction miss 2.33 and 0. This row is a transfer risk. Cutting the cap to 28 rad/s² dropped the torso at 0.025, so the cap stays 40.
+
+The largest root residual on these rows is a fore-aft force, 2.77 N at t = 2.088 s (0.010) and 2.81 N at t = 3.592 s (0.025). The largest moment on those samples is −0.40 Nm and −0.54 Nm. The old −2.77 Nm roll residual is gone.
+
+Stepping bars fail at both armatures. Clearance over 20–80% of the declared swing is −0.76 mm at 0.010 and −1.30 mm at 0.025, against an 8 mm bar. The highest sole in those windows is 2.43 mm and 2.64 mm. Step fraction is 0 and 0.33. Placement is −5.4 mm and −10.2 mm against an 8 mm command. Slip stays inside 2 mm (0.59 mm and 0.60 mm). Six swings are declared and none scores as a step. The inverse is of the measured pose, so the feedforward holds the foot that is still on the floor, and 1 Nm/rad does not lift the 8 mm swing inside a 0.225 s single support. vx over the walk window, which includes the 1.0 s arm, is 0.0077 m/s and 0.0085 m/s.
+
+The 0.010 row holds signed force, limiter, clamp, the DC line, and the upright flat stop. It misses the stepping bars and the vx ratio sits at 0.48. The 0.025 row holds the torso, the DC line, limiter 0, and the flat stop, and misses signed force, clamp, and the stepping bars. The gait is not locked. There is no video.
 
 Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. The plant XML is not edited.

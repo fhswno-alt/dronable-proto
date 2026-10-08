@@ -1781,6 +1781,12 @@ def run_attempt(
         "id_plan_t": float(getattr(lipm, "id_plan_t", 0.0)),
         "id_resid_exact_n": int(getattr(lipm, "id_resid_exact_n", 0)),
         "id_resid_bucket_nm": float(lipm_gait.ID_RESID_BUCKET_NM),
+        "id_plan_root_max": float(getattr(lipm, "id_plan_root_max", 0.0)),
+        "id_plan_root_t": float(getattr(lipm, "id_plan_root_t", 0.0)),
+        "id_plan_root_i": int(getattr(lipm, "id_plan_root_i", -1)),
+        "id_plan_root_vec": [
+            float(v) for v in getattr(lipm, "id_plan_root_vec", [])
+        ],
         "id_req_with": dict(getattr(lipm, "id_req_with", {})),
         "id_req_bare": dict(getattr(lipm, "id_req_bare", {})),
         "id_req_stop_with": dict(getattr(lipm, "id_req_stop_with", {})),

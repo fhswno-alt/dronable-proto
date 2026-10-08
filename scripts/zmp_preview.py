@@ -63,6 +63,10 @@ class ZmpPreview:
     def com_vel_m_s(self) -> float:
         return float(self._x[1])
 
+    @property
+    def com_acc_m_s2(self) -> float:
+        return float(self._x[2])
+
     def step(self, zmp_future_m: np.ndarray) -> float:
         """Advance one tick. ``zmp_future_m[0]`` is the ZMP due now."""
         ref = np.asarray(zmp_future_m, dtype=np.float64).reshape(-1)
