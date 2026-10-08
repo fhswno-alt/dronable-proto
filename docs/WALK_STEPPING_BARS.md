@@ -663,4 +663,4 @@ Per-substep logs, including CoP, ctrl second difference, the hand estimate, the 
 | 1.20 | 0.048 | 3.491 | r_knee | 4.526 | 0 | 6 | 16 | 10.04 | — | 0.00 | 1.00 | 0.00 | r_knee | stop | +0.876 | +2.45 | +1.574 |
 | 1.20 | 0.056 | 3.460 | r_knee | 4.739 | 0 | 9 | 27 | 9.20 | — | 0.00 | 1.00 | 0.00 | r_knee | stop | +0.825 | +2.45 | +1.625 |
 
-Logs from SHA `424b3d0`. Prior goal-ask score SHA `697d53b`.
+SHA `e729d99`. Logs from SHA `424b3d0`. Prior goal-ask score SHA `697d53b`.
