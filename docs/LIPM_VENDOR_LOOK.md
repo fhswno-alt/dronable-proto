@@ -2811,11 +2811,21 @@ with the actuator held at its `qvel_t` clip when `forcerange` is active. On ever
 | T 1.20 / 0.024, planned | 1.3e-14 | 0 | 1.1e-14 | — | 1.90 | 10.00 | 10.03 |
 | T 4 / 0.016, planned | 1.7e-14 | 0 | 3.5e-14 | — | 1.62 | 9.98 | 10.11 |
 
-The inverse column is `scratch.qfrc_inverse[dof]` after the inverse on the pre-step copy. When `nefc > 0`, `mj_compareFwdInv` runs that inverse; otherwise the call is `mj_inverse`. The stored value is that vector. The implicit step force, `qfrc_actuator`, and the `forcerange` clip stay out of the column. The implicit force remains the identity residual only. A wall is `|qfrc_inverse − 0.01·q̈| > 2.33` on a tick inside the identity, with the torso up component at least 0.92. The 0.01 has no source and is not changed. The planned rows above were bucketed on the implicit step force. They are not rescored in this reprint.
+MuJoCo is 3.14.0. `mjENBL_INVDISCRETE` exists. On the inverse copy only, the audit sets `model.opt.enableflags |= mjENBL_INVDISCRETE` and then runs `mj_inverse` (`mj_compareFwdInv` when `nefc > 0`). The flag makes that inverse treat `q̈ = (qvel_{t+1} − qvel_t) / dt` as the discrete implicitfast step, `(M − dt·qDeriv) q̈ = f`. The flags are restored before the next live step. The plant XML is not edited.
+
+The leg residual is `|qfrc_inverse − qfrc_actuator − qfrc_applied|` on that copy. There is no wider band. A tick above 1×10⁻³ Nm is counted and is not bucketed. The inverse column is `qfrc_inverse[dof]`. The Δqvel/dt identity above stays the cross-check: on the flat-hold knee gait its max is 1.0×10⁻¹⁴ Nm.
+
+On the nominal T 0.60 / 0.032 flat hold the discrete residual max is 1.476×10⁻³ Nm, on the right hip pitch at 1.726 s. 4 of 2440 physics steps are over 1×10⁻³ Nm, fraction 0.00164. The target of every tick inside 1×10⁻³ Nm is missed. The largest residual in the ±5% and rug set is 5.242×10⁻³ Nm, on mass +5% with the entrance rug, 6 of 2440 steps, fraction 0.00246. Prefer FAIL on that target.
+
+The inverse column is `scratch.qfrc_inverse[dof]` after that flagged inverse. A wall is `|qfrc_inverse − 0.01·q̈| > 2.33` on a tick inside 1×10⁻³ Nm, with the torso up component at least 0.92. The 0.01 has no source and is not changed. The planned rows above were bucketed before this flag. They are not rescored here.
 
 The T 4 left-hip-pitch +2.395 and T 20 right-hip-pitch −2.355 figures were the 0.15 Nm band's stripped `qfrc_inverse`. They are the mismatched column, so they were not walls on bucketed ticks of this residual. An exact-residual rescore of the previous realised-state feedforward, before the planned rebuild, also did not reproduce them. T 4 had no wall on the step force. T 20's re-solved inverse spiked on the right hip pitch at 2.962 s, double-support transfer, `qfrc_inverse` −3.649 Nm, stripped −3.408 Nm. The RNE split of that re-solved vector did not close, so the label was unsplit.
 
-`mj_inverse` does not apply `forcerange`. ±2.450 is the plant clamp on `qfrc_actuator` in `mj_fwdActuation`, before the implicit solve. On the T 0.60 / 0.032 flat-hold knee gait the actuator sits on that rail for 10 physics steps, all on the right knee during the stop. The inverse at the same dof on those steps is a different number. None of them, and none of the mass or rug rows, print an inverse of exactly ±2.450.
+`mj_inverse` does not apply `forcerange`. With `mjENBL_INVDISCRETE` it returns the force of the discrete step, and that force is the forward `qfrc_actuator`. On the nominal flat hold the right knee sits on the plant rail for 10 stop steps, and `qfrc_inverse` on those steps equals the rail. The nominal upright knee inverse is +2.450 Nm at 2.690 s. The residual on that step is 7.5×10⁻¹⁵ Nm, so the tick is inside the gate. Stripping `0.01·q̈` leaves +1.302 Nm, an unsourced-armature candidate. There is no wall on this bout.
+
+The previous worst case, mass −5% seed 3, recomputes to the same rail: `qfrc_inverse` +2.450 Nm on the right knee at 2.692 s, stop, torso up, residual 1.6×10⁻¹⁴ Nm, stripped +1.109 Nm, also an unsourced-armature candidate. Across the ±5% seeds the upright inside-residual knee peak is +2.450 Nm or −2.450 Nm. The rug rows stay under the rail: +1.860 Nm nominal and +1.861 Nm at mass +5%, both on the left knee at 1.336 s, swing lift. The nominal and the worst case are the same number, +2.450 Nm, and it is above 2.33 Nm.
+
+The table below is the earlier continuous inverse, before `mjENBL_INVDISCRETE`. It is not this bucket.
 
 | t | joint | actuator | qfrc_inverse |
 | ---: | --- | ---: | ---: |
@@ -2830,9 +2840,9 @@ The T 4 left-hip-pitch +2.395 and T 20 right-hip-pitch −2.355 figures were the
 | 2.692 | r_knee | +2.450 | +2.944 |
 | 2.694 | r_knee | +2.450 | +2.828 |
 
-The knee decision uses this same exact residual. A sample counts when the identity residual is inside 1×10⁻³ Nm and the torso up component is at least 0.92. The gait is the flat hold: T 0.60 s, 0.032 m/s, z 8 mm, dsp 0.25, arm 1.0 s, quintic off, feedforward off. Identity residual on every row is at most 1.1×10⁻¹⁴ Nm. The fraction over 0.05 Nm is 0. min up stays at least 0.957. Soft-pass is off.
+That continuous column counted a sample when the identity residual was inside 1×10⁻³ Nm and the torso up component was at least 0.92. The gait is the flat hold: T 0.60 s, 0.032 m/s, z 8 mm, dsp 0.25, arm 1.0 s, quintic off, feedforward off. min up on those runs stayed at least 0.957. Soft-pass is off.
 
-The old flat-hold cell at t = 2.680 s recomputes to `qfrc_inverse` +1.087 Nm on the right knee, stop, torso up. The actuator on that step is +1.180 Nm. The upright peak of the same bout is the later rail step, +3.057 Nm at 2.690 s. The 1.087 Nm figure from mass +5% plus the entrance rug recomputes to +1.490 Nm on the left knee at 1.336 s, swing lift. The worst upright knee inverse in the set is +3.160 Nm, mass −5%, seed 3, right knee, stop, 2.698 s. That is above 2.33 Nm. On this method the feedforward path is not worth building. Prefer FAIL. Stripping `0.01·q̈` from that peak leaves +2.005 Nm, which is the unsourced-armature bucket. The 0.01 is not applied to the decision.
+On that continuous column the flat-hold cell at t = 2.680 s was `qfrc_inverse` +1.087 Nm, and the worst upright knee inverse was +3.160 Nm. The discrete reprint above replaces both.
 
 | Case | qfrc_inverse Nm | joint | t | phase | actuator |
 | --- | ---: | --- | ---: | --- | ---: |
@@ -2861,7 +2871,7 @@ The old flat-hold cell at t = 2.680 s recomputes to `qfrc_inverse` +1.087 Nm on 
 | rug | +1.484 | l_knee | 1.336 | swing lift | +1.575 |
 | rug, mass +5% | +1.490 | l_knee | 1.336 | swing lift | +1.577 |
 
-On mass +5%, seeds 3, 4, and 7, the same runs also record one inside-residual wall on the left hip pitch at 2.682 s, stop, torso up: `qfrc_inverse` +2.655 Nm, stripped +2.688 Nm. That wall is a hip, and the knee number above is the knee.
+On the continuous column, mass +5% seeds 3, 4, and 7 recorded a left-hip-pitch wall at 2.682 s, `qfrc_inverse` +2.655 Nm, stripped +2.688 Nm. The discrete reprint of those seeds has no wall. The knee bucket is the unsourced-armature candidate at +2.450 Nm.
 
 The feedforward is the planned gait, not the realised inverse. `τ_ff = ID(q_ref, q̇_ref, q̈_ref)` on a scratch data with contacts disabled, restored before the live step. The wrench is the LIPM force `m·(0, a_y, g)` with `a_y = (com_y − zmp_y)·g/z_c`, applied by `mj_applyFT`. In single support the whole wrench is projected into the stance box. In double support the vertical split uses the box-centre y so the net CoP y is the ZMP, and each share's x is the planned CoM x clamped inside that box. `q̈_ref` is the central difference of the IK reference at 8 ms. The swing is a quintic with the rise started at the previous touchdown, clearance 8 mm, preview jerk weight 1×10⁻⁴, double support 0.40, and a 1.0 s CoM pre-shift. Then
 
