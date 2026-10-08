@@ -5,9 +5,11 @@ Stand, shift onto the first stance foot, walk, soft-stop. y_swap stays 0.
 The lateral channel is the cart-table preview. Nothing here solves q_des
 onto ±2.33 Nm, edits the plant, or raises a torque rail.
 
-The ask is |kp*(q_des−q)| + |kv*ω| on the gait target passed to the
-position writer. A later slew of ctrl is reported beside it and is not
-the bar.
+Two pre-clamp signals are logged, both on the command before
+write_clipped or write_force_limited edits ctrl. The historical 2.33 Nm
+bar is |kp*(q_des−q)| + |kv*ω|. The signed force is
+kp*(q_des−q) − kv*ω. kv is −actuator_biasprm[i, 2] from dampratio=1,
+a different number on every joint.
 """
 from __future__ import annotations
 
@@ -62,6 +64,14 @@ COP_P5_MM = 5.0
 AIR_N = 1.0
 # HX-35H no-load speed. The plant has no velocity rail, so this is a score.
 QVEL_LIM = 5.82
+# DC-motor model, not datasheet. Stall 3.43 Nm, no-load 5.82 rad/s.
+# Same-tick bar: |qvel| <= 5.82 * (1 - |τ| / 3.43). τ is the pre-clamp
+# signed force on that tick, not the conservative sum.
+DC_STALL_NM = 3.43
+DC_LABEL = "DC-motor model, not datasheet"
+# Leg actuator forcerange and joint actuatorfrcrange are both ±2.45 Nm.
+# A tick is clamp-active when the pre-clamp |signed| meets either rail.
+CLAMP_NM = 2.45
 LEG_JOINTS: tuple[str, ...] = (
     "l_hip_yaw", "l_hip_roll", "l_hip_pitch", "l_knee", "l_ank_pitch", "l_ank_roll",
     "r_hip_yaw", "r_hip_roll", "r_hip_pitch", "r_knee", "r_ank_pitch", "r_ank_roll",
@@ -100,37 +110,149 @@ def _plant_md5() -> str:
     return digest.hexdigest()
 
 
+def preclamp_torque(
+    kp: float, q_des: float, q: float, kv: float, omega: float,
+) -> tuple[float, float]:
+    """Pre-clamp torque from one command, before any position or force clip.
+
+    ``kv`` is ``-actuator_biasprm[i, 2]``. dampratio=1 compiles a
+    different kv on every joint. It is not a shared constant.
+
+    The signed force is ``kp·(q_des−q) − kv·ω``. That is the position
+    actuator before forcerange. The conservative bar is
+    ``|kp·(q_des−q)| + |kv·ω|``. The historical 2.33 Nm figure is the
+    conservative one. ``q_des`` here is the command the walker asked
+    for, not the ctrl that was written.
+    """
+    kp_term = float(kp) * (float(q_des) - float(q))
+    signed = kp_term - float(kv) * float(omega)
+    conservative = abs(kp_term) + abs(float(kv) * float(omega))
+    return float(signed), float(conservative)
+
+
+# Printed components from the ask log at those commits. The published
+# peak is sum_nm. signed_nm on the same tick is the other formula.
+# kv is the hip-roll value of -actuator_biasprm[:, 2], printed to 4 decimals.
+# d6e8b5e rounded kv to 1.703 and omega to 0.588 in the diary; the
+# reconstruction from those rounded digits sits 0.0003 Nm above 2.2567.
+_HISTORICAL_ASKS: tuple[tuple[str, float, float | None, float, float, float, float, float], ...] = (
+    # commit, published sum, signed on that tick, q, q_des, kp, kv, omega.
+    # d6e8b5e printed the components in the diary and not the signed field.
+    # ac81435 and 58ce1d8 store both in ask_worst.
+    ("d6e8b5e", 2.2567, None, -0.11738, -0.08599, 40.0, 1.703, 0.588),
+    ("ac81435", 2.3135, 0.2607, -0.00845, 0.02372, 40.0, 1.7027, 0.6028),
+    ("58ce1d8", 1.9792, 0.2486, -0.14153, -0.11368, 40.0, 1.7027, 0.5082),
+)
+
+
+def historical_torque_identity(model: mj.MjModel | None = None) -> list[dict[str, float | str]]:
+    """Which formula produced the three published peaks.
+
+    All three commits log in ``_install_ask_log``. ``ask_nm`` is
+    ``sum_nm``, the conservative ``|kp·e|+|kv·ω|``. ``kv`` is
+    ``-actuator_biasprm[i, 2]`` with dampratio=1, so hip roll is 1.7027
+    and the knee is 1.4573. The signed force on those ticks is about
+    +0.25 Nm and was not the published number.
+
+    ac81435 and 58ce1d8 store the full line in ``ask_worst``
+    (``previews/com_zmp_preview_s.json`` and ``_j.json``). d6e8b5e's
+    2.2567 is the same field, with the components in the diary.
+    """
+    rows: list[dict[str, float | str]] = []
+    for commit, published, signed_pub, q, q_des, kp, kv, omega in _HISTORICAL_ASKS:
+        signed, conservative = preclamp_torque(kp, q_des, q, kv, omega)
+        if abs(conservative - published) > 5e-4:
+            raise RuntimeError(
+                f"{commit} conservative {conservative:.4f} != published {published:.4f}"
+            )
+        if signed_pub is not None and abs(signed - signed_pub) > 5e-3:
+            raise RuntimeError(
+                f"{commit} signed {signed:.4f} != stored {signed_pub:.4f}"
+            )
+        compared = signed if signed_pub is None else signed_pub
+        if abs(published - compared) < 1.0:
+            raise RuntimeError(f"{commit} published peak matches the signed force")
+        rows.append({
+            "commit": commit,
+            "formula": "|kp*(q_des-q)|+|kv*omega|",
+            "kv_source": "-actuator_biasprm[i,2]",
+            "published": published,
+            "conservative": conservative,
+            "signed": signed,
+        })
+    if model is not None:
+        for jn, expect in (("r_hip_roll", 1.7027), ("r_knee", 1.4573)):
+            aid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_ACTUATOR, jn + "_pos")
+            kv = -float(model.actuator_biasprm[aid, 2])
+            if abs(kv - expect) > 5e-4:
+                raise RuntimeError(f"{jn} kv {kv:.4f} != {expect:.4f}")
+            if abs(kv - 1.7027) < 1e-4 and jn == "r_knee":
+                raise RuntimeError("knee kv collapsed onto the hip-roll constant")
+    return rows
+
+
+def _log_preclamp(
+    lipm: lipm_gait.LipmWalker, bucket: list[AskRow], jn: str, q_des: float,
+) -> None:
+    """Record the command before write_clipped or write_force_limited clips it."""
+    if jn not in LEG_JOINTS:
+        return
+    idx = lipm.act_idx.get(jn + "_pos")
+    if idx is None:
+        return
+    q = float(lipm.q(jn))
+    jid = mj.mj_name2id(lipm.model, mj.mjtObj.mjOBJ_JOINT, jn)
+    omega = float(lipm.data.qvel[int(lipm.model.jnt_dofadr[jid])])
+    kp = float(lipm.model.actuator_gainprm[idx, 0])
+    kv = -float(lipm.model.actuator_biasprm[idx, 2])
+    signed, total = preclamp_torque(kp, float(q_des), q, kv, omega)
+    bucket.append(AskRow(
+        t=float(lipm.data.time),
+        joint=jn,
+        q_des=float(q_des),
+        q=q,
+        omega=omega,
+        kp=kp,
+        kv=kv,
+        signed_nm=signed,
+        sum_nm=total,
+        stage=str(lipm.preview_stage),
+    ))
+
+
 def _install_ask_log(lipm: lipm_gait.LipmWalker, bucket: list[AskRow]) -> None:
     orig = lipm.write_clipped
+    orig_lim = lipm.write_force_limited
 
     def wrapped(jn: str, q_des: float) -> None:
-        if jn in LEG_JOINTS:
-            act = jn + "_pos"
-            idx = lipm.act_idx.get(act)
-            if idx is not None:
-                q = float(lipm.q(jn))
-                jid = mj.mj_name2id(lipm.model, mj.mjtObj.mjOBJ_JOINT, jn)
-                omega = float(lipm.data.qvel[int(lipm.model.jnt_dofadr[jid])])
-                kp = float(lipm.model.actuator_gainprm[idx, 0])
-                kv = -float(lipm.model.actuator_biasprm[idx, 2])
-                kp_term = kp * (float(q_des) - q)
-                signed = kp_term - kv * omega
-                total = abs(kp_term) + abs(kv * omega)
-                bucket.append(AskRow(
-                    t=float(lipm.data.time),
-                    joint=jn,
-                    q_des=float(q_des),
-                    q=q,
-                    omega=omega,
-                    kp=kp,
-                    kv=kv,
-                    signed_nm=float(signed),
-                    sum_nm=float(total),
-                    stage=str(lipm.preview_stage),
-                ))
+        _log_preclamp(lipm, bucket, jn, q_des)
         orig(jn, q_des)
 
+    def wrapped_lim(jn: str, q_des: float, limit_nm: float | None = None) -> None:
+        _log_preclamp(lipm, bucket, jn, q_des)
+        orig_lim(jn, q_des, limit_nm)
+
     lipm.write_clipped = wrapped  # type: ignore[method-assign]
+    lipm.write_force_limited = wrapped_lim  # type: ignore[method-assign]
+
+
+def _dc_speed_limit(tau_nm: float) -> float:
+    """Allowed |qvel| on the DC-motor model line. Not a datasheet."""
+    return QVEL_LIM * (1.0 - abs(float(tau_nm)) / DC_STALL_NM)
+
+
+def _clamp_limits(lipm: lipm_gait.LipmWalker) -> dict[str, tuple[float, float]]:
+    """Actuator forcerange and joint actuatorfrcrange, both absolute."""
+    out: dict[str, tuple[float, float]] = {}
+    for jn in LEG_JOINTS:
+        idx = lipm.act_idx.get(jn + "_pos")
+        jid = mj.mj_name2id(lipm.model, mj.mjtObj.mjOBJ_JOINT, jn)
+        if idx is None or jid < 0:
+            raise RuntimeError(f"missing actuator or joint {jn}")
+        act = abs(float(lipm.model.actuator_forcerange[idx, 1]))
+        jnt = abs(float(lipm.model.jnt_actfrcrange[jid, 1]))
+        out[jn] = (act, jnt)
+    return out
 
 
 def _support(
@@ -1051,6 +1173,18 @@ def run_attempt(
     qvel_peak = 0.0
     qvel_joint = ""
     qvel_t = 0.0
+    clamp_lim = _clamp_limits(lipm)
+    clamp_n = {jn: 0 for jn in LEG_JOINTS}
+    clamp_hit = {jn: 0 for jn in LEG_JOINTS}
+    dc_excess = -1.0
+    dc_joint = ""
+    dc_tau = 0.0
+    dc_spd = 0.0
+    dc_lim = 0.0
+    dc_t = 0.0
+    vx_sum = 0.0
+    vx_n = 0
+    historical_torque_identity(session.model)
 
     def _body_id(name: str) -> int:
         bid = int(mj.mj_name2id(session.model, mj.mjtObj.mjOBJ_BODY, name))
@@ -1092,6 +1226,24 @@ def run_attempt(
             stage = str(lipm.preview_stage)
         for row in asks[n_ask:]:
             row.stage = stage
+            clamp_n[row.joint] += 1
+            act_lim, jnt_lim = clamp_lim[row.joint]
+            # Either rail. On this plant both are 2.45 Nm.
+            if abs(row.signed_nm) >= act_lim - 1e-9 or abs(row.signed_nm) >= jnt_lim - 1e-9:
+                clamp_hit[row.joint] += 1
+            # τ and ω are this write. ω is the qvel the torque used,
+            # before mj_step replaces it.
+            tau = abs(row.signed_nm)
+            spd = abs(row.omega)
+            limit = _dc_speed_limit(tau)
+            excess = spd - limit
+            if excess > dc_excess:
+                dc_excess = excess
+                dc_joint = row.joint
+                dc_tau = tau
+                dc_spd = spd
+                dc_lim = limit
+                dc_t = row.t
         hull, kind, fn_l, fn_r = _support(session)
         com = np.asarray(session.data.subtree_com[session.bid_body], dtype=np.float64).copy()
         com_hist.append(com)
@@ -1182,6 +1334,9 @@ def run_attempt(
                 qvel_peak = spd
                 qvel_joint = jn
                 qvel_t = now
+        if stand_s - 1e-12 <= now < t_stop - 1e-12:
+            vx_sum += float(session._body_forward_speed())
+            vx_n += 1
         preview_peak = max(preview_peak, abs(float(lipm.preview_com_y)))
         if not kit_baseline and lipm.op3 is not None:
             if stage == "walk":
@@ -1341,6 +1496,17 @@ def run_attempt(
     )
     tip_ok = up_z >= 0.90
     honesty = _step_honesty(foot_rows, x_amp_seen, vx_cmd, period_s)
+    signed_all = max(asks, key=lambda row: abs(row.signed_nm)) if asks else None
+    clamp_frac = {
+        jn: (float(clamp_hit[jn]) / float(clamp_n[jn])) if clamp_n[jn] else float("nan")
+        for jn in LEG_JOINTS
+    }
+    clamp_max = max(clamp_frac.values()) if clamp_frac else float("nan")
+    clamp_joint = max(clamp_frac, key=lambda jn: clamp_frac[jn]) if clamp_frac else ""
+    clamp_ok = all(clamp_n[jn] > 0 and clamp_hit[jn] == 0 for jn in LEG_JOINTS)
+    dc_ok = dc_excess <= 1e-6 and dc_joint != ""
+    vx_mean = vx_sum / float(vx_n) if vx_n else float("nan")
+    vx_ratio = vx_mean / vx_cmd if vx_n and abs(vx_cmd) > 1e-9 else float("nan")
     cop_p5 = float(np.percentile(decl_cop_mm, 5)) if decl_cop_mm else float("nan")
     if kit_baseline:
         step_ok = True
@@ -1393,6 +1559,29 @@ def run_attempt(
         "qvel_ok": qvel_peak <= QVEL_LIM + 1e-9,
         "ask_joint": "" if ask_all is None else str(ask_all.joint),
         "ask_t": 0.0 if ask_all is None else float(ask_all.t),
+        "ask_formula": "|kp*(q_des-q)|+|kv*omega|",
+        "ask_kv": "-actuator_biasprm[i,2]",
+        "signed_nm": 0.0 if signed_all is None else abs(float(signed_all.signed_nm)),
+        "signed_value": 0.0 if signed_all is None else float(signed_all.signed_nm),
+        "signed_joint": "" if signed_all is None else str(signed_all.joint),
+        "signed_t": 0.0 if signed_all is None else float(signed_all.t),
+        "signed_sum": 0.0 if signed_all is None else float(signed_all.sum_nm),
+        "ask_signed": 0.0 if ask_all is None else float(ask_all.signed_nm),
+        "signed_formula": "kp*(q_des-q)-kv*omega",
+        "clamp_frac": clamp_frac,
+        "clamp_max": clamp_max,
+        "clamp_joint": clamp_joint,
+        "clamp_ok": clamp_ok,
+        "dc_excess": dc_excess,
+        "dc_joint": dc_joint,
+        "dc_tau": dc_tau,
+        "dc_qvel": dc_spd,
+        "dc_limit": dc_lim,
+        "dc_t": dc_t,
+        "dc_ok": dc_ok,
+        "dc_label": DC_LABEL,
+        "vx_mean": vx_mean,
+        "vx_ratio": vx_ratio,
         "adv_mm": honesty["adv_mm"],
         "air_mm": honesty["air_mm"],
         "place_mm": honesty["place_mm"],

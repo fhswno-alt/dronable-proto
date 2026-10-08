@@ -2506,3 +2506,97 @@ The eight dashes are T 0.55 s at vx 0.032–0.056 and T 0.50 s at vx 0.032–0.0
 The sweep has no passing T, so it has no fastest vx on a passing T. The wired command stays period 0.50 s and 0.056 m/s. The clip is the highest window.
 
 `docs/media/voice_t060_vx032_feet.mp4` is T 0.60 s, vx 0.032 m/s, from the same live session. Stand 0.40 s, walk 3.00 s (five cycles), stop 2.40 s so the 2 s blend finishes. Side, front, and the sole camera, 1920×480, 30 fps, 174 frames, 5.80 s, fault none. The sole panel tints the group-0 contact boxes, left cyan and right orange, and paints the yellow floor line. At 0.20 s, still in the stand, both feet read −1.21 mm, n 4, 10.9 N, and the line crosses the box. At 1.60 s the right reads +1.67 mm, n 0, 0.0 N, and the left reads −0.98 mm, n 2, 10.4 N, with the right box above the line. At 1.90 s the left reads +1.97 mm, n 0, 0.0 N, and the right reads −1.15 mm, n 4, 22.1 N. At 2.20 s the right reads +1.35 mm, n 0, and the left reads −1.17 mm, n 4, 21.7 N. At 2.50 s the left reads +1.69 mm, n 0, and the right reads −1.17 mm, n 4, 21.5 N. At 3.00 s the right reads +0.89 mm, n 0, and the left reads −1.17 mm, n 4, 21.7 N. Those overlay peaks sit next to the scored peak of 2.18 mm. The 20–80% minimum on the cell is +0.37 mm. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0. Not kit-safe. Not go-anywhere.
+
+## Torque signal on the flat 20–80% sweep
+
+Every newton-metre below is pre-clamp. The command is the `q_des` passed into `write_clipped` or `write_force_limited`, before either function edits `ctrl`. `kv` is `-actuator_biasprm[i, 2]`. Every leg position actuator is `dampratio=1`, and that compiles a different kv on each joint: right hip roll 1.7027, right knee 1.4573, right ankle roll 1.1876. It is not one constant.
+
+Two formulas are logged. Abs is `|kp·(q_des−q)| + |kv·ω|`. That is the historical 2.33 Nm bar, and it is the Ask column in the table above. Sgn is `|kp·(q_des−q) − kv·ω|`, the position-actuator force before the ±2.45 Nm rail. The same-tick signed value on an Abs peak is listed beside it, because the two terms can cancel.
+
+`d6e8b5e`'s 2.2567, `ac81435`'s 2.3135, and `58ce1d8`'s 1.9792 are Abs, from `_install_ask_log`, with that kv. The stored lines are `sum` / `signed`. On the 2.3135 tick the signed force is +0.2607 Nm (`previews/com_zmp_preview_s.json` at that commit: q −0.00845, q_des +0.02372, kp 40, kv 1.7027, ω +0.6028). On the 1.9792 tick the signed force is +0.2486 Nm (`previews/com_zmp_preview_j.json`: q −0.14153, q_des −0.11368, kp 40, kv 1.7027, ω +0.5082). The diary's 2.2567 uses the same `sum` field: q −0.11738, q_des −0.08599, kp 40, kv 1.703, ω +0.588. Rebuilding Abs from those rounded digits gives 2.2570. The signed force on that tick is +0.254 Nm. `historical_torque_identity` checks the three rebuilds.
+
+A tick is clamp-active when that pre-clamp `|signed|` reaches either rail. The actuator `forcerange` and the joint `actuatorfrcrange` are both ±2.45 Nm, so the test is `|signed| ≥ 2.45`. The fraction is counted per leg joint. A row passes only when every joint's fraction is 0. Yaw, hip roll, both ankle joints, and the right hip pitch are 0 on all 54 rows. The left hip pitch is 0 except T 0.50 s at 0.016 m/s, where the fraction is 0.001. Both knees are above 0 on every row.
+
+The speed line is the DC-motor model, not a datasheet: `|qvel| ≤ 5.82·(1 − |τ|/3.43)` rad/s, with `τ` the pre-clamp `|signed|` and `qvel` the ω from that same write. DC ex is the worst same-tick excess of `|qvel|` over that limit. The trunk ratio is the mean forward speed of `body_link` while the bus commands vx, divided by that command. Forward is the body x axis dotted with `cvel` linear velocity.
+
+Zero rows pass Abs ≤ 2.33 Nm, clamp fraction 0 on every leg joint, the DC-motor line, and a 20–80% corner ≥ 8 mm. Abs stays 8.01–11.81 Nm. Sgn stays 3.81–6.21 Nm, every peak a knee. Every DC worst tick has `|τ|` above the 3.43 Nm stall, so the allowed speed is negative. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0.
+
+| Joint | Rows with fraction > 0 | Max fraction |
+| --- | ---: | ---: |
+| l_hip_yaw | 0 | 0.000 |
+| l_hip_roll | 0 | 0.000 |
+| l_hip_pitch | 1 | 0.001 |
+| l_knee | 54 | 0.026 |
+| l_ank_pitch | 0 | 0.000 |
+| l_ank_roll | 0 | 0.000 |
+| r_hip_yaw | 0 | 0.000 |
+| r_hip_roll | 0 | 0.000 |
+| r_hip_pitch | 0 | 0.000 |
+| r_knee | 54 | 0.026 |
+| r_ank_pitch | 0 | 0.000 |
+| r_ank_roll | 0 | 0.000 |
+
+| T s | vx | Abs Nm | Joint | tick sgn | Sgn Nm | Sgn joint | L knee | R knee | DC ex | vx ratio | Clear mm |
+| ---: | ---: | ---: | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| 0.80 | 0.016 | 11.10 | r_knee | +2.54 | 4.56 | l_knee | 0.020 | 0.020 | 3.16 | 1.352 | -0.65 |
+| 0.80 | 0.024 | 10.83 | r_knee | +2.50 | 4.61 | l_knee | 0.024 | 0.019 | 3.25 | 1.038 | -0.61 |
+| 0.80 | 0.032 | 10.93 | r_knee | +2.61 | 4.83 | l_knee | 0.024 | 0.019 | 3.34 | 0.855 | -0.55 |
+| 0.80 | 0.040 | 11.17 | r_knee | +2.62 | 4.93 | l_knee | 0.024 | 0.020 | 3.42 | 0.744 | -0.61 |
+| 0.80 | 0.048 | 10.80 | r_knee | +2.78 | 5.03 | l_knee | 0.024 | 0.020 | 3.63 | 0.669 | -0.90 |
+| 0.80 | 0.056 | 11.05 | r_knee | +2.94 | 5.11 | l_knee | 0.024 | 0.022 | 3.82 | 0.623 | -0.89 |
+| 0.75 | 0.016 | 10.75 | r_knee | +2.34 | 4.86 | l_knee | 0.021 | 0.017 | 3.45 | 1.401 | -0.62 |
+| 0.75 | 0.024 | 10.75 | r_knee | +2.23 | 4.91 | l_knee | 0.024 | 0.017 | 3.53 | 1.079 | -0.62 |
+| 0.75 | 0.032 | 10.77 | r_knee | +2.27 | 4.96 | l_knee | 0.024 | 0.017 | 3.61 | 0.888 | -0.65 |
+| 0.75 | 0.040 | 10.52 | r_knee | +2.45 | 5.03 | l_knee | 0.024 | 0.018 | 3.70 | 0.764 | -0.71 |
+| 0.75 | 0.048 | 10.56 | r_knee | +2.69 | 5.14 | l_knee | 0.024 | 0.018 | 3.77 | 0.687 | -0.79 |
+| 0.75 | 0.056 | 10.86 | r_knee | +2.87 | 5.23 | l_knee | 0.024 | 0.021 | 3.87 | 0.639 | -0.87 |
+| 0.70 | 0.016 | 11.50 | r_knee | +2.42 | 5.05 | l_knee | 0.021 | 0.020 | 3.69 | 1.456 | -0.61 |
+| 0.70 | 0.024 | 11.24 | r_knee | +2.31 | 5.10 | l_knee | 0.021 | 0.020 | 3.77 | 1.119 | -0.47 |
+| 0.70 | 0.032 | 11.23 | r_knee | +2.39 | 5.15 | l_knee | 0.024 | 0.020 | 3.85 | 0.925 | -0.59 |
+| 0.70 | 0.040 | 11.43 | r_knee | +2.49 | 5.19 | l_knee | 0.024 | 0.021 | 3.94 | 0.800 | -0.64 |
+| 0.70 | 0.048 | 11.74 | r_knee | +2.59 | 5.23 | l_knee | 0.024 | 0.021 | 4.02 | 0.718 | -0.70 |
+| 0.70 | 0.056 | 11.81 | r_knee | +2.75 | 5.34 | l_knee | 0.024 | 0.021 | 4.10 | 0.658 | -0.78 |
+| 0.65 | 0.016 | 11.27 | r_knee | +2.35 | 5.25 | l_knee | 0.021 | 0.019 | 4.36 | 1.504 | -0.57 |
+| 0.65 | 0.024 | 11.39 | r_knee | +2.32 | 5.29 | l_knee | 0.021 | 0.019 | 4.44 | 1.119 | -0.57 |
+| 0.65 | 0.032 | 11.26 | r_knee | +2.30 | 5.34 | l_knee | 0.021 | 0.019 | 4.51 | 0.964 | -0.61 |
+| 0.65 | 0.040 | 11.28 | r_knee | +2.32 | 5.39 | l_knee | 0.024 | 0.019 | 4.59 | 0.836 | -0.66 |
+| 0.65 | 0.048 | 11.58 | r_knee | +2.55 | 5.43 | l_knee | 0.023 | 0.020 | 4.68 | 0.752 | -0.71 |
+| 0.65 | 0.056 | 11.56 | r_knee | +2.68 | 5.48 | l_knee | 0.025 | 0.020 | 4.75 | 0.687 | -0.78 |
+| 0.60 | 0.016 | 11.26 | r_knee | +2.05 | 5.74 | l_knee | 0.020 | 0.015 | 5.00 | 1.585 | -0.59 |
+| 0.60 | 0.024 | 11.47 | r_knee | +2.12 | 5.78 | l_knee | 0.020 | 0.016 | 5.06 | 1.167 | -0.61 |
+| 0.60 | 0.032 | 11.37 | r_knee | +2.04 | 5.82 | l_knee | 0.019 | 0.015 | 5.13 | 1.018 | 0.37 |
+| 0.60 | 0.040 | 11.21 | r_knee | +1.99 | 5.86 | l_knee | 0.019 | 0.016 | 5.20 | 0.879 | -0.69 |
+| 0.60 | 0.048 | 11.29 | r_knee | +2.02 | 5.90 | l_knee | 0.020 | 0.016 | 5.28 | 0.785 | -0.74 |
+| 0.60 | 0.056 | 11.57 | r_knee | +2.16 | 5.95 | l_knee | 0.020 | 0.016 | 5.37 | 0.718 | -0.79 |
+| 0.55 | 0.016 | 10.56 | l_knee | +3.73 | 5.93 | l_knee | 0.019 | 0.010 | 5.07 | 1.629 | -0.62 |
+| 0.55 | 0.024 | 10.60 | l_knee | +3.77 | 5.97 | l_knee | 0.019 | 0.010 | 5.13 | 1.192 | -0.65 |
+| 0.55 | 0.032 | 10.64 | l_knee | +3.81 | 6.01 | l_knee | 0.019 | 0.010 | 5.19 | 1.032 | — |
+| 0.55 | 0.040 | 10.69 | l_knee | +3.85 | 6.04 | l_knee | 0.019 | 0.010 | 5.25 | 0.888 | — |
+| 0.55 | 0.048 | 10.75 | l_knee | +3.89 | 6.08 | l_knee | 0.021 | 0.010 | 5.32 | 0.789 | — |
+| 0.55 | 0.056 | 10.82 | l_knee | +3.93 | 6.13 | l_knee | 0.021 | 0.010 | 5.41 | 0.716 | — |
+| 0.50 | 0.016 | 10.69 | l_knee | +2.81 | 6.01 | l_knee | 0.021 | 0.008 | 5.71 | 1.554 | -0.65 |
+| 0.50 | 0.024 | 10.72 | l_knee | +2.84 | 6.05 | l_knee | 0.021 | 0.008 | 5.77 | 1.135 | -0.68 |
+| 0.50 | 0.032 | 10.77 | l_knee | +2.87 | 6.09 | l_knee | 0.021 | 0.008 | 5.83 | 0.947 | — |
+| 0.50 | 0.040 | 10.81 | l_knee | +2.91 | 6.12 | l_knee | 0.021 | 0.008 | 5.89 | 0.833 | — |
+| 0.50 | 0.048 | 10.88 | l_knee | +2.94 | 6.16 | l_knee | 0.021 | 0.008 | 5.96 | 0.734 | — |
+| 0.50 | 0.056 | 10.95 | l_knee | +2.98 | 6.21 | l_knee | 0.021 | 0.008 | 6.05 | 0.658 | — |
+| 1.00 | 0.016 | 10.50 | r_knee | +2.11 | 4.12 | l_knee | 0.023 | 0.020 | 2.19 | 1.199 | -0.69 |
+| 1.00 | 0.024 | 10.73 | r_knee | +2.07 | 4.26 | r_knee | 0.024 | 0.020 | 2.43 | 0.907 | -0.68 |
+| 1.00 | 0.032 | 11.00 | r_knee | +2.29 | 4.38 | r_knee | 0.024 | 0.020 | 2.63 | 0.766 | -0.77 |
+| 1.00 | 0.040 | 10.57 | r_knee | +2.47 | 4.51 | r_knee | 0.024 | 0.021 | 2.84 | 0.688 | -0.86 |
+| 1.00 | 0.048 | 10.38 | r_knee | +2.71 | 4.64 | r_knee | 0.025 | 0.024 | 3.04 | 0.635 | -1.01 |
+| 1.00 | 0.056 | 9.53 | r_knee | +2.93 | 4.78 | r_knee | 0.026 | 0.024 | 3.26 | 0.601 | -1.20 |
+| 1.20 | 0.016 | 8.01 | l_knee | +2.55 | 3.81 | r_knee | 0.022 | 0.013 | 1.75 | 1.122 | -0.80 |
+| 1.20 | 0.024 | 8.28 | r_knee | +1.78 | 3.94 | r_knee | 0.022 | 0.016 | 1.99 | 0.861 | -0.95 |
+| 1.20 | 0.032 | 9.21 | r_knee | +1.90 | 4.10 | r_knee | 0.022 | 0.018 | 2.28 | 0.727 | -0.90 |
+| 1.20 | 0.040 | 9.93 | r_knee | +1.98 | 4.34 | r_knee | 0.025 | 0.021 | 2.67 | 0.652 | -0.98 |
+| 1.20 | 0.048 | 10.04 | r_knee | +2.40 | 4.53 | r_knee | 0.025 | 0.022 | 3.02 | 0.627 | -1.09 |
+| 1.20 | 0.056 | 9.20 | r_knee | +2.74 | 4.74 | r_knee | 0.025 | 0.026 | 3.42 | 0.598 | -1.16 |
+
+On the highest window, T 0.60 s at 0.032 m/s, Abs is 11.365 Nm on the right knee at 2.696 s. The signed force on that tick is +2.045 Nm: the position term and the damping term point opposite ways, and Abs adds the absolute values. The Sgn peak is 5.820 Nm on the left knee at 1.328 s, and Abs on that tick is 8.961 Nm. Left-knee clamp fraction 0.019, right knee 0.015, the other ten joints 0. The DC worst tick is that 5.820 Nm sample with `|qvel|` 1.077 rad/s. The line at 5.820 Nm is −4.056 rad/s, so the excess is 5.134 rad/s. Trunk ratio 1.018 (mean 0.0326 m/s against the 0.032 m/s command). Clearance on the 20–80% window stays +0.37 mm.
+
+The lowest Abs is still T 1.20 s at 0.016 m/s, 8.014 Nm on the left knee at 1.408 s, signed on that tick +2.549 Nm. The Sgn peak on that row is 3.810 Nm on the right knee at 2.432 s, and Abs on that tick is 7.027 Nm. That is also the smallest DC excess, 1.749 rad/s: `|τ|` 3.810 Nm, `|qvel|` 1.104 rad/s, limit −0.645 rad/s. Left-knee clamp fraction 0.022, right knee 0.013. Trunk ratio 1.122. The window corner is −0.80 mm.
+
+Trunk ratio runs from 0.598 (T 1.20 s, vx 0.056 m/s) to 1.629 (T 0.55 s, vx 0.016 m/s). The short slow rows run faster than the command. The long fast rows run slower. The 0.60 s / 0.032 m/s row is the one nearest 1.
+
+The clip is unchanged. It is still the highest clearance window, and it does not pass Abs, the clamp fraction, or the DC-motor line. Not kit-safe. Not go-anywhere.
