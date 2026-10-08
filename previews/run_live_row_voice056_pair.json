@@ -1,0 +1,41 @@
+{
+  "entry_point": "scripts/run_live_row.py",
+  "entry_tip_sha": "6bae07ec9482714dbb886d282f2c547a5dae0328",
+  "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+  "mujoco_version": "3.14.0",
+  "identical_args": {
+    "t": 1.0,
+    "vx": 0.016,
+    "clearance": 0.008,
+    "dsp": 0.25,
+    "armature": 0.01,
+    "seed": "none",
+    "latency": 0,
+    "mass_scale": 1,
+    "mu": "none",
+    "arm_s": 1.0,
+    "stand_s": 0.25,
+    "walk_s": 3.05,
+    "stop_s": 2.4,
+    "preview_shape": 0,
+    "preview_r": 0.0001,
+    "z_quintic": 0,
+    "z_lead": 0,
+    "honor_vx": 0,
+    "crouch": 0.025,
+    "hip_pitch_deg": 15,
+    "gait": "voice056"
+  },
+  "armature_source": "MjSpec compile_plant before kv. The XML file is not written.",
+  "baseline_flags": {
+    "ff": 0,
+    "knee_qdd_cap": "none"
+  },
+  "feedforward_flags": {
+    "ff": 1,
+    "knee_qdd_cap": 40
+  },
+  "scorer_patch": "6bae07e shadows the ask-over list with the loop variable over, so ask_over = len(over) raises TypeError after a finished rollout. The baseline JSON was produced after renaming that loop variable to tick_over in the detached checkout. The gait and the bar arithmetic were not changed. The feedforward abort is from the unpatched runner.",
+  "baseline_json": "previews/run_live_row_a5a9183_baseline.json",
+  "feedforward_json": "previews/run_live_row_ff_cap.json"
+}
