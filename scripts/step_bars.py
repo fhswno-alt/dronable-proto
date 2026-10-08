@@ -131,15 +131,19 @@ def speed_torque_check(
 ) -> dict[str, object]:
     """Speed-torque check. The motor line stays unset until HW supplies it.
 
+    ``tau_abs`` is the physical servo torque ``|kp·(q_des−q) − kv·ω|``.
+    The sum ``|kp·e| + |kv·ω|`` is a separate conservative column and is
+    not what this check compares.
+
     With ``no_load_speed``, ``stall_torque``, or ``voltage`` left None, the
     status is ``SPEED_TORQUE_PENDING`` and nothing is failed. Each joint
-    still reports the tick with the largest ``|qvel|`` at ``|τ| ≥ 2`` Nm
-    and the tick with the largest ``|τ|`` at ``|qvel| ≥ 4`` rad/s.
+    still reports the tick with the largest ``|qvel|`` at signed ``|τ| ≥ 2``
+    Nm and the tick with the largest signed ``|τ|`` at ``|qvel| ≥ 4`` rad/s.
 
     When all three are set, each tick must satisfy
-    ``|qvel| ≤ no_load_speed * (1 − |τ| / stall_torque)``. Voltage is
-    recorded and does not scale that line. The worst margin is folded into
-    the row verdict.
+    ``|qvel| ≤ no_load_speed * (1 − |τ| / stall_torque)`` with that signed
+    ``|τ|``. Voltage is recorded and does not scale that line. The worst
+    margin is folded into the row verdict.
     """
     labels = [str(name) for name in names]
     times = np.asarray(t, dtype=np.float64)
@@ -225,6 +229,59 @@ def speed_torque_check(
         ]
         empty["passes"] = False
     return empty
+
+
+def forcerange_clamp_report(
+    names: tuple[str, ...] | list[str],
+    force: np.ndarray,
+    lo: np.ndarray,
+    hi: np.ndarray,
+    *,
+    eps_nm: float = 1e-3,
+) -> list[dict[str, object]]:
+    """Fraction of ticks whose applied actuator force sits on forcerange.
+
+    ``force`` is ``data.actuator_force`` after the control tick, shape
+    ``(n, n_joints)``. A tick is clamped when that force is within
+    ``eps_nm`` of the low or high rail. The denominator is every tick in
+    the bout.
+    """
+    labels = [str(name) for name in names]
+    applied = np.asarray(force, dtype=np.float64)
+    low = np.asarray(lo, dtype=np.float64)
+    high = np.asarray(hi, dtype=np.float64)
+    rows: list[dict[str, object]] = []
+    n = int(applied.shape[0]) if applied.ndim == 2 else 0
+    for col, name in enumerate(labels):
+        if applied.ndim != 2 or applied.shape[1] <= col or n < 1:
+            rows.append({
+                "joint": name,
+                "forcerange_lo_nm": None,
+                "forcerange_hi_nm": None,
+                "n_clamped": 0,
+                "n_ticks": n,
+                "fraction": None,
+            })
+            continue
+        series = applied[:, col]
+        rail_lo = float(low[col])
+        rail_hi = float(high[col])
+        on_rail = np.isfinite(series) & (
+            (series >= rail_hi - eps_nm) | (series <= rail_lo + eps_nm)
+        )
+        n_clamped = int(np.sum(on_rail))
+        finite = series[np.isfinite(series)]
+        peak = float(np.max(np.abs(finite))) if finite.size else None
+        rows.append({
+            "joint": name,
+            "forcerange_lo_nm": rail_lo,
+            "forcerange_hi_nm": rail_hi,
+            "n_clamped": n_clamped,
+            "n_ticks": n,
+            "fraction": float(n_clamped / n),
+            "peak_abs_nm": peak,
+        })
+    return rows
 
 
 def trunk_speed_line(

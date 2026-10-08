@@ -1266,10 +1266,12 @@ class PhaseScore:
 
 
 def _install_ask_log(walker: lipm_gait.LipmWalker, bucket: list[AskSample]) -> None:
-    """Log |kp*(q_des−q)| + |kv*ω| before ``write_clipped`` slews ctrl.
+    """Log both torque definitions before the writer slews ctrl.
 
-    This is the unclamped ask Controls posted. The hook does not change the
-    command that is written.
+    ``signed_nm`` is ``kp·(q_des−q) − kv·ω``, the physical servo torque of
+    the unclamped target. ``sum_nm`` is ``|kp·e| + |kv·ω|``, the upper bound.
+    The 2.33 Nm bar uses the sum. That is also the number Controls posts.
+    The hook does not change the command that is written.
     """
     def _log(jn: str, q_des: float) -> None:
         if jn not in LEG_JOINTS:
@@ -1456,29 +1458,69 @@ def _apply_perturb(session: steer_walk.SteerSession, perturb: Perturb) -> None:
 def _tick_pair(
     asks: list[AskSample],
     names: tuple[str, ...],
-) -> tuple[list[float | None], list[float | None]]:
-    """One (|unclamped τ|, |qvel|) pair per joint for the writes in this tick.
+) -> tuple[list[float | None], list[float | None], list[float | None], list[float | None]]:
+    """Signed |τ|, the sum, and the |qvel| of each of those writes.
 
-    Unclamped τ is |kp·(q_des−q)| + |kv·ω|, the same ask the torque bar uses.
-    If a joint is written more than once, the pair is the write with the
-    largest |τ|, and |qvel| is the speed at that write.
+    Signed |τ| is ``|kp·(q_des−q) − kv·ω|``. The sum is
+    ``|kp·e| + |kv·ω|`` on the write with the largest sum. ``qvel`` is the
+    speed at the largest signed write. ``qvel_at_sum`` is the speed at the
+    largest-sum write. The 2.33 Nm bar is not read from this pair.
     """
-    best: dict[str, AskSample] = {}
+    best_signed: dict[str, AskSample] = {}
+    best_sum: dict[str, AskSample] = {}
     for sample in asks:
-        prev = best.get(sample.joint)
-        if prev is None or sample.sum_nm > prev.sum_nm:
-            best[sample.joint] = sample
-    tau: list[float | None] = []
+        prev = best_signed.get(sample.joint)
+        if prev is None or abs(sample.signed_nm) > abs(prev.signed_nm):
+            best_signed[sample.joint] = sample
+        prev_sum = best_sum.get(sample.joint)
+        if prev_sum is None or sample.sum_nm > prev_sum.sum_nm:
+            best_sum[sample.joint] = sample
+    signed: list[float | None] = []
+    summed: list[float | None] = []
     qvel: list[float | None] = []
+    qvel_sum: list[float | None] = []
     for name in names:
-        sample = best.get(name)
-        if sample is None:
-            tau.append(None)
+        sample = best_signed.get(name)
+        summed_sample = best_sum.get(name)
+        if sample is None or summed_sample is None:
+            signed.append(None)
+            summed.append(None)
             qvel.append(None)
+            qvel_sum.append(None)
         else:
-            tau.append(float(sample.sum_nm))
+            signed.append(abs(float(sample.signed_nm)))
+            summed.append(float(summed_sample.sum_nm))
             qvel.append(float(sample.qvel_abs))
-    return tau, qvel
+            qvel_sum.append(float(summed_sample.qvel_abs))
+    return signed, summed, qvel, qvel_sum
+
+
+def _actuator_force_row(walker: lipm_gait.LipmWalker) -> list[float]:
+    """Applied actuator force after the control tick. NaN if the actuator is missing."""
+    row: list[float] = []
+    for name in LEG_JOINTS:
+        idx = walker.act_idx.get(name + "_pos")
+        if idx is None:
+            row.append(float("nan"))
+            continue
+        row.append(float(walker.data.actuator_force[idx]))
+    return row
+
+
+def _clamp_from_force(
+    walker: lipm_gait.LipmWalker,
+    rows: list[list[float]],
+) -> list[dict[str, object]]:
+    lo = np.zeros(len(LEG_JOINTS), dtype=np.float64)
+    hi = np.zeros(len(LEG_JOINTS), dtype=np.float64)
+    for col, name in enumerate(LEG_JOINTS):
+        idx = walker.act_idx.get(name + "_pos")
+        if idx is None:
+            continue
+        lo[col] = float(walker.model.actuator_forcerange[idx, 0])
+        hi[col] = float(walker.model.actuator_forcerange[idx, 1])
+    force = np.asarray(rows, dtype=np.float64) if rows else np.zeros((0, len(LEG_JOINTS)))
+    return step_bars.forcerange_clamp_report(LEG_JOINTS, force, lo, hi)
 
 
 def _pair_matrix(rows: list[list[float | None]], n_joints: int) -> np.ndarray:
@@ -1493,6 +1535,11 @@ def _pair_matrix(rows: list[list[float | None]], n_joints: int) -> np.ndarray:
 
 
 def _asks_by_joint(asks: list[AskSample]) -> list[dict[str, object]]:
+    """Peak of the 2.33 Nm bar. The bar is the sum, not |signed|.
+
+    Controls' posted unclamped numbers match this sum. Do not switch the
+    comparison to ``|signed_nm|``.
+    """
     best: dict[str, AskSample] = {}
     for sample in asks:
         prev = best.get(sample.joint)
@@ -1780,8 +1827,11 @@ def run_preview_row(
             raise RuntimeError(f"{spec.name}: missing joint {name}")
         leg_dof.append(int(session.model.jnt_dofadr[jid]))
     qvel_abs_rows: list[list[float]] = []
-    pair_tau: list[list[float | None]] = []
+    pair_signed: list[list[float | None]] = []
+    pair_sum: list[list[float | None]] = []
     pair_qvel: list[list[float | None]] = []
+    pair_qvel_sum: list[list[float | None]] = []
+    pair_force: list[list[float]] = []
     stage_ticks: list[str] = []
     trunk_x: list[float] = []
     trunk_y: list[float] = []
@@ -1818,9 +1868,12 @@ def run_preview_row(
         n_ask = len(asks)
         session.step()
         stage_name = str(getattr(walker, "preview_stage", "unknown"))
-        tau_tick, qvel_tick = _tick_pair(asks[n_ask:], LEG_JOINTS)
-        pair_tau.append(tau_tick)
+        signed_tick, sum_tick, qvel_tick, qvel_sum_tick = _tick_pair(asks[n_ask:], LEG_JOINTS)
+        pair_signed.append(signed_tick)
+        pair_sum.append(sum_tick)
         pair_qvel.append(qvel_tick)
+        pair_qvel_sum.append(qvel_sum_tick)
+        pair_force.append(_actuator_force_row(walker))
         for sample in asks[n_ask:]:
             sample.stage = stage_name
         if walker.op3.y_swap_cmd != 0.0:
@@ -1989,12 +2042,12 @@ def run_preview_row(
     qvel_reasons = qvel_report.get("fail_reasons")
     if isinstance(qvel_reasons, list):
         fail_reasons.extend(str(reason) for reason in qvel_reasons)
-    pair_tau_m = _pair_matrix(pair_tau, len(LEG_JOINTS))
+    pair_signed_m = _pair_matrix(pair_signed, len(LEG_JOINTS))
     pair_qvel_m = _pair_matrix(pair_qvel, len(LEG_JOINTS))
     speed_torque = step_bars.speed_torque_check(
         LEG_JOINTS,
         np.asarray(times, dtype=np.float64),
-        pair_tau_m,
+        pair_signed_m,
         pair_qvel_m,
         np.asarray(stage_ticks, dtype=object),
         no_load_speed=None,
@@ -2006,9 +2059,24 @@ def run_preview_row(
         fail_reasons.extend(str(reason) for reason in torque_reasons)
     hinge_pairs = {
         "t_s": times,
-        "tau_nm": {name: [row[i] for row in pair_tau] for i, name in enumerate(LEG_JOINTS)},
+        "tau_signed_nm": {
+            name: [row[i] for row in pair_signed] for i, name in enumerate(LEG_JOINTS)
+        },
+        "tau_sum_nm": {
+            name: [row[i] for row in pair_sum] for i, name in enumerate(LEG_JOINTS)
+        },
         "qvel_rad_s": {name: [row[i] for row in pair_qvel] for i, name in enumerate(LEG_JOINTS)},
+        "qvel_at_sum_rad_s": {
+            name: [row[i] for row in pair_qvel_sum] for i, name in enumerate(LEG_JOINTS)
+        },
+        "definitions": {
+            "signed": "|kp*(q_des-q) - kv*omega|",
+            "sum": "|kp*(q_des-q)| + |kv*omega|",
+            "speed_torque_uses": "signed",
+            "bar_2_33_nm_uses": "sum",
+        },
     }
+    clamp = _clamp_from_force(walker, pair_force)
     trunk_speed = step_bars.trunk_speed_line(
         np.asarray(times, dtype=np.float64),
         np.asarray(trunk_x, dtype=np.float64),
@@ -2103,6 +2171,7 @@ def run_preview_row(
         "trunk_speed": trunk_speed,
         "speed_torque": speed_torque,
         "hinge_pairs": hinge_pairs,
+        "clamp": clamp,
     }
 
 
@@ -3237,9 +3306,11 @@ def render_stepping_md(payloads: list[dict[str, object]]) -> str:
         "  (HX-35H no-load, 0.18 s/60°). The plant has no velocity cap. Headroom is",
         "  5.82 − peak. A miss names the joint, the peak, the time, and the stage.",
         "  Preview rows use `preview_stage`. A voice bout with no preview stage uses",
-        "  the gait phase. Each tick also logs `(|unclamped τ|, |qvel|)`.",
-        "  The speed-torque line (`|qvel| ≤ no_load·(1 − |τ|/stall)`) stays unset",
-        "  until a datasheet supplies `no_load_speed`, `stall_torque`, and `voltage`.",
+        "  the gait phase. Each tick logs signed `|kp·(q_des−q) − kv·ω|`, the sum",
+        "  `|kp·e| + |kv·ω|`, and `|qvel|`. The 2.33 Nm unclamped-ask bar stays on",
+        "  the sum. The speed-torque line uses the signed magnitude.",
+        "  That line (`|qvel| ≤ no_load·(1 − |τ|/stall)`) stays unset until a",
+        "  datasheet supplies `no_load_speed`, `stall_torque`, and `voltage`.",
         "",
         "Each row also reports period T, commanded vx, actual trunk vx, and the",
         "ratio. Actual trunk vx is the trunk origin's heading-frame forward",

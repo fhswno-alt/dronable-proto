@@ -207,6 +207,118 @@ def _cop_margin(sw, session, walker, side: str, grounds) -> float:
     return float(sw.support_margin(world[:2], hull))
 
 
+def _actuator_force_row(walker) -> list[float]:
+    row: list[float] = []
+    for name in LEG_JOINTS:
+        idx = walker.act_idx.get(name + "_pos")
+        if idx is None:
+            row.append(float("nan"))
+            continue
+        row.append(float(walker.data.actuator_force[idx]))
+    return row
+
+
+def _clamp_rows(step_bars, rec: Recorder) -> list[dict[str, object]]:
+    lo = np.asarray(rec.rail_lo if rec.rail_lo is not None else [0.0] * len(LEG_JOINTS), dtype=np.float64)
+    hi = np.asarray(rec.rail_hi if rec.rail_hi is not None else [0.0] * len(LEG_JOINTS), dtype=np.float64)
+    force = np.asarray(rec.pair_force, dtype=np.float64) if rec.pair_force else np.zeros((0, len(LEG_JOINTS)))
+    return step_bars.forcerange_clamp_report(LEG_JOINTS, force, lo, hi)
+
+
+def _mode_run(modes: list[object], idx: int) -> tuple[int, int]:
+    mode = modes[idx]
+    i0 = idx
+    while i0 > 0 and modes[i0 - 1] == mode:
+        i0 -= 1
+    i1 = idx
+    while i1 + 1 < len(modes) and modes[i1 + 1] == mode:
+        i1 += 1
+    return i0, i1
+
+
+def _sum_peak_context(rec: Recorder, joint: str = "r_knee") -> dict[str, object] | None:
+    """What the walker was doing at the largest sum-|τ| tick of ``joint``."""
+    if joint not in LEG_JOINTS or not rec.pair_sum:
+        return None
+    col = LEG_JOINTS.index(joint)
+    sums = [row[col] if col < len(row) else None for row in rec.pair_sum]
+    finite = [(i, value) for i, value in enumerate(sums) if value is not None]
+    if not finite:
+        return None
+    idx, _peak = max(finite, key=lambda item: float(item[1]))
+    t = rec.cols["t"]
+    modes = rec.cols["mode"]
+    i0, i1 = _mode_run(modes, idx)
+    before = max(0, i0 - 125)
+    yaw_before = [abs(float(v)) for v in rec.applied_yaw[before:i0]]
+    vx_before = [abs(float(v)) for v in rec.applied_vx[before:i0]]
+    max_yaw = max(yaw_before) if yaw_before else 0.0
+    max_vx = max(vx_before) if vx_before else 0.0
+    mode = str(modes[idx])
+    fault = bool(rec.fault[idx]) if idx < len(rec.fault) else False
+    if fault:
+        doing = "fault recovery: the bus is in fault and the gait is holding the stand pose"
+    elif mode == "stand" and i0 == 0:
+        doing = "initial stand, before the first move"
+    elif mode == "stand" and max_yaw > 0.02 and max_vx < 0.01:
+        doing = (
+            "settle after an in-place yaw. The previous second had yaw and almost "
+            "no forward speed, then the bus snapped to stand. This is not a forward "
+            "stop and not a fault recovery"
+        )
+    elif mode == "stand" and max_vx > 0.01 and max_yaw > 0.02:
+        doing = (
+            "stop out of a turning walk. The previous second was moving with yaw, "
+            "then the bus snapped to stand and the gait holds the stand pose"
+        )
+    elif mode == "stand" and max_vx > 0.01:
+        doing = (
+            "stop from a straight walk. The previous second was moving forward, "
+            "then the bus snapped to stand and the gait holds the stand pose"
+        )
+    elif mode == "stand":
+        doing = "stand hold"
+    elif abs(float(rec.applied_yaw[idx])) > 0.02:
+        doing = "turn: the bus is still in move with a yaw rate"
+    else:
+        doing = "forward move"
+    force = rec.pair_force[idx][col] if idx < len(rec.pair_force) else float("nan")
+    pred = rec.pair_pred[idx][col] if idx < len(rec.pair_pred) else None
+    signed = rec.pair_signed[idx][col] if idx < len(rec.pair_signed) else None
+    qvel = rec.pair_qvel[idx][col] if idx < len(rec.pair_qvel) else None
+    qvel_sum = rec.pair_qvel_sum[idx][col] if idx < len(rec.pair_qvel_sum) else None
+    rail_hi = None
+    rail_lo = None
+    clamped = None
+    return {
+        "joint": joint,
+        "t_s": float(t[idx]),
+        "stage": rec.stage[idx],
+        "tau_sum_nm": float(sums[idx]),
+        "tau_signed_nm": None if signed is None else float(signed),
+        "qvel_rad_s": None if qvel is None else float(qvel),
+        "qvel_at_sum_rad_s": None if qvel_sum is None else float(qvel_sum),
+        "bus_mode": mode,
+        "applied_vx_m_s": float(rec.applied_vx[idx]),
+        "applied_yaw_rad_s": float(rec.applied_yaw[idx]) if idx < len(rec.applied_yaw) else None,
+        "cmd_vx_m_s": float(rec.cmd_vx[idx]) if idx < len(rec.cmd_vx) else None,
+        "cmd_yaw_rad_s": float(rec.cmd_yaw[idx]) if idx < len(rec.cmd_yaw) else None,
+        "fault": fault,
+        "n_l": rec.cols["n_l"][idx],
+        "n_r": rec.cols["n_r"][idx],
+        "stand_run_t0_s": float(t[i0]),
+        "stand_run_t1_s": float(t[i1]),
+        "prev_1s_max_abs_vx_m_s": max_vx,
+        "prev_1s_max_abs_yaw_rad_s": max_yaw,
+        "actuator_force_nm": None if not math.isfinite(float(force)) else float(force),
+        "ctrl_prediction_abs_nm": None if pred is None else float(pred),
+        "forcerange_lo_nm": rail_lo,
+        "forcerange_hi_nm": rail_hi,
+        "clamp_active": clamped,
+        "doing": doing,
+    }
+
+
 def _hinge_block(step_bars, rec: Recorder, period: float, vx: float) -> dict[str, object]:
     """Hinge-speed bar and trunk-speed line for one recorded bout.
 
@@ -217,9 +329,9 @@ def _hinge_block(step_bars, rec: Recorder, period: float, vx: float) -> dict[str
     omega = np.asarray(rec.omega, dtype=np.float64) if rec.omega else np.zeros((0, 12))
     stage = np.asarray(rec.stage, dtype=object)
     qvel = step_bars.hinge_speed_report(LEG_JOINTS, t, omega, stage)
-    tau_m = np.full((len(rec.pair_tau), len(LEG_JOINTS)), np.nan, dtype=np.float64)
+    tau_m = np.full((len(rec.pair_signed), len(LEG_JOINTS)), np.nan, dtype=np.float64)
     qv_m = np.full_like(tau_m, np.nan)
-    for i, (tau_row, qv_row) in enumerate(zip(rec.pair_tau, rec.pair_qvel)):
+    for i, (tau_row, qv_row) in enumerate(zip(rec.pair_signed, rec.pair_qvel)):
         for j, (tau, qvel_abs) in enumerate(zip(tau_row, qv_row)):
             if tau is not None:
                 tau_m[i, j] = float(tau)
@@ -231,13 +343,36 @@ def _hinge_block(step_bars, rec: Recorder, period: float, vx: float) -> dict[str
     )
     pairs = {
         "t_s": [float(item) for item in rec.cols["t"]],
-        "tau_nm": {
-            name: [row[i] for row in rec.pair_tau] for i, name in enumerate(LEG_JOINTS)
+        "tau_signed_nm": {
+            name: [row[i] for row in rec.pair_signed] for i, name in enumerate(LEG_JOINTS)
+        },
+        "tau_sum_nm": {
+            name: [row[i] for row in rec.pair_sum] for i, name in enumerate(LEG_JOINTS)
         },
         "qvel_rad_s": {
             name: [row[i] for row in rec.pair_qvel] for i, name in enumerate(LEG_JOINTS)
         },
+        "qvel_at_sum_rad_s": {
+            name: [row[i] for row in rec.pair_qvel_sum] for i, name in enumerate(LEG_JOINTS)
+        },
+        "definitions": {
+            "signed": "|kp*(q_des-q) - kv*omega|",
+            "sum": "|kp*(q_des-q)| + |kv*omega|",
+            "speed_torque_uses": "signed",
+            "bar_2_33_nm_uses": "sum",
+        },
     }
+    context = _sum_peak_context(rec, "r_knee")
+    if context is not None and rec.rail_hi is not None and rec.rail_lo is not None:
+        col = LEG_JOINTS.index("r_knee")
+        context["forcerange_lo_nm"] = float(rec.rail_lo[col])
+        context["forcerange_hi_nm"] = float(rec.rail_hi[col])
+        force = context.get("actuator_force_nm")
+        hi = float(context["forcerange_hi_nm"])
+        lo = float(context["forcerange_lo_nm"])
+        context["clamp_active"] = (
+            force is not None and (float(force) >= hi - 1e-3 or float(force) <= lo + 1e-3)
+        )
     speed = step_bars.trunk_speed_line(
         t,
         np.asarray(rec.trunk_x, dtype=np.float64),
@@ -247,7 +382,14 @@ def _hinge_block(step_bars, rec: Recorder, period: float, vx: float) -> dict[str
         period_s=period,
         vx_cmd_m_s=vx,
     )
-    return {"qvel": qvel, "trunk_speed": speed, "speed_torque": torque, "hinge_pairs": pairs}
+    return {
+        "qvel": qvel,
+        "trunk_speed": speed,
+        "speed_torque": torque,
+        "hinge_pairs": pairs,
+        "clamp": _clamp_rows(step_bars, rec),
+        "sum_peak_context": context,
+    }
 
 
 def _leg_q(model, data) -> list[float]:
@@ -287,8 +429,18 @@ class Recorder:
         self.trunk_y: list[float] = []
         self.trunk_yaw: list[float] = []
         self._dof: list[int] | None = None
-        self.pair_tau: list[list[float | None]] = []
+        self.pair_signed: list[list[float | None]] = []
+        self.pair_sum: list[list[float | None]] = []
         self.pair_qvel: list[list[float | None]] = []
+        self.pair_qvel_sum: list[list[float | None]] = []
+        self.pair_pred: list[list[float | None]] = []
+        self.pair_force: list[list[float]] = []
+        self.applied_yaw: list[float] = []
+        self.fault: list[bool] = []
+        self.cmd_vx: list[float] = []
+        self.cmd_yaw: list[float] = []
+        self.rail_lo: list[float] | None = None
+        self.rail_hi: list[float] | None = None
         self._orig = sw.SteerSession.step
 
         def _step(session, *args, **kwargs):
@@ -302,38 +454,54 @@ class Recorder:
         sw.SteerSession.step = _step  # type: ignore[method-assign]
 
     def _arm_ask_log(self, walker) -> None:
-        """Record unclamped |τ| and |qvel| at each leg write. The command is unchanged."""
+        """Record signed |τ|, the sum, and |qvel| at each leg write.
+
+        Signed is ``|kp·(q_des−q) − kv·ω|``. The sum is the upper bound
+        ``|kp·e| + |kv·ω|``. After the write, the predicted force of the
+        stored ctrl is logged too. The command is unchanged.
+        """
         if getattr(walker, "_pair_log", None) is not None:
             return
         walker._pair_log = []
 
-        def _log(jn: str, q_des: float) -> None:
+        def _terms(jn: str, q_des: float):
             if jn not in LEG_JOINTS:
-                return
+                return None
             act = jn + "_pos"
             idx = walker.act_idx.get(act)
             if idx is None:
-                return
+                return None
             q = float(walker.q(jn))
             jid = mj.mj_name2id(walker.model, mj.mjtObj.mjOBJ_JOINT, jn)
             omega = float(walker.data.qvel[int(walker.model.jnt_dofadr[jid])])
             kp = float(walker.model.actuator_gainprm[idx, 0])
             kv = -float(walker.model.actuator_biasprm[idx, 2])
-            total = abs(kp * (float(q_des) - q)) + abs(kv * omega)
-            walker._pair_log.append((jn, float(total), abs(omega)))
+            kp_term = kp * (float(q_des) - q)
+            signed = abs(kp_term - kv * omega)
+            total = abs(kp_term) + abs(kv * omega)
+            return idx, q, omega, kp, kv, signed, total
+
+        def _store(jn: str, q_des: float) -> None:
+            got = _terms(jn, q_des)
+            if got is None:
+                return
+            idx, q, omega, kp, kv, signed, total = got
+            ctrl = float(walker.data.ctrl[idx])
+            pred = abs(kp * (ctrl - q) - kv * omega)
+            walker._pair_log.append((jn, float(signed), float(total), abs(omega), float(pred)))
 
         orig = walker.write_clipped
 
         def wrapped(jn: str, q_des: float) -> None:
-            _log(jn, q_des)
             orig(jn, q_des)
+            _store(jn, q_des)
 
         walker.write_clipped = wrapped  # type: ignore[method-assign]
         limited = getattr(walker, "write_force_limited", None)
         if limited is not None:
             def wrapped_limited(jn: str, q_des: float, limit_nm: float | None = None) -> None:
-                _log(jn, q_des)
                 limited(jn, q_des, limit_nm)
+                _store(jn, q_des)
 
             walker.write_force_limited = wrapped_limited  # type: ignore[method-assign]
 
@@ -342,23 +510,58 @@ class Recorder:
         writes = list(log) if log is not None else []
         if log is not None:
             log.clear()
-        best: dict[str, tuple[float, float]] = {}
-        for name, tau, qvel in writes:
-            prev = best.get(name)
-            if prev is None or tau > prev[0]:
-                best[name] = (tau, qvel)
-        tau_row: list[float | None] = []
+        best_signed: dict[str, tuple[float, float]] = {}
+        best_sum: dict[str, tuple[float, float]] = {}
+        best_pred: dict[str, float] = {}
+        for name, signed, total, qvel, pred in writes:
+            prev = best_signed.get(name)
+            if prev is None or signed > prev[0]:
+                best_signed[name] = (signed, qvel)
+            old_sum = best_sum.get(name)
+            if old_sum is None or total > old_sum[0]:
+                best_sum[name] = (total, qvel)
+            old_pred = best_pred.get(name)
+            if old_pred is None or pred > old_pred:
+                best_pred[name] = pred
+        signed_row: list[float | None] = []
+        sum_row: list[float | None] = []
         qvel_row: list[float | None] = []
+        qvel_sum_row: list[float | None] = []
+        pred_row: list[float | None] = []
         for name in LEG_JOINTS:
-            got = best.get(name)
-            if got is None:
-                tau_row.append(None)
+            got = best_signed.get(name)
+            got_sum = best_sum.get(name)
+            if got is None or got_sum is None:
+                signed_row.append(None)
+                sum_row.append(None)
                 qvel_row.append(None)
+                qvel_sum_row.append(None)
+                pred_row.append(None)
             else:
-                tau_row.append(got[0])
+                signed_row.append(got[0])
+                sum_row.append(got_sum[0])
                 qvel_row.append(got[1])
-        self.pair_tau.append(tau_row)
+                qvel_sum_row.append(got_sum[1])
+                pred_row.append(best_pred.get(name))
+        self.pair_signed.append(signed_row)
+        self.pair_sum.append(sum_row)
         self.pair_qvel.append(qvel_row)
+        self.pair_qvel_sum.append(qvel_sum_row)
+        self.pair_pred.append(pred_row)
+        self.pair_force.append(_actuator_force_row(walker))
+        if self.rail_hi is None:
+            lo: list[float] = []
+            hi: list[float] = []
+            for name in LEG_JOINTS:
+                idx = walker.act_idx.get(name + "_pos")
+                if idx is None:
+                    lo.append(float("nan"))
+                    hi.append(float("nan"))
+                    continue
+                lo.append(float(walker.model.actuator_forcerange[idx, 0]))
+                hi.append(float(walker.model.actuator_forcerange[idx, 1]))
+            self.rail_lo = lo
+            self.rail_hi = hi
 
     def _leg_omega(self, model, data) -> list[float]:
         if self._dof is None:
@@ -424,6 +627,10 @@ class Recorder:
         self.trunk_x.append(float(origin[0]))
         self.trunk_y.append(float(origin[1]))
         self.trunk_yaw.append(yaw)
+        self.applied_yaw.append(float(session.bus.applied_yaw_rate))
+        self.fault.append(bool(session.bus.fault))
+        self.cmd_vx.append(float(getattr(walker, "cmd_vx", 0.0)))
+        self.cmd_yaw.append(float(getattr(walker, "cmd_yaw", 0.0)))
         self._drain_pairs(walker)
         if self.half_x is None:
             self.half_x = float(session.model.geom_size[int(walker.gid["L"]), 0])
@@ -445,8 +652,18 @@ class Recorder:
         self.trunk_x = []
         self.trunk_y = []
         self.trunk_yaw = []
-        self.pair_tau = []
+        self.pair_signed = []
+        self.pair_sum = []
         self.pair_qvel = []
+        self.pair_qvel_sum = []
+        self.pair_pred = []
+        self.pair_force = []
+        self.applied_yaw = []
+        self.fault = []
+        self.cmd_vx = []
+        self.cmd_yaw = []
+        self.rail_lo = None
+        self.rail_hi = None
 
 
 def _q_err(step_bars, cols, q_rows: list[list[float]]) -> np.ndarray:
@@ -685,6 +902,8 @@ def run_voice(sw, step_bars, label: str, pr: int, sha: str, rooms: tuple[str, ..
             "trunk_speed": _jsonable(hinge["trunk_speed"]),
             "speed_torque": _jsonable(hinge["speed_torque"]),
             "hinge_pairs": _jsonable(hinge["hinge_pairs"]),
+            "clamp": _jsonable(hinge["clamp"]),
+            "sum_peak_context": _jsonable(hinge["sum_peak_context"]),
             "script": "voice_goto_rooms._run_room",
             "config": "locked_kit_config",
             "phrase": phrases[name],
@@ -1041,7 +1260,7 @@ def _corner_lines(speed_torque: object) -> list[str]:
     lines = [
         str(speed_torque.get("status")),
         "",
-        "| Joint | Largest \\|qvel\\| at \\|τ\\|≥2 Nm | Largest \\|τ\\| at \\|qvel\\|≥4 rad/s |",
+        "| Joint | Largest \\|qvel\\| at signed \\|τ\\|≥2 Nm | Largest signed \\|τ\\| at \\|qvel\\|≥4 rad/s |",
         "| --- | --- | --- |",
     ]
     corners = speed_torque.get("corners")
@@ -1059,6 +1278,103 @@ def _corner_lines(speed_torque: object) -> list[str]:
                 + " |"
             )
     lines.append("")
+    return lines
+
+
+def _peak_of(series: object, times: object) -> tuple[float | None, float | None]:
+    if not isinstance(series, list) or not isinstance(times, list):
+        return None, None
+    best: float | None = None
+    best_t: float | None = None
+    for t_s, value in zip(times, series):
+        if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+            continue
+        got = float(value)
+        if best is None or got > best:
+            best = got
+            best_t = float(t_s)
+    return best, best_t
+
+
+def _peak_lines(pairs: object) -> list[str]:
+    if not isinstance(pairs, dict):
+        return []
+    signed = pairs.get("tau_signed_nm")
+    summed = pairs.get("tau_sum_nm")
+    times = pairs.get("t_s")
+    if not isinstance(signed, dict) or not isinstance(summed, dict):
+        return []
+    lines = [
+        "| Joint | Peak signed \\|τ\\| Nm | t s | Peak sum Nm | t s |",
+        "| --- | ---: | ---: | ---: | ---: |",
+    ]
+    names = list(signed.keys())
+    for name in names:
+        peak_s, t_s = _peak_of(signed.get(name), times)
+        peak_u, t_u = _peak_of(summed.get(name), times)
+        lines.append(
+            f"| {name} | {_num(peak_s, 4)} | {_num(t_s, 3)} | {_num(peak_u, 4)} | {_num(t_u, 3)} |"
+        )
+    lines.append("")
+    return lines
+
+
+def _clamp_lines(clamp: object) -> list[str]:
+    if not isinstance(clamp, list) or not clamp:
+        return []
+    lines = [
+        "Forcerange clamp, applied `actuator_force` on the rail:",
+        "",
+        "| Joint | Rail Nm | Peak applied Nm | Clamped ticks | Fraction |",
+        "| --- | ---: | ---: | ---: | ---: |",
+    ]
+    for row in clamp:
+        if not isinstance(row, dict):
+            continue
+        lo = row.get("forcerange_lo_nm")
+        hi = row.get("forcerange_hi_nm")
+        rail = f"{_num(lo, 2)} to {_num(hi, 2)}"
+        frac = row.get("fraction")
+        frac_s = "—" if not isinstance(frac, (int, float)) else f"{float(frac):.3f}"
+        lines.append(
+            f"| {row.get('joint')} | {rail} | {_num(row.get('peak_abs_nm'), 4)} | "
+            f"{row.get('n_clamped')}/{row.get('n_ticks')} | {frac_s} |"
+        )
+    lines.append("")
+    return lines
+
+
+def _context_lines(context: object) -> list[str]:
+    if not isinstance(context, dict):
+        return []
+    joint = context.get("joint")
+    lines = [
+        (
+            f"Largest sum on `{joint}` is {_num(context.get('tau_sum_nm'), 4)} Nm at "
+            f"{_num(context.get('t_s'), 3)} s, stage {context.get('stage')}. "
+            f"Signed |τ| on that tick is {_num(context.get('tau_signed_nm'), 4)} Nm. "
+            f"|qvel| at the signed write is {_num(context.get('qvel_rad_s'), 4)} rad/s. "
+            f"|qvel| at the sum write is {_num(context.get('qvel_at_sum_rad_s'), 4)} rad/s. "
+            f"{context.get('doing')}."
+        ),
+        (
+            f"Bus mode {context.get('bus_mode')}, applied vx {_num(context.get('applied_vx_m_s'), 4)} m/s, "
+            f"applied yaw {_num(context.get('applied_yaw_rad_s'), 4)} rad/s, "
+            f"fault {context.get('fault')}. "
+            f"That mode runs {_num(context.get('stand_run_t0_s'), 3)}–{_num(context.get('stand_run_t1_s'), 3)} s. "
+            f"The previous 1 s peaked at |vx| {_num(context.get('prev_1s_max_abs_vx_m_s'), 4)} m/s and "
+            f"|yaw| {_num(context.get('prev_1s_max_abs_yaw_rad_s'), 4)} rad/s. "
+            f"Contacts L/R {context.get('n_l')}/{context.get('n_r')}."
+        ),
+        (
+            f"Applied actuator force {_num(context.get('actuator_force_nm'), 4)} Nm. "
+            f"Written-ctrl prediction {_num(context.get('ctrl_prediction_abs_nm'), 4)} Nm. "
+            f"Forcerange {_num(context.get('forcerange_lo_nm'), 2)} to "
+            f"{_num(context.get('forcerange_hi_nm'), 2)} Nm. "
+            f"Clamp active on that tick: {context.get('clamp_active')}."
+        ),
+        "",
+    ]
     return lines
 
 
@@ -1087,14 +1403,26 @@ def hinge_markdown(payload: dict[str, object] | None = None) -> str:
         "displacement over the bus `move` window, divided by that window's",
         "duration. The ratio is reported. It is not a separate cutoff.",
         "",
-        "Each leg hinge logs the per-tick pair `(|unclamped τ|, |qvel|)` in",
-        "`previews/walk_hinge_speed.json`. Unclamped τ is",
-        "`|kp·(q_des−q)| + |kv·ω|` at the write. `no_load_speed`, `stall_torque`,",
-        "and `voltage` are unset, so the speed-torque line is pending the HW",
-        "datasheet. While it is pending, each joint reports the tick with the",
-        "largest `|qvel|` at `|τ| ≥ 2` Nm and the tick with the largest `|τ|`",
-        "at `|qvel| ≥ 4` rad/s. When the line is set, a tick fails when",
-        "`|qvel|` exceeds `no_load·(1 − |τ|/stall)`.",
+        "The 2.33 Nm unclamped-ask bar is unchanged. It scores the sum",
+        "`|kp·(q_des−q)| + |kv·ω|`. Controls' posted unclamped numbers match",
+        "that sum: on `d6e8b5e`, r_hip_roll 2.2567 Nm at 2.832 s is the sum,",
+        "and the signed torque on that same write is not 2.2567 Nm.",
+        "",
+        "Each leg hinge logs both numbers, plus `|qvel|`, in",
+        "`previews/walk_hinge_speed.json`. `tau_signed_nm` is",
+        "`|kp·(q_des−q) − kv·ω|`, the physical servo torque of the unclamped",
+        "target. `tau_sum_nm` is the sum, kept as the conservative column.",
+        "The speed-torque check and the `|τ| ≥ 2` Nm corner use the signed",
+        "magnitude. `no_load_speed`, `stall_torque`, and `voltage` are unset,",
+        "so the line is pending the HW datasheet. While it is pending, each",
+        "joint reports the tick with the largest `|qvel|` at signed `|τ| ≥ 2`",
+        "Nm and the tick with the largest signed `|τ|` at `|qvel| ≥ 4` rad/s.",
+        "When the line is set, a tick fails when `|qvel|` exceeds",
+        "`no_load·(1 − |τ|/stall)` using that signed `|τ|`.",
+        "",
+        "A tick is forcerange-clamped when `actuator_force` after the control",
+        "tick sits within 0.001 Nm of the actuator rail. The fraction is over",
+        "every tick of the bout.",
         "",
     ]
     for row in rows:
@@ -1113,6 +1441,9 @@ def hinge_markdown(payload: dict[str, object] | None = None) -> str:
             f"Plant `{row.get('plant_md5_before')}` before and `{row.get('plant_md5')}` after."
         )
         lines.extend(_corner_lines(row.get("speed_torque")))
+        lines.extend(_peak_lines(row.get("hinge_pairs")))
+        lines.extend(_clamp_lines(row.get("clamp")))
+        lines.extend(_context_lines(row.get("sum_peak_context")))
         lines.append(
             f"Period T {_num(speed.get('period_s'), 3)} s, commanded vx "
             f"{_num(speed.get('vx_cmd_m_s'), 4)} m/s, actual trunk vx "
@@ -1215,6 +1546,8 @@ def main() -> None:
                 "trunk_speed": row.get("trunk_speed"),
                 "speed_torque": row.get("speed_torque"),
                 "hinge_pairs": row.get("hinge_pairs"),
+                "clamp": row.get("clamp"),
+                "sum_peak_context": row.get("sum_peak_context"),
             })
         splice_hinge_doc()
         return

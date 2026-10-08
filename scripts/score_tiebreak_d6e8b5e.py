@@ -657,6 +657,7 @@ def main() -> None:
         "trunk_speed": _jsonable(trunk_speed),
         "speed_torque": _jsonable(speed_torque),
         "hinge_pairs": _jsonable(hinge_pairs),
+        "clamp": _jsonable(row.get("clamp")),
         "stepping": _jsonable(strict),
         "stepping_contact_count": _jsonable(contact_only),
         "swings": swings,
@@ -704,6 +705,7 @@ def main() -> None:
         "trunk_speed": payload_row["trunk_speed"],
         "speed_torque": payload_row["speed_torque"],
         "hinge_pairs": payload_row["hinge_pairs"],
+        "clamp": payload_row.get("clamp"),
     })
     retro.splice_hinge_doc()
 
