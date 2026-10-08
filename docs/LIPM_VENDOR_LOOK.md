@@ -2803,4 +2803,41 @@ The bar on these rows is the applied ask ≤ 2.33 Nm on every tick, clamp-active
 
 When `mj_inverse` at `data.qacc` itself exceeds 2.33 Nm the dominant piece is named. q̈ is the inertia excluding armature, plus the velocity product. Armature is `0.01·q̈`. Impact is the contact torque at touchdown. CoP is the contact torque when that foot's centre of pressure is at least 15 mm from the ankle. Any other contact is counted with gravity. The peak is taken while the torso up component is at least 0.92, so a fallen pose does not supply the name.
 
-The five rows below are the data.qacc rescore of the same set. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0.
+The five rows below are that rescore. `id_ff_broke` and `id_ff_impossible` are 0. The signed peak sits on the 2.33 Nm rail, the clamp fraction is 0, the DC excess is ≤ 0, and every leg command stays inside ctrlrange. The inverse at `data.qacc` is over 2.33 Nm on each row. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0.
+
+| Row | signed | joint | t | clamp | DC ex | clips | \|ctrl\| max | clear | cmax | slip | off | up_z | ID | ID joint | phase | term | n |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | ---: |
+| T 0.60 / 0.032, flat 8 mm | +2.33 | l_knee | 1.336 | 0 | 0.00 | 0 | 1.165 | −0.45 | 6.58 | 0.36 | 0.88 | 0.747 | −18.12 | r_hip_roll | held swing | CoP | 1 |
+| T 1.00 / 0.016, flat 8 mm | −2.33 | l_knee | 1.664 | 0 | −0.03 | 0 | 1.224 | −3.04 | 5.58 | 4.98 | 0.66 | 0.850 | −4.51 | r_hip_roll | stop | CoP | 7 |
+| T 1.20 / 0.024, flat 8 mm | +2.33 | l_hip_pitch | 2.648 | 0 | 0.00 | 0 | 1.198 | −2.87 | 13.58 | 10.58 | 0.37 | 0.943 | +7.75 | l_hip_roll | stop | CoP | 8 |
+| T 4 / 0.016, flat 8 mm | −2.33 | l_knee | 4.696 | 0 | −0.29 | 0 | 1.172 | −4.37 | 32.58 | 26.63 | 0.49 | 0.914 | +6.91 | r_hip_roll | stance edge | CoP | 18 |
+| T 20 / 0.0042, flat 18 mm | −2.33 | l_knee | 18.872 | 0 | −0.74 | 0 | 1.186 | 0.42 | 21.44 | 24.42 | 0.98 | 0.644 | −10.71 | r_hip_pitch | DS transfer | CoP | 12 |
+
+Max `|ctrl|` on each leg joint, in radians. The plant range is ±2.09. The clip count on every joint is 0.
+
+| Joint | T 0.60 | T 1.00 | T 1.20 | T 4 | T 20 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| l_hip_yaw | 0.048 | 0.071 | 0.068 | 0.056 | 0.041 |
+| l_hip_roll | 0.274 | 0.331 | 0.315 | 0.304 | 0.328 |
+| l_hip_pitch | 0.852 | 0.892 | 0.877 | 0.931 | 0.888 |
+| l_knee | 1.165 | 1.224 | 1.198 | 1.172 | 1.185 |
+| l_ank_pitch | 0.620 | 0.660 | 0.691 | 0.699 | 0.646 |
+| l_ank_roll | 0.264 | 0.320 | 0.315 | 0.296 | 0.317 |
+| r_hip_yaw | 0.089 | 0.059 | 0.030 | 0.064 | 0.048 |
+| r_hip_roll | 0.258 | 0.414 | 0.299 | 0.362 | 0.348 |
+| r_hip_pitch | 0.848 | 0.847 | 0.860 | 0.915 | 0.902 |
+| r_knee | 1.147 | 1.166 | 1.192 | 1.169 | 1.186 |
+| r_ank_pitch | 0.615 | 0.624 | 0.629 | 0.696 | 0.662 |
+| r_ank_roll | 0.373 | 0.399 | 0.290 | 0.361 | 0.353 |
+
+T 0.60 s leaves the support. The fault is the centre of mass outside the polygon, margin −55 mm, and min up_z is 0.747. No swing completes the 8 mm airborne count. The 20–80% minimum on the swings that do run is −0.45 mm, and the highest corner in that window is 6.58 mm. The signed peak is +2.33 Nm on the left knee at 1.336 s. The DC excess is on the line at the right knee. The `data.qacc` inverse, while the torso up component is still at least 0.92, reaches −18.12 Nm on the right hip roll in the held swing, at 1.832 s. That is one tick. The contact term is the largest piece, and the foot's centre of pressure is at least 15 mm from the ankle.
+
+T 1.00 s also leaves the support. The fault is the same centre-of-mass check, margin −58 mm, min up_z 0.850. The window minimum is −3.04 mm and the window peak is 5.58 mm. The inverse reaches −4.51 Nm on the right hip roll in the stop, CoP, at 3.384 s, on 7 upright ticks. The DC excess is −0.03 rad/s on the left knee.
+
+T 1.20 s stays up (min up_z 0.943) and the fault string is empty. The sole does rise — the highest corner inside the window is 13.58 mm — and the 20–80% minimum is −2.87 mm. Slip is 10.58 mm and the contact-off fraction is 0.37. The inverse reaches +7.75 Nm on the left hip roll in the stop, CoP, at 3.888 s, on 8 upright ticks. The DC excess is on the line at the right knee.
+
+T 4 s at 0.016 m/s stays up (min up_z 0.914). The window minimum is −4.37 mm, the window peak is 32.58 mm, and slip is 26.63 mm. The inverse reaches +6.91 Nm on the right hip roll at the stance edge, CoP, at 7.152 s, on 18 upright ticks. The DC excess is −0.29 rad/s on that same joint.
+
+The 20 s / 18 mm gait (dsp 0.35, x_amp 21 mm, preview 0.043 m, arm 2.40 s, stand 0.40 s, walk 22 s) holds the applied ask: signed peak −2.33 Nm on the left knee at 18.872 s, clamp fraction 0, DC excess −0.74 rad/s on the right hip pitch, ctrl clips 0, max `|ctrl|` 1.186 rad on the right knee. The 20–80% window is 0.42 mm, the window peak is 21.44 mm, slip is 24.42 mm, and the contact-off fraction is 0.98. No swing completes the 8 mm airborne count. Min up_z is 0.644 and the fault is `tip up_z=0.64`. Trunk ratio is 2.08. The inverse exceeds 2.33 Nm on 12 upright ticks. The largest is −10.71 Nm on the right hip pitch during double-support transfer, at 2.920 s, and the dominant term is CoP.
+
+The applied ask, the clamp, the DC line, and the ctrlrange check pass on every row. The 8 mm window does not. The inverse at this step's `data.qacc` is over 2.33 Nm on every row, and the dominant term on the peak tick is CoP.
