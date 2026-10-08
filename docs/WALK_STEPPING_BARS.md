@@ -594,92 +594,144 @@ A control tick is clipped when any leg writer command before the ctrlrange clip,
 
 The sum `|kp·(q_des−q)| + |kv·ω|` is a column. Sum peaks stay 8.014–11.809 Nm, so the sum fails every row. Clamp-active fraction is the share of control ticks with plant `|ask| ≥ 2.45`. The DC-motor line is `|qvel| ≤ 5.82·(1 − |plant ask|/3.43)` on every plant-ask sample, labelled `DC-motor model, not datasheet (Hiwonder HX-35H page values)`. Peak `|qvel|` ≤ 5.82 is a separate bar. Stepping bars, declared-stance ZMP and CoM margins, whole-bout jerk under the #102 baseline, and the final-1 s stop (both feet ≥ 3 contacts, trunk within 5° of the stand median, up_z ≥ 0.90) are the rest of the CLEAR set. Trunk speed ratio is a report.
 
-MuJoCo is 3.14.0. `mjtEnableBit.mjENBL_INVDISCRETE` is present (the `invdiscrete` flag). It is set on a binary copy of the model, together with `mjENBL_FWDINV`. The live model's enableflags stay 0. The plant file is not written. Under implicitfast the forward step solves `(M + dt·D)·qacc = f`. The qacc that belongs to that discrete step is `(qvel_next − qvel) / dt` on the pre-step state. `mj_forward` still runs on the copy so the pre-step actuator and passive forces are the ones in the residual. `mj_compareFwdInv` runs on the discrete qacc, then `mj_inverse` runs on that same qacc. The inverse column is `data_copy.qfrc_inverse` only:
+MuJoCo is 3.14.0. `mjtEnableBit.mjENBL_INVDISCRETE` is present (value 8). The module-level name `mujoco.mjENBL_INVDISCRETE` is absent, so the scorer uses the enum. The flag is set on a binary copy of the model, together with `mjENBL_FWDINV`. The live model's enableflags stay 0. The plant file is not written. Under implicitfast the forward step solves `(M + dt·D)·qacc = f`. The qacc that belongs to that discrete step is `(qvel_next − qvel) / dt` on the pre-step state. `mj_forward` still runs on the copy so the pre-step actuator and passive forces are the ones in the residual. `mj_compareFwdInv` runs on the discrete qacc, then `mj_inverse` runs on that same qacc. The inverse column is `data_copy.qfrc_inverse` only:
 
 ```python
 def _qfrc_inverse_column(data_copy: mj.MjData) -> np.ndarray:
+    """Inverse column for every dof. This reads ``data_copy.qfrc_inverse`` only."""
     return np.array(data_copy.qfrc_inverse, dtype=np.float64, copy=True)
 ```
 
-That array is what the knee column reads. It does not read `qfrc_actuator`.
+```python
+"id": _qfrc_inverse_column(copy),
+```
+
+That array is what the knee column reads.
 
 The plant timestep is 0.002 s. The integrator is implicitfast on every cell. The solver is the MuJoCo default: Newton, 100 iterations, tolerance 1e-8, Jacobian auto. Cone is pyramidal, impratio is 1, and noslip iterations are 0. The option element does not override cone, impratio, or noslip.
 
-A control tick is bucketed only when every leg joint and every root dof has `|qfrc_inverse − (qfrc_actuator + qfrc_passive)| ≤ 1e-3` Nm. Exactly 1e-3 stays inside. The band `0.05 + 0.002·(0.08 + kv_i)·|q̈_i|` and its 0.15 Nm cap stay in the table for comparison. They do not decide the bucket, and they do not relax the signed applied bar. The signed bar still sees every control tick. It fails 42 rows and passes 12. Those 12 still fail the sum. The flag exists on this build, so the gate is not the post-subtraction residual. The qDeriv diagonal is `−(0.08 + kv)`, and subtracting `dt·(0.08 + kv)·qacc` from the raw residual still does not bring it under 1e-3.
+The match residual is `|qfrc_inverse − qfrc_actuator|` on each of the 12 leg joints and each of the 6 root dofs. Exactly 1e-3 Nm stays inside the Prefer FAIL target. Exactly 1e-2 Nm stays inside the bucket. A tick over 1e-3 Nm is a Prefer FAIL count and can still be bucketed when it is at or under 1e-2 Nm. A tick is bucketed only when every one of those residuals is ≤ 1e-2 Nm. Counts over each threshold are both in the table. On the example cell, T 0.60 s / vx 0.032 m/s, the leg match peaks at 1.476e-3 Nm. Controls' nominal on MuJoCo 3.14 with this flag is 1.48e-3 Nm. The same cell's root match peaks at 9.32e-3 Nm. Across the 54 cells the leg match peaks at 3.56e-3 Nm and the root match peaks at 0.0173 Nm. Ticks over 1e-3 Nm are 0–7 per row. Ticks over 1e-2 Nm are 0–3 per row, and on those ticks the leg match stays under 1e-2 Nm while the root match is the one over 1e-2 Nm. Three rows have no tick over 1e-3 Nm (T 0.50 s at 0.016 m/s, T 0.70 s at 0.024 m/s, T 0.65 s at 0.048 m/s).
 
-On this grid the raw residual still equals `|qfrc_passive|`, 0.080 Nm per rad/s on every row. The largest raw residual is 0.270 Nm. `|qfrc_inverse − qfrc_actuator|` reaches 0.00356 Nm, so the actuator identity is tight and is not the 1e-3 failure. The root residual on the same formula is between 3e-13 and 0.017 Nm. `solver_fwdinv[0]` and `solver_fwdinv[1]` peak at 0.0186.
+The passive-inclusive residual `|qfrc_inverse − (qfrc_actuator + qfrc_passive)|` stays a comparison column. It still equals `|qfrc_passive|`, 0.080 Nm per rad/s on every row, and its largest sample is 0.270 Nm. That column is what used to fail 569–762 ticks per row. It does not decide the bucket. The band `0.05 + 0.002·(0.08 + kv_i)·|q̈_i|` and its 0.15 Nm cap stay in the table for comparison. They do not decide the bucket, and they do not relax the signed applied bar. The signed bar still sees every control tick. It fails 42 rows and passes 12. Those 12 still fail the sum. The maximum band on a row is 0.319–0.775 Nm. Ticks counted by band > 0.15 Nm are 59–119 per row. Ticks counted by residual > band are 91–153 per row. The overlap is 31–60 ticks per row. These counts match the previous score. `solver_fwdinv[0]` and `solver_fwdinv[1]` peak at 0.0186.
 
-The maximum band on a row is 0.319–0.775 Nm. Ticks counted by band > 0.15 Nm are 59–119 per row. Ticks counted by residual > band are 91–153 per row, the same counts as the previous score. The overlap is 31–60 ticks per row. Ticks that miss the 1e-3 residual are 569–762 per row, which is 97–99.7% of the bout. The ticks that meet it are 2–16 per row, all in the stand. All 376 over-bar substeps sit on a tick that misses 1e-3 Nm, so all 376 are `discrete-residual, not bucketed`. Controller, unsourced-armature, and physics fractions are empty on every row.
+A joint with `|applied| ≥ 2.45` Nm is `clamped, unclassifiable`. Applied means the signed plant ask or `qfrc_actuator` on that joint. Exactly 2.45 is clamped. The realised-motion inverse returns the clamp, so the sample is not sorted into controller, unsourced-armature, or physics. The armature-stripped value `qfrc_inverse − 0.01·qacc` is reported on the sample and is not a pass. On the example cell the right knee is on the rail for 10 substeps in the stop. At 2.688 s the inverse is +2.450 Nm and the armature-stripped value is +1.302 Nm. At 2.690 s the same rail reads +2.450 Nm and strips to +1.435 Nm. Controls cited r_knee +2.450 at 2.69 s in the stop, armature-stripped 1.302 Nm. That 1.302 Nm sample is the 2.688 s substep, labelled `clamped, unclassifiable`.
 
-The implicitfast offset term is `0.002·(0.08 + kv_i)·q̈_i`, signed. The offset does not explain the residual. At the sample with the largest |raw| residual, |offset| is 0.0003–0.091 Nm while |raw| is 0.169–0.270 Nm. Subtracting the offset makes the absolute residual larger on all 54 rows.
+On an over-bar sample that is not clamped, a tick whose match residual is over 1e-2 Nm is `residual over 1e-2, not bucketed`. No over-bar sample landed in that class: the ticks over 1e-2 Nm did not carry an unclamped over-bar joint. The remaining samples are the three buckets. Of 376 over-bar substeps, 325 are `clamped, unclassifiable` and 51 are `unsourced-armature candidate`. Controller and physics counts are 0. The 51 sit on 28 rows, and on each of those rows the armature share of the bucketed samples is 1. One of them is T 0.80 s / vx 0.032 m/s, right knee at 3.044 s: plant ask +2.446 Nm, inverse +2.446 Nm, armature-stripped +1.879 Nm. The ask is over 2.33 Nm, so the row does not pass. Stripping armature is what puts the inverse under 2.33 Nm, which is why the class is an unsourced-armature candidate.
 
-The knee column is a column bug wherever it is exactly ±2.450 Nm. That is the actuator rail. Nominal peak is +2.450 Nm on the right knee (41 of 54 rows, 325 samples). The other 13 rows are 1.846–2.379 Nm. The closest of those to the old 2.045 Nm is 2.023 Nm, on T 0.55 s at vx 0.056 m/s. The closest to Controls' 0.934 Nm is 1.846 Nm. None of the nominal peaks is 0.934 or 1.087. The knee value on ticks that meet 1e-3 Nm is 0.678 Nm at 0.168 s, the same stand sample on every row.
+The implicitfast offset term is `0.002·(0.08 + kv_i)·q̈_i`, signed. At the sample with the largest |raw| residual, |offset| is 0.0003–0.091 Nm while |raw| is 0.169–0.270 Nm. Subtracting the offset makes the absolute residual larger on all 54 rows.
 
-Worst case is the same rail. Mass ×0.95, mass ×1.05, seeds 0–9 (σ 0.002 rad on the twelve leg hinges), and the entrance rug (`room_entrance.xml`, `mat_rug` placed at runtime, plant file not written) all peak at +2.450 Nm. The largest sample is +2.450001 Nm, seed 1, T 0.75 s, vx 0.056 m/s, right knee at 2.926 s. That is still the ±2.450 column bug. It is not Controls' 0.934 / 1.087, and it is not the old 2.045.
+The knee column is a column bug wherever it is exactly ±2.450 Nm. That is the actuator rail. Nominal peak is +2.450 Nm on the right knee (41 of 54 rows, 325 samples). The other 13 rows are 1.846–2.379 Nm. The closest of those to the old 2.045 Nm is 2.023 Nm, on T 0.55 s at vx 0.056 m/s. The closest to Controls' 0.934 Nm is 1.846 Nm. None of the nominal peaks is 0.934 or 1.087. The knee value on ticks that meet the passive-inclusive 1e-3 Nm gate is 0.678 Nm at 0.168 s, the same stand sample on every row.
 
-A controller-side clip exists, so the limiter column is a fraction and not `none`. A control tick is limiter-active when the `write_clipped` band binds on a non-sagittal leg joint, or `write_force_limited` changes the predicted-force command, or the hip, knee, and ankle pitch slew in `_lipm_substep` shortens the move. The fraction is 0.000–0.149. The Clip column is still the plant ctrlrange test, which stays 0.
+Worst case is the same rail. Mass ×0.95 peaks at +2.450 Nm (largest unsaturated sample +2.363 Nm, T 1.20 s / vx 0.016 m/s). Mass ×1.05 peaks at +2.450 Nm (largest unsaturated sample +2.408 Nm, T 1.20 s / vx 0.016 m/s). Seeds 0–9 (σ 0.002 rad on the twelve leg hinges, PCG64) all peak at +2.450 Nm. The largest sample is +2.450001 Nm, seed 1, T 0.75 s, vx 0.056 m/s, right knee at 2.926 s. The entrance rug (`room_entrance.xml`, `mat_rug` placed at runtime, plant file not written) peaks at +2.450 Nm (largest unsaturated sample +2.443 Nm, T 1.00 s / vx 0.056 m/s). That is still the ±2.450 column bug. It is not Controls' 0.934 / 1.087, and it is not the old 2.045.
 
-Plant peaks, goal peaks, clip fractions, sums, gait calls, band counts, and the Prefer FAIL reasons are the same numbers as the previous score. Twelve rows still pass the plant signed ask and fail the sum. Every row is Prefer FAIL. qvel ≤ 5.82 passes all 54. The DC line and the clamp pass on 13 rows and fail on 41. Two rows are SKATES (T 1.20 s at 0.048 and 0.056 m/s). The other 52 are STEPS.
+On the same perturbations the leg match peaks at 4.40e-3 Nm (seed 8). Controls' worst seed is 5.2e-3 Nm. The root match on seeds peaks at 2.57e-2 Nm (seed 4), which is over the 1e-2 Nm bucket. Mass ×0.95 leg match peaks at 3.89e-3 Nm, mass ×1.05 at 3.95e-3 Nm, and the rug at 6.51e-3 Nm. The rug root match peaks at 0.0371 Nm.
 
-On the example row (T 0.60 s, vx 0.032 m/s) the goal peak is still +5.820 Nm on the left knee at 1.328 s. The plant peak is still +3.854 Nm on the right knee at 2.680 s, in the stop, so the signed bar still fails the row. The knee inverse on that step is +2.450 Nm (10 samples on the rail), so the column is the bug, and the tick misses 1e-3 Nm. The row's maximum band is 0.717 Nm. All 10 over-bar substeps are discrete-residual, not bucketed. Limiter-active fraction is 0.148 (90 of 610 control ticks). Root residual is 9.3e-3 Nm. Ticks counted by band > 0.15 Nm are 87 of 610. Ticks counted by residual > band are 120 of 610. Both of those counts catch 59 ticks. Ticks that miss 1e-3 Nm are 608 of 610. At the largest |raw| residual, +0.266 Nm on the right knee at 2.700 s, the offset is −0.010 Nm and the adjusted residual is +0.276 Nm.
+The pass stays the real plant. Armature stays 0.01. Signed applied is ≤ 2.33 Nm on every leg joint on every tick, and the limiter fraction is 0. A row that clears 2.33 only after subtracting armature is an unsourced-armature candidate. It is not a pass. Limiter-active ticks are a fail on their own. A control tick is limiter-active when the `write_clipped` band binds on a non-sagittal leg joint, or `write_force_limited` changes the predicted-force command, or the hip, knee, and ankle pitch slew in `_lipm_substep` shortens the move. The Clip column is still the plant ctrlrange test, which stays 0. The fraction is 0.000–0.149. Three rows are at 0 (T 1.20 s at 0.016, 0.024, and 0.032 m/s). They still fail other bars.
 
-Band is the maximum per-joint residual band on the row, in Nm. Cap is control ticks whose band exceeds 0.15 Nm, over the tick count. ResFail is control ticks whose residual exceeds the band. Those two counts are comparison only. A tick can appear in both. Lim is the limiter-active fraction. Knee ID is the peak `data_copy.qfrc_inverse` on either knee, in Nm. A value of 2.450 is the column bug. Raw, Off, and Adj are the signed raw residual, the signed implicitfast offset, and the signed adjusted residual at the leg sample with the largest |raw| residual. Ctrl, Arm, and Phys are the bucket fractions on the ticks that meet 1e-3 Nm. They are empty on every row. Note is `passes signed, fails sum` when the row passes the plant ask and fails the sum. Per-tick traces are in `previews/walk_a5a9183_signed_id.json`.
+The planned-motion check is separate and does not change the pass. `τ_req` is plain `mj_inverse` on the walker's own `q_des`, with `q̇` and `q̈` the backward differences at 8 ms. Contacts are off. The root force `qfrc_inverse[0:3]` is applied through the planned ZMP, so gravity is not added twice. The ZMP point is the body-link subtree CoM x, the preview's instantaneous ZMP y, and z = 0. In double support the wrench is split two ways: by ZMP position along the foot-to-foot line, and by the min-norm ankle-torque split. Both are reported, with the spread. In single support there is one wrench, so the spread is 0. A root step larger than 5 mm, or a root z step larger than 2 mm, is a foothold relabel. Root velocity is held across that tick. Joint differences stay the raw reference. Those holds are 0–10 per row. The largest root step is 0.122 m, on T 1.20 s at vx 0.056 m/s.
 
-| T s | vx | Plant Nm | Joint | Goal Nm | Clip | Lim | Band | Cap | ResFail | Knee ID | Raw | Off | Adj | Note | Ctrl | Arm | Phys |
-| ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: |
-| 0.80 | 0.016 | 3.383 | r_knee | 4.560 | 0 | 0.014 | 0.543 | 88/662 | 129/662 | 2.450 | +0.253 | -0.034 | +0.287 | — | — | — | — |
-| 0.80 | 0.024 | 3.259 | r_knee | 4.613 | 0 | 0.017 | 0.756 | 84/662 | 126/662 | 2.450 | +0.245 | -0.042 | +0.288 | — | — | — | — |
-| 0.80 | 0.032 | 3.412 | r_knee | 4.830 | 0 | 0.015 | 0.543 | 83/662 | 127/662 | 2.450 | +0.247 | -0.028 | +0.276 | — | — | — | — |
-| 0.80 | 0.040 | 3.703 | r_knee | 4.934 | 0 | 0.015 | 0.467 | 90/662 | 141/662 | 2.450 | +0.253 | -0.032 | +0.285 | — | — | — | — |
-| 0.80 | 0.048 | 3.726 | r_knee | 5.031 | 0 | 0.011 | 0.454 | 86/662 | 143/662 | 2.450 | +0.237 | -0.034 | +0.271 | — | — | — | — |
-| 0.80 | 0.056 | 3.923 | r_knee | 5.113 | 0 | 0.012 | 0.446 | 92/662 | 151/662 | 2.450 | +0.239 | -0.019 | +0.258 | — | — | — | — |
-| 0.75 | 0.016 | 3.025 | r_knee | 4.857 | 0 | 0.052 | 0.767 | 84/649 | 117/649 | 2.450 | +0.242 | -0.090 | +0.333 | — | — | — | — |
-| 0.75 | 0.024 | 2.802 | r_knee | 4.906 | 0 | 0.048 | 0.767 | 83/649 | 119/649 | 2.450 | +0.243 | -0.053 | +0.296 | — | — | — | — |
-| 0.75 | 0.032 | 2.853 | r_knee | 4.956 | 0 | 0.048 | 0.768 | 86/649 | 124/649 | 2.450 | +0.240 | -0.032 | +0.272 | — | — | — | — |
-| 0.75 | 0.040 | 3.072 | r_knee | 5.032 | 0 | 0.042 | 0.770 | 90/649 | 136/649 | 2.450 | +0.231 | -0.019 | +0.250 | — | — | — | — |
-| 0.75 | 0.048 | 3.434 | r_knee | 5.138 | 0 | 0.039 | 0.771 | 91/649 | 140/649 | 2.450 | +0.229 | -0.045 | +0.274 | — | — | — | — |
-| 0.75 | 0.056 | 3.862 | r_knee | 5.226 | 0 | 0.035 | 0.461 | 90/649 | 153/649 | 2.450 | +0.236 | -0.029 | +0.265 | — | — | — | — |
-| 0.70 | 0.016 | 3.678 | r_knee | 5.055 | 0 | 0.060 | 0.534 | 88/636 | 111/636 | 2.450 | +0.265 | -0.046 | +0.311 | — | — | — | — |
-| 0.70 | 0.024 | 3.408 | r_knee | 5.099 | 0 | 0.061 | 0.768 | 85/636 | 113/636 | 2.450 | +0.259 | -0.055 | +0.314 | — | — | — | — |
-| 0.70 | 0.032 | 3.470 | r_knee | 5.145 | 0 | 0.060 | 0.769 | 83/636 | 111/636 | 2.450 | +0.257 | -0.090 | +0.347 | — | — | — | — |
-| 0.70 | 0.040 | 3.706 | r_knee | 5.190 | 0 | 0.057 | 0.531 | 85/636 | 121/636 | 2.450 | +0.263 | -0.091 | +0.354 | — | — | — | — |
-| 0.70 | 0.048 | 3.919 | r_knee | 5.234 | 0 | 0.055 | 0.516 | 89/636 | 137/636 | 2.450 | +0.270 | -0.039 | +0.310 | — | — | — | — |
-| 0.70 | 0.056 | 4.064 | r_knee | 5.338 | 0 | 0.049 | 0.497 | 88/636 | 146/636 | 2.450 | +0.268 | -0.077 | +0.345 | — | — | — | — |
-| 0.65 | 0.016 | 3.428 | r_knee | 5.248 | 0 | 0.119 | 0.771 | 84/623 | 105/623 | 2.450 | +0.258 | -0.055 | +0.313 | — | — | — | — |
-| 0.65 | 0.024 | 3.575 | r_knee | 5.293 | 0 | 0.125 | 0.772 | 86/623 | 107/623 | 2.450 | +0.262 | -0.057 | +0.319 | — | — | — | — |
-| 0.65 | 0.032 | 3.389 | r_knee | 5.339 | 0 | 0.132 | 0.774 | 83/623 | 111/623 | 2.450 | +0.258 | -0.043 | +0.301 | — | — | — | — |
-| 0.65 | 0.040 | 3.568 | r_knee | 5.387 | 0 | 0.136 | 0.775 | 81/623 | 115/623 | 2.450 | +0.256 | -0.029 | +0.286 | — | — | — | — |
-| 0.65 | 0.048 | 3.991 | r_knee | 5.435 | 0 | 0.140 | 0.537 | 83/623 | 132/623 | 2.450 | +0.266 | -0.015 | +0.281 | — | — | — | — |
-| 0.65 | 0.056 | 4.029 | r_knee | 5.476 | 0 | 0.135 | 0.517 | 83/623 | 143/623 | 2.450 | +0.259 | -0.068 | +0.327 | — | — | — | — |
-| 0.60 | 0.016 | 3.514 | r_knee | 5.737 | 0 | 0.144 | 0.772 | 88/610 | 117/610 | 2.450 | +0.263 | -0.008 | +0.272 | — | — | — | — |
-| 0.60 | 0.024 | 3.846 | r_knee | 5.778 | 0 | 0.144 | 0.716 | 89/610 | 117/610 | 2.450 | +0.268 | -0.001 | +0.269 | — | — | — | — |
-| 0.60 | 0.032 | 3.854 | r_knee | 5.820 | 0 | 0.148 | 0.717 | 87/610 | 120/610 | 2.450 | +0.266 | -0.010 | +0.276 | — | — | — | — |
-| 0.60 | 0.040 | 3.843 | r_knee | 5.860 | 0 | 0.148 | 0.719 | 87/610 | 126/610 | 2.450 | +0.263 | -0.014 | +0.277 | — | — | — | — |
-| 0.60 | 0.048 | 3.806 | r_knee | 5.904 | 0 | 0.149 | 0.749 | 83/610 | 133/610 | 2.450 | +0.264 | -0.018 | +0.282 | — | — | — | — |
-| 0.60 | 0.056 | 3.971 | r_knee | 5.954 | 0 | 0.146 | 0.713 | 84/610 | 138/610 | 2.450 | +0.269 | -0.011 | +0.279 | — | — | — | — |
-| 0.55 | 0.016 | 1.846 | l_knee | 5.932 | 0 | 0.145 | 0.468 | 59/598 | 98/598 | 1.846 | +0.225 | -0.018 | +0.243 | passes signed, fails sum | — | — | — |
-| 0.55 | 0.024 | 1.881 | l_knee | 5.969 | 0 | 0.147 | 0.469 | 62/598 | 99/598 | 1.881 | +0.225 | -0.016 | +0.241 | passes signed, fails sum | — | — | — |
-| 0.55 | 0.032 | 1.917 | l_knee | 6.006 | 0 | 0.147 | 0.470 | 62/598 | 100/598 | 1.917 | +0.226 | -0.014 | +0.240 | passes signed, fails sum | — | — | — |
-| 0.55 | 0.040 | 1.944 | l_knee | 6.041 | 0 | 0.149 | 0.467 | 63/598 | 104/598 | 1.944 | +0.227 | -0.011 | +0.238 | passes signed, fails sum | — | — | — |
-| 0.55 | 0.048 | 1.982 | l_knee | 6.084 | 0 | 0.145 | 0.472 | 66/598 | 112/598 | 1.982 | +0.228 | -0.009 | +0.237 | passes signed, fails sum | — | — | — |
-| 0.55 | 0.056 | 2.023 | l_knee | 6.131 | 0 | 0.145 | 0.473 | 62/598 | 118/598 | 2.023 | +0.229 | -0.008 | +0.237 | passes signed, fails sum | — | — | — |
-| 0.50 | 0.016 | 1.850 | l_knee | 6.012 | 0 | 0.125 | 0.470 | 64/585 | 92/585 | 1.850 | +0.230 | -0.012 | +0.242 | passes signed, fails sum | — | — | — |
-| 0.50 | 0.024 | 1.883 | l_knee | 6.048 | 0 | 0.130 | 0.470 | 65/585 | 91/585 | 1.883 | +0.231 | -0.010 | +0.240 | passes signed, fails sum | — | — | — |
-| 0.50 | 0.032 | 1.915 | l_knee | 6.085 | 0 | 0.135 | 0.502 | 64/585 | 94/585 | 1.915 | +0.231 | -0.003 | +0.234 | passes signed, fails sum | — | — | — |
-| 0.50 | 0.040 | 1.938 | l_knee | 6.117 | 0 | 0.138 | 0.472 | 65/585 | 98/585 | 1.938 | +0.232 | -0.005 | +0.237 | passes signed, fails sum | — | — | — |
-| 0.50 | 0.048 | 1.974 | l_knee | 6.161 | 0 | 0.140 | 0.473 | 66/585 | 104/585 | 1.974 | +0.233 | -0.003 | +0.236 | passes signed, fails sum | — | — | — |
-| 0.50 | 0.056 | 2.012 | l_knee | 6.210 | 0 | 0.140 | 0.473 | 68/585 | 109/585 | 2.012 | +0.234 | -0.003 | +0.237 | passes signed, fails sum | — | — | — |
-| 1.00 | 0.016 | 3.306 | r_knee | 4.121 | 0 | 0.007 | 0.439 | 91/713 | 136/713 | 2.450 | +0.241 | -0.059 | +0.300 | — | — | — | — |
-| 1.00 | 0.024 | 3.346 | r_knee | 4.257 | 0 | 0.007 | 0.439 | 91/713 | 143/713 | 2.450 | +0.247 | -0.005 | +0.253 | — | — | — | — |
-| 1.00 | 0.032 | 3.507 | r_knee | 4.382 | 0 | 0.006 | 0.429 | 91/713 | 143/713 | 2.450 | +0.252 | -0.048 | +0.300 | — | — | — | — |
-| 1.00 | 0.040 | 3.486 | r_knee | 4.513 | 0 | 0.007 | 0.413 | 92/713 | 148/713 | 2.450 | +0.235 | -0.049 | +0.285 | — | — | — | — |
-| 1.00 | 0.048 | 3.636 | r_knee | 4.645 | 0 | 0.010 | 0.399 | 91/713 | 153/713 | 2.450 | +0.226 | -0.027 | +0.253 | — | — | — | — |
-| 1.00 | 0.056 | 3.606 | r_knee | 4.784 | 0 | 0.015 | 0.400 | 103/713 | 146/713 | 2.450 | +0.201 | -0.027 | +0.229 | — | — | — | — |
-| 1.20 | 0.016 | 2.379 | r_knee | 3.810 | 0 | 0.000 | 0.390 | 79/764 | 113/764 | 2.379 | +0.169 | -0.000 | +0.169 | — | — | — | — |
-| 1.20 | 0.024 | 2.568 | r_knee | 3.941 | 0 | 0.000 | 0.397 | 85/764 | 116/764 | 2.450 | +0.186 | -0.002 | +0.188 | — | — | — | — |
-| 1.20 | 0.032 | 2.879 | r_knee | 4.105 | 0 | 0.000 | 0.389 | 90/764 | 120/764 | 2.450 | +0.209 | -0.050 | +0.259 | — | — | — | — |
-| 1.20 | 0.040 | 3.202 | r_knee | 4.342 | 0 | 0.010 | 0.351 | 95/764 | 133/764 | 2.450 | +0.227 | -0.054 | +0.281 | — | — | — | — |
-| 1.20 | 0.048 | 3.491 | r_knee | 4.526 | 0 | 0.017 | 0.319 | 97/764 | 142/764 | 2.450 | +0.224 | -0.019 | +0.243 | — | — | — | — |
-| 1.20 | 0.056 | 3.460 | r_knee | 4.739 | 0 | 0.029 | 0.352 | 119/764 | 153/764 | 2.450 | +0.192 | -0.017 | +0.209 | — | — | — | — |
+`τ` is printed with and without `armature·q̈_ref` for every leg joint, worst tick of the start, the walk, and the stop. The table below is the example cell. The phase median, over ticks, of the largest |τ| on that tick is 0.757 Nm in the start, 1.212 Nm in the walk, and 0.802 Nm in the stop. Across the grid those medians are 0.636–0.763 Nm, 1.149–1.265 Nm, and 0.559–0.818 Nm. The cell's root residual after the wrench is removed peaks at 30.5 Nm (3.7–36.1 Nm across the grid). The worst leg torque on the example is the right hip pitch at 1.296 s, −25.250 Nm on both splits. Stripping armature leaves −25.255 Nm, so that tick is not an unsourced-armature candidate. The grid's largest walk sample is the same joint at the same kind of tick: T 0.55 s / vx 0.040 m/s, right hip pitch at 1.296 s, −29.875 Nm with armature and −29.868 Nm without. The stop right knee on the example is −5.329 Nm with armature and −0.183 Nm without, spread 0.033 Nm. That one clears 2.33 only without armature, so it is an unsourced-armature candidate, and the row stays Prefer FAIL. On 66 worst-tick joints the two double-support splits disagree about 2.33 Nm. The largest spread is 4.477 Nm, T 0.70 s / vx 0.024 m/s, stop, left knee: linear +0.351 Nm and min-norm −4.125 Nm. The split is reported. It is not a wall.
+
+Plant peaks, goal peaks, clip fractions, sums, gait calls, and band counts are the same numbers as the previous score. Twelve rows still carry the note `passes signed, fails sum`. Every row is Prefer FAIL. qvel ≤ 5.82 passes all 54. The DC line and the clamp pass on 13 rows and fail on 41. Two rows are SKATES (T 1.20 s at 0.048 and 0.056 m/s). The other 52 are STEPS.
+
+`>1e-3` and `>1e-2` are control ticks whose match residual exceeds that threshold, over the tick count. A tick over 1e-3 Nm and at or under 1e-2 Nm counts in the first column and can still be bucketed. Band is the maximum per-joint residual band on the row, in Nm. Cap is control ticks whose band exceeds 0.15 Nm. ResFail is control ticks whose passive-inclusive residual exceeds the band. Those two counts are comparison only. Lim is the limiter-active fraction. Knee ID is the peak `data_copy.qfrc_inverse` on either knee, in Nm. A value of 2.450 is the column bug. Raw, Off, and Adj are the signed passive-inclusive residual, the signed implicitfast offset, and the signed adjusted residual at the leg sample with the largest |raw| residual. Ctrl, Arm, and Phys are the bucket fractions on the unclamped samples whose tick match residual is ≤ 1e-2 Nm. They are empty when every over-bar sample is clamped or the row has no over-bar sample. Note is `passes signed, fails sum` when the row passes the plant ask and fails the sum. Per-tick traces and the planned τ for every cell are in `previews/walk_a5a9183_signed_id.json`.
+
+| T s | vx | Plant Nm | Joint | Goal Nm | Clip | Lim | Band | Cap | ResFail | >1e-3 | >1e-2 | Knee ID | Raw | Off | Adj | Note | Ctrl | Arm | Phys |
+| ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: |
+| 0.80 | 0.016 | 3.383 | r_knee | 4.560 | 0 | 0.014 | 0.543 | 88/662 | 129/662 | 1/662 | 0/662 | 2.450 | +0.253 | -0.034 | +0.287 | — | 0 | 1 | 0 |
+| 0.80 | 0.024 | 3.259 | r_knee | 4.613 | 0 | 0.017 | 0.756 | 84/662 | 126/662 | 3/662 | 0/662 | 2.450 | +0.245 | -0.042 | +0.288 | — | 0 | 1 | 0 |
+| 0.80 | 0.032 | 3.412 | r_knee | 4.830 | 0 | 0.015 | 0.543 | 83/662 | 127/662 | 4/662 | 1/662 | 2.450 | +0.247 | -0.028 | +0.276 | — | 0 | 1 | 0 |
+| 0.80 | 0.040 | 3.703 | r_knee | 4.934 | 0 | 0.015 | 0.467 | 90/662 | 141/662 | 6/662 | 0/662 | 2.450 | +0.253 | -0.032 | +0.285 | — | — | — | — |
+| 0.80 | 0.048 | 3.726 | r_knee | 5.031 | 0 | 0.011 | 0.454 | 86/662 | 143/662 | 3/662 | 0/662 | 2.450 | +0.237 | -0.034 | +0.271 | — | 0 | 1 | 0 |
+| 0.80 | 0.056 | 3.923 | r_knee | 5.113 | 0 | 0.012 | 0.446 | 92/662 | 151/662 | 2/662 | 0/662 | 2.450 | +0.239 | -0.019 | +0.258 | — | 0 | 1 | 0 |
+| 0.75 | 0.016 | 3.025 | r_knee | 4.857 | 0 | 0.052 | 0.767 | 84/649 | 117/649 | 1/649 | 0/649 | 2.450 | +0.242 | -0.090 | +0.333 | — | 0 | 1 | 0 |
+| 0.75 | 0.024 | 2.802 | r_knee | 4.906 | 0 | 0.048 | 0.767 | 83/649 | 119/649 | 4/649 | 1/649 | 2.450 | +0.243 | -0.053 | +0.296 | — | — | — | — |
+| 0.75 | 0.032 | 2.853 | r_knee | 4.956 | 0 | 0.048 | 0.768 | 86/649 | 124/649 | 5/649 | 1/649 | 2.450 | +0.240 | -0.032 | +0.272 | — | 0 | 1 | 0 |
+| 0.75 | 0.040 | 3.072 | r_knee | 5.032 | 0 | 0.042 | 0.770 | 90/649 | 136/649 | 7/649 | 2/649 | 2.450 | +0.231 | -0.019 | +0.250 | — | — | — | — |
+| 0.75 | 0.048 | 3.434 | r_knee | 5.138 | 0 | 0.039 | 0.771 | 91/649 | 140/649 | 2/649 | 1/649 | 2.450 | +0.229 | -0.045 | +0.274 | — | — | — | — |
+| 0.75 | 0.056 | 3.862 | r_knee | 5.226 | 0 | 0.035 | 0.461 | 90/649 | 153/649 | 3/649 | 0/649 | 2.450 | +0.236 | -0.029 | +0.265 | — | — | — | — |
+| 0.70 | 0.016 | 3.678 | r_knee | 5.055 | 0 | 0.060 | 0.534 | 88/636 | 111/636 | 2/636 | 0/636 | 2.450 | +0.265 | -0.046 | +0.311 | — | 0 | 1 | 0 |
+| 0.70 | 0.024 | 3.408 | r_knee | 5.099 | 0 | 0.061 | 0.768 | 85/636 | 113/636 | 0/636 | 0/636 | 2.450 | +0.259 | -0.055 | +0.314 | — | 0 | 1 | 0 |
+| 0.70 | 0.032 | 3.470 | r_knee | 5.145 | 0 | 0.060 | 0.769 | 83/636 | 111/636 | 4/636 | 0/636 | 2.450 | +0.257 | -0.090 | +0.347 | — | 0 | 1 | 0 |
+| 0.70 | 0.040 | 3.706 | r_knee | 5.190 | 0 | 0.057 | 0.531 | 85/636 | 121/636 | 4/636 | 1/636 | 2.450 | +0.263 | -0.091 | +0.354 | — | — | — | — |
+| 0.70 | 0.048 | 3.919 | r_knee | 5.234 | 0 | 0.055 | 0.516 | 89/636 | 137/636 | 4/636 | 0/636 | 2.450 | +0.270 | -0.039 | +0.310 | — | 0 | 1 | 0 |
+| 0.70 | 0.056 | 4.064 | r_knee | 5.338 | 0 | 0.049 | 0.497 | 88/636 | 146/636 | 2/636 | 2/636 | 2.450 | +0.268 | -0.077 | +0.345 | — | — | — | — |
+| 0.65 | 0.016 | 3.428 | r_knee | 5.248 | 0 | 0.119 | 0.771 | 84/623 | 105/623 | 1/623 | 0/623 | 2.450 | +0.258 | -0.055 | +0.313 | — | 0 | 1 | 0 |
+| 0.65 | 0.024 | 3.575 | r_knee | 5.293 | 0 | 0.125 | 0.772 | 86/623 | 107/623 | 1/623 | 0/623 | 2.450 | +0.262 | -0.057 | +0.319 | — | — | — | — |
+| 0.65 | 0.032 | 3.389 | r_knee | 5.339 | 0 | 0.132 | 0.774 | 83/623 | 111/623 | 3/623 | 0/623 | 2.450 | +0.258 | -0.043 | +0.301 | — | 0 | 1 | 0 |
+| 0.65 | 0.040 | 3.568 | r_knee | 5.387 | 0 | 0.136 | 0.775 | 81/623 | 115/623 | 5/623 | 1/623 | 2.450 | +0.256 | -0.029 | +0.286 | — | — | — | — |
+| 0.65 | 0.048 | 3.991 | r_knee | 5.435 | 0 | 0.140 | 0.537 | 83/623 | 132/623 | 0/623 | 0/623 | 2.450 | +0.266 | -0.015 | +0.281 | — | 0 | 1 | 0 |
+| 0.65 | 0.056 | 4.029 | r_knee | 5.476 | 0 | 0.135 | 0.517 | 83/623 | 143/623 | 4/623 | 1/623 | 2.450 | +0.259 | -0.068 | +0.327 | — | 0 | 1 | 0 |
+| 0.60 | 0.016 | 3.514 | r_knee | 5.737 | 0 | 0.144 | 0.772 | 88/610 | 117/610 | 3/610 | 0/610 | 2.450 | +0.263 | -0.008 | +0.272 | — | 0 | 1 | 0 |
+| 0.60 | 0.024 | 3.846 | r_knee | 5.778 | 0 | 0.144 | 0.716 | 89/610 | 117/610 | 4/610 | 0/610 | 2.450 | +0.268 | -0.001 | +0.269 | — | — | — | — |
+| 0.60 | 0.032 | 3.854 | r_knee | 5.820 | 0 | 0.148 | 0.717 | 87/610 | 120/610 | 4/610 | 0/610 | 2.450 | +0.266 | -0.010 | +0.276 | — | — | — | — |
+| 0.60 | 0.040 | 3.843 | r_knee | 5.860 | 0 | 0.148 | 0.719 | 87/610 | 126/610 | 3/610 | 0/610 | 2.450 | +0.263 | -0.014 | +0.277 | — | 0 | 1 | 0 |
+| 0.60 | 0.048 | 3.806 | r_knee | 5.904 | 0 | 0.149 | 0.749 | 83/610 | 133/610 | 2/610 | 0/610 | 2.450 | +0.264 | -0.018 | +0.282 | — | 0 | 1 | 0 |
+| 0.60 | 0.056 | 3.971 | r_knee | 5.954 | 0 | 0.146 | 0.713 | 84/610 | 138/610 | 3/610 | 1/610 | 2.450 | +0.269 | -0.011 | +0.279 | — | — | — | — |
+| 0.55 | 0.016 | 1.846 | l_knee | 5.932 | 0 | 0.145 | 0.468 | 59/598 | 98/598 | 2/598 | 0/598 | 1.846 | +0.225 | -0.018 | +0.243 | passes signed, fails sum | — | — | — |
+| 0.55 | 0.024 | 1.881 | l_knee | 5.969 | 0 | 0.147 | 0.469 | 62/598 | 99/598 | 5/598 | 3/598 | 1.881 | +0.225 | -0.016 | +0.241 | passes signed, fails sum | — | — | — |
+| 0.55 | 0.032 | 1.917 | l_knee | 6.006 | 0 | 0.147 | 0.470 | 62/598 | 100/598 | 2/598 | 1/598 | 1.917 | +0.226 | -0.014 | +0.240 | passes signed, fails sum | — | — | — |
+| 0.55 | 0.040 | 1.944 | l_knee | 6.041 | 0 | 0.149 | 0.467 | 63/598 | 104/598 | 5/598 | 0/598 | 1.944 | +0.227 | -0.011 | +0.238 | passes signed, fails sum | — | — | — |
+| 0.55 | 0.048 | 1.982 | l_knee | 6.084 | 0 | 0.145 | 0.472 | 66/598 | 112/598 | 2/598 | 1/598 | 1.982 | +0.228 | -0.009 | +0.237 | passes signed, fails sum | — | — | — |
+| 0.55 | 0.056 | 2.023 | l_knee | 6.131 | 0 | 0.145 | 0.473 | 62/598 | 118/598 | 3/598 | 2/598 | 2.023 | +0.229 | -0.008 | +0.237 | passes signed, fails sum | — | — | — |
+| 0.50 | 0.016 | 1.850 | l_knee | 6.012 | 0 | 0.125 | 0.470 | 64/585 | 92/585 | 0/585 | 0/585 | 1.850 | +0.230 | -0.012 | +0.242 | passes signed, fails sum | — | — | — |
+| 0.50 | 0.024 | 1.883 | l_knee | 6.048 | 0 | 0.130 | 0.470 | 65/585 | 91/585 | 4/585 | 0/585 | 1.883 | +0.231 | -0.010 | +0.240 | passes signed, fails sum | — | — | — |
+| 0.50 | 0.032 | 1.915 | l_knee | 6.085 | 0 | 0.135 | 0.502 | 64/585 | 94/585 | 2/585 | 0/585 | 1.915 | +0.231 | -0.003 | +0.234 | passes signed, fails sum | — | — | — |
+| 0.50 | 0.040 | 1.938 | l_knee | 6.117 | 0 | 0.138 | 0.472 | 65/585 | 98/585 | 5/585 | 1/585 | 1.938 | +0.232 | -0.005 | +0.237 | passes signed, fails sum | — | — | — |
+| 0.50 | 0.048 | 1.974 | l_knee | 6.161 | 0 | 0.140 | 0.473 | 66/585 | 104/585 | 3/585 | 0/585 | 1.974 | +0.233 | -0.003 | +0.236 | passes signed, fails sum | — | — | — |
+| 0.50 | 0.056 | 2.012 | l_knee | 6.210 | 0 | 0.140 | 0.473 | 68/585 | 109/585 | 1/585 | 0/585 | 2.012 | +0.234 | -0.003 | +0.237 | passes signed, fails sum | — | — | — |
+| 1.00 | 0.016 | 3.306 | r_knee | 4.121 | 0 | 0.007 | 0.439 | 91/713 | 136/713 | 2/713 | 0/713 | 2.450 | +0.241 | -0.059 | +0.300 | — | 0 | 1 | 0 |
+| 1.00 | 0.024 | 3.346 | r_knee | 4.257 | 0 | 0.007 | 0.439 | 91/713 | 143/713 | 3/713 | 0/713 | 2.450 | +0.247 | -0.005 | +0.253 | — | 0 | 1 | 0 |
+| 1.00 | 0.032 | 3.507 | r_knee | 4.382 | 0 | 0.006 | 0.429 | 91/713 | 143/713 | 6/713 | 2/713 | 2.450 | +0.252 | -0.048 | +0.300 | — | 0 | 1 | 0 |
+| 1.00 | 0.040 | 3.486 | r_knee | 4.513 | 0 | 0.007 | 0.413 | 92/713 | 148/713 | 2/713 | 0/713 | 2.450 | +0.235 | -0.049 | +0.285 | — | 0 | 1 | 0 |
+| 1.00 | 0.048 | 3.636 | r_knee | 4.645 | 0 | 0.010 | 0.399 | 91/713 | 153/713 | 2/713 | 1/713 | 2.450 | +0.226 | -0.027 | +0.253 | — | 0 | 1 | 0 |
+| 1.00 | 0.056 | 3.606 | r_knee | 4.784 | 0 | 0.015 | 0.400 | 103/713 | 146/713 | 2/713 | 0/713 | 2.450 | +0.201 | -0.027 | +0.229 | — | — | — | — |
+| 1.20 | 0.016 | 2.379 | r_knee | 3.810 | 0 | 0.000 | 0.390 | 79/764 | 113/764 | 4/764 | 1/764 | 2.379 | +0.169 | -0.000 | +0.169 | — | 0 | 1 | 0 |
+| 1.20 | 0.024 | 2.568 | r_knee | 3.941 | 0 | 0.000 | 0.397 | 85/764 | 116/764 | 2/764 | 2/764 | 2.450 | +0.186 | -0.002 | +0.188 | — | — | — | — |
+| 1.20 | 0.032 | 2.879 | r_knee | 4.105 | 0 | 0.000 | 0.389 | 90/764 | 120/764 | 3/764 | 1/764 | 2.450 | +0.209 | -0.050 | +0.259 | — | 0 | 1 | 0 |
+| 1.20 | 0.040 | 3.202 | r_knee | 4.342 | 0 | 0.010 | 0.351 | 95/764 | 133/764 | 7/764 | 2/764 | 2.450 | +0.227 | -0.054 | +0.281 | — | 0 | 1 | 0 |
+| 1.20 | 0.048 | 3.491 | r_knee | 4.526 | 0 | 0.017 | 0.319 | 97/764 | 142/764 | 4/764 | 1/764 | 2.450 | +0.224 | -0.019 | +0.243 | — | 0 | 1 | 0 |
+| 1.20 | 0.056 | 3.460 | r_knee | 4.739 | 0 | 0.029 | 0.352 | 119/764 | 153/764 | 4/764 | 3/764 | 2.450 | +0.192 | -0.017 | +0.209 | — | 0 | 1 | 0 |
+
+The planned τ for T 0.60 s / vx 0.032 m/s, worst tick of each phase. Linear and min-norm are the two double-support splits. In single support they match and the spread is 0. The no-armature columns subtract `dof_armature·q̈_ref` with the plant armature 0.01.
+
+| Phase | Joint | t s | Support | Linear Nm | Linear, no armature | Min-norm Nm | Min-norm, no armature | Spread Nm |
+| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| start | l_hip_yaw | 0.312 | ds | -0.021 | -0.021 | -0.008 | -0.008 | 0.013 |
+| start | l_hip_roll | 1.224 | ds | +0.033 | +0.023 | -0.261 | -0.271 | 0.294 |
+| start | l_hip_pitch | 0.264 | ds | +0.469 | +0.468 | -0.013 | -0.013 | 0.481 |
+| start | l_knee | 0.288 | ds | -0.093 | -0.089 | -0.562 | -0.558 | 0.469 |
+| start | l_ank_pitch | 0.400 | ds | -0.117 | -0.128 | +0.332 | +0.322 | 0.450 |
+| start | l_ank_roll | 0.344 | ds | -0.184 | -0.157 | -0.035 | -0.009 | 0.148 |
+| start | r_hip_yaw | 0.312 | ds | -0.022 | -0.022 | -0.008 | -0.008 | 0.014 |
+| start | r_hip_roll | 1.208 | ds | +0.302 | +0.292 | +0.773 | +0.763 | 0.471 |
+| start | r_hip_pitch | 1.240 | ds | -1.159 | -1.162 | -0.403 | -0.406 | 0.756 |
+| start | r_knee | 1.240 | ds | -0.050 | -0.042 | +1.020 | +1.028 | 1.070 |
+| start | r_ank_pitch | 1.240 | ds | +0.317 | +0.319 | -0.680 | -0.679 | 0.997 |
+| start | r_ank_roll | 1.240 | ds | +0.282 | +0.272 | +0.046 | +0.035 | 0.236 |
+| walk | l_hip_yaw | 1.288 | ss | -0.733 | -0.733 | -0.733 | -0.733 | 0.000 |
+| walk | l_hip_roll | 1.704 | ss | -1.401 | -1.375 | -1.401 | -1.375 | 0.000 |
+| walk | l_hip_pitch | 2.464 | ss | +9.736 | +9.714 | +9.736 | +9.714 | 0.000 |
+| walk | l_knee | 2.472 | ss | -9.536 | -9.505 | -9.536 | -9.505 | 0.000 |
+| walk | l_ank_pitch | 2.472 | ss | +3.618 | +3.652 | +3.618 | +3.652 | 0.000 |
+| walk | l_ank_roll | 1.944 | ds | -1.317 | -1.308 | -0.035 | -0.026 | 1.282 |
+| walk | r_hip_yaw | 1.288 | ss | +3.399 | +3.399 | +3.399 | +3.399 | 0.000 |
+| walk | r_hip_roll | 2.072 | ss | +1.279 | +1.279 | +1.279 | +1.279 | 0.000 |
+| walk | r_hip_pitch | 1.296 | ss | -25.250 | -25.255 | -25.250 | -25.255 | 0.000 |
+| walk | r_knee | 1.288 | ss | +13.864 | +13.875 | +13.864 | +13.875 | 0.000 |
+| walk | r_ank_pitch | 2.080 | ss | -3.612 | -3.640 | -3.612 | -3.640 | 0.000 |
+| walk | r_ank_roll | 2.312 | ds | +1.288 | +1.266 | +0.040 | +0.018 | 1.248 |
+| stop | l_hip_yaw | 2.704 | ds | -0.566 | -0.566 | -0.135 | -0.135 | 0.431 |
+| stop | l_hip_roll | 2.704 | ds | -2.647 | -2.436 | -2.116 | -1.904 | 0.532 |
+| stop | l_hip_pitch | 2.920 | ds | +2.547 | +2.548 | +1.726 | +1.726 | 0.822 |
+| stop | l_knee | 2.584 | ss | -1.588 | -1.592 | -1.588 | -1.592 | 0.000 |
+| stop | l_ank_pitch | 2.912 | ds | -1.185 | -0.432 | -0.278 | +0.474 | 0.906 |
+| stop | l_ank_roll | 2.696 | ds | -0.552 | -0.408 | -0.117 | +0.027 | 0.435 |
+| stop | r_hip_yaw | 2.920 | ds | -0.014 | -0.014 | -0.087 | -0.087 | 0.073 |
+| stop | r_hip_roll | 2.696 | ds | +0.466 | +0.260 | +0.807 | +0.600 | 0.341 |
+| stop | r_hip_pitch | 2.696 | ds | +2.643 | +0.223 | +2.967 | +0.547 | 0.324 |
+| stop | r_knee | 2.696 | ds | -5.329 | -0.183 | -5.362 | -0.216 | 0.033 |
+| stop | r_ank_pitch | 2.504 | ss | +2.636 | +0.021 | +2.636 | +0.021 | 0.000 |
+| stop | r_ank_roll | 2.672 | ss | -0.393 | -0.012 | -0.393 | -0.012 | 0.000 |
 
 SHA `6ecbffb`. Logs from SHA `424b3d0`. Prior goal-ask score SHA `697d53b`.
