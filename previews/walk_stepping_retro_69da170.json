@@ -1,0 +1,144 @@
+{
+  "label": "69da170",
+  "pr": 70,
+  "tip_sha": "69da1701e091965e6157ef7df135288680d4f7ec",
+  "kind": "kit",
+  "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+  "period_s": 0.5,
+  "vx_m_s": 0.15,
+  "rows": [
+    {
+      "label": "69da170",
+      "pr": 70,
+      "tip_sha": "69da1701e091965e6157ef7df135288680d4f7ec",
+      "bout": "kit",
+      "earlier_clear": "Track 1 toe-clearance CLEAR, MID_SWING_TOE_MIN_M \u22120.003066",
+      "plant_md5_before": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+      "plant_md5_after": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+      "plant_matches_frozen": true,
+      "plant_predates_frozen": false,
+      "soft_pass": false,
+      "script": "steer_walk._bus_kit_forward_stop",
+      "config": "locked_kit_config",
+      "bus_script": "BUS_KIT_SCRIPT",
+      "vx_m_s": 0.15,
+      "period_s": 0.5,
+      "kit_self_check_failures": [],
+      "stepping": {
+        "expected": {
+          "period_s": 0.5,
+          "vx_m_s": 0.15,
+          "per_swing_m": 0.075,
+          "stance_to_stance_m": 0.0375,
+          "commanded_x_amp_m": 0.02,
+          "commanded_hip_travel_m": 0.04
+        },
+        "n_swings": 22,
+        "n_scored_swings": 22,
+        "step_fraction": 0.9606928127621147,
+        "airborne_forward_m": 1.3924878677518437,
+        "contact_forward_m": 0.05697428003737817,
+        "worst_slip_m": 0.0031861297327808002,
+        "min_clear_m": 0.0020237455932012576,
+        "honest_max_clear_m": 0.008065505006264118,
+        "airborne_min_m": 0.0038818190735328923,
+        "airborne_median_m": 0.0771604955543769,
+        "sep_peak_m": 0.04281356642228369,
+        "sep_bout_m": 0.04281356642228369,
+        "sep_move_m": 0.04281356642228369,
+        "mismatch_fraction": 0.3894736842105263,
+        "ss": {
+          "n": 585,
+          "min_contacts": 2,
+          "cop_min_m": -1.9875567199187068e-05,
+          "cop_p5_m": 0.0001144481549871107,
+          "cop_p50_m": 0.0004880524955897047,
+          "cop_p95_m": 0.032256170501283495,
+          "edge_fraction": 0.7350427350427351,
+          "edge_zero_fraction": 0.037606837606837605,
+          "tilt_max_rad": 0.0917883367723272,
+          "tilt_over_1deg": 0.7196581196581197
+        },
+        "stop": {
+          "min_up_z": 0.9659399665033227,
+          "min_contacts_l": 4,
+          "min_contacts_r": 4,
+          "pitch_off_rad": 0.18488343187707434,
+          "roll_off_rad": 0.0020441592729456733,
+          "stand_pitch_rad": -0.07685371014426222,
+          "stand_roll_rad": 2.5393153097561503e-05,
+          "final_pitch_rad": -0.26144459660614716,
+          "final_roll_rad": -0.0018704595400016908,
+          "q_stand_err_rad": 0.018519442183741353,
+          "upright": false,
+          "pose": "freezes in a lean"
+        },
+        "actual": {
+          "zmp_min_m": -1.9875567199187068e-05,
+          "com_min_m": -0.009934848985208513,
+          "zmp_out": 0.002105263157894737,
+          "com_out": 0.15052631578947367
+        },
+        "swings": [
+          {
+            "side": "L",
+            "t_lift": 0.6080000000000004,
+            "t_land": 0.7600000000000006,
+            "airborne_dx_m": 0.0038818190735328923,
+            "slip_m": 0.0012399461586592201,
+            "clear_m": 0.008065505006264118,
+            "sep_m": 0.004500234182856007,
+            "mode": "move"
+          },
+          {
+            "side": "L",
+            "t_lift": 1.1040000000000008,
+            "t_land": 1.336000000000001,
+            "airborne_dx_m": 0.025538993935046127,
+            "slip_m": 0.002189762308824185,
+            "clear_m": 0.005597097691791016,
+            "sep_m": 0.015948587372592877,
+            "mode": "move"
+          },
+          {
+            "side": "L",
+            "t_lift": 1.6560000000000012,
+            "t_land": 1.8640000000000014,
+            "airborne_dx_m": 0.044530063949065724,
+            "slip_m": 0.0031169289008224086,
+            "clear_m": 0.004149486450325202,
+            "sep_m": 0.025176561564788008,
+            "mode": "move"
+          },
+          {
+            "side": "L",
+            "t_lift": 2.1519999999999846,
+            "t_land": 2.3599999999999617,
+            "airborne_dx_m": 0.06826378121543458,
+            "slip_m": 0.0026402613850214224,
+            "clear_m": 0.0051206784380372974,
+            "sep_m": 0.03656384646575957,
+            "mode": "move"
+          }
+        ],
+        "fail_reasons": [
+          "worst stance slip 3.19 mm is over 2 mm",
+          "sole clearance min 2.02 mm is under 8 mm; honest max of the per-step minima is 8.07 mm",
+          "airborne advance 0.0039 m on L at 0.608 s is outside \u00b120% of vx\u00b7T (0.0750 m). vx\u00b7T/2 is the stance-to-stance spacing (0.0375 m), not this travel",
+          "stance contact count min 2 is under 3",
+          "stop does not end upright: final 1 s min up_z 0.966, contacts L/R 4/4, trunk pitch off the stand by 10.59 deg, roll off by 0.12 deg",
+          "actual-stance ZMP margin -1.9875567199187068e-05 outside 0.002105263157894737",
+          "actual-stance CoM margin -0.009934848985208513 outside 0.15052631578947367"
+        ],
+        "passes": false,
+        "forward_axis": "trunk heading",
+        "airborne_ticks": 585,
+        "n_ticks": 950,
+        "box_half_x_m": 0.0675,
+        "applied_vx_median_m_s": 0.15,
+        "gait_verdict": "STEPS"
+      },
+      "verdict": "STEPS"
+    }
+  ]
+}

@@ -1,0 +1,297 @@
+{
+  "item": "signed-vs-sum audit and full-bar re-verdicts",
+  "mujoco_version": "3.14.0",
+  "xml_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+  "compiled_md5": "03ed33386178ab8d05db76a7307f1c1d",
+  "compiled_md5_check": {
+    "refs": "previews/compiled_refs.json",
+    "mujoco_version": "3.14.0",
+    "ref_key": "armature_0.01",
+    "ref_md5": "03ed33386178ab8d05db76a7307f1c1d",
+    "match": true
+  },
+  "perturbation": "none",
+  "note": "d7b06e7, ac81435, and 58ce1d8 did not log the pre-clamp ask. Their signed column stays not logged. d6e8b5e passes signed and sum. 51ae123 kitchen fails signed, sum, the DC-motor line, and the clamp. PRs 82, 88, 90, 98, and 99 are wall-stop CLEARs, not torque CLEARs.",
+  "rows": [
+    {
+      "file": "previews/walk_stepping_d7b06e7.json",
+      "marker": "\"source\": \"previews/com_zmp_declared.json voice-3.57 nominal, preview_shape 0, 1800 ticks\",\n      \"tip_sha\": \"d7b06e79757a6394784ab3582e9c34c1b8c2ab2b\",\n      \"perturb_label\": null,",
+      "signed_note": "not logged",
+      "manifest": {
+        "xml_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+        "compiled_md5": "03ed33386178ab8d05db76a7307f1c1d",
+        "compiled_md5_check": {
+          "refs": "previews/compiled_refs.json",
+          "mujoco_version": "3.14.0",
+          "ref_key": "armature_0.01",
+          "ref_md5": "03ed33386178ab8d05db76a7307f1c1d",
+          "match": true
+        },
+        "perturbation": "none",
+        "tip_sha": "d7b06e79757a6394784ab3582e9c34c1b8c2ab2b",
+        "seed": null,
+        "cmd": "WALK_GAIT_SCRIPTS=/tmp/tip-d7b06e7/scripts MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/score_walk_smoothness.py --stepping d7b06e7"
+      }
+    },
+    {
+      "file": "previews/walk_stepping_d7b06e7.json",
+      "marker": "\"source\": \"previews/com_zmp_declared.json voice-3.60 nominal, preview_shape 0, 1800 ticks\",\n      \"tip_sha\": \"d7b06e79757a6394784ab3582e9c34c1b8c2ab2b\",\n      \"perturb_label\": null,",
+      "signed_note": "not logged",
+      "manifest": {
+        "xml_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+        "compiled_md5": "03ed33386178ab8d05db76a7307f1c1d",
+        "compiled_md5_check": {
+          "refs": "previews/compiled_refs.json",
+          "mujoco_version": "3.14.0",
+          "ref_key": "armature_0.01",
+          "ref_md5": "03ed33386178ab8d05db76a7307f1c1d",
+          "match": true
+        },
+        "perturbation": "none",
+        "tip_sha": "d7b06e79757a6394784ab3582e9c34c1b8c2ab2b",
+        "seed": null,
+        "cmd": "WALK_GAIT_SCRIPTS=/tmp/tip-d7b06e7/scripts MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/score_walk_smoothness.py --stepping d7b06e7"
+      }
+    },
+    {
+      "file": "previews/walk_stepping_d7b06e7.json",
+      "marker": "\"source\": \"previews/com_zmp_declared.json s1-3.60 nominal, preview_shape 1, 1800 ticks\",\n      \"tip_sha\": \"d7b06e79757a6394784ab3582e9c34c1b8c2ab2b\",\n      \"perturb_label\": null,",
+      "signed_note": "not logged",
+      "manifest": {
+        "xml_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+        "compiled_md5": "03ed33386178ab8d05db76a7307f1c1d",
+        "compiled_md5_check": {
+          "refs": "previews/compiled_refs.json",
+          "mujoco_version": "3.14.0",
+          "ref_key": "armature_0.01",
+          "ref_md5": "03ed33386178ab8d05db76a7307f1c1d",
+          "match": true
+        },
+        "perturbation": "none",
+        "tip_sha": "d7b06e79757a6394784ab3582e9c34c1b8c2ab2b",
+        "seed": null,
+        "cmd": "WALK_GAIT_SCRIPTS=/tmp/tip-d7b06e7/scripts MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/score_walk_smoothness.py --stepping d7b06e7"
+      }
+    },
+    {
+      "file": "previews/walk_stepping_ac81435.json",
+      "marker": "\"source\": \"previews/com_zmp_preview_s.json period 3.60 dsp 0.70 amp 0.043 z 0.004 arm 2.40 vx 0.056 stand 0.40 walk 11.00 stop 3.00\",",
+      "signed_note": "not logged",
+      "manifest": {
+        "xml_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+        "compiled_md5": "03ed33386178ab8d05db76a7307f1c1d",
+        "compiled_md5_check": {
+          "refs": "previews/compiled_refs.json",
+          "mujoco_version": "3.14.0",
+          "ref_key": "armature_0.01",
+          "ref_md5": "03ed33386178ab8d05db76a7307f1c1d",
+          "match": true
+        },
+        "perturbation": "none",
+        "tip_sha": "ac814356f484735c442f825a2afb567ed65785d6",
+        "seed": null,
+        "cmd": "MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/score_walk_smoothness.py --stepping ac81435"
+      }
+    },
+    {
+      "file": "previews/walk_stepping_ac81435.json",
+      "marker": "\"source\": \"previews/com_zmp_preview_p.json period 3.70 dsp 0.70 amp 0.043 z 0.004 arm 2.40 vx 0.056 stand 0.40 walk 11.00 stop 3.00\",",
+      "signed_note": "not logged",
+      "manifest": {
+        "xml_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+        "compiled_md5": "03ed33386178ab8d05db76a7307f1c1d",
+        "compiled_md5_check": {
+          "refs": "previews/compiled_refs.json",
+          "mujoco_version": "3.14.0",
+          "ref_key": "armature_0.01",
+          "ref_md5": "03ed33386178ab8d05db76a7307f1c1d",
+          "match": true
+        },
+        "perturbation": "none",
+        "tip_sha": "ac814356f484735c442f825a2afb567ed65785d6",
+        "seed": null,
+        "cmd": "MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/score_walk_smoothness.py --stepping ac81435"
+      }
+    },
+    {
+      "file": "previews/walk_stepping_58ce1d8.json",
+      "marker": "\"source\": \"scripts/score_com_zmp.py --period 6.40 --dsp 0.70 --amp 0.043 --z 0.004 --arm 2.40 --stand 0.40 --walk 11.00 --stop 3.00 --vx 0.040 --tag j\",",
+      "signed_note": "not logged",
+      "manifest": {
+        "xml_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+        "compiled_md5": "03ed33386178ab8d05db76a7307f1c1d",
+        "compiled_md5_check": {
+          "refs": "previews/compiled_refs.json",
+          "mujoco_version": "3.14.0",
+          "ref_key": "armature_0.01",
+          "ref_md5": "03ed33386178ab8d05db76a7307f1c1d",
+          "match": true
+        },
+        "perturbation": "none",
+        "tip_sha": "58ce1d861b85a2af3f4ca09f0eeead629baa40d1",
+        "seed": null,
+        "cmd": "WALK_GAIT_SCRIPTS=/tmp/tip-58ce1d8/scripts MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/score_walk_smoothness.py --stepping 58ce1d8"
+      }
+    },
+    {
+      "file": "previews/walk_hinge_speed.json",
+      "marker": "\"tip\": \"d6e8b5e\",",
+      "signed_note": null,
+      "manifest": {
+        "xml_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+        "compiled_md5": "03ed33386178ab8d05db76a7307f1c1d",
+        "compiled_md5_check": {
+          "refs": "previews/compiled_refs.json",
+          "mujoco_version": "3.14.0",
+          "ref_key": "armature_0.01",
+          "ref_md5": "03ed33386178ab8d05db76a7307f1c1d",
+          "match": true
+        },
+        "perturbation": "none",
+        "tip_sha": "d6e8b5ebb801250814552fc728886a11dd0350c2",
+        "seed": null,
+        "cmd": "MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/score_tiebreak_d6e8b5e.py"
+      }
+    },
+    {
+      "file": "previews/walk_hinge_speed.json",
+      "marker": "\"tip\": \"51ae123\",",
+      "signed_note": null,
+      "manifest": {
+        "xml_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+        "compiled_md5": "03ed33386178ab8d05db76a7307f1c1d",
+        "compiled_md5_check": {
+          "refs": "previews/compiled_refs.json",
+          "mujoco_version": "3.14.0",
+          "ref_key": "armature_0.01",
+          "ref_md5": "03ed33386178ab8d05db76a7307f1c1d",
+          "match": true
+        },
+        "perturbation": "none",
+        "tip_sha": "51ae123add3cc6bb9c3e5cd0f1d6b4035e65b29c",
+        "seed": null,
+        "cmd": "MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/score_retro_voice.py --hinge --sha 51ae123add3cc6bb9c3e5cd0f1d6b4035e65b29c --label 51ae123 --pr 90 --kind voice --rooms kitchen"
+      }
+    },
+    {
+      "file": "previews/walk_ctrl_clip.json",
+      "marker": "\"bout\": \"d6e8b5e voice-20\",",
+      "signed_note": null,
+      "manifest": {
+        "xml_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+        "compiled_md5": "03ed33386178ab8d05db76a7307f1c1d",
+        "compiled_md5_check": {
+          "refs": "previews/compiled_refs.json",
+          "mujoco_version": "3.14.0",
+          "ref_key": "armature_0.01",
+          "ref_md5": "03ed33386178ab8d05db76a7307f1c1d",
+          "match": true
+        },
+        "perturbation": "none",
+        "tip_sha": "d6e8b5ebb801250814552fc728886a11dd0350c2",
+        "seed": null,
+        "cmd": "MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/score_ctrl_clip_retro.py --bout d6e8b5e --out previews/walk_ctrl_clip.json"
+      }
+    },
+    {
+      "file": "previews/walk_ctrl_clip.json",
+      "marker": "\"bout\": \"51ae123 kitchen-m90\",",
+      "signed_note": null,
+      "manifest": {
+        "xml_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+        "compiled_md5": "03ed33386178ab8d05db76a7307f1c1d",
+        "compiled_md5_check": {
+          "refs": "previews/compiled_refs.json",
+          "mujoco_version": "3.14.0",
+          "ref_key": "armature_0.01",
+          "ref_md5": "03ed33386178ab8d05db76a7307f1c1d",
+          "match": true
+        },
+        "perturbation": "none",
+        "tip_sha": "51ae123add3cc6bb9c3e5cd0f1d6b4035e65b29c",
+        "seed": null,
+        "cmd": "MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/score_ctrl_clip_retro.py --bout kitchen --out previews/walk_ctrl_clip.json"
+      }
+    },
+    {
+      "file": "previews/walk_tiebreak_d6e8b5e.json",
+      "marker": "\"name\": \"voice-20\",",
+      "signed_note": null,
+      "manifest": {
+        "xml_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+        "compiled_md5": "03ed33386178ab8d05db76a7307f1c1d",
+        "compiled_md5_check": {
+          "refs": "previews/compiled_refs.json",
+          "mujoco_version": "3.14.0",
+          "ref_key": "armature_0.01",
+          "ref_md5": "03ed33386178ab8d05db76a7307f1c1d",
+          "match": true
+        },
+        "perturbation": "none",
+        "tip_sha": "d6e8b5ebb801250814552fc728886a11dd0350c2",
+        "seed": null,
+        "cmd": "MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/score_tiebreak_d6e8b5e.py"
+      }
+    },
+    {
+      "file": "previews/walk_stepping_retro_51ae123.json",
+      "marker": "\"bout\": \"kitchen-m90\",",
+      "signed_note": "not logged",
+      "manifest": {
+        "xml_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+        "compiled_md5": "03ed33386178ab8d05db76a7307f1c1d",
+        "compiled_md5_check": {
+          "refs": "previews/compiled_refs.json",
+          "mujoco_version": "3.14.0",
+          "ref_key": "armature_0.01",
+          "ref_md5": "03ed33386178ab8d05db76a7307f1c1d",
+          "match": true
+        },
+        "perturbation": "none",
+        "tip_sha": "51ae123add3cc6bb9c3e5cd0f1d6b4035e65b29c",
+        "seed": null,
+        "cmd": "MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/score_retro_voice.py --sha 51ae123add3cc6bb9c3e5cd0f1d6b4035e65b29c --label 51ae123 --pr 90 --kind voice --rooms kitchen,living,entrance"
+      }
+    },
+    {
+      "file": "previews/walk_stepping_retro_51ae123.json",
+      "marker": "\"bout\": \"living-m90\",",
+      "signed_note": "not logged",
+      "manifest": {
+        "xml_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+        "compiled_md5": "03ed33386178ab8d05db76a7307f1c1d",
+        "compiled_md5_check": {
+          "refs": "previews/compiled_refs.json",
+          "mujoco_version": "3.14.0",
+          "ref_key": "armature_0.01",
+          "ref_md5": "03ed33386178ab8d05db76a7307f1c1d",
+          "match": true
+        },
+        "perturbation": "none",
+        "tip_sha": "51ae123add3cc6bb9c3e5cd0f1d6b4035e65b29c",
+        "seed": null,
+        "cmd": "MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/score_retro_voice.py --sha 51ae123add3cc6bb9c3e5cd0f1d6b4035e65b29c --label 51ae123 --pr 90 --kind voice --rooms kitchen,living,entrance"
+      }
+    },
+    {
+      "file": "previews/walk_stepping_retro_51ae123.json",
+      "marker": "\"bout\": \"entrance-m90\",",
+      "signed_note": "not logged",
+      "manifest": {
+        "xml_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+        "compiled_md5": "03ed33386178ab8d05db76a7307f1c1d",
+        "compiled_md5_check": {
+          "refs": "previews/compiled_refs.json",
+          "mujoco_version": "3.14.0",
+          "ref_key": "armature_0.01",
+          "ref_md5": "03ed33386178ab8d05db76a7307f1c1d",
+          "match": true
+        },
+        "perturbation": "none",
+        "tip_sha": "51ae123add3cc6bb9c3e5cd0f1d6b4035e65b29c",
+        "seed": null,
+        "cmd": "MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/score_retro_voice.py --sha 51ae123add3cc6bb9c3e5cd0f1d6b4035e65b29c --label 51ae123 --pr 90 --kind voice --rooms kitchen,living,entrance"
+      }
+    }
+  ]
+}

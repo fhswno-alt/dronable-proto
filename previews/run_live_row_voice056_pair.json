@@ -1,0 +1,106 @@
+{
+  "at_4f1d027": {
+    "entry_point": "scripts/run_live_row.py",
+    "entry_tip_sha": "4f1d02705d5b4f79285d20e91e92afb52ed4d40b",
+    "previous_entry_tip_sha": "6bae07ec9482714dbb886d282f2c547a5dae0328",
+    "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+    "mujoco_version": "3.14.0",
+    "compile_plant_md5": {
+      "armature_0.01": "03ed33386178ab8d05db76a7307f1c1d",
+      "armature_0.025": "f4fb2b70b5312a851e16316a38a88283",
+      "refs_match": true
+    },
+    "runner_emits": [
+      "tip_sha",
+      "plant_md5",
+      "mujoco_version",
+      "args"
+    ],
+    "runner_omits": [
+      "compiled_md5",
+      "xml_md5",
+      "perturbation",
+      "cmd",
+      "scorer_sha",
+      "seed"
+    ],
+    "manifest_source": "wrapper-attached",
+    "seed_in_args": null,
+    "baseline_json": "previews/run_live_row_4f1d027_baseline.json",
+    "feedforward_json": "previews/run_live_row_4f1d027_ff_cap.json",
+    "baseline": {
+      "r_hip_roll_signed": 6.0163777812014505,
+      "t_s": 3.2239999999998665,
+      "over": 34,
+      "signed_over": 149,
+      "min_up_z": 0.8441202027304724,
+      "pitch_deg": -30.48943727069735,
+      "n_ticks": 567,
+      "fault": "COM outside support and tipping margin=-0.069",
+      "tip_ok": false,
+      "cleared": false,
+      "ctrl_clip_frac": 0.0,
+      "signed_peak_nm": 6.0163777812014505,
+      "sum_peak_nm": 10.105977838562447,
+      "sum_signed_ratio": 1.6797445582854202,
+      "flag": ""
+    },
+    "feedforward": {
+      "abort": null,
+      "r_hip_roll_signed": 0.9346340432115512,
+      "r_hip_roll_over": 0,
+      "signed_peak_nm": 1.710454974454931,
+      "signed_joint": "r_ank_roll",
+      "sum_peak_nm": 4.164848919770975,
+      "sum_over": 210,
+      "sum_signed_ratio": 2.4349363075740613,
+      "flag": "latency-test-first",
+      "note": "passes signed, fails sum",
+      "tip_ok": true,
+      "cleared": false,
+      "min_up_z": 0.9755245999976713,
+      "pitch_deg": 4.220534940133613,
+      "n_ticks": 713,
+      "step_frac": 0.0
+    }
+  },
+  "entry_point": "scripts/run_live_row.py",
+  "entry_tip_sha": "6bae07ec9482714dbb886d282f2c547a5dae0328",
+  "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+  "mujoco_version": "3.14.0",
+  "identical_args": {
+    "t": 1.0,
+    "vx": 0.016,
+    "clearance": 0.008,
+    "dsp": 0.25,
+    "armature": 0.01,
+    "seed": "none",
+    "latency": 0,
+    "mass_scale": 1,
+    "mu": "none",
+    "arm_s": 1.0,
+    "stand_s": 0.25,
+    "walk_s": 3.05,
+    "stop_s": 2.4,
+    "preview_shape": 0,
+    "preview_r": 0.0001,
+    "z_quintic": 0,
+    "z_lead": 0,
+    "honor_vx": 0,
+    "crouch": 0.025,
+    "hip_pitch_deg": 15,
+    "gait": "voice056"
+  },
+  "armature_source": "MjSpec compile_plant before kv. The XML file is not written.",
+  "baseline_flags": {
+    "ff": 0,
+    "knee_qdd_cap": "none"
+  },
+  "feedforward_flags": {
+    "ff": 1,
+    "knee_qdd_cap": 40
+  },
+  "scorer_patch": "6bae07e shadows the ask-over list with the loop variable over, so ask_over = len(over) raises TypeError after a finished rollout. The baseline JSON was produced after renaming that loop variable to tick_over in the detached checkout. The gait and the bar arithmetic were not changed. The feedforward abort is from the unpatched runner.",
+  "baseline_json": "previews/run_live_row_a5a9183_baseline.json",
+  "feedforward_json": "previews/run_live_row_ff_cap.json"
+}

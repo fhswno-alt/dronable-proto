@@ -1,0 +1,644 @@
+{
+  "xml_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+  "compiled_md5": "03ed33386178ab8d05db76a7307f1c1d",
+  "dof_armature": {
+    "r_hip_yaw": 0.01,
+    "r_hip_roll": 0.01,
+    "r_hip_pitch": 0.01,
+    "r_knee": 0.01,
+    "r_ank_pitch": 0.01,
+    "r_ank_roll": 0.01,
+    "l_hip_yaw": 0.01,
+    "l_hip_roll": 0.01,
+    "l_hip_pitch": 0.01,
+    "l_knee": 0.01,
+    "l_ank_pitch": 0.01,
+    "l_ank_roll": 0.01
+  },
+  "kv": {
+    "r_hip_yaw": 1.291860165879885,
+    "r_hip_roll": 1.702689162101357,
+    "r_hip_pitch": 1.810178483237901,
+    "r_knee": 1.4573414651387,
+    "r_ank_pitch": 1.1980191293867757,
+    "r_ank_roll": 1.1876113311363912,
+    "l_hip_yaw": 1.2918601084408812,
+    "l_hip_roll": 1.7026897170532251,
+    "l_hip_pitch": 1.8101789997722038,
+    "l_knee": 1.457342283649325,
+    "l_ank_pitch": 1.1980190621468776,
+    "l_ank_roll": 1.1876113413795888
+  },
+  "kp": {
+    "r_hip_yaw": 40.0,
+    "r_hip_roll": 40.0,
+    "r_hip_pitch": 45.0,
+    "r_knee": 45.0,
+    "r_ank_pitch": 35.0,
+    "r_ank_roll": 35.0,
+    "l_hip_yaw": 40.0,
+    "l_hip_roll": 40.0,
+    "l_hip_pitch": 45.0,
+    "l_knee": 45.0,
+    "l_ank_pitch": 35.0,
+    "l_ank_roll": 35.0
+  },
+  "forcerange": {
+    "r_hip_yaw": [
+      -2.45,
+      2.45
+    ],
+    "r_hip_roll": [
+      -2.45,
+      2.45
+    ],
+    "r_hip_pitch": [
+      -2.45,
+      2.45
+    ],
+    "r_knee": [
+      -2.45,
+      2.45
+    ],
+    "r_ank_pitch": [
+      -2.45,
+      2.45
+    ],
+    "r_ank_roll": [
+      -2.45,
+      2.45
+    ],
+    "l_hip_yaw": [
+      -2.45,
+      2.45
+    ],
+    "l_hip_roll": [
+      -2.45,
+      2.45
+    ],
+    "l_hip_pitch": [
+      -2.45,
+      2.45
+    ],
+    "l_knee": [
+      -2.45,
+      2.45
+    ],
+    "l_ank_pitch": [
+      -2.45,
+      2.45
+    ],
+    "l_ank_roll": [
+      -2.45,
+      2.45
+    ]
+  },
+  "actfrcrange": {
+    "r_hip_yaw": [
+      -2.45,
+      2.45
+    ],
+    "r_hip_roll": [
+      -2.45,
+      2.45
+    ],
+    "r_hip_pitch": [
+      -2.45,
+      2.45
+    ],
+    "r_knee": [
+      -2.45,
+      2.45
+    ],
+    "r_ank_pitch": [
+      -2.45,
+      2.45
+    ],
+    "r_ank_roll": [
+      -2.45,
+      2.45
+    ],
+    "l_hip_yaw": [
+      -2.45,
+      2.45
+    ],
+    "l_hip_roll": [
+      -2.45,
+      2.45
+    ],
+    "l_hip_pitch": [
+      -2.45,
+      2.45
+    ],
+    "l_knee": [
+      -2.45,
+      2.45
+    ],
+    "l_ank_pitch": [
+      -2.45,
+      2.45
+    ],
+    "l_ank_roll": [
+      -2.45,
+      2.45
+    ]
+  },
+  "ctrlrange": {
+    "r_hip_yaw": [
+      -2.09,
+      2.09
+    ],
+    "r_hip_roll": [
+      -2.09,
+      2.09
+    ],
+    "r_hip_pitch": [
+      -2.09,
+      2.09
+    ],
+    "r_knee": [
+      -2.09,
+      2.09
+    ],
+    "r_ank_pitch": [
+      -2.09,
+      2.09
+    ],
+    "r_ank_roll": [
+      -2.09,
+      2.09
+    ],
+    "l_hip_yaw": [
+      -2.09,
+      2.09
+    ],
+    "l_hip_roll": [
+      -2.09,
+      2.09
+    ],
+    "l_hip_pitch": [
+      -2.09,
+      2.09
+    ],
+    "l_knee": [
+      -2.09,
+      2.09
+    ],
+    "l_ank_pitch": [
+      -2.09,
+      2.09
+    ],
+    "l_ank_roll": [
+      -2.09,
+      2.09
+    ]
+  },
+  "mujoco_version": "3.14.0",
+  "compiled_md5_by_mujoco_version": {
+    "3.14.0": "03ed33386178ab8d05db76a7307f1c1d"
+  },
+  "tip_sha": "a5a9183461105016211bebbf110051c2bb8f9df2",
+  "scorer_sha": "d4a38cc13e9ef406fc5d85841a873bc6db8260c4",
+  "seed": null,
+  "args": {
+    "plan_y": true,
+    "out": "/tmp/a5-plan-y/plan_y.json",
+    "committed_copy": "previews/walk_a5a9183_plan_y.json",
+    "cells": "",
+    "mass_scale": 1.0,
+    "seed_flag": -1,
+    "rug": false,
+    "compact": false,
+    "armature_flag": 0.01,
+    "sensitivity": false,
+    "plan_y_refuses": "sensitivity, rug, seed >= 0, mass_scale != 1, armature != 0.01"
+  },
+  "cmd": "A5_TIP_SCRIPTS=/tmp/tip-a5a9183/scripts MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/score_a5a9183_signed_id.py --plan-y --out /tmp/a5-plan-y/plan_y.json",
+  "perturbation": "none",
+  "body_mass": {
+    "world": 0.0,
+    "body_link": 0.743,
+    "r_hip_yaw_link": 0.032,
+    "r_hip_roll_link": 0.12,
+    "r_hip_pitch_link": 0.1065,
+    "r_knee_link": 0.045,
+    "r_ank_pitch_link": 0.12,
+    "r_ank_roll_link": 0.0675,
+    "l_hip_yaw_link": 0.032,
+    "l_hip_roll_link": 0.12,
+    "l_hip_pitch_link": 0.1065,
+    "l_knee_link": 0.045,
+    "l_ank_pitch_link": 0.12,
+    "l_ank_roll_link": 0.0675,
+    "head_pan_link": 0.00767349,
+    "head_tilt_link": 0.0262249,
+    "r_sho_pitch_link": 0.0128,
+    "r_sho_roll_link": 0.121,
+    "r_el_pitch_link": 0.045,
+    "r_el_yaw_link": 0.102,
+    "r_gripper_link": 0.0135,
+    "l_sho_pitch_link": 0.0128,
+    "l_sho_roll_link": 0.121,
+    "l_el_pitch_link": 0.045,
+    "l_el_yaw_link": 0.102,
+    "l_gripper_link": 0.0135
+  },
+  "body_inertia": {
+    "world": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "body_link": [
+      0.00123535,
+      0.00106658,
+      0.00104392
+    ],
+    "r_hip_yaw_link": [
+      2.27792e-05,
+      1.75538e-05,
+      8.97703e-06
+    ],
+    "r_hip_roll_link": [
+      7.31184e-05,
+      6.05065e-05,
+      2.91551e-05
+    ],
+    "r_hip_pitch_link": [
+      0.000112942,
+      0.000111046,
+      4.06518e-05
+    ],
+    "r_knee_link": [
+      6.75039e-05,
+      5.49998e-05,
+      2.05563e-05
+    ],
+    "r_ank_pitch_link": [
+      7.36835e-05,
+      6.10769e-05,
+      2.91596e-05
+    ],
+    "r_ank_roll_link": [
+      0.000126012,
+      9.21991e-05,
+      4.20891e-05
+    ],
+    "l_hip_yaw_link": [
+      2.27801e-05,
+      1.75528e-05,
+      8.97707e-06
+    ],
+    "l_hip_roll_link": [
+      7.31184e-05,
+      6.05065e-05,
+      2.91551e-05
+    ],
+    "l_hip_pitch_link": [
+      0.000112942,
+      0.000111046,
+      4.06518e-05
+    ],
+    "l_knee_link": [
+      6.75038e-05,
+      5.49999e-05,
+      2.05563e-05
+    ],
+    "l_ank_pitch_link": [
+      7.36835e-05,
+      6.10769e-05,
+      2.91596e-05
+    ],
+    "l_ank_roll_link": [
+      0.000126012,
+      9.21991e-05,
+      4.20891e-05
+    ],
+    "head_pan_link": [
+      2.17841e-06,
+      1.77447e-06,
+      9.86663e-07
+    ],
+    "head_tilt_link": [
+      7.42721e-06,
+      6.32366e-06,
+      5.6713e-06
+    ],
+    "r_sho_pitch_link": [
+      5.03e-06,
+      3.90135e-06,
+      2.04865e-06
+    ],
+    "r_sho_roll_link": [
+      7.5398e-05,
+      7.4522e-05,
+      2.37399e-05
+    ],
+    "r_el_pitch_link": [
+      1.05425e-05,
+      8.79567e-06,
+      7.46187e-06
+    ],
+    "r_el_yaw_link": [
+      0.000143205,
+      0.000142106,
+      2.94195e-05
+    ],
+    "r_gripper_link": [
+      6.51914e-06,
+      3.96161e-06,
+      3.27925e-06
+    ],
+    "l_sho_pitch_link": [
+      5.03e-06,
+      3.90135e-06,
+      2.04865e-06
+    ],
+    "l_sho_roll_link": [
+      7.5398e-05,
+      7.4522e-05,
+      2.37399e-05
+    ],
+    "l_el_pitch_link": [
+      1.05425e-05,
+      8.79567e-06,
+      7.46187e-06
+    ],
+    "l_el_yaw_link": [
+      0.000143205,
+      0.000142106,
+      2.94195e-05
+    ],
+    "l_gripper_link": [
+      6.51914e-06,
+      3.96161e-06,
+      3.27925e-06
+    ]
+  },
+  "geom_friction": {
+    "floor": [
+      1.6,
+      0.1,
+      0.01
+    ],
+    "r_foot_contact": [
+      1.6,
+      0.1,
+      0.01
+    ],
+    "l_foot_contact": [
+      1.6,
+      0.1,
+      0.01
+    ]
+  },
+  "dof_damping": {
+    "root:0": 0.0,
+    "root:1": 0.0,
+    "root:2": 0.0,
+    "root:3": 0.0,
+    "root:4": 0.0,
+    "root:5": 0.0,
+    "r_hip_yaw": 0.08,
+    "r_hip_roll": 0.08,
+    "r_hip_pitch": 0.08,
+    "r_knee": 0.08,
+    "r_ank_pitch": 0.08,
+    "r_ank_roll": 0.08,
+    "l_hip_yaw": 0.08,
+    "l_hip_roll": 0.08,
+    "l_hip_pitch": 0.08,
+    "l_knee": 0.08,
+    "l_ank_pitch": 0.08,
+    "l_ank_roll": 0.08,
+    "head_pan": 0.05,
+    "head_tilt": 0.05,
+    "r_sho_pitch": 0.05,
+    "r_sho_roll": 0.05,
+    "r_el_pitch": 0.05,
+    "r_el_yaw": 0.05,
+    "r_gripper": 0.05,
+    "l_sho_pitch": 0.05,
+    "l_sho_roll": 0.05,
+    "l_el_pitch": 0.05,
+    "l_el_yaw": 0.05,
+    "l_gripper": 0.05
+  },
+  "opt": {
+    "timestep": 0.002,
+    "integrator": 3,
+    "integrator_name": "mjINT_IMPLICITFAST"
+  },
+  "compiled_order": {
+    "joints": [
+      "r_hip_yaw",
+      "r_hip_roll",
+      "r_hip_pitch",
+      "r_knee",
+      "r_ank_pitch",
+      "r_ank_roll",
+      "l_hip_yaw",
+      "l_hip_roll",
+      "l_hip_pitch",
+      "l_knee",
+      "l_ank_pitch",
+      "l_ank_roll"
+    ],
+    "joint_rule": "ascending MuJoCo joint id of the twelve leg hinges in the compiled model",
+    "bodies": [
+      "world",
+      "body_link",
+      "r_hip_yaw_link",
+      "r_hip_roll_link",
+      "r_hip_pitch_link",
+      "r_knee_link",
+      "r_ank_pitch_link",
+      "r_ank_roll_link",
+      "l_hip_yaw_link",
+      "l_hip_roll_link",
+      "l_hip_pitch_link",
+      "l_knee_link",
+      "l_ank_pitch_link",
+      "l_ank_roll_link",
+      "head_pan_link",
+      "head_tilt_link",
+      "r_sho_pitch_link",
+      "r_sho_roll_link",
+      "r_el_pitch_link",
+      "r_el_yaw_link",
+      "r_gripper_link",
+      "l_sho_pitch_link",
+      "l_sho_roll_link",
+      "l_el_pitch_link",
+      "l_el_yaw_link",
+      "l_gripper_link"
+    ],
+    "body_rule": "ascending body id, world body first",
+    "inertia_layout": "ix, iy, iz principal moments, C order, one body at a time",
+    "geoms": [
+      "floor",
+      "r_foot_contact",
+      "l_foot_contact"
+    ],
+    "geom_rule": "floor, then the two foot contact boxes, ascending geom id",
+    "friction_layout": "slide, torsion, roll",
+    "dofs": [
+      "root:0",
+      "root:1",
+      "root:2",
+      "root:3",
+      "root:4",
+      "root:5",
+      "r_hip_yaw",
+      "r_hip_roll",
+      "r_hip_pitch",
+      "r_knee",
+      "r_ank_pitch",
+      "r_ank_roll",
+      "l_hip_yaw",
+      "l_hip_roll",
+      "l_hip_pitch",
+      "l_knee",
+      "l_ank_pitch",
+      "l_ank_roll",
+      "head_pan",
+      "head_tilt",
+      "r_sho_pitch",
+      "r_sho_roll",
+      "r_el_pitch",
+      "r_el_yaw",
+      "r_gripper",
+      "l_sho_pitch",
+      "l_sho_roll",
+      "l_el_pitch",
+      "l_el_yaw",
+      "l_gripper"
+    ],
+    "dof_rule": "ascending dof id. The free joint root occupies dofs 0-5 as root:0 through root:5, three translations then three rotations. Each hinge is one dof under its joint name.",
+    "quantities": [
+      "dof_armature",
+      "kv",
+      "kp",
+      "forcerange",
+      "actfrcrange",
+      "ctrlrange",
+      "body_mass",
+      "body_inertia",
+      "geom_friction",
+      "dof_damping",
+      "opt.timestep",
+      "opt.integrator"
+    ],
+    "kv": "-actuator_biasprm[actuator, 2] on the joint _pos actuator",
+    "kp": "actuator_gainprm[actuator, 0] on the joint _pos actuator",
+    "range_layout": "lo then hi, C order, one pair per joint",
+    "integrator": "mjtIntegrator cast to float64. mjINT_IMPLICITFAST is 3",
+    "dtype": "float64",
+    "byte_order": "little",
+    "n": 253,
+    "nbytes": 2024,
+    "hash": "md5",
+    "compile": "MjModel.from_xml_path",
+    "perturbation": "none",
+    "armature_kgm2": 0.01
+  },
+  "name": "voice056 T 1.00 s vx 0.016 planned-y",
+  "walker_tip_sha": "a5a9183461105016211bebbf110051c2bb8f9df2",
+  "scorer_file": "scripts/score_a5a9183_signed_id.py",
+  "scorer_blob": "9185cf929379d4dc66a3362527a4d3af96f3543b",
+  "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+  "plant_xml": "mujoco/ainex_hiwonder/ainex_controls_m2_145.xml",
+  "plant_loaded_from": "walker tip checkout, mujoco/ainex_hiwonder/ainex_controls_m2_145.xml",
+  "mujoco_version_source": "mujoco.__version__",
+  "soft_pass": false,
+  "command_line": "A5_TIP_SCRIPTS=/tmp/tip-a5a9183/scripts MUJOCO_GL=glfw DISPLAY=:1 PYTHONUNBUFFERED=1 python3 scripts/score_a5a9183_signed_id.py --plan-y --out /tmp/a5-plan-y/plan_y.json",
+  "argv": [
+    "scripts/score_a5a9183_signed_id.py",
+    "--plan-y",
+    "--out",
+    "/tmp/a5-plan-y/plan_y.json"
+  ],
+  "cwd": "repository root",
+  "requires": {
+    "A5_TIP_SCRIPTS": "/tmp/tip-a5a9183/scripts",
+    "tip_checkout": "a5a9183461105016211bebbf110051c2bb8f9df2",
+    "note": "The scorer sets WALK_GAIT_SCRIPTS to A5_TIP_SCRIPTS before importing score_walk_smoothness. That puts the tip's steer_walk, lipm_gait, op3_walk, and zmp_preview on sys.path. The default A5_TIP_SCRIPTS is /tmp/tip-a5a9183/scripts. The scorer sets MUJOCO_GL=glfw and DISPLAY=:1 when those are unset."
+  },
+  "flags": {
+    "feedforward": "off",
+    "feedforward_detail": "The live command is a position target. Planned-ID torque is a scorer column on q_des. It is not added to data.ctrl.",
+    "knee_qdd_cap_rad_s2": null,
+    "qdd_cap_detail": "No knee q̈ cap. Planned q̈ is the backward difference of q_des at 8 ms. Realised qacc is (qvel_next - qvel) / dt.",
+    "armature_kgm2": 0.01,
+    "armature_source": "plant XML joint attribute armature=\"0.01\", loaded by MjModel.from_xml_path. MjSpec is not used. model.dof_armature is not written after compile.",
+    "ctrl_source": "Position servo. write_clipped stores q_des on knee, hip_pitch, and ank_pitch. Other joints are band-limited by e_sat first. The command is then clipped to ctrlrange ±2.09. On the gait_manager schedule the session slews hip, knee, and ankle pitch from the previous ctrl toward that target over gm_move_s 0.020 s, and not faster than 5.5 rad/s. The plant ask is |kp·(clip(data.ctrl, ±2.09)−q) − kv·q̇| at each 2 ms substep. During preview_stage stand the phase is stand, so each substep rewrites legs with write_force_limited at LEG_STOP_NM 2.28. The stop blend sets phase shift, so that stand rewrite stays off during the blend.",
+    "stop_blend": {
+      "bus": "CommandBus.stop calls stand and snaps applied vx and yaw rate to 0.",
+      "gait": "preview path _tick_preview_stop. Finish the swing already in the air. Hold 0.20 s once both soles are under 3 mm and the clock is in double support, then plant. ZMP returns to 0 by a smootherstep over 1.50 s. Joints smootherstep from the frozen walk pose to q_stand over 2.0 s. Phase stays shift.",
+      "sole_pitch_null": "During the 2 s blend, ankle pitch adds 4× measured sole pitch, capped at ±0.12 rad, faded over the last 20% of the blend. The swing ankle stays on the IK target."
+    },
+    "duration": {
+      "stand_s": 0.25,
+      "walk_s": 3.05,
+      "walk_rule": "1.00 + 2.05*T",
+      "stop_s": 2.4,
+      "t_end_s": 5.7,
+      "ctrl_dt_s": 0.008,
+      "physics_dt_s": 0.002,
+      "substeps_per_ctrl": 4,
+      "n_ticks": 713,
+      "bus": "vel(0.016, 0.0) resent while walking; one bus.stop at t_stop"
+    }
+  },
+  "lipm_config": {
+    "name": "voice056",
+    "clear_m": 0.008,
+    "arms": true,
+    "schedule": "gait_manager",
+    "gm_period_s": 1.0,
+    "gm_dsp": 0.25,
+    "gm_y_swap_m": 0.0,
+    "gm_x_m": 0.004,
+    "gm_x_rule": "abs(vx)*T/4",
+    "gm_z_m": 0.008,
+    "gm_z_swap_m": 0.0,
+    "gm_pelvis_deg": 0.0,
+    "gm_hip_pitch_deg": 15.0,
+    "gm_start_lead": "L",
+    "gm_crouch_m": 0.025,
+    "gm_move_s": 0.02,
+    "preview_amp_m": 0.022851623535156247,
+    "preview_amp_call": "sway_zmp_amp(1.0, 0.25, 0.18, 0.016, 0.043, 0.0, 1e-4)",
+    "preview_arm_s": 1.0,
+    "preview_r": 0.0001,
+    "preview_shape": 0.0,
+    "wired_voice_preview_config": false,
+    "wired_voice_preview_config_differs": {
+      "gm_period_s": 0.5,
+      "vx_m_s": 0.056,
+      "gm_x_m": 0.007,
+      "preview_amp_m": 0.043
+    }
+  },
+  "recorded_outcome": {
+    "artifact": "previews/walk_a5a9183_plan_y.json",
+    "verdict": "Prefer FAIL",
+    "gait": "STEPS",
+    "r_hip_roll_peak_ask_nm": 0.8228916757405761,
+    "r_hip_roll_n_over_2_33": 0,
+    "r_hip_roll_n_ticks": 713,
+    "r_hip_roll_peak_sum_nm": 4.4813263198278666,
+    "r_hip_roll_n_sum_over": 157,
+    "r_hip_roll_note": "passes signed, fails sum",
+    "tip": false,
+    "tip_rule": "A tip is a stop that unloads a foot (contacts under 3), rolls more than 5° off the stand, or drops up_z under 0.90. Pitch off the stand is the lean column.",
+    "stop": {
+      "pose": "freezes in a lean",
+      "min_up_z": 0.9935110318010113,
+      "contacts_l": 4,
+      "contacts_r": 4,
+      "pitch_off_deg": 8.14,
+      "roll_off_deg": 0.29
+    }
+  }
+}
