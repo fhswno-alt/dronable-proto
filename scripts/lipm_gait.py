@@ -30,6 +30,7 @@ from typing import Literal
 import mujoco as mj
 import numpy as np
 
+import ds_split
 import gait_manager_traj as gm
 import op3_walk
 import zmp_preview
@@ -617,6 +618,44 @@ class LipmWalker:
         self.id_req_knee_t = 0.0
         self.id_req_knee_qdd = 0.0
         self.id_req_knee_bare = 0.0
+        # Double-support split comparison. (c) is the feedforward share.
+        # A wall is (c)'s bare torque, or the single-support wrench. (a)
+        # and (b) are the spread, not a wall.
+        self.id_split_ds_n = 0
+        self.id_split_stop_n = 0
+        self.id_split_infeas = 0
+        self.id_split_knee_spread = 0.0
+        self.id_split_knee_joint = ""
+        self.id_split_knee_phase = ""
+        self.id_split_knee_t = 0.0
+        self.id_split_knee_a = 0.0
+        self.id_split_knee_b = 0.0
+        self.id_split_knee_c = 0.0
+        self.id_split_stop_knee_spread = 0.0
+        self.id_split_stop_knee_joint = ""
+        self.id_split_stop_knee_t = 0.0
+        self.id_split_stop_knee_a = 0.0
+        self.id_split_stop_knee_b = 0.0
+        self.id_split_stop_knee_c = 0.0
+        self.id_split_peak_spread = 0.0
+        self.id_split_peak_phase = ""
+        self.id_split_peak_t = 0.0
+        self.id_split_peak_a = 0.0
+        self.id_split_peak_b = 0.0
+        self.id_split_peak_c = 0.0
+        self.id_split_a_max = 0.0
+        self.id_split_b_max = 0.0
+        self.id_split_c_max = 0.0
+        self.id_split_a_joint = ""
+        self.id_split_b_joint = ""
+        self.id_split_c_joint = ""
+        self.id_split_a_resid_m = 0.0
+        self.id_split_bare: dict[str, dict[str, dict[str, float | str]]] = {
+            "a": {}, "b": {}, "c": {},
+        }
+        self.id_split_stop_bare: dict[str, dict[str, dict[str, float | str]]] = {
+            "a": {}, "b": {}, "c": {},
+        }
         self.id_ff_resid = 0.0
         self._id_qvel0: np.ndarray | None = None
         self.id_tick_offset: dict[str, float] = {}
@@ -1631,9 +1670,9 @@ class LipmWalker:
         saved_typ = np.array(self.model.geom_contype, copy=True)
         self.model.geom_conaffinity[:] = 0
         self.model.geom_contype[:] = 0
+        self._ds_count_wall = True
         try:
             mj.mj_forward(self.model, scratch)
-            self._apply_planned_wrench(scratch, zmp_y)
             for name, val in qdd.items():
                 jid = int(mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, name))
                 if jid < 0:
@@ -1646,9 +1685,23 @@ class LipmWalker:
             scratch.qacc[free + 3] = 0.0
             scratch.qacc[free + 4] = 0.0
             scratch.qacc[free + 5] = 0.0
+            scratch.qfrc_applied[:] = 0.0
+            scratch.xfrc_applied[:] = 0.0
             mj.mj_inverse(self.model, scratch)
-            applied = np.array(scratch.qfrc_applied, dtype=np.float64, copy=True)
             inv = np.array(scratch.qfrc_inverse, dtype=np.float64, copy=True)
+            # Double support does not fix the foot-to-foot share. Split (c)
+            # is the feedforward when it solves. One airborne foot is the
+            # stance box, the same as single support.
+            if self._planned_stance() is None and not self._return_hold:
+                self._ds_apply_split(scratch, zmp_y, inv, qdd)
+            else:
+                forced = None
+                if self._return_hold:
+                    loaded = self._loaded_box_zmp()
+                    if loaded is not None:
+                        forced = "L" if loaded > 0.0 else "R"
+                self._apply_planned_wrench(scratch, zmp_y, forced)
+            applied = np.array(scratch.qfrc_applied, dtype=np.float64, copy=True)
         finally:
             self.model.geom_conaffinity[:] = saved_aff
             self.model.geom_contype[:] = saved_typ
@@ -1666,7 +1719,9 @@ class LipmWalker:
             bare = tau - ID_FF_ARMATURE * qdd_i
             phase = self._ff_phase(name)
             phase_of[name] = phase
-            self._note_planned_req(name, tau, bare, qdd_i, phase)
+            self._note_planned_req(
+                name, tau, bare, qdd_i, phase, count_wall=self._ds_count_wall,
+            )
             if abs(tau) > worst:
                 worst = abs(tau)
                 worst_name = name
@@ -1677,15 +1732,17 @@ class LipmWalker:
 
     def _note_planned_req(
         self, name: str, tau: float, bare: float, qdd: float, phase: str,
+        count_wall: bool = True,
     ) -> None:
         """Per-joint peaks of the planned inverse, with and without armature.
 
         ``tau`` already includes 0.01·q̈_ref. ``bare`` is tau − 0.01·q̈_ref.
-        |bare| > 2.33 names a wall. |tau| > 2.33 with |bare| ≤ 2.33 is an
-        unsourced-armature candidate. Neither one is a pass. A pass is the
-        applied signed force on the real plant, armature included, ≤ 2.33
-        on every tick, with limiter-active fraction 0 and clamp fraction 0.
-        The stop target is the same 2.33 Nm with armature included.
+        On double support this tau is split (c), the min-max share. A wall
+        is |bare| > 2.33 on that share, or on the single-support wrench.
+        Splits (a) and (b) do not name a wall. |tau| > 2.33 with |bare| ≤
+        2.33 is an unsourced-armature candidate. A pass is the applied
+        signed force on the real plant, armature included, ≤ 2.33 on every
+        tick, with limiter-active fraction 0 and clamp fraction 0.
         """
         t = float(self.data.time)
         sample = {
@@ -1721,7 +1778,7 @@ class LipmWalker:
                 self.id_req_arm_bare = float(bare)
                 self.id_req_arm_phase = phase
                 self.id_req_arm_t = t
-        if abs(bare) > KNEE_SAG_NM + 1e-9:
+        if count_wall and abs(bare) > KNEE_SAG_NM + 1e-9:
             self.id_req_wall = True
             self.id_req_wall_n += 1
             if abs(bare) > abs(self.id_req_wall_bare):
@@ -1745,8 +1802,237 @@ class LipmWalker:
                 return int(self.model.jnt_dofadr[jid])
         return 0
 
-    def _apply_planned_wrench(self, scratch: mj.MjData, zmp_y: float) -> None:
-        """LIPM wrench. Single support uses the stance box. Double support splits."""
+    def _ds_apply_split(
+        self,
+        scratch: mj.MjData,
+        zmp_y: float,
+        inv: np.ndarray,
+        qdd: dict[str, float],
+    ) -> None:
+        """Write the double-support wrench. Feedforward is split (c) when it solves.
+
+        (a) is the line split, (b) is minimum-norm ankle torque, (c) minimises
+        the maximum |bare leg torque|. All three are asked to sum to the same
+        planned wrench. (c) is the one that can name a wall.
+        """
+        names = list(self._leg_dof)
+        dofs = [int(self._leg_dof[name]) for name in names]
+        free = self._free_dof()
+        free_dofs = list(range(free, free + 6))
+        mass = float(self.model.body_subtreemass[self.bid_body])
+        if mass < 1e-6:
+            mass = float(np.sum(self.model.body_mass))
+        zc = float(self._preview_zc) if self._preview_zc > 0.05 else 0.18
+        ay = (float(self.preview_com_y) - float(zmp_y)) * G / zc
+        force = np.array([0.0, mass * ay, mass * G], dtype=np.float64)
+        com = np.array(scratch.subtree_com[self.bid_body], dtype=np.float64)
+        feet = []
+        for side in ("L", "R"):
+            center, rot, half = self._sole_frame(scratch, side)
+            bottom = center + rot @ np.array([0.0, 0.0, -float(half[2])], dtype=np.float64)
+            body = int(self.model.geom_bodyid[self.gid[side]])
+            feet.append((bottom, rot, (float(half[0]), float(half[1])), body))
+        p_zmp = np.array(
+            [float(com[0]), float(zmp_y), 0.5 * (float(feet[0][0][2]) + float(feet[1][0][2]))],
+            dtype=np.float64,
+        )
+
+        def probe(point: np.ndarray, body: int) -> np.ndarray:
+            cols = []
+            for axis in range(6):
+                scratch.qfrc_applied[:] = 0.0
+                f = np.zeros(3, dtype=np.float64)
+                tq = np.zeros(3, dtype=np.float64)
+                if axis < 3:
+                    f[axis] = 1.0
+                else:
+                    tq[axis - 3] = 1.0
+                mj.mj_applyFT(self.model, scratch, f, tq, point, body, scratch.qfrc_applied)
+                cols.append(np.array(scratch.qfrc_applied, dtype=np.float64, copy=True))
+            return np.column_stack(cols)
+
+        maps = [probe(feet[i][0], feet[i][3]) for i in (0, 1)]
+        blocks = [
+            ds_split.corner_wrench_map(feet[i][1], feet[i][2][0], feet[i][2][1]) for i in (0, 1)
+        ]
+        J = np.concatenate(
+            [maps[i][np.ix_(dofs, range(6))] @ blocks[i] for i in (0, 1)], axis=1,
+        )
+        geq = np.concatenate(
+            [maps[i][np.ix_(free_dofs, range(6))] @ blocks[i] for i in (0, 1)], axis=1,
+        )
+        scratch.qfrc_applied[:] = 0.0
+        mj.mj_applyFT(
+            self.model, scratch, force, np.zeros(3), p_zmp, int(self.bid_body), scratch.qfrc_applied,
+        )
+        target = np.array(scratch.qfrc_applied[free_dofs], dtype=np.float64, copy=True)
+        bare0 = np.array(
+            [
+                float(inv[self._leg_dof[name]]) - ID_FF_ARMATURE * float(qdd.get(name, 0.0))
+                for name in names
+            ],
+            dtype=np.float64,
+        )
+        tau0 = np.array([float(inv[self._leg_dof[name]]) for name in names], dtype=np.float64)
+        linear = ds_split.linear_split(
+            [feet[0][0], feet[1][0]],
+            [feet[0][1], feet[1][1]],
+            [feet[0][2], feet[1][2]],
+            p_zmp,
+            force,
+        )
+        qfrc_a = (
+            maps[0][np.ix_(dofs, range(6))] @ linear["wrenches"][0]
+            + maps[1][np.ix_(dofs, range(6))] @ linear["wrenches"][1]
+        )
+        bare_a = bare0 - qfrc_a
+        self.id_split_a_resid_m = max(
+            self.id_split_a_resid_m, float(linear["residual_m"]),
+        )
+        x0 = ds_split.barycentric_forces(linear, [feet[0][1], feet[1][1]], [feet[0][2], feet[1][2]])
+        x_c, _t_c = ds_split.solve_minimax(J, bare0, geq, target, x0)
+        ankle = [i for i, name in enumerate(names) if name.endswith(("ank_pitch", "ank_roll"))]
+        x_b = ds_split.solve_ankle_norm(J[ankle, :], bare0[ankle], geq, target, x0)
+        if x_b is not None and (
+            float(np.linalg.norm(geq @ x_b - target)) > 1e-3
+            or bool(np.any(ds_split._A_UB @ x_b > 1e-4))
+        ):
+            x_b = None
+        if x_c is not None and float(np.linalg.norm(geq @ x_c - target)) > 1e-3:
+            x_c = None
+        bares = {"a": bare_a, "b": None, "c": None}
+        taus = {"a": tau0 - qfrc_a, "b": None, "c": None}
+        chosen = None
+        if x_b is not None:
+            bares["b"] = bare0 - J @ x_b
+            taus["b"] = tau0 - J @ x_b
+        if x_c is not None:
+            bares["c"] = bare0 - J @ x_c
+            taus["c"] = tau0 - J @ x_c
+            chosen = x_c
+            self._ds_count_wall = True
+        else:
+            self.id_split_infeas += 1
+            self._ds_count_wall = False
+        self._note_ds_spread(names, bares, taus, qdd)
+        scratch.qfrc_applied[:] = 0.0
+        scratch.xfrc_applied[:] = 0.0
+        if chosen is None:
+            for wrench, foot in zip(linear["wrenches"], feet):
+                mj.mj_applyFT(
+                    self.model, scratch, wrench[:3], wrench[3:], foot[0], foot[3], scratch.qfrc_applied,
+                )
+            return
+        for foot_i, foot in enumerate(feet):
+            rot = np.asarray(foot[1], dtype=np.float64).reshape(3, 3)
+            for k, (sx, sy) in enumerate(((1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0))):
+                f_s = chosen[12 * foot_i + 3 * k : 12 * foot_i + 3 * k + 3]
+                if float(np.linalg.norm(f_s)) < 1e-10:
+                    continue
+                r = np.array([sx * foot[2][0], sy * foot[2][1], 0.0], dtype=np.float64)
+                mj.mj_applyFT(
+                    self.model, scratch, rot @ f_s, rot @ np.cross(r, f_s),
+                    foot[0], foot[3], scratch.qfrc_applied,
+                )
+
+    def _note_ds_spread(
+        self,
+        names: list[str],
+        bares: dict[str, np.ndarray | None],
+        taus: dict[str, np.ndarray | None],
+        qdd: dict[str, float],
+    ) -> None:
+        """Record the same-tick spread of the three double-support shares."""
+        if bares.get("c") is None:
+            return
+        self.id_split_ds_n += 1
+        phase = self._ff_phase(names[0])
+        t = float(self.data.time)
+        if phase == "stop":
+            self.id_split_stop_n += 1
+        present = [key for key in ("a", "b", "c") if bares.get(key) is not None]
+        for key in present:
+            bare = bares[key]
+            tau = taus[key]
+            assert bare is not None and tau is not None
+            for i, name in enumerate(names):
+                self._note_split_peak(
+                    key, name, float(tau[i]), float(bare[i]), float(qdd.get(name, 0.0)), phase, t,
+                    stop=False,
+                )
+                if phase == "stop":
+                    self._note_split_peak(
+                        key, name, float(tau[i]), float(bare[i]), float(qdd.get(name, 0.0)),
+                        phase, t, stop=True,
+                    )
+            peak = float(np.max(np.abs(bare)))
+            if peak > getattr(self, f"id_split_{key}_max"):
+                setattr(self, f"id_split_{key}_max", peak)
+                joint = names[int(np.argmax(np.abs(bare)))]
+                setattr(self, f"id_split_{key}_joint", joint)
+        peaks = []
+        for key in present:
+            bare = bares[key]
+            assert bare is not None
+            peaks.append(float(np.max(np.abs(bare))))
+        if len(peaks) >= 2:
+            spread = max(peaks) - min(peaks)
+            if spread > self.id_split_peak_spread:
+                self.id_split_peak_spread = spread
+                self.id_split_peak_phase = phase
+                self.id_split_peak_t = t
+                self.id_split_peak_a = float(np.max(np.abs(bares["a"]))) if bares.get("a") is not None else 0.0
+                self.id_split_peak_b = float(np.max(np.abs(bares["b"]))) if bares.get("b") is not None else 0.0
+                self.id_split_peak_c = float(np.max(np.abs(bares["c"])))
+        for i, name in enumerate(names):
+            if not name.endswith("knee"):
+                continue
+            vals = []
+            for key in ("a", "b", "c"):
+                bare = bares.get(key)
+                if bare is None:
+                    continue
+                vals.append(float(bare[i]))
+            if len(vals) < 2:
+                continue
+            spread = max(vals) - min(vals)
+            if spread > self.id_split_knee_spread:
+                self.id_split_knee_spread = spread
+                self.id_split_knee_joint = name
+                self.id_split_knee_phase = self._ff_phase(name)
+                self.id_split_knee_t = t
+                self.id_split_knee_a = float(bares["a"][i]) if bares.get("a") is not None else 0.0
+                self.id_split_knee_b = float(bares["b"][i]) if bares.get("b") is not None else 0.0
+                self.id_split_knee_c = float(bares["c"][i])
+            if phase == "stop" and spread > self.id_split_stop_knee_spread:
+                self.id_split_stop_knee_spread = spread
+                self.id_split_stop_knee_joint = name
+                self.id_split_stop_knee_t = t
+                self.id_split_stop_knee_a = float(bares["a"][i]) if bares.get("a") is not None else 0.0
+                self.id_split_stop_knee_b = float(bares["b"][i]) if bares.get("b") is not None else 0.0
+                self.id_split_stop_knee_c = float(bares["c"][i])
+
+    def _note_split_peak(
+        self, key: str, name: str, tau: float, bare: float, qdd: float, phase: str,
+        t: float, stop: bool,
+    ) -> None:
+        store = self.id_split_stop_bare if stop else self.id_split_bare
+        rec = store[key].get(name)
+        if rec is not None and abs(bare) <= float(rec["abs"]):
+            return
+        store[key][name] = {
+            "abs": abs(bare),
+            "tau": float(tau),
+            "bare": float(bare),
+            "qdd": float(qdd),
+            "t": float(t),
+            "phase": phase,
+        }
+
+    def _apply_planned_wrench(
+        self, scratch: mj.MjData, zmp_y: float, stance: str | None = None,
+    ) -> None:
+        """LIPM wrench on one foot. Double support uses ``_ds_apply_split``."""
         mass = float(self.model.body_subtreemass[self.bid_body])
         if mass < 1e-6:
             mass = float(np.sum(self.model.body_mass))
@@ -1756,7 +2042,8 @@ class LipmWalker:
         torque = np.zeros(3, dtype=np.float64)
         scratch.qfrc_applied[:] = 0.0
         scratch.xfrc_applied[:] = 0.0
-        stance = self._planned_stance()
+        if stance is None:
+            stance = self._planned_stance()
         if stance in ("L", "R"):
             point = self._project_zmp(scratch, stance, zmp_y)
             body = int(self.model.geom_bodyid[self.gid[stance]])
