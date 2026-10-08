@@ -38,11 +38,17 @@ signed applied ≤ 2.33 Nm on every tick, limiter fraction 0.
 
 An independent planned-motion inverse reads the walker's own reference
 ``(q_ref, q̇_ref, q̈_ref)`` and replaces contacts with the planned ZMP wrench.
-Double support is split two ways: ZMP position along the foot-to-foot line,
-and a min-norm ankle-torque split. Both are reported, with the spread.
-``τ_req`` is printed with and without ``armature·q̈_ref``. A joint that is
-over 2.33 only before that subtraction is an unsourced-armature candidate.
-It is not a pass.
+Double support is split three ways: ZMP position along the foot-to-foot
+line, a min-norm ankle-torque split, and a minimax split (called QP below)
+that minimises the largest |τ| over the leg joints with armature removed.
+The QP keeps each foot's centre of pressure inside its 135×76 mm box and
+each corner force inside a friction pyramid of μ 1.2. The three splits are
+reported. A planned-motion wall is only a double-support tick where even
+that QP still needs more than 2.33 Nm without armature. The realised
+double-support contact split is compared with the QP split. Neither
+comparison changes the pass. ``τ_req`` is printed with and without
+``armature·q̈_ref``. A joint that is over 2.33 only before that subtraction
+is an unsourced-armature candidate. It is not a pass.
 """
 from __future__ import annotations
 
@@ -67,6 +73,7 @@ if str(_SCRIPTS) not in sys.path:
 
 import mujoco as mj
 import numpy as np
+from scipy.optimize import linprog
 
 import score_walk_smoothness as sws
 import step_bars
@@ -99,6 +106,10 @@ OVER_BUCKET = "residual over 1e-2, not bucketed"
 CLAMPED = "clamped, unclassifiable"
 UNBUCKETED = "unbucketed"
 PLAN_PHASES = ("start", "walk", "stop")
+QP_MU = 1.2
+QP_HALF_X_M = 0.0675
+QP_HALF_Y_M = 0.038
+QP_DS_FZ_N = 1.0
 KNEE_ID_CONTROLS_NM = 2.045
 KNEE_ID_CONTROLS_DISCRETE_NM = (0.934, 1.087)
 ROOT_DOFS = 6
@@ -154,6 +165,8 @@ _CAPTURE: list[dict[str, np.ndarray]] = []
 _CAPTURE_ON = False
 _ID_MODEL: mj.MjModel | None = None
 _ID_COPY: mj.MjData | None = None
+_FOOT_SINK: list | None = None
+_FOOT_SPEC: dict[str, object] | None = None
 
 
 def _invdiscrete_bit() -> int | None:
@@ -224,6 +237,8 @@ def _capturing_step(model: mj.MjModel, data: mj.MjData) -> None:
     actuator = np.array(copy.qfrc_actuator, dtype=np.float64, copy=True)
     passive = np.array(copy.qfrc_passive, dtype=np.float64, copy=True)
     _ORIG_MJ_STEP(model, data)
+    if _FOOT_SINK is not None and _FOOT_SPEC is not None:
+        _FOOT_SINK.append(_sum_foot_forces(model, data, _FOOT_SPEC))
     dt = float(copy_model.opt.timestep)
     qacc = (np.array(data.qvel, dtype=np.float64) - qvel) / dt
     copy.qacc[:] = qacc
@@ -897,6 +912,251 @@ def _min_norm_ankle_split(
     return sol[0:3], sol[3:6], sol[6:9], sol[9:12]
 
 
+def _sum_foot_forces(model: mj.MjModel, data: mj.MjData, spec: dict[str, object]) -> dict[str, list[float]]:
+    """World force on each foot from floor contacts. Positive z is upward."""
+    grounds = spec["grounds"]
+    gids = {"l": int(spec["l"]), "r": int(spec["r"])}
+    total = {"l": np.zeros(3, dtype=np.float64), "r": np.zeros(3, dtype=np.float64)}
+    if not isinstance(grounds, set):
+        return {"l": [0.0, 0.0, 0.0], "r": [0.0, 0.0, 0.0]}
+    for i in range(int(data.ncon)):
+        con = data.contact[i]
+        g1 = int(con.geom1)
+        g2 = int(con.geom2)
+        side = ""
+        for name, gid in gids.items():
+            if g1 == gid and g2 in grounds:
+                side = name
+                break
+            if g2 == gid and g1 in grounds:
+                side = name
+                break
+        if not side:
+            continue
+        fr = np.zeros(6, dtype=np.float64)
+        mj.mj_contactForce(model, data, i, fr)
+        frame = np.array(con.frame, dtype=np.float64).reshape(3, 3)
+        total[side] += frame.T @ fr[:3]
+    return {side: [float(v) for v in total[side]] for side in ("l", "r")}
+
+
+def _foot_corners(model: mj.MjModel, data: mj.MjData, side: str) -> tuple[np.ndarray, list[np.ndarray]]:
+    """Sole rotation and the four bottom corners of the 135×76 mm box."""
+    gid = int(mj.mj_name2id(model, mj.mjtObj.mjOBJ_GEOM, f"{side}_foot_contact"))
+    if gid < 0:
+        raise RuntimeError(f"missing {side}_foot_contact")
+    hx = float(model.geom_size[gid, 0])
+    hy = float(model.geom_size[gid, 1])
+    hz = float(model.geom_size[gid, 2])
+    if abs(hx - QP_HALF_X_M) > 1e-6 or abs(hy - QP_HALF_Y_M) > 1e-6:
+        raise RuntimeError(
+            f"{side} foot box {2 * hx * 1000:.1f}×{2 * hy * 1000:.1f} mm is not 135×76"
+        )
+    centre = np.array(data.geom_xpos[gid], dtype=np.float64)
+    rot = np.array(data.geom_xmat[gid], dtype=np.float64).reshape(3, 3).copy()
+    points = []
+    for sx in (-1.0, 1.0):
+        for sy in (-1.0, 1.0):
+            local = np.array([sx * hx, sy * hy, -hz], dtype=np.float64)
+            points.append(centre + rot @ local)
+    return rot, points
+
+
+def _qp_solve_minmax(
+    rotations: list[np.ndarray],
+    points: list[np.ndarray],
+    coef: np.ndarray,
+    b_leg: np.ndarray,
+    force: np.ndarray,
+    p_zmp: np.ndarray,
+) -> dict[str, object]:
+    """Minimise the largest |leg torque| with armature already removed.
+
+    Corner forces of both feet are the variables. The summed wrench equals
+    ``force`` at ``p_zmp`` with zero moment about that point. Each corner
+    stays in the friction pyramid μ = 1.2, so each foot's centre of pressure
+    stays inside the convex hull of its 135×76 mm sole. The program is the
+    linear epigraph of that maximum. A second solve, among those optima,
+    minimises the sum of absolute tangential corner forces so the reported
+    split is one torque-optimal wrench.
+    """
+    n_c = 8
+    n_leg = int(b_leg.shape[0])
+    n_f = n_c * 3
+    n_u = n_c * 2
+    t_idx = n_f + n_u
+    n_var = t_idx + 1
+    a_eq = np.zeros((6, n_var), dtype=np.float64)
+    for c in range(n_c):
+        cols = slice(3 * c, 3 * c + 3)
+        rot = rotations[c]
+        a_eq[0:3, cols] = rot
+        a_eq[3:6, cols] = _skew(points[c] - p_zmp) @ rot
+    b_eq = np.zeros(6, dtype=np.float64)
+    b_eq[0:3] = force
+    rows: list[np.ndarray] = []
+    rhs: list[float] = []
+
+    def _add(row: np.ndarray, limit: float) -> None:
+        rows.append(row)
+        rhs.append(float(limit))
+
+    mu = QP_MU
+    for c in range(n_c):
+        base = 3 * c
+        u_fx = n_f + 2 * c
+        u_fy = u_fx + 1
+        for sign, axis, scale_z in (
+            (1.0, 0, -mu),
+            (-1.0, 0, -mu),
+            (1.0, 1, -mu),
+            (-1.0, 1, -mu),
+        ):
+            row = np.zeros(n_var, dtype=np.float64)
+            row[base + axis] = sign
+            row[base + 2] = scale_z
+            _add(row, 0.0)
+        row = np.zeros(n_var, dtype=np.float64)
+        row[base + 2] = -1.0
+        _add(row, 0.0)
+        for axis, u_idx in ((0, u_fx), (1, u_fy)):
+            pos = np.zeros(n_var, dtype=np.float64)
+            pos[base + axis] = 1.0
+            pos[u_idx] = -1.0
+            _add(pos, 0.0)
+            neg = np.zeros(n_var, dtype=np.float64)
+            neg[base + axis] = -1.0
+            neg[u_idx] = -1.0
+            _add(neg, 0.0)
+    for j in range(n_leg):
+        pos = np.zeros(n_var, dtype=np.float64)
+        neg = np.zeros(n_var, dtype=np.float64)
+        for c in range(n_c):
+            block = coef[j, c]
+            pos[3 * c:3 * c + 3] = block
+            neg[3 * c:3 * c + 3] = -block
+        pos[t_idx] = -1.0
+        neg[t_idx] = -1.0
+        _add(pos, float(b_leg[j]))
+        _add(neg, -float(b_leg[j]))
+    a_ub = np.vstack(rows)
+    b_ub = np.asarray(rhs, dtype=np.float64)
+    bounds = [(None, None)] * n_f + [(0.0, None)] * n_u + [(0.0, None)]
+    c_obj = np.zeros(n_var, dtype=np.float64)
+    c_obj[t_idx] = 1.0
+
+    def _run(obj: np.ndarray, ub: np.ndarray, bb: np.ndarray) -> np.ndarray | None:
+        try:
+            res = linprog(obj, A_ub=ub, b_ub=bb, A_eq=a_eq, b_eq=b_eq, bounds=bounds, method="highs")
+        except (ValueError, np.linalg.LinAlgError):
+            return None
+        if not res.success or res.x is None:
+            return None
+        return np.asarray(res.x, dtype=np.float64)
+
+    x1 = _run(c_obj, a_ub, b_ub)
+    if x1 is None:
+        # Distinguish an infeasible wrench from a solver failure.
+        try:
+            probe = linprog(
+                c_obj, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq, bounds=bounds, method="highs",
+            )
+            status = "infeasible" if int(probe.status) == 2 else "unsolved"
+        except (ValueError, np.linalg.LinAlgError):
+            status = "unsolved"
+        return {"status": status}
+    t_star = float(x1[t_idx])
+    cap_row = np.zeros(n_var, dtype=np.float64)
+    cap_row[t_idx] = 1.0
+    a2 = np.vstack([a_ub, cap_row])
+    b2 = np.concatenate([b_ub, np.array([t_star + 1e-7])])
+    c2 = np.zeros(n_var, dtype=np.float64)
+    c2[n_f:n_f + n_u] = 1.0
+    x2 = _run(c2, a2, b2)
+    x = x1 if x2 is None else x2
+    forces = x[:n_f].reshape(n_c, 3)
+    eq = a_eq[:, :n_f] @ x[:n_f] - b_eq
+    if float(np.max(np.abs(eq))) > 1e-4:
+        return {"status": "unsolved"}
+    for c in range(n_c):
+        fx, fy, fz = (float(forces[c, 0]), float(forces[c, 1]), float(forces[c, 2]))
+        if fz < -1e-6 or abs(fx) > mu * fz + 1e-5 or abs(fy) > mu * fz + 1e-5:
+            return {"status": "unsolved"}
+    return {
+        "status": "feasible",
+        "forces": forces,
+        "t_star": t_star,
+        "from_stage2": x2 is not None,
+    }
+
+
+def _qp_foot_split(
+    model: mj.MjModel,
+    data: mj.MjData,
+    foot_ids: dict[str, int],
+    p_zmp: np.ndarray,
+    force: np.ndarray,
+    b_no_arm: np.ndarray,
+    leg_order: list[tuple[str, int]],
+) -> dict[str, object]:
+    """QP split for one double-support tick. ``b_no_arm`` is per dof."""
+    rotations: list[np.ndarray] = []
+    points: list[np.ndarray] = []
+    jacps: list[np.ndarray] = []
+    locals_xy: list[tuple[float, float]] = []
+    for side in ("l", "r"):
+        rot, corners = _foot_corners(model, data, side)
+        hx = QP_HALF_X_M
+        hy = QP_HALF_Y_M
+        xy = ((-hx, -hy), (-hx, hy), (hx, -hy), (hx, hy))
+        # _foot_corners walks sx outer, sy inner: (-hx,-hy), (-hx,hy), (hx,-hy), (hx,hy).
+        for point, local in zip(corners, xy):
+            jacp = np.zeros((3, model.nv), dtype=np.float64)
+            jacr = np.zeros((3, model.nv), dtype=np.float64)
+            mj.mj_jac(model, data, jacp, jacr, np.asarray(point, dtype=np.float64), int(foot_ids[side]))
+            rotations.append(rot)
+            points.append(point)
+            jacps.append(jacp)
+            locals_xy.append(local)
+    n_leg = len(leg_order)
+    coef = np.zeros((n_leg, 8, 3), dtype=np.float64)
+    b_leg = np.zeros(n_leg, dtype=np.float64)
+    for j, (_name, adr) in enumerate(leg_order):
+        b_leg[j] = float(b_no_arm[adr])
+        for c, jacp in enumerate(jacps):
+            coef[j, c, :] = rotations[c].T @ jacp[:, adr]
+    solved = _qp_solve_minmax(rotations, points, coef, b_leg, force, p_zmp)
+    if solved["status"] != "feasible":
+        return {"status": solved["status"]}
+    forces = np.asarray(solved["forces"], dtype=np.float64)
+    gen = np.zeros(model.nv, dtype=np.float64)
+    world = {"l": np.zeros(3, dtype=np.float64), "r": np.zeros(3, dtype=np.float64)}
+    cop_ok = True
+    for side, start in (("l", 0), ("r", 4)):
+        fz = 0.0
+        cop_x = 0.0
+        cop_y = 0.0
+        for c in range(start, start + 4):
+            f_world = rotations[c] @ forces[c]
+            world[side] += f_world
+            gen += jacps[c].T @ f_world
+            weight = float(forces[c, 2])
+            fz += weight
+            cop_x += locals_xy[c][0] * weight
+            cop_y += locals_xy[c][1] * weight
+        if fz > 1e-6:
+            if abs(cop_x / fz) > QP_HALF_X_M + 1e-4 or abs(cop_y / fz) > QP_HALF_Y_M + 1e-4:
+                cop_ok = False
+    if not cop_ok:
+        return {"status": "unsolved"}
+    return {
+        "status": "feasible",
+        "gen": gen,
+        "f": world,
+        "t_star": float(solved["t_star"]),
+    }
+
+
 def _contact_copy(model: mj.MjModel) -> mj.MjModel:
     """Binary copy with contacts and inverse flags off. The source stays put."""
     flags = int(model.opt.enableflags)
@@ -928,8 +1188,9 @@ def _planned_tau(
     ``samples`` are one control tick each. q_ref is the walker's q_des.
     q̇_ref and q̈_ref are backward differences at 8 ms. The floating base is
     placed so the planned stance foot stays on its foothold and the sole
-    is on z = 0. Double support reports the linear foot-line split and the
-    min-norm ankle split. Single support has one wrench, so the spread is 0.
+    is on z = 0. Double support reports the linear foot-line split, the
+    min-norm ankle split, and the QP minimax split. Single support has one
+    wrench, so the three columns match and the spread is 0.
     """
     empty = {
         "phases": {name: {} for name in PLAN_PHASES},
@@ -1065,17 +1326,32 @@ def _planned_tau(
             qvel[k, adr] = (float(poses[k][qadr[name]]) - float(poses[k - 1][qadr[name]])) / step
     for k in range(2, n):
         qacc[k] = (qvel[k] - qvel[k - 1]) / _dt(k)
-    # Worst |τ| per phase, per joint. Both splits are stored at that tick.
+    # Worst |τ| per phase, per joint. All three splits are stored at that tick.
     worst: dict[str, dict[str, dict[str, float | str]]] = {name: {} for name in PLAN_PHASES}
     root_max = 0.0
     force_max = 0.0
     qacc_max = 0.0
     spike: dict[str, object] = {"qacc": 0.0}
     phase_peaks: dict[str, list[float]] = {name: [] for name in PLAN_PHASES}
+    phase_qp: dict[str, list[float]] = {name: [] for name in PLAN_PHASES}
     dof_name = {int(adr): name for name, adr in dofadr.items()}
     candidate_best: dict[tuple[str, str, str], dict[str, object]] = {}
     candidate_n = 0
     arm = np.asarray(plan.dof_armature, dtype=np.float64)
+    leg_order = [(name, int(adr)) for name, adr in dofadr.items()]
+    qp_ds = 0
+    qp_feasible = 0
+    qp_infeasible = 0
+    qp_unsolved = 0
+    qp_wall_n = 0
+    qp_worst: dict[str, object] | None = None
+    ss_n = 0
+    ss_over_n = 0
+    ss_worst: dict[str, object] | None = None
+    gap_share: list[float] = []
+    gap_force: list[float] = []
+    gap_worst: dict[str, object] | None = None
+    n_compared = 0
     for k in range(2, n):
         sample = samples[k]
         data.qpos[:] = poses[k]
@@ -1129,6 +1405,36 @@ def _planned_tau(
                 gen_min += _jac_wrench(plan, data, soles[k][side], foot_ids[side], f_min[side], m_min[side])
         tau_lin = ident - gen_lin
         tau_min = ident - gen_min
+        b_no_arm = ident - arm * qacc[k]
+        qp_status = "single-support"
+        tau_qp = tau_lin
+        f_qp: dict[str, np.ndarray] | None = f_lin
+        t_star = None
+        if support == "ss" and stance in ("l", "r"):
+            gen_qp = gen_lin
+        else:
+            qp_ds += 1
+            solved = _qp_foot_split(plan, data, foot_ids, p_zmp, force, b_no_arm, leg_order)
+            qp_status = str(solved["status"])
+            if qp_status == "feasible" and "gen" in solved:
+                qp_feasible += 1
+                gen_qp = np.asarray(solved["gen"], dtype=np.float64)
+                tau_qp = ident - gen_qp
+                f_qp = solved["f"] if isinstance(solved["f"], dict) else None
+                t_star = float(solved["t_star"])
+            else:
+                if qp_status == "infeasible":
+                    qp_infeasible += 1
+                else:
+                    qp_unsolved += 1
+                    qp_status = "unsolved"
+                gen_qp = None
+                tau_qp = None
+                f_qp = None
+        if gen_qp is not None:
+            root_here = float(np.max(np.abs((ident - gen_qp)[:ROOT_DOFS])))
+        else:
+            root_here = 0.0
         force_max = max(force_max, float(np.max(np.abs(force))))
         peak_i = int(np.argmax(np.abs(qacc[k])))
         peak = abs(float(qacc[k][peak_i]))
@@ -1152,13 +1458,88 @@ def _planned_tau(
                 "joint_dq_rad": dq,
                 "force_n": [float(v) for v in force],
             }
-        root_max = max(root_max, float(np.max(np.abs(tau_lin[:ROOT_DOFS]))), float(np.max(np.abs(tau_min[:ROOT_DOFS]))))
+        root_max = max(
+            root_max,
+            float(np.max(np.abs(tau_lin[:ROOT_DOFS]))),
+            float(np.max(np.abs(tau_min[:ROOT_DOFS]))),
+            root_here,
+        )
         phase = str(sample["phase"])
         if phase in phase_peaks:
             phase_peaks[phase].append(max(
                 max(abs(float(tau_lin[adr])), abs(float(tau_min[adr])))
                 for adr in dofadr.values()
             ))
+        no_qp_legs: dict[str, float] = {}
+        with_qp_legs: dict[str, float] = {}
+        if tau_qp is not None:
+            for name, adr in leg_order:
+                with_qp_legs[name] = float(tau_qp[adr])
+                no_qp_legs[name] = float(tau_qp[adr]) - float(arm[adr]) * float(qacc[k][adr])
+            qp_peak = max(abs(v) for v in no_qp_legs.values())
+            qp_joint = max(no_qp_legs, key=lambda name: abs(no_qp_legs[name]))
+            if phase in phase_qp:
+                phase_qp[phase].append(qp_peak)
+            sample_rec = {
+                "joint": qp_joint,
+                "t_s": float(sample["t"]),
+                "phase": phase,
+                "support": support,
+                "tau_no_armature_nm": no_qp_legs[qp_joint],
+                "tau_nm": with_qp_legs[qp_joint],
+                "max_no_armature_nm": qp_peak,
+                "t_star_nm": t_star if t_star is not None else qp_peak,
+            }
+            if support == "ss":
+                ss_n += 1
+                if qp_peak > ASK_BAR + 1e-9:
+                    ss_over_n += 1
+                if ss_worst is None or qp_peak > float(ss_worst["max_no_armature_nm"]):
+                    ss_worst = sample_rec
+            elif qp_status == "feasible":
+                # Wall number is the pure minimax, before the tangential tie-break.
+                wall_peak = float(t_star) if t_star is not None else qp_peak
+                if wall_peak > ASK_BAR + 1e-9:
+                    qp_wall_n += 1
+                if qp_worst is None or wall_peak > float(qp_worst["max_no_armature_nm"]):
+                    qp_worst = dict(sample_rec)
+                    qp_worst["max_no_armature_nm"] = wall_peak
+            if (
+                support != "ss"
+                and qp_status == "feasible"
+                and f_qp is not None
+                and "foot_f_l" in sample
+                and "foot_f_r" in sample
+            ):
+                real_l = np.asarray(sample["foot_f_l"], dtype=np.float64)
+                real_r = np.asarray(sample["foot_f_r"], dtype=np.float64)
+                fql = np.asarray(f_qp["l"], dtype=np.float64)
+                fqr = np.asarray(f_qp["r"], dtype=np.float64)
+                den_q = float(fql[2] + fqr[2])
+                if (
+                    float(real_l[2]) > QP_DS_FZ_N
+                    and float(real_r[2]) > QP_DS_FZ_N
+                    and den_q > QP_DS_FZ_N
+                ):
+                    n_compared += 1
+                    den_r = float(real_l[2] + real_r[2])
+                    share = abs(float(real_r[2]) / den_r - float(fqr[2]) / den_q)
+                    gap_share.append(share)
+                    gap = float(np.linalg.norm(np.concatenate([real_l - fql, real_r - fqr])))
+                    gap_force.append(gap)
+                    if gap_worst is None or gap > float(gap_worst["force_gap_n"]):
+                        gap_worst = {
+                            "t_s": float(sample["t"]),
+                            "phase": phase,
+                            "force_gap_n": gap,
+                            "share_abs": share,
+                            "share_real": float(real_r[2]) / den_r,
+                            "share_qp": float(fqr[2]) / den_q,
+                            "f_l_real_n": [float(v) for v in real_l],
+                            "f_r_real_n": [float(v) for v in real_r],
+                            "f_l_qp_n": [float(v) for v in fql],
+                            "f_r_qp_n": [float(v) for v in fqr],
+                        }
         if phase not in worst:
             continue
         qdd = qacc[k]
@@ -1200,6 +1581,9 @@ def _planned_tau(
                 "tau_linear_no_armature_nm": no_lin,
                 "tau_minnorm_nm": with_min,
                 "tau_minnorm_no_armature_nm": no_min,
+                "tau_qp_nm": with_qp_legs.get(name),
+                "tau_qp_no_armature_nm": no_qp_legs.get(name),
+                "qp_status": qp_status,
                 "spread_nm": spread,
                 "armature_qdd_nm": strip,
                 "zmp_y_m": zmp_y,
@@ -1210,6 +1594,12 @@ def _planned_tau(
     for phase in PLAN_PHASES:
         for row in worst[phase].values():
             row.pop("rank", None)
+
+    def _median(vals: list[float]) -> float | None:
+        if not vals:
+            return None
+        return float(np.median(np.asarray(vals, dtype=np.float64)))
+
     return {
         "phases": worst,
         "candidates": list(candidate_best.values()),
@@ -1218,9 +1608,34 @@ def _planned_tau(
         "force_abs_max_n": force_max,
         "qacc_abs_max": qacc_max,
         "qacc_spike": spike,
-        "phase_median_abs_nm": {
-            name: (float(np.median(np.asarray(vals, dtype=np.float64))) if vals else None)
-            for name, vals in phase_peaks.items()
+        "phase_median_abs_nm": {name: _median(vals) for name, vals in phase_peaks.items()},
+        "phase_median_qp_no_armature_nm": {name: _median(vals) for name, vals in phase_qp.items()},
+        "qp_wall": {
+            "n_ds": qp_ds,
+            "n_feasible": qp_feasible,
+            "n_infeasible": qp_infeasible,
+            "n_unsolved": qp_unsolved,
+            "n_wall": qp_wall_n,
+            "bar_nm": ASK_BAR,
+            "mu": QP_MU,
+            "box_mm": [135.0, 76.0],
+            "worst": qp_worst,
+        },
+        "ss_over_no_armature": {
+            "n_ss": ss_n,
+            "n_over": ss_over_n,
+            "worst": ss_worst,
+        },
+        "realised_vs_qp": {
+            "n_planned_ds": qp_ds,
+            "n_qp_feasible": qp_feasible,
+            "n_compared": n_compared,
+            "fz_min_n": QP_DS_FZ_N,
+            "share_abs_median": _median(gap_share),
+            "share_abs_max": (max(gap_share) if gap_share else None),
+            "force_gap_median_n": _median(gap_force),
+            "force_gap_max_n": (max(gap_force) if gap_force else None),
+            "worst": gap_worst,
         },
         "root_velocity_holds": int(shift_log["n_reject"]),
         "max_root_step_m": float(shift_log["max_attempt_m"]),
@@ -1234,8 +1649,17 @@ def _planned_tau(
             "τ_req is mj_inverse of the walker's q_des, with qvel and qacc "
             "the 8 ms differences, contacts off, and the root force applied "
             "through the planned ZMP. Double support reports the foot-line "
-            "split and the min-norm ankle split. clears-only-without-armature "
-            "is an unsourced-armature candidate, not a pass."
+            "split, the min-norm ankle split, and a linear program that "
+            "minimises the largest |τ| over the leg joints with armature "
+            "removed. That program keeps each foot's centre of pressure "
+            "inside the 135×76 mm box and each corner force inside friction "
+            "μ 1.2. A wall is only a double-support tick where this split "
+            "still needs more than 2.33 Nm without armature. Linear and "
+            "min-norm exceeding 2.33 are not a wall. Single support above "
+            "2.33 without armature is required single-foot torque. The "
+            "realised contact split is compared with this split and does "
+            "not change the pass. clears-only-without-armature is an "
+            "unsourced-armature candidate, not a pass."
         ),
     }
 
@@ -1246,7 +1670,7 @@ def score_cell(
     amp: float,
     perturb: sws.Perturb | None = None,
 ) -> dict[str, object]:
-    global _CAPTURE_ON, _ID_COPY, _ID_MODEL
+    global _CAPTURE_ON, _ID_COPY, _ID_MODEL, _FOOT_SINK, _FOOT_SPEC
     digest_before = _plant_md5()
     if digest_before != PLANT_MD5:
         raise SystemExit(f"plant md5 {digest_before} != {PLANT_MD5}")
@@ -1428,6 +1852,12 @@ def score_cell(
     ctrl_dt = float(session.ctrl_dt)
     vx_cmd = float(vx)
     last_q: dict[str, float] | None = None
+    _FOOT_SPEC = {
+        "l": int(walker.gid["L"]),
+        "r": int(walker.gid["R"]),
+        "grounds": {int(gid) for gid in sws._ground_gids(session, walker)},
+    }
+    _FOOT_SINK = None
     try:
         while float(session.data.time) < t_end - 1e-12:
             now = float(session.data.time)
@@ -1448,10 +1878,13 @@ def score_cell(
             n_ask = len(asks)
             _CAPTURE.clear()
             _CAPTURE_ON = True
+            foot_buf: list[dict[str, list[float]]] = []
+            _FOOT_SINK = foot_buf
             try:
                 session.step()
             finally:
                 _CAPTURE_ON = False
+                _FOOT_SINK = None
             shots = list(_CAPTURE)
             new_writes = writes[n_ask:]
             new_asks = asks[n_ask:]
@@ -1848,6 +2281,16 @@ def score_cell(
             if len(q_map) == len(sws.LEG_JOINTS):
                 support, stance_side = _plan_support(swing, stance)
                 zmp_y = float(zmp_calls[-1]) if len(zmp_calls) > zmp_mark else 0.0
+                if foot_buf:
+                    mean_l = np.mean(
+                        np.asarray([item["l"] for item in foot_buf], dtype=np.float64), axis=0,
+                    )
+                    mean_r = np.mean(
+                        np.asarray([item["r"] for item in foot_buf], dtype=np.float64), axis=0,
+                    )
+                else:
+                    mean_l = np.zeros(3, dtype=np.float64)
+                    mean_r = np.zeros(3, dtype=np.float64)
                 plan_samples.append({
                     "t": now,
                     "phase": _plan_phase(stage_name),
@@ -1856,12 +2299,16 @@ def score_cell(
                     "q": q_map,
                     "zmp_y": zmp_y,
                     "com_y": float(getattr(walker, "preview_com_y", 0.0)),
+                    "foot_f_l": [float(v) for v in mean_l],
+                    "foot_f_r": [float(v) for v in mean_r],
                 })
             tick_box[0] += 1
             if session.bus.fault:
                 break
     finally:
         zmp_preview.ZmpPreview.step = preview_step  # type: ignore[method-assign]
+        _FOOT_SINK = None
+        _FOOT_SPEC = None
     session.assert_plant_unchanged()
     if int(session.model.opt.enableflags) != 0:
         raise RuntimeError("live enableflags were set during the bout")
@@ -2378,6 +2825,22 @@ def score_cell(
             f"at {float(clamp_pick['t_s']):.3f}s "
             f"strip {float(clamp_pick['id_minus_armature_nm']):+.3f}"
         )
+    qp_block = planned.get("qp_wall") if isinstance(planned, dict) else None
+    real_block = planned.get("realised_vs_qp") if isinstance(planned, dict) else None
+    if not isinstance(qp_block, dict):
+        qp_block = {}
+    if not isinstance(real_block, dict):
+        real_block = {}
+    ss_block = planned.get("ss_over_no_armature") if isinstance(planned, dict) else None
+    if not isinstance(ss_block, dict):
+        ss_block = {}
+
+    def _opt(block: dict[str, object], key: str, spec: str) -> str:
+        val = block.get(key)
+        if not isinstance(val, (int, float)):
+            return "-"
+        return format(float(val), spec)
+
     print(
         f"T {period_s:.2f} vx {vx:.3f} {verdict} {gait} "
         f"ask {row['ask_peak_nm']:.3f} {row['ask_peak_joint']} "
@@ -2397,6 +2860,11 @@ def score_cell(
         f"over ask/qdes {n_ask_over}/{n_qdes_over} "
         f"clamped {n_clamped} unbucketed {n_over_bucket} bucketed {n_bucketed} "
         f"plan {plan_abs:.3f} {plan_name} rootP {plan_root:.3e} "
+        f"qpW {_opt(qp_block, 'n_wall', '.0f')}/{_opt(qp_block, 'n_feasible', '.0f')} "
+        f"qpInf {_opt(qp_block, 'n_infeasible', '.0f')} "
+        f"ssOver {_opt(ss_block, 'n_over', '.0f')} "
+        f"share {_opt(real_block, 'share_abs_median', '.3f')}/{_opt(real_block, 'share_abs_max', '.3f')} "
+        f"fgap {_opt(real_block, 'force_gap_median_n', '.2f')}/{_opt(real_block, 'force_gap_max_n', '.2f')} "
         f"note {torque_bar['note'] or '-'} resid {max_resid:.3e} "
         f"clampEx {clamp_note} "
         f"class {counts}",
@@ -2498,16 +2966,26 @@ def main() -> None:
             "the clamp. The passive-inclusive residual stays a comparison column. "
             "The inverse column is data_copy.qfrc_inverse only. "
             "A knee inverse value exactly ±2.450 Nm is a column bug. "
-            "The planned-motion τ_req does not change the pass. A joint that "
-            "clears 2.33 only after subtracting armature·q̈_ref is an "
-            "unsourced-armature candidate."
+            "The planned-motion τ_req does not change the pass, including a "
+            "double-support tick where the QP split still needs more than "
+            "2.33 Nm without armature. The realised contact split versus "
+            "that QP does not change the pass. A joint that clears 2.33 only "
+            "after subtracting armature·q̈_ref is an unsourced-armature candidate."
         ),
         "planned_motion": (
             "τ_req is mj_inverse on the walker's q_des with 8 ms qvel and qacc, "
             "contacts off, and the root force applied through the planned ZMP. "
-            "Double support reports the foot-line split and the min-norm ankle "
-            "split, plus the spread. Each leg joint is printed with and without "
-            "armature·q̈_ref, worst tick per start, walk, and stop."
+            "Double support reports the foot-line split, the min-norm ankle "
+            "split, and a linear program that minimises the largest |τ| over "
+            "the leg joints with armature removed. The program keeps each "
+            "foot's centre of pressure inside the 135×76 mm box and each "
+            "corner force inside a friction pyramid of μ 1.2. A wall is only "
+            "a double-support tick where that program still needs more than "
+            "2.33 Nm without armature. Linear and min-norm exceeding 2.33 "
+            "are not a wall. Single support above 2.33 without armature is "
+            "required single-foot torque. The realised double-support contact "
+            "split is compared with the QP split. A position servo does not "
+            "command the split. Neither comparison changes the pass."
         ),
         "band_cap_nm": BAND_CAP_NM,
         "band_cap_rule": (
