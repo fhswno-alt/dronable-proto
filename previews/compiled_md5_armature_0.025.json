@@ -194,6 +194,9 @@
     ]
   },
   "mujoco_version": "3.14.0",
+  "compiled_md5_by_mujoco_version": {
+    "3.14.0": "f4fb2b70b5312a851e16316a38a88283"
+  },
   "perturbation": "armature_0.025",
   "body_mass": {
     "world": 0.0,
