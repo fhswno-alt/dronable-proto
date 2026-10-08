@@ -13,15 +13,20 @@ A tick with ``|ctrl_raw| > 2.09`` fails the clip bar. ``ctrl_raw`` is the
 writer command before the ctrlrange clip when that command reproduces the
 stored ctrl; otherwise the clip fraction is ``raw ctrl unavailable``.
 
-Inverse dynamics runs on every physics substep, before ``mj_step``. A binary
-copy of the model carries ``mjENBL_FWDINV``. The live model does not, so the
-forward rollout is unchanged. The copy gets ``mj_forward``, then
-``mj_compareFwdInv``, then ``mj_inverse`` with that same qacc. A leg joint
-whose raw residual exceeds ``0.05 + dt·(0.08 + kv)·|q̈|`` marks that substep
-``residual-fail, not bucketed``. A control tick whose band exceeds 0.15 Nm
-is ``unbucketed``: counted, not passed, and not classified. The band decides
-bucketing only. It does not relax the signed applied bar of 2.33 Nm. Only
-substeps that pass both gates are split into the three buckets.
+Inverse dynamics runs on every physics substep. A binary copy of the model
+carries ``mjENBL_FWDINV`` and, when this MuJoCo build has it,
+``mjENBL_INVDISCRETE``. The live model does not, so the forward rollout is
+unchanged. Under implicitfast the step solves ``(M + dt·D)·qacc = f``. The
+qacc that belongs to that discrete step is ``(qvel_next − qvel) / dt``, not
+the continuous ``mj_forward`` acceleration. The copy takes ``mj_forward`` on
+the pre-step state, the live ``mj_step`` advances, and ``mj_inverse`` with
+the discrete flag runs on that finite-difference qacc. The inverse column
+is ``data_copy.qfrc_inverse`` only.
+
+A tick is bucketed when every leg joint and the root satisfy
+``|qfrc_inverse − (qfrc_actuator + qfrc_passive)| ≤ 1e-3`` Nm. The band and
+its 0.15 Nm cap stay in the table and do not decide the bucket. The band
+does not relax the signed applied bar of 2.33 Nm.
 """
 from __future__ import annotations
 
@@ -61,15 +66,21 @@ HAND_M_KG = 2.2
 HAND_L_M = 0.093
 HAND_LABEL = "hand estimate"
 QACC_SOURCE = (
-    "mj_forward qacc on an mj_copyData of the pre-step state; "
-    "mj_inverse uses that same qacc. Not data.qacc after mj_step."
+    "finite-difference qacc (qvel_next - qvel) / dt on the pre-step state; "
+    "mj_inverse with mjENBL_INVDISCRETE uses that qacc. "
+    "Not the continuous mj_forward qacc, and not a post-step q paired with it."
 )
 RESIDUAL_FLOOR = 0.05
 JOINT_DAMPING = 0.08
 BAND_CAP_NM = 0.15
+DISCRETE_RESIDUAL_NM = 1e-3
+RAIL_NM = 2.45
+RAIL_ATOL = 5e-4
 RESIDUAL_FAIL = "residual-fail, not bucketed"
+DISCRETE_FAIL = "discrete-residual, not bucketed"
 UNBUCKETED = "unbucketed"
 KNEE_ID_CONTROLS_NM = 2.045
+KNEE_ID_CONTROLS_DISCRETE_NM = (0.934, 1.087)
 ROOT_DOFS = 6
 PERIODS = (0.80, 0.75, 0.70, 0.65, 0.60, 0.55, 0.50, 1.00, 1.20)
 SPEEDS = (0.016, 0.024, 0.032, 0.040, 0.048, 0.056)
@@ -83,25 +94,24 @@ CLASS_NAMES = (
 CLASS_RULE = (
     "Comparisons use the absolute value of the signed torque. "
     "Exactly 2.33 stays on the low side of each greater-than test. "
-    "A physics substep is residual-fail, not bucketed, when any leg joint has "
-    "|qfrc_inverse - (qfrc_actuator + qfrc_passive)| > "
-    "0.05 + dt*(0.08 + kv)*|qacc|. dt is the plant timestep 0.002 s, kv is "
-    "-actuator_biasprm[i,2], and 0.08 is the leg joint damping. "
-    "The implicitfast offset dt*(0.08 + kv)*qacc is logged signed, and the "
-    "residual is also logged after subtracting that offset. "
-    "A control tick whose maximum per-joint band exceeds 0.15 Nm is unbucketed: "
-    "counted, not passed, and not classified. "
-    "A control tick is counted residual-fail when any of its substeps fails. "
-    "The band decides which substeps may be bucketed. It does not relax the "
-    "signed applied bar: |ask| > 2.33 fails that bar on every control tick, "
-    "including an unbucketed tick. "
-    "The three buckets use substeps that pass both gates. "
+    "MuJoCo implicitfast solves (M + dt*D)*qacc = f. The discrete qacc is "
+    "(qvel_next - qvel) / dt. mjENBL_INVDISCRETE is set on the inverse copy "
+    "when mjtEnableBit has that flag, so mj_inverse matches that step. "
+    "A control tick is discrete-residual, not bucketed, when any leg joint or "
+    "any root dof has |qfrc_inverse - (qfrc_actuator + qfrc_passive)| > 1e-3 Nm. "
+    "Exactly 1e-3 stays inside. Root rows are the same residual on the free joint. "
+    "The band 0.05 + dt*(0.08 + kv)*|qacc| and its 0.15 Nm cap are logged for "
+    "comparison and do not decide the bucket. "
+    "The band does not relax the signed applied bar: |ask| > 2.33 fails that "
+    "bar on every control tick. "
+    "The three buckets use substeps on ticks that meet the 1e-3 residual. "
     "controller fail: |qfrc_inverse| <= 2.33 and |ask| > 2.33. "
     "unsourced-armature candidate: |qfrc_inverse| > 2.33 and "
     "|qfrc_inverse - 0.01*qacc| <= 2.33. Armature 0.01 has no Hiwonder source; "
     "this bucket is not a physics candidate. "
     "physics candidate: |qfrc_inverse - 0.01*qacc| > 2.33, named by the largest "
-    "of impact/contact, link inertia, and gravity."
+    "of impact/contact, link inertia, and gravity. "
+    "An inverse sample whose absolute value is exactly 2.450 Nm is a column bug."
 )
 INTEGRATOR_NAME = {
     int(mj.mjtIntegrator.mjINT_EULER): "Euler",
@@ -118,8 +128,19 @@ _ID_MODEL: mj.MjModel | None = None
 _ID_COPY: mj.MjData | None = None
 
 
+def _invdiscrete_bit() -> int | None:
+    """``mjtEnableBit.mjENBL_INVDISCRETE`` when this build has the flag."""
+    enum = getattr(mj, "mjtEnableBit", None)
+    if enum is None:
+        return None
+    bit = getattr(enum, "mjENBL_INVDISCRETE", None)
+    if bit is None:
+        return None
+    return int(bit)
+
+
 def _isolated_inverse_model(model: mj.MjModel) -> mj.MjModel:
-    """Binary copy with ``mjENBL_FWDINV`` set. The source model's flags stay put."""
+    """Binary copy with the inverse flags set. The source model's flags stay put."""
     flags = int(model.opt.enableflags)
     fd, path = tempfile.mkstemp(prefix="a5-inv-", suffix=".mjb")
     os.close(fd)
@@ -131,52 +152,76 @@ def _isolated_inverse_model(model: mj.MjModel) -> mj.MjModel:
     if int(model.opt.enableflags) != flags:
         raise RuntimeError("saving the inverse model changed the live enableflags")
     copied.opt.enableflags |= int(mj.mjtEnableBit.mjENBL_FWDINV)
+    bit = _invdiscrete_bit()
+    if bit is not None:
+        copied.opt.enableflags |= bit
     if int(model.opt.enableflags) != flags:
         raise RuntimeError("the inverse copy shares enableflags with the live model")
     return copied
 
 
-def _capturing_step(model: mj.MjModel, data: mj.MjData) -> None:
-    """Inverse the pre-step copy, then step the live state.
+def _qfrc_inverse_column(data_copy: mj.MjData) -> np.ndarray:
+    """Inverse column for every dof. This reads ``data_copy.qfrc_inverse`` only."""
+    return np.array(data_copy.qfrc_inverse, dtype=np.float64, copy=True)
 
-    ``mj_forward`` on the copy writes the qacc that belongs to this q and
-    q̇. ``mj_compareFwdInv`` and ``mj_inverse`` reuse that qacc. The live
-    model does not carry ``mjENBL_FWDINV``, and the live ``mj_step`` is not
-    paired with this acceleration.
+
+def _rail_exact(value: float) -> bool:
+    """True when an inverse sample prints as exactly ±2.450 Nm."""
+    return abs(abs(float(value)) - RAIL_NM) <= RAIL_ATOL
+
+
+def _capturing_step(model: mj.MjModel, data: mj.MjData) -> None:
+    """Step the live state, then inverse the discrete acceleration.
+
+    ``mj_forward`` on the copy snapshots the pre-step forces. The live model
+    does not carry ``mjENBL_FWDINV`` or ``mjENBL_INVDISCRETE``. After the
+    live step, qacc is ``(qvel_next − qvel) / dt`` on that pre-step copy.
+    ``mj_inverse`` reads it. The stored inverse column is
+    ``data_copy.qfrc_inverse`` only.
     """
-    if _CAPTURE_ON:
-        if _ID_COPY is None or _ID_MODEL is None:
-            raise RuntimeError("inverse copy is not allocated")
-        copy_model = _ID_MODEL
-        copy = _ID_COPY
-        mj.mj_copyData(copy, copy_model, data)
-        mj.mj_forward(copy_model, copy)
-        qacc = np.array(copy.qacc, dtype=np.float64, copy=True)
-        actuator = np.array(copy.qfrc_actuator, dtype=np.float64, copy=True)
-        passive = np.array(copy.qfrc_passive, dtype=np.float64, copy=True)
-        # Forward constraint forces are still in place. compareFwdInv saves
-        # them, runs inverse, and restores them. Our own inverse follows.
-        mj.mj_compareFwdInv(copy_model, copy)
-        fwdinv = np.array(copy.solver_fwdinv[:2], dtype=np.float64, copy=True)
+    if not _CAPTURE_ON:
+        _ORIG_MJ_STEP(model, data)
+        return
+    if _ID_COPY is None or _ID_MODEL is None:
+        raise RuntimeError("inverse copy is not allocated")
+    copy_model = _ID_MODEL
+    copy = _ID_COPY
+    t_pre = float(data.time)
+    qpos = np.array(data.qpos, dtype=np.float64, copy=True)
+    qvel = np.array(data.qvel, dtype=np.float64, copy=True)
+    ctrl = np.array(data.ctrl, dtype=np.float64, copy=True)
+    mj.mj_copyData(copy, copy_model, data)
+    mj.mj_forward(copy_model, copy)
+    qacc_fwd = np.array(copy.qacc, dtype=np.float64, copy=True)
+    actuator = np.array(copy.qfrc_actuator, dtype=np.float64, copy=True)
+    passive = np.array(copy.qfrc_passive, dtype=np.float64, copy=True)
+    _ORIG_MJ_STEP(model, data)
+    dt = float(copy_model.opt.timestep)
+    qacc = (np.array(data.qvel, dtype=np.float64) - qvel) / dt
+    copy.qacc[:] = qacc
+    # Constraint forces from the forward pass are still on the copy.
+    # compareFwdInv saves them, runs inverse, and restores them.
+    mj.mj_compareFwdInv(copy_model, copy)
+    fwdinv = np.array(copy.solver_fwdinv[:2], dtype=np.float64, copy=True)
+    copy.qacc[:] = qacc
+    mj.mj_inverse(copy_model, copy)
+    if float(np.max(np.abs(np.array(copy.qacc) - qacc))) > 1e-8:
         copy.qacc[:] = qacc
         mj.mj_inverse(copy_model, copy)
-        if float(np.max(np.abs(copy.qacc - qacc))) > 1e-8:
-            copy.qacc[:] = qacc
-            mj.mj_inverse(copy_model, copy)
-        _CAPTURE.append({
-            "time": float(data.time),
-            "qpos": np.array(data.qpos, dtype=np.float64, copy=True),
-            "qvel": np.array(data.qvel, dtype=np.float64, copy=True),
-            "ctrl": np.array(data.ctrl, dtype=np.float64, copy=True),
-            "qacc": qacc,
-            "actuator": actuator,
-            "passive": passive,
-            "id": np.array(copy.qfrc_inverse, dtype=np.float64, copy=True),
-            "constraint": np.array(copy.qfrc_constraint, dtype=np.float64, copy=True),
-            "bias": np.array(copy.qfrc_bias, dtype=np.float64, copy=True),
-            "fwdinv": fwdinv,
-        })
-    _ORIG_MJ_STEP(model, data)
+    _CAPTURE.append({
+        "time": t_pre,
+        "qpos": qpos,
+        "qvel": qvel,
+        "ctrl": ctrl,
+        "qacc": qacc,
+        "qacc_fwd": qacc_fwd,
+        "actuator": actuator,
+        "passive": passive,
+        "id": _qfrc_inverse_column(copy),
+        "constraint": np.array(copy.qfrc_constraint, dtype=np.float64, copy=True),
+        "bias": np.array(copy.qfrc_bias, dtype=np.float64, copy=True),
+        "fwdinv": fwdinv,
+    })
 
 
 mj.mj_step = _capturing_step
@@ -689,7 +734,12 @@ def _solver_report(model: mj.MjModel) -> dict[str, object]:
     return report
 
 
-def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
+def score_cell(
+    period_s: float,
+    vx: float,
+    amp: float,
+    perturb: sws.Perturb | None = None,
+) -> dict[str, object]:
     global _CAPTURE_ON, _ID_COPY, _ID_MODEL
     digest_before = _plant_md5()
     if digest_before != PLANT_MD5:
@@ -700,7 +750,16 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
     t_stop = stand_s + walk_s
     t_end = t_stop + stop_s
     cfg = _config(period_s, vx, amp)
-    session = sws.steer_walk.SteerSession(video=False, lipm=cfg)
+    scene = None
+    if perturb is not None and perturb.rug:
+        scene = sws.steer_walk.ROOT / "mujoco" / "room_entrance.xml"
+    session = sws.steer_walk.SteerSession(video=False, lipm=cfg, scene_xml=scene)
+    if perturb is not None:
+        sws._apply_perturb(session, perturb)
+        if perturb.rug:
+            sws._place_entrance_rug(session)
+        if _plant_md5() != PLANT_MD5:
+            raise SystemExit("plant md5 changed while applying a runtime perturb")
     walker = session.lipm
     if walker is None or walker.op3 is None:
         raise RuntimeError("walker did not build")
@@ -714,11 +773,15 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
     integrator = _integrator_name(session.model)
     solver = _solver_report(session.model)
     physics_dt = float(session.model.opt.timestep)
-    # The flag lives on a binary copy. The live model, and the file, stay clear.
+    # Flags live on a binary copy taken after any runtime perturb. The file stays clear.
     _ID_MODEL = _isolated_inverse_model(session.model)
     _ID_COPY = mj.MjData(_ID_MODEL)
     if int(session.model.opt.enableflags) != 0:
         raise RuntimeError("live enableflags changed while building the inverse copy")
+    inv_bit = _invdiscrete_bit()
+    use_invdiscrete = inv_bit is not None
+    if use_invdiscrete and int(_ID_MODEL.opt.enableflags) & inv_bit == 0:
+        raise RuntimeError("inverse copy is missing mjENBL_INVDISCRETE")
     root_jid = int(mj.mj_name2id(session.model, mj.mjtObj.mjOBJ_JOINT, "root"))
     if root_jid < 0 or int(session.model.jnt_type[root_jid]) != int(mj.mjtJoint.mjJNT_FREE):
         raise RuntimeError("root is not a free joint")
@@ -747,9 +810,13 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
     limiter_ticks = 0
     residual_fail_ticks = 0
     residual_fail_substeps = 0
+    discrete_fail_ticks = 0
+    discrete_fail_substeps = 0
     band_max = 0.0
     band_cap_ticks = 0
     band_and_residual_ticks = 0
+    knee_rail_count = 0
+    root_resid_max = 0.0
     fwdinv_ticks: list[list[float]] = []
     root_id_ticks: list[float] = []
     root_id_max = 0.0
@@ -921,30 +988,39 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
                     over_shots.setdefault(si, []).append((leg, ask))
                     setattr(over, "_shot", si)
         tick_fail = False
+        tick_discrete = False
         tick_band_max = 0.0
         fwd0 = 0.0
         fwd1 = 0.0
         root_tick = 0.0
         substep_fail: list[bool] = []
+        substep_discrete: list[bool] = []
         for shot in shots:
             ident = shot["id"]
             actuator = shot["actuator"]
             passive = shot["passive"]
             qvel = shot["qvel"]
-            qacc = shot["qacc"]
+            qacc_fwd = shot["qacc_fwd"]
             fwd = shot["fwdinv"]
             fwd0 = max(fwd0, abs(float(fwd[0])))
             fwd1 = max(fwd1, abs(float(fwd[1])))
-            root_abs = float(np.max(np.abs(ident[root_adr:root_adr + ROOT_DOFS])))
+            root_slice = slice(root_adr, root_adr + ROOT_DOFS)
+            root_raw = ident[root_slice] - (actuator[root_slice] + passive[root_slice])
+            root_resid = float(np.max(np.abs(root_raw)))
+            root_resid_max = max(root_resid_max, root_resid)
+            root_abs = float(np.max(np.abs(ident[root_slice])))
             root_tick = max(root_tick, root_abs)
             root_id_max = max(root_id_max, root_abs)
             this_fail = False
+            this_discrete = root_resid > DISCRETE_RESIDUAL_NM + 1e-12
             for leg in legs:
                 adr = int(leg["dof"])
                 joint = str(leg["joint"])
                 raw = float(ident[adr] - (actuator[adr] + passive[adr]))
                 resid = abs(raw)
-                offset, band = _implicit_terms(physics_dt, float(leg["kv"]), float(qacc[adr]))
+                # Band stays on the forward qacc so the comparison column matches
+                # the previous score. The inverse itself used the discrete qacc.
+                offset, band = _implicit_terms(physics_dt, float(leg["kv"]), float(qacc_fwd[adr]))
                 adjusted = raw - offset
                 act_gap = abs(float(ident[adr] - actuator[adr]))
                 speed = abs(float(qvel[adr]))
@@ -971,23 +1047,33 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
                 if resid > band + 1e-9:
                     this_fail = True
                     tick_fail = True
+                gate = resid if use_invdiscrete else abs(adjusted)
+                if gate > DISCRETE_RESIDUAL_NM + 1e-12:
+                    this_discrete = True
                 signed_id = float(ident[adr])
-                if joint.endswith("knee") and abs(signed_id) > knee_id_peak:
-                    knee_id_peak = abs(signed_id)
-                    knee_id_signed = signed_id
-                    knee_id_joint = joint
-                    knee_id_t = float(shot["time"])
+                if joint.endswith("knee"):
+                    if _rail_exact(signed_id):
+                        knee_rail_count += 1
+                    if abs(signed_id) > knee_id_peak:
+                        knee_id_peak = abs(signed_id)
+                        knee_id_signed = signed_id
+                        knee_id_joint = joint
+                        knee_id_t = float(shot["time"])
             if this_fail:
                 residual_fail_substeps += 1
+            if this_discrete:
+                discrete_fail_substeps += 1
+                tick_discrete = True
             substep_fail.append(this_fail)
-        # Exactly 0.15 stays eligible. A wider band unbuckets the whole tick.
+            substep_discrete.append(this_discrete)
+        # The 0.15 Nm cap is a comparison count. It does not unbucket the tick.
         tick_capped = tick_band_max > BAND_CAP_NM + 1e-9
         if tick_capped:
             band_cap_ticks += 1
         if tick_capped and tick_fail:
             band_and_residual_ticks += 1
-        if not tick_capped:
-            for shot, failed in zip(shots, substep_fail):
+        if not tick_discrete:
+            for shot, failed in zip(shots, substep_discrete):
                 if failed:
                     continue
                 ident_pass = shot["id"]
@@ -1004,10 +1090,13 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         for over in plant_overs[over_from:]:
             si = getattr(over, "_shot", None)
             setattr(over, "_sub_fail", True if not isinstance(si, int) else substep_fail[si])
+            setattr(over, "_discrete_fail", tick_discrete)
             setattr(over, "_band_cap", tick_capped)
             setattr(over, "_tick_band_max", tick_band_max)
         if tick_fail:
             residual_fail_ticks += 1
+        if tick_discrete:
+            discrete_fail_ticks += 1
         tick_residual_fail.append(tick_fail)
         fwdinv_ticks.append([fwd0, fwd1])
         root_id_ticks.append(root_tick)
@@ -1317,17 +1406,13 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         hand = HAND_M_KG * G * HAND_L_M * math.sin(abs(rec.q) / 2.0)
         gated = bool(getattr(rec, "_sub_fail", True))
         capped = bool(getattr(rec, "_band_cap", False))
+        discrete_gated = bool(getattr(rec, "_discrete_fail", True))
         if not isinstance(blob, dict):
             kind, term = ("unmeasured", "")
             parts = {name: float("nan") for name in TERMS}
-        elif capped:
+        elif discrete_gated:
             parts = {name: float(blob["parts"][name]) for name in TERMS}
-            kind, term = UNBUCKETED, ""
-            resid = abs(float(blob["ident_residual_nm"]))
-            max_resid = max(max_resid, resid)
-        elif gated:
-            parts = {name: float(blob["parts"][name]) for name in TERMS}
-            kind, term = RESIDUAL_FAIL, ""
+            kind, term = DISCRETE_FAIL, ""
             resid = abs(float(blob["ident_residual_nm"]))
             max_resid = max(max_resid, resid)
         else:
@@ -1372,6 +1457,7 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
             "ident_residual_nm": None if not isinstance(blob, dict) else blob["ident_residual_nm"],
             "solver_fwdinv": None if not isinstance(blob, dict) else blob["solver_fwdinv"],
             "residual_gated": gated,
+            "discrete_gated": discrete_gated,
             "band_capped": capped,
             "tick_band_max_nm": float(getattr(rec, "_tick_band_max", float("nan"))),
             "qacc_rad_s2": None if not isinstance(blob, dict) else blob["qacc_rad_s2"],
@@ -1400,9 +1486,13 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
     term_counts = {name: 0 for name in REMAINING}
     n_residual_over = 0
     n_unbucketed = 0
+    n_discrete_over = 0
     for row in ask_events:
         if row["class"] == UNBUCKETED:
             n_unbucketed += 1
+            continue
+        if row["class"] == DISCRETE_FAIL:
+            n_discrete_over += 1
             continue
         if row["class"] == RESIDUAL_FAIL:
             n_residual_over += 1
@@ -1492,6 +1582,23 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         "residual_fail_ticks": residual_fail_ticks,
         "residual_fail_substeps": residual_fail_substeps,
         "residual_fail_over_bar": n_residual_over,
+        "perturb": None if perturb is None else {
+            "label": perturb.label,
+            "seed": perturb.seed,
+            "mass_scale": perturb.mass_scale,
+            "rug": perturb.rug,
+        },
+        "mujoco_version": mj.__version__,
+        "invdiscrete": use_invdiscrete,
+        "discrete_residual_nm": DISCRETE_RESIDUAL_NM,
+        "discrete_fail_label": DISCRETE_FAIL,
+        "discrete_fail_ticks": discrete_fail_ticks,
+        "discrete_fail_substeps": discrete_fail_substeps,
+        "discrete_fail_over_bar": n_discrete_over,
+        "root_residual_max_nm": root_resid_max,
+        "knee_id_rail_nm": RAIL_NM,
+        "knee_id_rail_bug": knee_rail_count > 0 or _rail_exact(knee_id_peak),
+        "knee_id_rail_count": knee_rail_count,
         "unbucketed_label": UNBUCKETED,
         "unbucketed_band_ticks": band_cap_ticks,
         "unbucketed_residual_ticks": residual_fail_ticks,
@@ -1589,7 +1696,10 @@ def score_cell(period_s: float, vx: float, amp: float) -> dict[str, object]:
         f"kneeID {knee_id_peak:.3f} {knee_id_joint} "
         f"raw {raw_peak_signed:+.4f} off {raw_peak_offset:+.4f} adj {raw_peak_adjusted:+.4f} "
         f"adjmax {adj_max_abs:.4f} "
-        f"root {root_id_max:.3e} bandmax {band_max:.4f} "
+        f"root {root_id_max:.3e} rootR {root_resid_max:.3e} "
+        f"dresid {max_leg_resid:.4f} dfail {discrete_fail_ticks}/{n} "
+        f"rail {knee_rail_count} "
+        f"bandmax {band_max:.4f} "
         f"cap {band_cap_ticks}/{n} resfail {residual_fail_ticks}/{n} "
         f"qdes {row['qdes_peak_nm']:.3f} {row['qdes_peak_joint']} "
         f"over ask/qdes {n_ask_over}/{n_qdes_over} bucketed {n_bucketed} "
@@ -1614,6 +1724,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Score a5a9183 on the #102 bars plus inverse dynamics")
     parser.add_argument("--cells", default="", help="Optional T:vx pairs, comma separated. Empty runs the 54.")
     parser.add_argument("--out", default="", help="JSON path. Empty prints only.")
+    parser.add_argument("--mass-scale", type=float, default=1.0)
+    parser.add_argument("--seed", type=int, default=-1)
+    parser.add_argument("--rug", action="store_true")
+    parser.add_argument("--compact", action="store_true", help="Drop per-tick traces from the JSON.")
     args = parser.parse_args()
     if sws.SOFT_PASS:
         raise SystemExit("soft-pass is on")
@@ -1622,10 +1736,32 @@ def main() -> None:
     cells = _parse_cells(args.cells) if args.cells else [
         (period, vx) for period in PERIODS for vx in SPEEDS
     ]
+    perturb = None
+    if args.rug or args.seed >= 0 or abs(args.mass_scale - 1.0) > 1e-12:
+        label = "nominal"
+        if args.rug:
+            label = "rug"
+        elif args.seed >= 0:
+            label = f"seed-{args.seed}"
+        elif abs(args.mass_scale - 1.0) > 1e-12:
+            label = f"mass-{args.mass_scale:.2f}"
+        perturb = sws.Perturb(
+            label=label,
+            seed=None if args.seed < 0 else int(args.seed),
+            mass_scale=float(args.mass_scale),
+            rug=bool(args.rug),
+        )
     cache: dict[float, float] = {}
     rows = []
     for period_s, vx in cells:
-        rows.append(score_cell(period_s, vx, _amp(period_s, cache)))
+        row = score_cell(period_s, vx, _amp(period_s, cache), perturb)
+        if args.compact:
+            for key in (
+                "over_bar", "root_id_per_tick_nm", "solver_fwdinv_per_tick",
+                "torque_bar", "qvel", "stop",
+            ):
+                row.pop(key, None)
+        rows.append(row)
         if _plant_md5() != PLANT_MD5:
             raise SystemExit("plant md5 changed")
     payload = {
@@ -1644,14 +1780,28 @@ def main() -> None:
         ),
         "solver": None if not rows else rows[0]["solver"],
         "residual_floor_nm": RESIDUAL_FLOOR,
+        "mujoco_version": mj.__version__,
+        "invdiscrete": _invdiscrete_bit() is not None,
+        "invdiscrete_flag": "mjtEnableBit.mjENBL_INVDISCRETE",
+        "discrete_residual_nm": DISCRETE_RESIDUAL_NM,
+        "discrete_rule": (
+            "mujoco.__version__ is checked for mjtEnableBit.mjENBL_INVDISCRETE. "
+            "On this build the flag exists and is set on the inverse copy only. "
+            "qacc is (qvel_next - qvel) / dt. A control tick is bucketed when "
+            "every leg joint and every root dof has "
+            "|qfrc_inverse - (qfrc_actuator + qfrc_passive)| <= 1e-3 Nm. "
+            "The inverse column is data_copy.qfrc_inverse only. "
+            "A knee inverse value exactly ±2.450 Nm is a column bug. "
+            "If the flag were absent, the gate would be the residual after "
+            "subtracting the signed dt*(damping+kv)*qacc term from the qDeriv "
+            "diagonal, still against 1e-3."
+        ),
         "band_cap_nm": BAND_CAP_NM,
         "band_cap_rule": (
-            "A control tick whose maximum per-joint band exceeds 0.15 Nm is "
-            "unbucketed: counted, not passed into a bucket, and not classified. "
-            "A control tick with any leg residual above its own band is counted "
-            "separately as residual-fail, not bucketed. Bucket fractions use the "
-            "over-bar substeps that remain. The band does not relax the signed "
-            "applied bar of 2.33 Nm; that bar still sees every control tick."
+            "The band and its 0.15 Nm cap are comparison columns. They do not "
+            "decide the bucket once the discrete residual is available. "
+            "A tick can still be counted in Cap or ResFail. "
+            "The band does not relax the signed applied bar of 2.33 Nm."
         ),
         "residual_band": "0.05 + dt*(0.08 + kv)*|qacc| per leg joint per 0.002 s step",
         "residual_definition": "signed qfrc_inverse - (qfrc_actuator + qfrc_passive) per leg joint",
@@ -1678,7 +1828,7 @@ def main() -> None:
             "g": G,
         },
         "id_split": {
-            "id": "qfrc_inverse from mj_inverse on an mj_copyData of the pre-step state after mj_forward, using that forward qacc",
+            "id": "data_copy.qfrc_inverse from mj_inverse on the pre-step copy, qacc = (qvel_next - qvel) / dt, mjENBL_INVDISCRETE set on that copy only",
             "armature_qacc": "0.01 * qacc",
             "impact_contact": "-qfrc_constraint",
             "link_inertia": "(M*qacc - dof_armature*qacc) + (qfrc_bias(q,v) - qfrc_bias(q,0))",
