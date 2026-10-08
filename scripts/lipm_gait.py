@@ -595,6 +595,14 @@ class LipmWalker:
         self.id_rail_n = 0
         self.id_req_with: dict[str, dict[str, float | str]] = {}
         self.id_req_bare: dict[str, dict[str, float | str]] = {}
+        self.id_req_stop_with: dict[str, dict[str, float | str]] = {}
+        self.id_req_stop_bare: dict[str, dict[str, float | str]] = {}
+        self.id_req_arm = False
+        self.id_req_arm_joint = ""
+        self.id_req_arm_tau = 0.0
+        self.id_req_arm_bare = 0.0
+        self.id_req_arm_phase = ""
+        self.id_req_arm_t = 0.0
         self.id_req_wall = False
         self.id_req_wall_n = 0
         self.id_req_wall_joint = ""
@@ -1672,31 +1680,47 @@ class LipmWalker:
     ) -> None:
         """Per-joint peaks of the planned inverse, with and without armature.
 
-        ``tau`` is ID(q_ref, q̇_ref, q̈_ref) and already includes 0.01·q̈_ref.
-        ``bare`` is tau − 0.01·q̈_ref. A wall is |bare| > 2.33. The knee
-        budget is |tau| ≤ 2.0, armature included.
+        ``tau`` already includes 0.01·q̈_ref. ``bare`` is tau − 0.01·q̈_ref.
+        |bare| > 2.33 names a wall. |tau| > 2.33 with |bare| ≤ 2.33 is an
+        unsourced-armature candidate. Neither one is a pass. A pass is the
+        applied signed force on the real plant, armature included, ≤ 2.33
+        on every tick, with limiter-active fraction 0 and clamp fraction 0.
+        The stop target is the same 2.33 Nm with armature included.
         """
         t = float(self.data.time)
+        sample = {
+            "abs": abs(tau),
+            "tau": float(tau),
+            "bare": float(bare),
+            "qdd": float(qdd),
+            "t": t,
+            "phase": phase,
+        }
         with_rec = self.id_req_with.get(name)
         if with_rec is None or abs(tau) > float(with_rec["abs"]):
-            self.id_req_with[name] = {
-                "abs": abs(tau),
-                "tau": float(tau),
-                "bare": float(bare),
-                "qdd": float(qdd),
-                "t": t,
-                "phase": phase,
-            }
+            self.id_req_with[name] = dict(sample)
         bare_rec = self.id_req_bare.get(name)
         if bare_rec is None or abs(bare) > float(bare_rec["abs"]):
-            self.id_req_bare[name] = {
-                "abs": abs(bare),
-                "tau": float(tau),
-                "bare": float(bare),
-                "qdd": float(qdd),
-                "t": t,
-                "phase": phase,
-            }
+            bare_sample = dict(sample)
+            bare_sample["abs"] = abs(bare)
+            self.id_req_bare[name] = bare_sample
+        if phase == "stop":
+            stop_with = self.id_req_stop_with.get(name)
+            if stop_with is None or abs(tau) > float(stop_with["abs"]):
+                self.id_req_stop_with[name] = dict(sample)
+            stop_bare = self.id_req_stop_bare.get(name)
+            if stop_bare is None or abs(bare) > float(stop_bare["abs"]):
+                stop_sample = dict(sample)
+                stop_sample["abs"] = abs(bare)
+                self.id_req_stop_bare[name] = stop_sample
+        if abs(tau) > KNEE_SAG_NM + 1e-9 and abs(bare) <= KNEE_SAG_NM + 1e-9:
+            self.id_req_arm = True
+            if abs(tau) > abs(self.id_req_arm_tau):
+                self.id_req_arm_joint = name
+                self.id_req_arm_tau = float(tau)
+                self.id_req_arm_bare = float(bare)
+                self.id_req_arm_phase = phase
+                self.id_req_arm_t = t
         if abs(bare) > KNEE_SAG_NM + 1e-9:
             self.id_req_wall = True
             self.id_req_wall_n += 1
