@@ -54,8 +54,12 @@ ID_FF_ARMATURE = 0.01
 DC_QVEL_LIM = 5.82
 DC_STALL_NM = 3.43
 # Solver tolerance for a matched forward/inverse pair. A tick is not
-# bucketed while the leg residual is above this.
+# bucketed while the leg residual is above its band. The band is
+# ID_RESID_NM plus the implicit offset. A band above ID_BAND_CAP_NM
+# does not bucket and does not count as passed. The band never
+# relaxes the 2.33 Nm applied-ask bar.
 ID_RESID_NM = 0.05
+ID_BAND_CAP_NM = 0.15
 # Stop/silence command budget for every leg joint. Hip yaw, hip roll,
 # hip pitch, knee, ankle pitch, and ankle roll share the HX-35H class.
 # The sag bar stays 2.33. Sitting the prediction on that bar measured
@@ -514,6 +518,8 @@ class LipmWalker:
         self.id_impl_max = 0.0
         self.id_impl_at_resid = 0.0
         self.id_band_at_resid = ID_RESID_NM
+        self.id_band_max = 0.0
+        self.id_band_hi_n = 0
         self.id_tick_offset: dict[str, float] = {}
         self.id_tick_band: dict[str, float] = {}
         self._leg_kv: dict[str, float] = {}
@@ -1111,6 +1117,8 @@ class LipmWalker:
         velocity derivative, so the band is
         0.05 + dt·(damping + kv)·|q̈|. The offset is logged on its
         own. A joint outside that band is counted and not bucketed.
+        A band above 0.15 Nm is unbucketed and is not a pass. The
+        band does not relax the 2.33 Nm applied-ask bar.
         """
         self._ensure_leg_dof()
         if self._id_data is None:
@@ -1155,6 +1163,7 @@ class LipmWalker:
         if root_bad:
             self.id_root_fail_n += 1
         step_fail = root_bad
+        step_wide = False
         rot = np.array(self.data.xmat[self.bid_body], dtype=np.float64).reshape(3, 3)
         upright = float(rot[2, 2]) >= 0.92
         sag = float(KNEE_SAG_NM)
@@ -1177,15 +1186,23 @@ class LipmWalker:
             prev_resid = float(self.id_tick_resid.get(name, -1.0))
             if resid > prev_resid:
                 self.id_tick_resid[name] = resid
+            if band > self.id_band_max:
+                self.id_band_max = band
             outside = resid > band
+            wide = band > ID_BAND_CAP_NM
+            if wide:
+                step_wide = True
             if outside:
                 self.id_tick_ok[name] = False
                 step_fail = True
+            elif wide:
+                self.id_tick_ok[name] = False
             elif abs(tau) >= abs(float(self.id_tick_tau.get(name, 0.0))):
                 self.id_tick_tau[name] = tau
                 self.id_tick_arm[name] = arm
                 self.id_tick_stripped[name] = stripped
-            if not outside and not root_bad:
+            passed = (not outside) and (not wide) and (not root_bad)
+            if passed:
                 self._consistent_tau[name] = tau
                 if name.endswith("knee"):
                     self.id_knee_ok_n += 1
@@ -1199,7 +1216,7 @@ class LipmWalker:
                 self.id_resid_joint = name
                 self.id_impl_at_resid = offset
                 self.id_band_at_resid = band
-            if root_bad or outside or not upright:
+            if root_bad or outside or wide or not upright:
                 continue
             if abs(stripped) > sag + 1e-9:
                 self.id_wall_phys_n += 1
@@ -1240,6 +1257,8 @@ class LipmWalker:
         if root_bad:
             for name in self.id_tick_ok:
                 self.id_tick_ok[name] = False
+        if step_wide:
+            self.id_band_hi_n += 1
         if step_fail:
             self.id_resid_fail_n += 1
 

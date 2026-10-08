@@ -2805,23 +2805,27 @@ The signed ask on these rows is `kp·(ctrl−q) − kv·q̇` with ctrl after the
 
 A tick whose `mj_inverse` is over 2.33 Nm only because of armature·q̈ — `mj_inverse − 0.01·q̈` still inside ±2.33 — is an unsourced-armature candidate. The 0.01 has no source and is not changed. A wall is only a tick where `mj_inverse − 0.01·q̈` is still over 2.33 Nm. On a wall the dominant piece is named. q̈ is the inertia excluding armature, plus the velocity product. Armature is `0.01·q̈`. Impact is the contact torque at touchdown. CoP is the contact torque when that foot's centre of pressure is at least 15 mm from the ankle. Any other contact is counted with gravity. The peak is taken while the torso up component is at least 0.92, so a fallen pose does not supply the name.
 
-The inverse copy is taken before `mj_step`. `mjENBL_FWDINV` is set on that copy only and cleared before the live step, so the plant XML is untouched. The copy runs `mj_forward`, then `mj_inverse`. `solver_fwdinv` is the forward/inverse norm from that copy: component 0 is the constraint difference and component 1 is the force difference. The integrator is implicitfast at 0.002 s. Joint damping 0.08 and each leg actuator's kv enter the implicit velocity derivative, so the logged offset is `dt·(0.08 + kv)·|q̈|`. The band on a leg joint is `0.05 + offset`. A joint outside that band is counted and not bucketed.
+The inverse copy is taken before `mj_step`. `mjENBL_FWDINV` is set on that copy only and cleared before the live step, so the plant XML is untouched. The copy runs `mj_forward`, then `mj_inverse`. `solver_fwdinv` is the forward/inverse norm from that copy: component 0 is the constraint difference and component 1 is the force difference. The integrator is implicitfast at 0.002 s. Joint damping 0.08 and each leg actuator's kv enter the implicit velocity derivative, so the logged offset is `dt·(0.08 + kv)·|q̈|`. The band on a leg joint is `0.05 + offset`. A joint outside that band is counted and not bucketed. A band above 0.15 Nm is counted in the max-band column and is not a pass: that tick stays unbucketed. The band chooses the bucket. The applied-ask bar stays ≤2.33 Nm on `kp·(clip(ctrl, ±2.09) − q) − kv·ω`, and the band is not an input to that bar.
 
-Root rows first. `max |qfrc_inverse[0:6]|` stays under 6.8×10⁻⁴ Nm. No physics step is over 0.05 Nm. `solver_fwdinv[0]` stays under 8×10⁻¹⁴ and `solver_fwdinv[1]` under 8.1×10⁻⁴.
+Root rows first. `max |qfrc_inverse[0:6]|` stays under 5.3×10⁻⁴ Nm on the eight rows. No physics step is over 0.05 Nm. `solver_fwdinv[0]` stays under 6×10⁻¹⁴ and `solver_fwdinv[1]` under 6.4×10⁻⁴.
 
-| Row | root max | root t | root dof | fwdinv0 | fwdinv1 | impl offset | resid | band at resid | outside | knee ID |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| T 0.60 / 0.032, feedforward | 4.7e-4 | 0.886 | x | 4.5e-14 | 5.7e-4 | 1.046 | 0.805 | 0.264 | 346 | −2.45 |
-| T 1.00 / 0.016, feedforward | 6.7e-4 | 0.760 | x | 7.1e-14 | 8.1e-4 | 1.227 | 0.840 | 0.154 | 521 | −2.45 |
-| T 1.20 / 0.024, feedforward | 5.1e-4 | 0.318 | x | 4.4e-14 | 6.0e-4 | 1.286 | 0.890 | 0.173 | 388 | −2.45 |
-| T 4 / 0.016, feedforward | 5.3e-14 | 3.438 | z | 4.6e-14 | 5.6e-14 | 1.476 | 0.976 | 0.230 | 712 | +2.45 |
-| T 20 / 0.0042, feedforward | 2.2e-4 | 0.456 | x | 6.5e-14 | 2.7e-4 | 1.501 | 0.848 | 0.130 | 807 | +2.45 |
-| T 0.60 / 0.032, knee gait | 4.4e-4 | 4.656 | y | 1.9e-14 | 5.3e-4 | 0.667 | 0.266 | 0.060 | 424 | +2.45 |
-| T 1.00 / 0.016, knee gait | 1.5e-4 | 1.860 | x | 2.2e-14 | 1.7e-4 | 0.389 | 0.241 | 0.109 | 469 | +2.45 |
-| T 1.20 / 0.024, knee gait | 5.2e-4 | 5.416 | y | 1.5e-14 | 6.4e-4 | 0.347 | 0.186 | 0.052 | 402 | +2.45 |
+| Row | root max | root t | root dof | fwdinv0 | fwdinv1 | impl offset | resid | band at resid | outside | max band | band>0.15 | knee ID |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| T 0.60 / 0.032, feedforward | 5.3e-4 | 0.728 | x | 4.4e-14 | 6.3e-4 | 0.784 | 0.357 | 0.087 | 926 | 0.834 | 911 | +1.876 |
+| T 1.00 / 0.016, feedforward | 6.4e-8 | 0.932 | x | 4.7e-14 | 3.7e-5 | 0.887 | 0.338 | 0.068 | 518 | 0.937 | 499 | +2.450 |
+| T 1.20 / 0.024, feedforward | 5.1e-4 | 0.318 | x | 2.4e-14 | 6.0e-4 | 0.695 | 0.289 | 0.072 | 638 | 0.745 | 667 | +2.006 |
+| T 4 / 0.016, feedforward | 4.5e-4 | 2.938 | y | 5.9e-14 | 5.6e-4 | 1.193 | 0.514 | 0.124 | 1146 | 1.243 | 1190 | +1.941 |
+| T 20 / 0.0042, feedforward | 2.2e-4 | 0.456 | x | 4.9e-14 | 2.7e-4 | 0.715 | 0.411 | 0.133 | 584 | 0.765 | 730 | −2.450 |
+| T 0.60 / 0.032, knee gait | 4.4e-4 | 4.656 | y | 1.9e-14 | 5.3e-4 | 0.667 | 0.266 | 0.060 | 424 | 0.717 | 301 | +0.934 |
+| T 1.00 / 0.016, knee gait | 1.5e-4 | 1.860 | x | 2.2e-14 | 1.7e-4 | 0.389 | 0.241 | 0.109 | 469 | 0.439 | 294 | −1.492 |
+| T 1.20 / 0.024, knee gait | 5.2e-4 | 5.416 | y | 1.5e-14 | 6.4e-4 | 0.347 | 0.186 | 0.052 | 402 | 0.397 | 276 | +1.543 |
 
-`impl offset` is the largest `dt·(0.08 + kv)·|q̈|` on that row. The residual and the band beside it are the leg joint where the residual itself is largest. Outside is the number of physics steps with a leg joint over its own band. Those steps are not bucketed. Knee ID is the largest knee inverse on a step inside the band.
+`impl offset` is the largest `dt·(0.08 + kv)·|q̈|` on that row. The residual and the band beside it are the leg joint where the residual itself is largest. Outside is the number of physics steps with a leg joint over its own band. Max band is the largest `0.05 + offset` on any leg joint. `band>0.15` is the number of physics steps with at least one leg joint over 0.15 Nm. Those steps are not bucketed and are not passes. Knee ID is the largest knee inverse on a step whose residual is inside its band and whose band is at most 0.15 Nm.
 
-The knee gaits stay up. On each of them the in-band knee inverse reaches the plant rail, +2.45 Nm. The T 0.60 knee gait, with mass scaled ±5% on the body inertias, ten hinge seeds at each scale, and the entrance rug, has the same worst case: 2.450 Nm on the right knee. The rug peaks are 1.860 Nm and 1.861 Nm. The root wrench on that sweep stays under 7.8×10⁻⁴ Nm, with no step over 0.05 Nm. 2.450 Nm is over 2.33 Nm, so the feedforward path is not worth building.
+The knee gaits stay up. Their capped knee inverses are +0.934 Nm (right knee, 1.358 s), −1.492 Nm (left knee, 2.882 s), and +1.543 Nm (right knee, 2.456 s). The T 0.60 knee gait, with mass scaled ±5% on the body inertias and ten hinge seeds at each scale, stays between 0.885 Nm and 0.986 Nm. The entrance rug is 1.062 Nm, and the rug at +5% mass is 1.087 Nm on the left knee at 2.482 s. That is the worst case. The root wrench on the sweep stays under 7.8×10⁻⁴ Nm, with no step over 0.05 Nm, and the max band on the sweep is 0.776 Nm. 1.543 Nm and 1.087 Nm are both under 2.33 Nm, so the feedforward path is worth building.
+
+The applied ask on those same knee gaits is still over the bar: +5.820 Nm, −4.121 Nm, and +3.941 Nm, all knees, with 28, 36, and 37 writes over 2.33 Nm. Limiter fractions are 0.464, 0.534, and 0.565. `signed_ok` is false on every row. The 0.15 Nm cap did not move that bar.
+
+The feedforward rows tip. Two of their capped knee inverses sit on the plant rail: +2.450 Nm on the right knee at 1.416 s (T 1.00) and −2.450 Nm on the left knee at 3.696 s (T 20). While the torso up component is at least 0.92, T 4 has a wall on the left hip pitch at 3.856 s, stance edge, CoP, inverse +2.157 Nm, stripped +2.395 Nm. T 20 has a wall on the right hip pitch at 3.276 s, double-support transfer, CoP, inverse −2.104 Nm, stripped −2.355 Nm. The three knee gaits have no wall and no unsourced-armature candidate. Their signed asks still fail, and their limiter fractions are above 0.
 
 Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0.

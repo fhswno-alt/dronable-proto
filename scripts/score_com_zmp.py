@@ -1310,15 +1310,20 @@ def run_attempt(
             clo, chi = ctrl_lim[row.joint]
             if row.q_des < clo - 1e-9 or row.q_des > chi + 1e-9:
                 ctrl_clip[row.joint] += 1
-            # Bucket only after the matched residual is inside 0.05 Nm.
-            # The inverse is the pre-integration forward of this command.
+            # The band chooses a bucket. It does not relax the 2.33 Nm
+            # applied-ask bar, which is signed_over above. A band above
+            # 0.15 Nm is unbucketed and is not a pass.
             tau_id = lipm.id_tick_tau.get(row.joint)
             resid_id = float(lipm.id_tick_resid.get(row.joint, float("inf")))
             band_id = float(lipm.id_tick_band.get(row.joint, lipm_gait.ID_RESID_NM))
             ok_id = bool(lipm.id_tick_ok.get(row.joint, False)) and tau_id is not None
             if abs(row.signed_nm) > ASK_NM + 1e-9:
                 id_over_signed += 1
-            if not ok_id or resid_id > band_id:
+            if (
+                not ok_id
+                or resid_id > band_id
+                or band_id > lipm_gait.ID_BAND_CAP_NM
+            ):
                 id_skip_n += 1
             else:
                 stripped_id = float(lipm.id_tick_stripped.get(row.joint, float(tau_id)))
@@ -1737,6 +1742,8 @@ def run_attempt(
         "id_impl_max": float(getattr(lipm, "id_impl_max", 0.0)),
         "id_impl_at_resid": float(getattr(lipm, "id_impl_at_resid", 0.0)),
         "id_band_at_resid": float(getattr(lipm, "id_band_at_resid", 0.0)),
+        "id_band_max": float(getattr(lipm, "id_band_max", 0.0)),
+        "id_band_hi_n": int(getattr(lipm, "id_band_hi_n", 0)),
         "id_resid_max": float(getattr(lipm, "id_resid_max", 0.0)),
         "id_resid_joint": str(getattr(lipm, "id_resid_joint", "")),
         "id_resid_pas_max": float(getattr(lipm, "id_resid_pas_max", 0.0)),
