@@ -1,0 +1,40 @@
+{
+  "soft_pass": false,
+  "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+  "ctrl_abs_rad": 2.09,
+  "rows": [
+    {
+      "bout": "d6e8b5e voice-20",
+      "tip_sha": "d6e8b5ebb801250814552fc728886a11dd0350c2",
+      "ctrl_abs_rad": 2.09,
+      "n_ticks": 3801,
+      "clip_ticks": 0,
+      "clip_fraction": 0.0,
+      "clip_substeps": 0,
+      "substeps": 15204,
+      "writes": 49456,
+      "max_abs_writer_raw": 1.1742502841896196,
+      "max_abs_data_ctrl": 1.1742486909969703,
+      "passes": true,
+      "definition": "|ctrl_raw| > 2.09 on a control tick is a fail. ctrl_raw is the writer command before the ctrlrange clip when that command reproduces the stored ctrl, and data.ctrl entering mj_step.",
+      "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+      "n_samples": 3801
+    },
+    {
+      "bout": "51ae123 kitchen-m90",
+      "tip_sha": "51ae123add3cc6bb9c3e5cd0f1d6b4035e65b29c",
+      "ctrl_abs_rad": 2.09,
+      "n_ticks": 4583,
+      "clip_ticks": 0,
+      "clip_fraction": 0.0,
+      "clip_substeps": 0,
+      "substeps": 18332,
+      "writes": 141300,
+      "max_abs_writer_raw": 1.317074495268845,
+      "max_abs_data_ctrl": 1.3072592690883889,
+      "passes": true,
+      "definition": "|ctrl_raw| > 2.09 on a control tick is a fail. ctrl_raw is the writer command before the ctrlrange clip when that command reproduces the stored ctrl, and data.ctrl entering mj_step.",
+      "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e"
+    }
+  ]
+}
