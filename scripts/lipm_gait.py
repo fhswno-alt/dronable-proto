@@ -2931,11 +2931,14 @@ class LipmWalker:
                 for bid in self._leg_bodies(swing):
                     self.model.body_mass[bid] = 0.0
                     self.model.body_inertia[bid, :] = 0.0
+                # cinert is filled by mj_comPos. mj_crb only assembles it.
+                mj.mj_comPos(self.model, scratch)
                 mj.mj_crb(self.model, scratch)
                 grav_r, full_r = self._rne_grav_full(scratch)
             finally:
                 self.model.body_mass[:] = saved_m
                 self.model.body_inertia[:] = saved_i
+                mj.mj_comPos(self.model, scratch)
                 mj.mj_crb(self.model, scratch)
             swing_term = float(full[adr] - full_r[adr])
             gravity = float(grav_r[adr])

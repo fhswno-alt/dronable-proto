@@ -3729,7 +3729,7 @@ Through that cycle the planned CoM stays inside the stance box, and the stance h
 
 The stop blend was a second frame error. It took a hip-roll reference of −1.30 rad/s into a 0.55 s quintic whose endpoints were both −0.03 rad. The curve overshot to −0.17 rad, the left sole walked out to +0.10 m, and the 0.010 stop tipped (up_z 0.70, CoM margin −0.054 m). The blend now keeps only the incoming velocity whose quintic stays within 0.02 rad of the endpoints. That sample becomes −0.16 rad/s. The stop also clears the swing-foot bias, so the return is between the two planted feet.
 
-Free-root rescore with the guard in the loop. Same window as the table above. The guard did not fire. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off.
+Free-root rescore with the earlier guard in the loop. Same window as the table above. That guard did not fire. The corrected abort, below, refuses this plan on the first walk tick. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off.
 
 | | armature 0.010 | armature 0.025 |
 | --- | --- | --- |
@@ -3761,3 +3761,18 @@ Largest planned root residual: 2.70 N fore-aft at t = 2.088 s on 0.010, vector [
 Stepping bars still fail. Clearance over 20–80% of the declared swing is −0.37 mm at 0.010 and −1.27 mm at 0.025. The highest sole in those windows is 1.01 mm and 2.28 mm. Placement is −10.9 mm and −7.2 mm against an 8 mm command. Slip is 0.55 mm and 1.05 mm. vx over the window, including the 1.0 s arm, is 0.0049 m/s and 0.0016 m/s. That is slower than the previous free-root row (0.48 and 0.53). The swing sole is being held on its latched y, and the foot still does not clear.
 
 The 0.010 row holds signed force, limiter, clamp, the DC line, and the upright flat stop. It misses the stepping bars. The 0.025 row holds the torso, the DC line, limiter 0, and the flat stop, and misses signed force, clamp, and the stepping bars. The gait is not locked. There is no video.
+
+## Root-row abort
+
+The 1.3 Nm hip check does not discard a plan. A stance hip-roll |τ_req| above 1.3 Nm is printed with the tick, the phase, and four parts that add to τ_req: gravity, inertial (coriolis, armature·q̈, and minus passive), swing-leg, and contact. Contact is −qfrc_applied on that dof, the planned wrench's share. The swing-leg part is the RNE change when that leg's mass and inertia are removed. mj_comPos refreshes the composite inertia first. mj_crb alone still sees the old mass.
+
+The plan aborts when any planned root row is outside 1e-2. Those rows are qfrc_inverse minus the planned wrench. mj_inverse does not subtract qfrc_applied, so the raw vertical row is the weight, 23.029 N, and is not the check. The plan also aborts when the planned CoM or ZMP leaves the support box of the feet that tick is using. Single support is the stance box. Double support, the stand, and the stop are the convex hull of both full contact boxes.
+
+On the cold plant the first planned tick aborts. No hip flag is raised, because both stance hips are under 1.3 Nm. The support check does not fire. Soft-pass is off. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`.
+
+| | t | phase | fx N | fy N | fz N | tx Nm | ty Nm | tz Nm |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.010 | 0.256 | start | +0.0137 | +0.0000 | +0.3362 | −0.0002 | −0.0003 | −0.0000 |
+| 0.025 | 0.256 | start | +0.0176 | +0.0000 | +0.3422 | −0.0001 | −0.0005 | −0.0000 |
+
+The preview stage is start and the clock phase is shift, so both hips are stance. At 0.010 the wrench's vertical row is the weight, 23.029 N, and the inverse wants 23.365 N. The 0.336 N difference is the abort. The moments are inside 1e-2 Nm. At that tick the planned hips are +0.614 Nm and −0.607 Nm. Splitting them gives gravity ±0.023 Nm, inertial +0.006 Nm, swing-leg 0 (there is no swing leg in the shift), and contact +0.630 Nm and −0.636 Nm. The four parts match τ_req within 0.0003 Nm. Removing the right leg's mass moves its whole 0.029 Nm RNE into the swing-leg part and leaves the hip's own gravity at 0, so that part is the leg that was removed. The previous free-root table is the motion before this abort. It is not a score of the corrected guard. There is no video.
