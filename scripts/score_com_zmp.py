@@ -1633,6 +1633,21 @@ def run_attempt(
     tip_ok = up_z >= 0.90
     honesty = _step_honesty(foot_rows, x_amp_seen, vx_cmd, period_s)
     signed_all = max(asks, key=lambda row: abs(row.signed_nm)) if asks else None
+    joint_signed: dict[str, dict[str, float | int]] = {}
+    for row in asks:
+        rec = joint_signed.get(row.joint)
+        over = 1 if abs(row.signed_nm) > ASK_NM + 1e-9 else 0
+        if rec is None:
+            joint_signed[row.joint] = {
+                "value": float(row.signed_nm),
+                "t": float(row.t),
+                "over": over,
+            }
+            continue
+        rec["over"] = int(rec["over"]) + over
+        if abs(row.signed_nm) > abs(float(rec["value"])):
+            rec["value"] = float(row.signed_nm)
+            rec["t"] = float(row.t)
     clamp_frac = {
         jn: (float(clamp_hit[jn]) / float(clamp_n[jn])) if clamp_n[jn] else float("nan")
         for jn in LEG_JOINTS
@@ -1722,6 +1737,7 @@ def run_attempt(
         "ask_signed": 0.0 if ask_all is None else float(ask_all.signed_nm),
         "signed_formula": "kp*(clip(ctrl,±2.09)-q)-kv*omega",
         "signed_over": signed_over,
+        "joint_signed": joint_signed,
         "signed_ok": signed_ok,
         "sum_over": sum_over,
         "sum_ok": sum_ok,
