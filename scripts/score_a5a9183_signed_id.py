@@ -946,6 +946,7 @@ def _planned_tau(
     mass = float(np.sum(plan.body_mass))
     anchor: dict[str, np.ndarray] = {}
     held = {"support": "", "stance": ""}
+    shift_log = {"n_ok": 0, "n_reject": 0, "max_attempt_m": 0.0}
     poses: list[np.ndarray] = []
     soles: list[dict[str, np.ndarray]] = []
     ankles: list[dict[str, np.ndarray]] = []
@@ -973,10 +974,14 @@ def _planned_tau(
         mj.mj_forward(plan, data)
         sole = {side: _sole_point(plan, data, side) for side in ("l", "r")}
 
-        def _shift(delta_xy: np.ndarray) -> None:
+        def _shift(delta_xy: np.ndarray) -> bool:
+            attempt = float(np.hypot(delta_xy[0], delta_xy[1]))
+            shift_log["max_attempt_m"] = max(float(shift_log["max_attempt_m"]), attempt)
+            shift_log["n_ok"] = int(shift_log["n_ok"]) + 1
             data.qpos[0] += float(delta_xy[0])
             data.qpos[1] += float(delta_xy[1])
             mj.mj_forward(plan, data)
+            return True
 
         def _soles() -> dict[str, np.ndarray]:
             return {side: _sole_point(plan, data, side) for side in ("l", "r")}
@@ -989,7 +994,8 @@ def _planned_tau(
         if support == "ss" and stance in ("l", "r"):
             if stance not in anchor:
                 anchor[stance] = sole[stance][:2].copy()
-            _shift(anchor[stance] - sole[stance][:2])
+            if not _shift(anchor[stance] - sole[stance][:2]):
+                anchor[stance] = sole[stance][:2].copy()
         else:
             landing = ""
             if prev_sup == "ss" and prev_st in ("l", "r"):
@@ -998,21 +1004,24 @@ def _planned_tau(
                 anchor["l"] = sole["l"][:2].copy()
                 anchor["r"] = sole["r"][:2].copy()
             elif landing and prev_st in anchor:
-                _shift(anchor[prev_st] - sole[prev_st][:2])
-                sole = _soles()
+                if _shift(anchor[prev_st] - sole[prev_st][:2]):
+                    sole = _soles()
                 anchor[landing] = sole[landing][:2].copy()
             elif "l" in anchor and "r" not in anchor:
-                _shift(anchor["l"] - sole["l"][:2])
-                sole = _soles()
+                if _shift(anchor["l"] - sole["l"][:2]):
+                    sole = _soles()
                 anchor["r"] = sole["r"][:2].copy()
             elif "r" in anchor and "l" not in anchor:
-                _shift(anchor["r"] - sole["r"][:2])
-                sole = _soles()
+                if _shift(anchor["r"] - sole["r"][:2]):
+                    sole = _soles()
                 anchor["l"] = sole["l"][:2].copy()
             else:
                 mid_now = 0.5 * (sole["l"][:2] + sole["r"][:2])
                 mid_anc = 0.5 * (anchor["l"] + anchor["r"])
-                _shift(mid_anc - mid_now)
+                if not _shift(mid_anc - mid_now):
+                    sole = _soles()
+                    anchor["l"] = sole["l"][:2].copy()
+                    anchor["r"] = sole["r"][:2].copy()
         sole = _soles()
         held["support"] = support
         held["stance"] = stance if stance in ("l", "r") else ""
@@ -1042,7 +1051,16 @@ def _planned_tau(
 
     for k in range(1, n):
         step = _dt(k)
-        qvel[k, 0:3] = (poses[k][0:3] - poses[k - 1][0:3]) / step
+        delta = poses[k][0:3] - poses[k - 1][0:3]
+        # A foothold relabel can move the root by a centimetre in one tick.
+        # That is not a body acceleration. Keep the previous root velocity
+        # across the jump. Joint differences stay the raw reference.
+        jump = float(np.hypot(delta[0], delta[1])) > 0.005 or abs(float(delta[2])) > 0.002
+        if jump and k > 1:
+            qvel[k, 0:3] = qvel[k - 1, 0:3]
+            shift_log["n_reject"] = int(shift_log["n_reject"]) + 1
+        else:
+            qvel[k, 0:3] = delta / step
         for name, adr in dofadr.items():
             qvel[k, adr] = (float(poses[k][qadr[name]]) - float(poses[k - 1][qadr[name]])) / step
     for k in range(2, n):
@@ -1204,6 +1222,8 @@ def _planned_tau(
             name: (float(np.median(np.asarray(vals, dtype=np.float64))) if vals else None)
             for name, vals in phase_peaks.items()
         },
+        "root_velocity_holds": int(shift_log["n_reject"]),
+        "max_root_step_m": float(shift_log["max_attempt_m"]),
         "root_x_m": (
             [min(float(p[0]) for p in poses), max(float(p[0]) for p in poses)]
             if poses else [None, None]
