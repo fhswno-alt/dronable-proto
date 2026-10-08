@@ -48,6 +48,12 @@ KNEE_SAG_NM = 2.33
 # This is not the plant actuator kp. The XML gain stays 45 / 40 / 35.
 # 1 Nm/rad is small beside those gains. It is not a torque cap.
 ID_FF_KP = 1.0
+# Swing hip, knee, and ankle. K_fb of 1 Nm/rad does not close a 0.15 rad
+# knee lag during single support, so the contact box stays on the floor
+# while its centre is already up. Stance joints stay at ID_FF_KP.
+# SWING_FB_KD damps that spring. The kv cancel leaves it otherwise undamped.
+SWING_FB_KP = 8.0
+SWING_FB_KD = 0.8
 # File value on every joint. A load-time leg override replaces it on the
 # walker with the compiled dof_armature. The strip has to use that number:
 # mj_inverse already includes whatever armature the spec was compiled with.
@@ -86,6 +92,24 @@ STOP_KNEE_QDD_MAX = 25.0
 # and that row is a transfer risk. The same cap covers the other leg
 # joints: a hip-pitch corner near −100 rad/s² does not fit at 0.025.
 WALK_KNEE_QDD_MAX = 40.0
+# HW candidate A, full-leg IK, feet fixed, settled trunk held at −1.669°.
+# Hip yaw, hip roll, and ankle roll already match this IK stand, so only
+# the sagittal trio is replaced. The left leg is the negated mirror.
+# Values are the unrounded solve, not the six-decimal table print.
+STAND_A_SAGITTAL: dict[str, float] = {
+    "r_hip_pitch": 0.5667917122257708,
+    "r_knee": -1.193253838060539,
+    "r_ank_pitch": -0.60860459453674,
+    "l_hip_pitch": -0.5667917122257708,
+    "l_knee": 1.193253838060539,
+    "l_ank_pitch": 0.60860459453674,
+}
+# Min-jerk from the IK spawn into A, then a hold until the servos sag.
+# The walk clock does not start during either interval.
+STAND_BLEND_S = 1.0
+STAND_SETTLE_MIN_S = 0.40
+STAND_SETTLE_MAX_S = 1.50
+STAND_SETTLE_QVEL = 2.0e-4
 # Stance hip roll. The whole 2.347 kg on one foot is 23.0 N times the
 # CoP offset from the hip axis: −0.55 to +1.2 Nm across the foot, 0.32 Nm
 # at the box centre. Above 1.3 Nm is reported with the tick, the phase,
@@ -121,10 +145,17 @@ COP_TAU_K = 40.0
 COP_TAU_CAP = 0.50
 # r_hip_roll at stance mid was the DC-line joint: signed +2.508 Nm,
 # |ω| 5.07 rad/s, limit 1.56 rad/s, excess 3.51. That speed was the
-# fall, not the gait clock. 0.55 lengthens each transfer from 0.20 s
-# to 0.275 s so the planned hip-roll rate stays under the line once
-# the torso is held up.
-ID_FF_DSP = 0.55
+# fall, not the gait clock. 0.64 lengthens each transfer to 0.32 s
+# (single support 0.18 s) so the planned ZMP is inside the 5 mm
+# stance box before the sole is asked to rise.
+ID_FF_DSP = 0.64
+# Min-jerk rise of the swing sole, finished while the clock is still
+# held at the single-support edge. 0.28 s is long enough for the
+# airborne gain to reach an 8 mm corner, and the knee acceleration of
+# that rise stays inside the 40 rad/s² cap. The rise does not start
+# until the swing-foot normal force is at or under SWING_UNLOAD_N.
+PRELIFT_S = 0.28
+SWING_UNLOAD_N = 1.0
 # Stop/silence command budget for every leg joint. Hip yaw, hip roll,
 # hip pitch, knee, ankle pitch, and ankle roll share the HX-35H class.
 # The sag bar stays 2.33. Sitting the prediction on that bar measured
@@ -456,6 +487,24 @@ class LipmWalker:
         self.act_idx = act_idx
         self.cfg = cfg
         self.q_stand = dict(q_stand)
+        # Spawn pose. Candidate A overwrites q_stand; q_spawn stays the
+        # IK stand the robot is seated in, so the blend has a start.
+        self.q_spawn = dict(q_stand)
+        self._a_active = False
+        self._stand_ready = True
+        self._blend_s = 0.0
+        self._settle_s = 0.0
+        self._seed_com: np.ndarray | None = None
+        self._seed_cop: np.ndarray | None = None
+        self._seed_zc: float | None = None
+        self.seed_qvel_abs = float("nan")
+        self.seed_trunk_pitch_deg = float("nan")
+        self.seed_kit_cam_pitch_deg = float("nan")
+        self.stand_ready_t = -1.0
+        self.first_step_t0 = -1.0
+        self.first_step_t1 = -1.0
+        self._saw_first_swing = False
+        self.knee_qdd_rows: list[dict[str, float | str | bool]] = []
         self.op3: op3_walk.Op3Walker | None = None
         self._ff_dsp = float(cfg.gm_dsp)
         if cfg.schedule == "gait_manager":
@@ -485,6 +534,9 @@ class LipmWalker:
                 if "sho" in name:
                     continue
                 self.q_stand[name] = val
+            self.q_spawn = dict(self.q_stand)
+            if cfg.gm_id_ff:
+                self._install_stand_a()
         self.phase: PhaseName = "stand"
         self.stance: Side = "L"
         lead = str(cfg.gm_start_lead)
@@ -777,6 +829,8 @@ class LipmWalker:
         self.id_split_bias_max = 0.0
         self._dcm_zmp = 0.0
         self._swing_z_full = False
+        self._prelift_s = 0.0
+        self._air_side: str | None = None
         self._dcm_step = 0.0
         self._dcm_err_f = 0.0
         # Last three planned joint accelerations. A one-tick wiggle of
@@ -996,12 +1050,186 @@ class LipmWalker:
             return
         self._pending_lead = lead
 
+    def _install_stand_a(self) -> None:
+        """Replace the sagittal stand with HW candidate A.
+
+        q_spawn stays the IK stand. Hip yaw, hip roll, and ankle roll
+        are already A's targets, so they are left on the IK value.
+        """
+        self._a_active = True
+        self._stand_ready = False
+        for name, val in STAND_A_SAGITTAL.items():
+            self.q_stand[name] = float(val)
+
+    def _hw_trunk_pitch_deg(self) -> float:
+        """body_link pitch. Positive is a forward lean. HW definition."""
+        rot = np.asarray(self.data.xmat[self.bid_body], dtype=np.float64).reshape(3, 3)
+        return math.degrees(math.atan2(float(rot[0, 2]), float(rot[2, 2])))
+
+    def _hw_kit_cam_pitch_deg(self) -> float:
+        """kit_cam look pitch. Look is the camera −z axis. HW definition."""
+        cid = int(mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_CAMERA, "kit_cam"))
+        if cid < 0:
+            return float("nan")
+        rot = np.asarray(self.data.cam_xmat[cid], dtype=np.float64).reshape(3, 3)
+        look = -rot[:, 2]
+        return math.degrees(math.atan2(float(look[2]), float(math.hypot(look[0], look[1]))))
+
+    def _leg_qvel_abs(self) -> float:
+        peak = 0.0
+        for name in _LEG_JOINT_NAMES:
+            jid = int(mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, name))
+            if jid < 0:
+                continue
+            peak = max(peak, abs(float(self.data.qvel[int(self.model.jnt_dofadr[jid])])))
+        return peak
+
+    def _world_cop_xy(self) -> np.ndarray | None:
+        """Contact CoP in world xy, both feet. None when nothing is loaded."""
+        num = np.zeros(2, dtype=np.float64)
+        den = 0.0
+        for side in ("L", "R"):
+            gid = int(self.gid[side])
+            for i in range(self.data.ncon):
+                contact = self.data.contact[i]
+                g1, g2 = int(contact.geom1), int(contact.geom2)
+                if not self._on_ground(g1, g2, gid):
+                    continue
+                force = np.zeros(6, dtype=np.float64)
+                mj.mj_contactForce(self.model, self.data, i, force)
+                fn = float(force[0])
+                if fn <= 1e-6:
+                    continue
+                num += fn * np.asarray(contact.pos[:2], dtype=np.float64)
+                den += fn
+        if den <= 1e-6:
+            return None
+        return num / den
+
+    def _capture_stand_seed(self) -> None:
+        """Preview state from the settled stand, velocity zero.
+
+        Commanded joint targets are not the seed. The servos sag, and
+        the cart table has to start on the pose the robot actually holds.
+        """
+        com = np.array(self.data.subtree_com[self.bid_body], dtype=np.float64)
+        sole = min(self._sole("L"), self._sole("R"))
+        cop = self._world_cop_xy()
+        if cop is None:
+            cop = np.array([float(com[0]), float(com[1])], dtype=np.float64)
+        self._seed_com = com.copy()
+        self._seed_cop = np.array([float(cop[0]), float(cop[1])], dtype=np.float64)
+        # A sole a fraction of a millimetre through the floor is contact
+        # compliance. The cart-table height is CoM above the floor plane.
+        self._seed_zc = float(com[2] - max(float(sole), 0.0))
+        self.seed_qvel_abs = self._leg_qvel_abs()
+        self.seed_trunk_pitch_deg = self._hw_trunk_pitch_deg()
+        self.seed_kit_cam_pitch_deg = self._hw_kit_cam_pitch_deg()
+        self._zmp_x = float(self._seed_cop[0])
+        self._zmp_cmd = float(self._seed_cop[1])
+        self.stand_ready_t = float(self.data.time)
+
+    def _tick_stand_blend(self, walker: op3_walk.Op3Walker) -> None:
+        """Min-jerk from the IK spawn into A, then hold until the sag settles.
+
+        write_clipped, not the force limiter. A slow chord stays inside
+        ctrlrange, so the limiter and the clamp both stay at zero.
+        """
+        del walker
+        # phase "stand" makes the physics loop replace this command with
+        # a force-limited snap to A. The blend has to stay the min-jerk.
+        self.phase = "shift"
+        self.preview_stage = "stand"
+        if self._blend_s < STAND_BLEND_S - 1e-12:
+            self._blend_s = min(STAND_BLEND_S, self._blend_s + float(op3_walk.OP3_CTRL_S))
+            u = self._blend_s / STAND_BLEND_S
+            blend = op3_walk.Op3Walker._minjerk(u)
+            for name, target in self.q_stand.items():
+                start = float(self.q_spawn.get(name, target))
+                self.write_clipped(name, start + (float(target) - start) * blend)
+            return
+        self._settle_s += float(op3_walk.OP3_CTRL_S)
+        qvel = self._leg_qvel_abs()
+        settled = self._settle_s >= STAND_SETTLE_MIN_S and (
+            qvel <= STAND_SETTLE_QVEL or self._settle_s >= STAND_SETTLE_MAX_S
+        )
+        if settled and not self._stand_ready:
+            # The previous tick already held A. This tick's command is
+            # either that hold or the first walk target, not both.
+            self._capture_stand_seed()
+            self._stand_ready = True
+            return
+        for name, target in self.q_stand.items():
+            self.write_clipped(name, float(target))
+
+    def _home_on_a(self, joints: dict[str, float]) -> None:
+        """Walk IK as a deviation from the IK stand, added onto candidate A.
+
+        Double support with zero step length then commands A exactly.
+        The first walk tick does not jump back to the old crouch.
+        """
+        if not self._a_active:
+            return
+        for side in ("l_", "r_"):
+            for suffix in ("hip_pitch", "knee", "ank_pitch"):
+                name = side + suffix
+                if name not in joints:
+                    continue
+                neutral = self.q_spawn.get(name)
+                home = self.q_stand.get(name)
+                if neutral is None or home is None:
+                    continue
+                joints[name] = float(home) + (float(joints[name]) - float(neutral))
+
+    def _note_knee_qdd(
+        self,
+        name: str,
+        planned: float,
+        capped: float,
+    ) -> None:
+        """Swing-knee acceleration over the first 30% of the planned SSP."""
+        if not name.endswith("knee") or self.preview_stage != "walk":
+            return
+        walker = self.op3
+        if walker is None or walker.period <= 1e-6:
+            return
+        t_mod = float(walker.time) % float(walker.period)
+        frac = -1.0
+        if float(walker.l_ssp_start) - 1e-12 <= t_mod <= float(walker.l_ssp_end):
+            span = float(walker.l_ssp_end) - float(walker.l_ssp_start)
+            frac = (t_mod - float(walker.l_ssp_start)) / span if span > 1e-9 else 0.0
+        elif float(walker.r_ssp_start) - 1e-12 <= t_mod <= float(walker.r_ssp_end):
+            span = float(walker.r_ssp_end) - float(walker.r_ssp_start)
+            frac = (t_mod - float(walker.r_ssp_start)) / span if span > 1e-9 else 0.0
+        if frac < 0.0 or frac > 0.30:
+            return
+        jid = int(mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, name))
+        realised = 0.0
+        if jid >= 0:
+            realised = float(self.data.qacc[int(self.model.jnt_dofadr[jid])])
+        cap = float(WALK_KNEE_QDD_MAX)
+        self.knee_qdd_rows.append({
+            "t": float(self.data.time),
+            "joint": name,
+            "frac": float(frac),
+            "planned": float(planned),
+            "capped": float(capped),
+            "realised": realised,
+            "cap": cap,
+            "clipped": abs(float(planned)) > cap + 1e-9,
+            "armature": float(self.leg_armature),
+        })
+
     def _ensure_preview(self, walker: op3_walk.Op3Walker) -> zmp_preview.ZmpPreview:
         if self._preview is not None:
             return self._preview
         sole = min(self._sole("L"), self._sole("R"))
-        com_z = float(self.data.subtree_com[self.bid_body, 2])
-        measured = com_z - sole
+        com = np.array(self.data.subtree_com[self.bid_body], dtype=np.float64)
+        if self._seed_com is not None:
+            com = np.array(self._seed_com, dtype=np.float64)
+        measured = float(com[2] - sole)
+        if self._seed_zc is not None and self._seed_zc > 0.08:
+            measured = float(self._seed_zc)
         zc = float(self.cfg.preview_zc_m) if self.cfg.preview_zc_m > 0.05 else measured
         if zc < 0.08:
             zc = 0.22
@@ -1013,10 +1241,18 @@ class LipmWalker:
         self._preview_x = zmp_preview.ZmpPreview(
             zc, op3_walk.OP3_CTRL_S, horizon, float(self.cfg.preview_r),
         )
-        # Standing CoM x is ahead of the origin. A sagittal preview that
-        # starts at 0 is already behind the latched box centre.
-        self._preview_x._x[0] = float(self.data.subtree_com[self.bid_body, 0])
-        self.preview_com_x = float(self._preview_x._x[0])
+        # Settled stand, both axes, velocity 0. The live CoM at this
+        # call is that settle when the blend finished first. A preview
+        # that starts at 0 is already behind the ankle.
+        self._preview._x[:] = (float(com[1]), 0.0, 0.0)
+        self._preview._e = 0.0
+        self._preview_x._x[:] = (float(com[0]), 0.0, 0.0)
+        self._preview_x._e = 0.0
+        self.preview_com_x = float(com[0])
+        self.preview_com_y = float(com[1])
+        if self._seed_cop is not None:
+            self._zmp_x = float(self._seed_cop[0])
+            self._zmp_cmd = float(self._seed_cop[1])
         self._preview_clock = -float(self.cfg.preview_arm_s)
         return self._preview
 
@@ -1145,6 +1381,7 @@ class LipmWalker:
             # The preview stays the Kajita plan of the foot ZMP. Capture
             # point feedback moves the wrench ZMP, not this reference, so
             # a live lean does not drag the planned CoM off the gait.
+            # The samples are already on the 5 mm inset hull.
             self._split_zmp_applied = 0.0
             return
         bias = float(self._split_zmp_bias)
@@ -1196,10 +1433,15 @@ class LipmWalker:
             t = t0_s + i * dt
             if self.cfg.gm_id_ff:
                 x, y = self._ff_zmp_xy(t)
-                out[i] = y
-                x_future[i] = x
+                held = self._project_inset_xy(
+                    self.data,
+                    np.array([x, y], dtype=np.float64),
+                    self._sides_at(t),
+                )
+                out[i] = float(held[1])
+                x_future[i] = float(held[0])
                 if i == 0:
-                    self._zmp_x = x
+                    self._zmp_x = float(held[0])
             else:
                 out[i] = self._zmp_at(t)
         if self.cfg.gm_id_ff:
@@ -1231,8 +1473,14 @@ class LipmWalker:
         ay_ref = float(self._preview.com_acc_m_s2)
         ay = ay_ref + 2.0 * omega * (v_ref - vy) + omega2 * (com_ref - com)
         zmp = com - ay / omega2
-        self._zmp_stab = self._clamp_support_y(zmp)
         self._command_zmp_x(omega2)
+        held = self._project_inset_xy(
+            self.data,
+            np.array([float(self._zmp_x), float(zmp)], dtype=np.float64),
+            self._support_sides(),
+        )
+        self._zmp_x = float(held[0])
+        self._zmp_stab = float(held[1])
         return float(self._zmp_stab)
 
     def _torso_pitch(self) -> tuple[float, float]:
@@ -1307,7 +1555,24 @@ class LipmWalker:
         filtered = 0.0 if self.preview_stage == "stop" else self._dcm_err_f
         target = min(DCM_STEP_MAX, max(-DCM_STEP_MAX, DCM_STEP_K * filtered))
         self._dcm_step = self._slew(self._dcm_step, target, DCM_STEP_RATE)
+        self._apply_preview_x()
         return -float(com) + self._dcm_step
+
+    def _apply_preview_x(self) -> None:
+        """Shift both feet in x so the pelvis follows the sagittal preview.
+
+        The box centre sits ahead of the standing CoM. A ZMP on that
+        centre with the pelvis left behind falls onto the heel as soon
+        as one foot lifts. Positive x_offset puts the feet ahead of the
+        hips, so the correction is the opposite of the preview error.
+        """
+        walker = self.op3
+        if walker is None or not self.cfg.gm_id_ff:
+            return
+        com_x = float(self.data.subtree_com[self.bid_body, 0])
+        err = float(self.preview_com_x) - com_x
+        target = min(0.040, max(-0.040, -err))
+        walker.x_offset = self._slew(float(walker.x_offset), target, 0.08)
 
     def _sole_pitch_rad(self, side: Side) -> float:
         """Sole pitch. Positive is toe-down, the same sign as the trunk."""
@@ -1987,10 +2252,12 @@ class LipmWalker:
         τ_ff = ID(q_ref, q̇_ref, q̈_ref) with the LIPM wrench inside the
         declared foot box. Then
 
-            ctrl = q + (τ_ff + kv·q̇ + K_fb·(q_ref−q)) / kp
+            ctrl = q + (τ_ff + kv·q̇ + K_fb·(q_ref−q̂)) / kp
 
-        q̇ is the measured joint velocity. K_fb is ID_FF_KP. The sum is
-        not saturated and not clipped into ±2.33 Nm. ctrl is not pulled
+        q̇ is the measured joint velocity. q̂ = q + q̇·dt is that joint
+        one planner tick ahead, so a ±1 tick lead still meets the
+        feedback it was written for. K_fb is ID_FF_KP. The sum is not
+        saturated and not clipped into ±2.33 Nm. ctrl is not pulled
         into ctrlrange here. A later limiter that changes it is a fail.
         """
         if not self.cfg.gm_id_ff:
@@ -2013,7 +2280,13 @@ class LipmWalker:
             q = self.q(name)
             omega = float(self.data.qvel[adr])
             q_ref = float(joints[name])
-            fb = ID_FF_KP * (q_ref - q)
+            dt = float(op3_walk.OP3_CTRL_S)
+            q_hat = q + omega * dt
+            if self._swing_fb_joint(name):
+                qd_ref = float(self._last_qd.get(name, 0.0)) if isinstance(self._last_qd, dict) else 0.0
+                fb = SWING_FB_KP * (q_ref - q_hat) + SWING_FB_KD * (qd_ref - omega)
+            else:
+                fb = ID_FF_KP * (q_ref - q_hat)
             tau = float(tau_ff.get(name, 0.0)) + float(cop_tau.get(name, 0.0)) + fb
             if abs(tau) > self.id_plan_ask:
                 self.id_plan_ask = abs(tau)
@@ -2088,26 +2361,19 @@ class LipmWalker:
         mj.mj_forward(self.model, scratch)
 
     def _clamp_zmp_y(self, scratch: mj.MjData, zmp_y: float, stance: str | None) -> float:
-        """Keep the planned ZMP inside the 5 mm inset of the planned feet."""
+        """Project the planned (x, y) onto the 5 mm inset hull.
+
+        A y-only clamp of the corner AABB leaves a point 0.2 mm outside
+        the polygon the guard checks. Both axes move together.
+        """
         sides = (stance,) if stance in ("L", "R") else ("L", "R")
-        inset = float(ds_split.COP_INSET_M)
-        ys: list[float] = []
-        for side in sides:
-            gid = int(self.gid[side])
-            center = np.asarray(scratch.geom_xpos[gid], dtype=np.float64)
-            rot = np.asarray(scratch.geom_xmat[gid], dtype=np.float64).reshape(3, 3)
-            half = np.asarray(self.model.geom_size[gid], dtype=np.float64)
-            hx = max(float(half[0]) - inset, 1e-4)
-            hy = max(float(half[1]) - inset, 1e-4)
-            for sx in (-1.0, 1.0):
-                for sy in (-1.0, 1.0):
-                    corner = center + rot @ np.array(
-                        [sx * hx, sy * hy, -float(half[2])], dtype=np.float64,
-                    )
-                    ys.append(float(corner[1]))
-        if not ys:
-            return float(zmp_y)
-        return min(max(ys), max(min(ys), float(zmp_y)))
+        held = self._project_inset_xy(
+            scratch,
+            np.array([float(self._zmp_x), float(zmp_y)], dtype=np.float64),
+            sides,
+        )
+        self._zmp_x = float(held[0])
+        return float(held[1])
 
     def _planned_tau(self, joints: dict[str, float]) -> dict[str, float]:
         """Inverse of the planned pose, with the LIPM wrench and no contacts.
@@ -2120,21 +2386,31 @@ class LipmWalker:
         self._plan_term_phase = ""
         self._qp_sample = None
         qd, qdd = self._ref_derivatives(joints)
+        self._last_qd = qd
         self._last_qdd = qdd
         if self._plan_data is None:
             self._plan_data = mj.MjData(self.model)
         scratch = self._plan_data
         mj.mj_resetData(self.model, scratch)
-        # Inverse the body that is in the air. The reference angles are
-        # the tracking spring. Substituting them here commanded the
-        # holding torque of a pose the feet had not reached.
         scratch.qpos[:] = self.data.qpos
         scratch.qvel[:] = self.data.qvel
-        for name, _val in joints.items():
+        # Planned inverse on the legs, measured root. q_ref is the pose
+        # the swing and the stance hip are asked to track. The free
+        # joint stays the body that is in the air; aligning it onto the
+        # preview CoM is a different moment.
+        self._ensure_leg_dof()
+        # Planned angles on the walk. The stop blend is a joint quintic
+        # on the body that is already in the air; substituting it made
+        # the support box leave the preview CoM.
+        use_ref = self.preview_stage == "walk"
+        for name, val in joints.items():
             jid = int(mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, name))
             if jid < 0:
                 continue
             vadr = int(self.model.jnt_dofadr[jid])
+            if use_ref and name in self._leg_dof:
+                scratch.qpos[int(self.model.jnt_qposadr[jid])] = float(val)
+                scratch.qvel[vadr] = float(qd.get(name, 0.0))
             scratch.qacc[vadr] = float(qdd.get(name, 0.0))
         zc = float(self._preview_zc) if self._preview_zc > 0.05 else 0.18
         zmp_y = self._command_zmp_y() if self.cfg.gm_id_ff else float(self._zmp_cmd)
@@ -2146,6 +2422,21 @@ class LipmWalker:
         self._ds_count_wall = True
         try:
             mj.mj_forward(self.model, scratch)
+            if use_ref:
+                # A knee-capped reference can leave a support sole under
+                # the floor. That box is not a contact the wrench can
+                # use, so the inverse stays on the measured legs.
+                stance_now = self._planned_stance()
+                support = (stance_now,) if stance_now in ("L", "R") else ("L", "R")
+                if any(self._sole_bottom(scratch, side) < -0.003 for side in support):
+                    for name, adr in self._leg_dof.items():
+                        jid = int(mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, name))
+                        if jid < 0:
+                            continue
+                        qadr = int(self.model.jnt_qposadr[jid])
+                        scratch.qpos[qadr] = float(self.data.qpos[qadr])
+                        scratch.qvel[adr] = float(self.data.qvel[adr])
+                    mj.mj_forward(self.model, scratch)
             if self.cfg.gm_id_ff:
                 # The wrench uses this pose's CoM. Shifting the root onto
                 # the preview CoM made the hip absorb a moment the live
@@ -2775,7 +3066,7 @@ class LipmWalker:
         brings that CoP onto the box. Root angular acceleration stays zero.
         """
         free = self._free_dof()
-        for _ in range(2):
+        for _ in range(6):
             applied = np.array(scratch.qfrc_applied[free:free + 6], dtype=np.float64)
             resid = inv[free:free + 6] - applied
             if float(np.max(np.abs(resid))) <= 1.0e-3:
@@ -2917,6 +3208,44 @@ class LipmWalker:
                 self.model, scratch, force * share, torque, point, body, scratch.qfrc_applied,
             )
 
+    def _lifting_side(self) -> str | None:
+        """Foot whose sole is commanded off the floor.
+
+        The half-cycle clock still names a swing foot during double
+        support. That foot is on the ground, and the higher swing gain
+        belongs only to the airborne one.
+        """
+        if self._air_side in ("L", "R"):
+            return self._air_side
+        walker = self.op3
+        if walker is None or self.preview_stage != "walk":
+            return None
+        period = float(walker.period)
+        if period <= 1e-6:
+            return None
+        t = float(walker.time) % period
+        if float(walker.l_ssp_start) < t <= float(walker.l_ssp_end):
+            return "L"
+        if float(walker.r_ssp_start) < t <= float(walker.r_ssp_end):
+            return "R"
+        return None
+
+    def _swing_fb_joint(self, name: str) -> bool:
+        """Airborne hip, knee, and ankle. Stance joints keep ID_FF_KP."""
+        if not self.cfg.gm_id_ff or self.op3 is None or self.preview_stage == "stop":
+            return False
+        swing = self._lifting_side()
+        if swing not in ("L", "R"):
+            return False
+        prefix = swing.lower() + "_"
+        return name in (
+            prefix + "hip_roll",
+            prefix + "hip_pitch",
+            prefix + "knee",
+            prefix + "ank_pitch",
+            prefix + "ank_roll",
+        )
+
     def _cap_plan_qacc(
         self,
         scratch: mj.MjData,
@@ -2956,6 +3285,7 @@ class LipmWalker:
                 cmd = cap
             elif cmd < -cap:
                 cmd = -cap
+            self._note_knee_qdd(name, raw, cmd)
             scratch.qacc[vadr] = cmd
             qdd[name] = cmd
 
@@ -2976,6 +3306,12 @@ class LipmWalker:
         return float(sorted(hist)[1])
 
     def _planned_stance(self) -> str | None:
+        # The pre-lift holds the clock in double support while one sole
+        # is already up. The wrench for that tick is the stance foot.
+        if self._air_side == "L":
+            return "R"
+        if self._air_side == "R":
+            return "L"
         if self.phase == "swing" and self.stance in ("L", "R"):
             return self.stance
         return None
@@ -3106,6 +3442,12 @@ class LipmWalker:
         dt = float(op3_walk.OP3_CTRL_S)
         if dt <= 0.0:
             return
+        # The feedforward walk caps q̈ inside the inverse. Rewriting the
+        # knee angle here drops the contact box off the 8 mm apex: a
+        # 1000 rad/s² sample becomes a 0.07 rad knee step, and the sole
+        # the robot is shown is no longer the one the plant solved.
+        if self.cfg.gm_id_ff:
+            return
         cap = float(WALK_KNEE_QDD_MAX)
         for name in ("l_knee", "r_knee"):
             if name not in joints:
@@ -3133,6 +3475,7 @@ class LipmWalker:
             self.preview_ik_fail += 1
             self._write_unused()
             return
+        self._home_on_a(joints)
         # Swing-foot toe lift, scheduled from the clock so it is in place
         # before the landing. The gait ankle dives as the leg extends and
         # the toe meets the floor alone. The offset is slewed, then the
@@ -3293,18 +3636,239 @@ class LipmWalker:
                     self._foot_y_latch[side] = y
         walker.foot_bias_l = 0.0
         walker.foot_bias_r = 0.0
-        if swing not in self._foot_y_latch:
+        if swing in self._foot_y_latch:
+            prev = 1.0
+            for _ in range(8):
+                joints, _info = walker.joints_now()
+                if not joints:
+                    break
+                err = float(self._foot_y_latch[swing]) - self._fk_box_y(joints, swing)
+                self._set_anchor_bias(walker, swing, self._anchor_bias(walker, swing) + err)
+                if abs(err) < 1.0e-4 or abs(err) >= prev - 1.0e-5:
+                    break
+                prev = abs(err)
+        # The stance box is the latched centre the ZMP is planned on.
+        # preview_y alone walks that sole outboard of the measured pelvis,
+        # and the planned CoM then sits outside the box it is checked on.
+        stance = "R" if swing == "L" else "L"
+        centre = self._foot_centre.get(stance)
+        if centre is None:
             return
         prev = 1.0
         for _ in range(8):
             joints, _info = walker.joints_now()
             if not joints:
                 return
-            err = float(self._foot_y_latch[swing]) - self._fk_box_y(joints, swing)
-            self._set_anchor_bias(walker, swing, self._anchor_bias(walker, swing) + err)
+            err = float(centre[1]) - self._fk_box_y(joints, stance)
+            self._set_anchor_bias(walker, stance, self._anchor_bias(walker, stance) + err)
             if abs(err) < 1.0e-4 or abs(err) >= prev - 1.0e-5:
                 break
             prev = abs(err)
+
+    def _fk_sole_pose(
+        self, joints: dict[str, float], side: str,
+    ) -> tuple[float, float, float]:
+        """Lowest corner, sole roll, and sole pitch of ``joints``.
+
+        Roll and pitch are the contact-box z axis against world vertical,
+        radians. The root is the measured one.
+        """
+        if self._anchor_data is None:
+            self._anchor_data = mj.MjData(self.model)
+        scratch = self._anchor_data
+        scratch.qpos[:] = self.data.qpos
+        for name, val in joints.items():
+            jid = int(mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, name))
+            if jid < 0:
+                continue
+            scratch.qpos[int(self.model.jnt_qposadr[jid])] = float(val)
+        mj.mj_forward(self.model, scratch)
+        gid = int(self.gid[side])
+        rot = np.asarray(scratch.geom_xmat[gid], dtype=np.float64).reshape(3, 3)
+        zx = float(rot[0, 2])
+        zy = float(rot[1, 2])
+        zz = float(rot[2, 2])
+        pitch = math.atan2(zx, zz)
+        roll = math.atan2(-zy, zz)
+        return self._sole_bottom(scratch, side), roll, pitch
+
+    def _fk_planned_sole(self, joints: dict[str, float], side: str) -> float:
+        """Lowest contact-box corner of ``joints`` on the measured root."""
+        return self._fk_sole_pose(joints, side)[0]
+
+    def _sole_trim(self, walker: op3_walk.Op3Walker, side: str, kind: str) -> float:
+        return float(getattr(walker, f"foot_{kind}_{side.lower()}"))
+
+    def _set_sole_trim(
+        self, walker: op3_walk.Op3Walker, side: str, kind: str, val: float,
+    ) -> None:
+        cap = 0.040 if kind == "z" else 0.25
+        setattr(walker, f"foot_{kind}_{side.lower()}", min(cap, max(-cap, float(val))))
+
+    def _zero_sole_trim(self, walker: op3_walk.Op3Walker) -> None:
+        for side in ("l", "r"):
+            for kind in ("z", "pitch", "roll"):
+                setattr(walker, f"foot_{kind}_{side}", 0.0)
+
+    def _newton_sole(
+        self,
+        walker: op3_walk.Op3Walker,
+        side: str,
+        kind: str,
+        index: int,
+        target: float,
+    ) -> None:
+        """One channel of the sole plant. The step is error over the slope.
+
+        Adding the raw error winds the trim: the contact-box corner does
+        not move one millimetre per millimetre of hip-frame z, and a
+        pitched sole can move several. A slope under 0.05 is left alone.
+        """
+        tol = 2.0e-4 if kind == "z" else 2.0e-3
+        step_cap = 0.004 if kind == "z" else 0.04
+        for _ in range(4):
+            joints, _info = walker.joints_now()
+            if not joints:
+                return
+            measured = self._fk_sole_pose(joints, side)[index]
+            err = float(target) - measured
+            if abs(err) < tol:
+                return
+            current = self._sole_trim(walker, side, kind)
+            probe = 1.0e-3
+            cap = 0.040 if kind == "z" else 0.25
+            if current > cap - 1.5e-3:
+                probe = -1.0e-3
+            self._set_sole_trim(walker, side, kind, current + probe)
+            nudged, _ninfo = walker.joints_now()
+            if not nudged:
+                self._set_sole_trim(walker, side, kind, current)
+                return
+            slope = (self._fk_sole_pose(nudged, side)[index] - measured) / probe
+            self._set_sole_trim(walker, side, kind, current)
+            if abs(slope) < 0.05:
+                return
+            step = min(step_cap, max(-step_cap, err / slope))
+            self._set_sole_trim(walker, side, kind, current + step)
+
+    def _limit_trim_step(
+        self,
+        walker: op3_walk.Op3Walker,
+        side: str,
+        kind: str,
+        start: float,
+        limit: float,
+    ) -> None:
+        now = self._sole_trim(walker, side, kind)
+        delta = now - start
+        if abs(delta) > limit:
+            self._set_sole_trim(walker, side, kind, start + math.copysign(limit, delta))
+
+    def _plant_sole(self, walker: op3_walk.Op3Walker, side: str, desired: float) -> None:
+        """Level one contact box, then put its lowest corner on ``desired``.
+
+        The solve may want a large step when the trunk pitches. Applying
+        it extends the leg and the pitch grows. Each tick takes at most
+        1.5 mm and 0.02 rad, so a falling trunk cannot jack the legs.
+        """
+        z0 = self._sole_trim(walker, side, "z")
+        pitch0 = self._sole_trim(walker, side, "pitch")
+        roll0 = self._sole_trim(walker, side, "roll")
+        held, _info = walker.joints_now()
+        sole0 = roll_now = pitch_now = 0.0
+        if held:
+            sole0, roll_now, pitch_now = self._fk_sole_pose(held, side)
+            # Height is already right and the box is level. Leave the
+            # trim. Chasing a pitching trunk extends the leg.
+            if (
+                abs(sole0 - float(desired)) < 0.0015
+                and abs(roll_now) < 0.015
+                and abs(pitch_now) < 0.015
+            ):
+                return
+            if abs(sole0 - float(desired)) < 0.003 and float(desired) >= sole0 - 0.002:
+                self._newton_sole(walker, side, "roll", 1, 0.0)
+                self._newton_sole(walker, side, "pitch", 2, 0.0)
+                self._limit_trim_step(walker, side, "pitch", pitch0, 0.020)
+                self._limit_trim_step(walker, side, "roll", roll0, 0.020)
+                self._set_sole_trim(walker, side, "z", z0)
+                return
+        for _ in range(2):
+            self._newton_sole(walker, side, "roll", 1, 0.0)
+            self._newton_sole(walker, side, "pitch", 2, 0.0)
+            self._newton_sole(walker, side, "z", 0, float(desired))
+        # A falling command is the landing. It may move faster than the
+        # rise. A rising command stays slow so the legs cannot jack.
+        z_lim = 0.008 if float(desired) < sole0 - 0.002 else 0.004
+        self._limit_trim_step(walker, side, "z", z0, z_lim)
+        self._limit_trim_step(walker, side, "pitch", pitch0, 0.020)
+        self._limit_trim_step(walker, side, "roll", roll0, 0.020)
+
+    def _ssp_apex_scale(self, walker: op3_walk.Op3Walker, frac: float) -> float:
+        """Hold the 8 mm apex, then min-jerk down over the last 20%.
+
+        The rise is the pre-lift, finished before this clock is inside
+        single support. Rising inside the first 20% asks the knee for
+        more than the 40 rad/s² cap.
+        """
+        del walker
+        if frac >= 1.0:
+            return 0.0
+        if frac > 0.80:
+            return 1.0 - op3_walk.Op3Walker._minjerk((frac - 0.80) / 0.20)
+        return 1.0
+
+    def _swing_apex_target(self, walker: op3_walk.Op3Walker) -> tuple[str | None, float]:
+        """Swing foot and the world height of its contact-box lowest corner.
+
+        The apex is the gait clearance (8 mm once the opening rise has
+        finished), not the OP3 hip-frame amplitude. Double support keeps
+        that corner on the floor. The edge tick that is about to enter
+        single support already holds the apex: the pre-lift put it there.
+        """
+        period = float(walker.period)
+        if period <= 1e-6:
+            return None, 0.0
+        apex = self._swing_height_cmd(walker)
+        if apex < 1e-6:
+            return None, 0.0
+        t = float(walker.time) % period
+        if float(walker.l_ssp_start) - 1e-12 <= t <= float(walker.l_ssp_end):
+            span = float(walker.l_ssp_end) - float(walker.l_ssp_start)
+            frac = (t - float(walker.l_ssp_start)) / span if span > 1e-9 else 1.0
+            return "L", apex * self._ssp_apex_scale(walker, frac)
+        if float(walker.r_ssp_start) - 1e-12 <= t <= float(walker.r_ssp_end):
+            span = float(walker.r_ssp_end) - float(walker.r_ssp_start)
+            frac = (t - float(walker.r_ssp_start)) / span if span > 1e-9 else 1.0
+            return "R", apex * self._ssp_apex_scale(walker, frac)
+        if t <= float(walker.l_ssp_start) or t > float(walker.r_ssp_end):
+            return "L", 0.0
+        return "R", 0.0
+
+    def _lift_swing_sole(self, walker: op3_walk.Op3Walker) -> None:
+        """Swing box on the apex, stance box on the floor.
+
+        Each foot is leveled and planted on its own. The stance sole is
+        not given the swing apex.
+        """
+        if not self.cfg.gm_id_ff:
+            self._zero_sole_trim(walker)
+            return
+        side, desired = self._swing_apex_target(walker)
+        if side is None:
+            self._zero_sole_trim(walker)
+            return
+        other = "R" if side == "L" else "L"
+        self._plant_sole(walker, other, 0.0)
+        self._plant_sole(walker, side, float(desired))
+
+    def _plant_both_soles(self, walker: op3_walk.Op3Walker) -> None:
+        """Both contact boxes on the floor. Used once the stop has landed."""
+        if not self.cfg.gm_id_ff:
+            self._zero_sole_trim(walker)
+            return
+        self._plant_sole(walker, "L", 0.0)
+        self._plant_sole(walker, "R", 0.0)
 
     def _leg_bodies(self, side: str) -> list[int]:
         """Body ids of one leg, from the hip yaw down through the foot."""
@@ -3435,6 +3999,95 @@ class LipmWalker:
             f"swing={swing_term:+.3f} contact={contact:+.3f}",
             flush=True,
         )
+
+    def _sides_at(self, t_s: float) -> tuple[str, ...]:
+        """Feet that carry the plan at clock time ``t_s``.
+
+        Single support is the stance box. Double support, the arm, and
+        the stop are the hull of both boxes.
+        """
+        if float(t_s) < 0.0 or self.preview_stage != "walk":
+            return ("L", "R")
+        stance = self._ssp_stance(t_s)
+        if stance in ("L", "R"):
+            return (stance,)
+        return ("L", "R")
+
+    def _inset_corners(
+        self, scratch: mj.MjData, sides: tuple[str, ...],
+    ) -> list[tuple[float, float]]:
+        """World xy corners of the contact boxes shrunk by 5 mm."""
+        pts: list[tuple[float, float]] = []
+        inset = float(ds_split.COP_INSET_M)
+        for side in sides:
+            center, rot, half = self._sole_frame(scratch, side)
+            hx = max(float(half[0]) - inset, 1e-4)
+            hy = max(float(half[1]) - inset, 1e-4)
+            for sx in (-1.0, 1.0):
+                for sy in (-1.0, 1.0):
+                    corner = center + rot @ np.array(
+                        [sx * hx, sy * hy, -float(half[2])],
+                        dtype=np.float64,
+                    )
+                    pts.append((float(corner[0]), float(corner[1])))
+        return pts
+
+    def _outside_hull_m(
+        self, hull: list[tuple[float, float]], x: float, y: float,
+    ) -> float:
+        """Metres outside ``hull``. A tenth of a millimetre stays inside."""
+        if len(hull) < 3:
+            return 0.0
+        outside = 0.0
+        n = len(hull)
+        for i in range(n):
+            x0, y0 = hull[i]
+            x1, y1 = hull[(i + 1) % n]
+            cross = (x1 - x0) * (y - y0) - (y1 - y0) * (x - x0)
+            if cross >= -1.0e-12:
+                continue
+            length = math.hypot(x1 - x0, y1 - y0)
+            dist = abs(cross) / length if length > 1.0e-12 else math.hypot(x - x0, y - y0)
+            outside = max(outside, dist)
+        if outside <= 1.0e-4:
+            return 0.0
+        return float(outside)
+
+    def _project_hull_xy(
+        self, xy: np.ndarray, corners: list[tuple[float, float]],
+    ) -> np.ndarray:
+        """Closest point on the hull. A point already inside stays."""
+        hull = self._support_hull(corners)
+        point = np.array(xy, dtype=np.float64)
+        if len(hull) < 2:
+            return point
+        if self._outside_hull_m(hull, float(point[0]), float(point[1])) <= 0.0:
+            return point
+        best = np.array(hull[0], dtype=np.float64)
+        best_d = float(np.hypot(best[0] - point[0], best[1] - point[1]))
+        n = len(hull)
+        for i in range(n):
+            a = np.array(hull[i], dtype=np.float64)
+            b = np.array(hull[(i + 1) % n], dtype=np.float64)
+            edge = b - a
+            length2 = float(edge @ edge)
+            if length2 < 1e-16:
+                cand = a
+            else:
+                t = float((point - a) @ edge / length2)
+                t = min(1.0, max(0.0, t))
+                cand = a + t * edge
+            dist = float(np.hypot(cand[0] - point[0], cand[1] - point[1]))
+            if dist < best_d:
+                best = cand
+                best_d = dist
+        return best
+
+    def _project_inset_xy(
+        self, scratch: mj.MjData, xy: np.ndarray, sides: tuple[str, ...],
+    ) -> np.ndarray:
+        """Project onto the 5 mm-shrunk support. 125×66 mm, or the DS hull."""
+        return self._project_hull_xy(xy, self._inset_corners(scratch, sides))
 
     def _support_corners(
         self, scratch: mj.MjData, sides: tuple[str, ...],
@@ -3580,6 +4233,12 @@ class LipmWalker:
         """
         if walker.y_swap_cmd != 0.0:
             raise RuntimeError("preview path refuses a non-zero y_swap")
+        if self._a_active and not self._stand_ready:
+            # Walking may already be requested. The clock stays put
+            # until the blend and the sag settle have both finished.
+            self._tick_stand_blend(walker)
+            if not self._stand_ready:
+                return
         if not walking and self.preview_stage == "stand":
             walker.stop()
             self.phase = "stand"
@@ -3620,11 +4279,15 @@ class LipmWalker:
             self._stop_swing_end = None
             self._gate_open = False
             self._gate_wait_s = 0.0
+            self._prelift_s = 0.0
+            self._air_side = None
             self._restart = True
         preview = self._ensure_preview(walker)
         if self.preview_stage == "stand":
             self.preview_stage = "start"
             self._preview_clock = -float(self.cfg.preview_arm_s)
+            if self.first_step_t0 < 0.0:
+                self.first_step_t0 = float(self.data.time)
         if self.preview_stage == "start":
             # The kit pitch leans the torso. On the feedforward walk the
             # sole stays level so the pendulum stays upright.
@@ -3695,7 +4358,10 @@ class LipmWalker:
             walker.sole_level = 0.0
         else:
             walker.sole_level = 1.0
-            walker.z_move_cmd = self._swing_height_cmd(walker)
+            # The world plant owns the clearance. The OP3 z channel
+            # stays at 0 so the sole is not lifted a second time.
+            self._swing_height_cmd(walker)
+            walker.z_move_cmd = 0.0
         x_amp, angle = kit_bus_step(self.cmd_vx, self.cmd_yaw, self.cfg.gm_period_s)
         # vx/7.50 ignores the period. One cycle advances the body by
         # 4·x_amp, so the step that matches vx is x_amp = vx·T/4.
@@ -3715,6 +4381,12 @@ class LipmWalker:
             # markers. Without this, the swing sole stays down until
             # mid-swing and then steps up inside one tick.
             walker.update_movement()
+            # Inside single support the pre-lift is over. The clock
+            # edge still carries _air_side so the release tick, which
+            # has not stepped yet, keeps the stance-only wrench.
+            if self._ssp_stance(float(walker.time)) is not None:
+                self._air_side = None
+                self._prelift_s = 0.0
         if self._hold_until_stance(walker, preview):
             return
         self._gate_wait_s = 0.0
@@ -3723,6 +4395,7 @@ class LipmWalker:
         self.preview_com_y = com
         walker.preview_y = self._preview_y_with_stab(com)
         self._anchor_swing_foot(walker)
+        self._lift_swing_sole(walker)
         joints, info = walker.step(op3_walk.OP3_CTRL_S)
         self._note_preview_phase(info)
         self._write_preview_joints(joints)
@@ -3797,35 +4470,72 @@ class LipmWalker:
         cycles = math.floor(t / period)
         return cycles * period + edge
 
-    def _on_stance_side(self, stance: str) -> bool:
-        """True when the planned CoM is inside the stance box.
+    def _in_inset(self, side: str, x: float, y: float) -> bool:
+        """True when (x, y) is inside that foot's 5 mm-shrunk box."""
+        held = self._project_inset_xy(
+            self.data, np.array([float(x), float(y)], dtype=np.float64), (side,),
+        )
+        return abs(float(held[0]) - float(x)) <= 1.0e-4 and abs(float(held[1]) - float(y)) <= 1.0e-4
 
-        The feedforward check is the box inner edge, geom half-width
-        inboard of the latched centre. The other gaits use the 8 mm line.
+    def _on_stance_side(self, stance: str) -> bool:
+        """True when the planned ZMP and CoM are inside the shrunk stance box.
+
+        The feedforward check is the 5 mm inset, 125×66 mm, not the full
+        geom half-width. The other gaits use the 8 mm line.
         """
         if self.cfg.gm_id_ff:
             self._note_foot_centres()
-            centre = self._foot_centre.get(stance)
-            if centre is None:
+            if stance not in self._foot_centre:
                 return False
-            hy = float(self.model.geom_size[int(self.gid[stance])][1])
-            y = float(self.preview_com_y)
-            if stance == "L":
-                return y >= float(centre[1]) - hy - 1.0e-4
-            return y <= float(centre[1]) + hy + 1.0e-4
+            z_in = self._in_inset(stance, float(self._zmp_x), float(self._zmp_cmd))
+            c_in = self._in_inset(
+                stance, float(self.preview_com_x), float(self.preview_com_y),
+            )
+            return z_in and c_in
         y = float(self.data.subtree_com[self.bid_body, 1])
         if stance == "L":
             return y >= zmp_preview.ENTRY_Y_M
         return y <= -zmp_preview.ENTRY_Y_M
 
+    def _hold_shift_pose(
+        self,
+        walker: op3_walk.Op3Walker,
+        preview: zmp_preview.ZmpPreview,
+        stance: str,
+    ) -> None:
+        """Preview onto the stance centre and write the pose. Clock stays."""
+        if self.cfg.gm_id_ff:
+            self._note_foot_centres()
+            centre = self._foot_centre.get(stance)
+            if centre is None:
+                target = 0.0
+            else:
+                target = float(centre[1])
+                self._zmp_x = float(centre[0])
+        else:
+            target = zmp_preview.BOX_CENTER_Y_M if stance == "L" else -zmp_preview.BOX_CENTER_Y_M
+        if self._preview_x is not None:
+            self._pending_x_future = np.full(
+                self._preview_x.horizon, float(self._zmp_x), dtype=np.float64,
+            )
+        future = np.full(preview.horizon, target, dtype=np.float64)
+        com = self._step_preview(preview, future)
+        self.preview_com_y = com
+        walker.preview_y = self._preview_y_with_stab(com)
+        self._anchor_swing_foot(walker)
+
     def _hold_until_stance(
         self, walker: op3_walk.Op3Walker, preview: zmp_preview.ZmpPreview,
     ) -> bool:
-        """Keep both feet down until the planned CoM is inside the stance box.
+        """Hold the clock until the weight is on the next stance foot.
 
-        On the feedforward walk the ZMP target is that foot's latched box
-        centre. The clock does not enter single support while the mass is
-        still outside that box. After 1.5 s the clock is released.
+        The feedforward check is the planned ZMP and CoM inside the 5 mm
+        stance box, and the swing-foot normal force at or under 1 N.
+        The sole then rises, min-jerk, to the 8 mm apex while the clock
+        is still on this edge, so single support opens with the foot
+        already clear. The phase stays double support during that rise,
+        and the planned wrench is the stance foot. After 2.0 s the clock
+        is released with both soles down.
         """
         dt = op3_walk.OP3_CTRL_S
         t_now = float(walker.time)
@@ -3841,33 +4551,47 @@ class LipmWalker:
             return False
         if stance_next is None or stance_next == stance_now:
             return False
-        if self._on_stance_side(stance_next):
-            return False
-        # Both soles stay down while the clock waits. z_lead at this
-        # edge is already on the rising part of the next swing.
-        if self.cfg.gm_id_ff:
+        swing = "R" if stance_next == "L" else "L"
+        com_now = np.asarray(self.data.subtree_com[self.bid_body], dtype=np.float64)
+        ready = (
+            self._on_stance_side(stance_next)
+            and self.foot_normal(swing) <= SWING_UNLOAD_N
+            and self._in_inset(stance_next, float(com_now[0]), float(com_now[1]))
+        )
+        rising = self._prelift_s > 1.0e-9
+        if self.cfg.gm_id_ff and (ready or rising) and self._prelift_s + 1e-9 < PRELIFT_S:
+            self._prelift_s += dt
+            self._air_side = swing
+            self._gate_wait_s = 0.0
             walker.z_move_cmd = 0.0
             walker.update_movement()
+            self._hold_shift_pose(walker, preview, stance_next)
+            apex = self._swing_height_cmd(walker)
+            u = min(1.0, self._prelift_s / PRELIFT_S)
+            self._plant_sole(walker, stance_next, 0.0)
+            self._plant_sole(walker, swing, apex * walker._minjerk(u))
+            joints = self._preview_pose(walker)
+            self.phase = "shift"
+            self.stance = stance_next  # type: ignore[assignment]
+            self._air_side = swing
+            self._write_preview_joints(joints)
+            return True
+        if self.cfg.gm_id_ff and (ready or rising):
+            return False
+        if not self.cfg.gm_id_ff and self._on_stance_side(stance_next):
+            return False
+        if self.cfg.gm_id_ff:
+            walker.z_move_cmd = 0.0
+            self._zero_sole_trim(walker)
+            self._prelift_s = 0.0
+            self._air_side = None
+            walker.update_movement()
         self._gate_wait_s += dt
-        if self._gate_wait_s >= 1.50:
+        if self._gate_wait_s >= 2.00:
             self._gate_open = True
             return False
         self.preview_gate_holds += 1
-        if self.cfg.gm_id_ff:
-            self._note_foot_centres()
-            centre = self._foot_centre.get(stance_next)
-            if centre is None:
-                target = 0.0
-            else:
-                target = float(centre[1])
-                self._zmp_x = float(centre[0])
-        else:
-            target = zmp_preview.BOX_CENTER_Y_M if stance_next == "L" else -zmp_preview.BOX_CENTER_Y_M
-        future = np.full(preview.horizon, target, dtype=np.float64)
-        com = self._step_preview(preview, future)
-        self.preview_com_y = com
-        walker.preview_y = self._preview_y_with_stab(com)
-        self._anchor_swing_foot(walker)
+        self._hold_shift_pose(walker, preview, stance_next)
         joints = self._preview_pose(walker)
         self.phase = "shift"
         self.stance = stance_next  # type: ignore[assignment]
@@ -3925,6 +4649,10 @@ class LipmWalker:
         else:
             self.phase = "shift"
             self._gm_swing = None
+            if self._saw_first_swing and self.first_step_t1 < 0.0:
+                self.first_step_t1 = float(self.data.time)
+        if info.phase in ("L", "R"):
+            self._saw_first_swing = True
         self.lat = float(info.swap_y_m)
 
     def _plant_preview_return(self, walker: op3_walk.Op3Walker) -> None:
@@ -4064,7 +4792,7 @@ class LipmWalker:
         return min(ys), max(ys)
 
     def _stop_zmp_future(self, horizon: int, t_now: float, span: float) -> np.ndarray:
-        """LIPM ZMP of the planned CoM deceleration, clamped into the stance boxes."""
+        """LIPM ZMP of the planned CoM deceleration, on the 5 mm inset hull."""
         if self.cfg.gm_id_ff:
             self._note_foot_centres()
             left = self._foot_centre.get("L")
@@ -4073,17 +4801,22 @@ class LipmWalker:
                 self._zmp_x = float(0.5 * (left[0] + right[0]))
         dt = float(op3_walk.OP3_CTRL_S)
         zc = float(self._preview_zc) if self._preview_zc > 0.05 else 0.18
-        lo, hi = self._stance_y_limits()
         out = np.zeros(horizon, dtype=np.float64)
+        xs = np.full(horizon, float(self._zmp_x), dtype=np.float64)
         for i in range(horizon):
             t = min(span, t_now + i * dt)
             com, _vel, acc = self._com_quintic(t, span)
             zmp = com - (zc / G) * acc
-            if zmp < lo:
-                zmp = lo
-            elif zmp > hi:
-                zmp = hi
-            out[i] = zmp
+            held = self._project_inset_xy(
+                self.data,
+                np.array([float(self._zmp_x), float(zmp)], dtype=np.float64),
+                ("L", "R"),
+            )
+            xs[i] = float(held[0])
+            out[i] = float(held[1])
+        if horizon > 0 and self.cfg.gm_id_ff:
+            self._zmp_x = float(xs[0])
+            self._pending_x_future = xs
         return out
 
     def _stand_blend_joints(self, walker: op3_walk.Op3Walker) -> dict[str, float] | None:
@@ -4152,6 +4885,7 @@ class LipmWalker:
                     self.preview_com_y = com
                     walker.preview_y = self._preview_y_with_stab(com)
                     self._anchor_swing_foot(walker)
+                    self._plant_both_soles(walker)
                     joints = self._preview_pose(walker)
                     self.phase = "shift"
                     self._write_preview_joints(joints)
@@ -4170,6 +4904,7 @@ class LipmWalker:
                 self.preview_com_y = com
                 walker.preview_y = self._preview_y_with_stab(com)
                 self._anchor_swing_foot(walker)
+                self._lift_swing_sole(walker)
                 joints, info = walker.step(op3_walk.OP3_CTRL_S)
                 self._note_preview_phase(info)
                 # Contact still names the support. A clock swing whose swing
@@ -4217,6 +4952,7 @@ class LipmWalker:
         walker.time = self._freeze_time
         walker.preview_y = self._preview_y_with_stab(com)
         self._anchor_swing_foot(walker)
+        self._plant_both_soles(walker)
         joints = self._stand_blend_joints(walker)
         # Stay in double support. Phase "stand" arms the kit stand hold,
         # which rewrites every leg toward the flat-floor pose. On the

@@ -254,6 +254,10 @@ class Op3Walker:
         self.z_offset = float(z_offset_m)
         self.y_offset = 0.0
         self.x_offset = 0.0
+        # Metres the pelvis sits forward of the IK foot, stand and walk.
+        # Positive moves both feet back in the hip frame. Trunk pitch
+        # (hit_pitch_offset) is not part of this shift.
+        self.pelvis_forward_m = 0.0
         self.roll_offset = 0.0
         self.pitch_offset = 0.0
         self.yaw_offset = 0.0
@@ -309,6 +313,17 @@ class Op3Walker:
         # pelvis sway is not applied a second time to the airborne foot.
         self.foot_bias_l = 0.0
         self.foot_bias_r = 0.0
+        # Per-foot hip-frame z, metres. The swing sole uses this so its
+        # contact-box lowest corner follows the world clearance. The
+        # stance foot stays at 0.
+        self.foot_z_l = 0.0
+        self.foot_z_r = 0.0
+        # Extra sole tilt, radians, hip frame. The world plant uses these
+        # so the contact box stays level while foot_z sets its clearance.
+        self.foot_pitch_l = 0.0
+        self.foot_pitch_r = 0.0
+        self.foot_roll_l = 0.0
+        self.foot_roll_r = 0.0
         self.period = self.period_cmd
         self.pelvis_swing = 0.0
         self.l_ssp_start = 0.0
@@ -404,6 +419,13 @@ class Op3Walker:
         self.lead_blend_tick = False
         self.lead_carry_tick = False
         self.lead_blend_s = 0.0
+        self.foot_z_l = 0.0
+        self.foot_z_r = 0.0
+        self.foot_pitch_l = 0.0
+        self.foot_pitch_r = 0.0
+        self.foot_roll_l = 0.0
+        self.foot_roll_r = 0.0
+        self.x_offset = 0.0
         self.update_movement()
 
     def next_swing(self) -> str | None:
@@ -672,19 +694,19 @@ class Op3Walker:
         left_z = self._left_z(t)
         leg = self.lengths.thigh_m + self.lengths.calf_m + self.lengths.ankle_m
         er = np.array([
-            swap_x + right[0] + self.x_offset,
+            swap_x + right[0] + self.x_offset - self.pelvis_forward_m,
             swap_y + right[1] - self.y_offset / 2.0 + self.foot_bias_r,
-            swap_z + right_z + self.z_offset - leg,
-            0.0 - self.roll_offset / 2.0,
-            0.0 + self.pitch_offset,
+            swap_z + right_z + self.z_offset - leg + self.foot_z_r,
+            0.0 - self.roll_offset / 2.0 + self.foot_roll_r,
+            0.0 + self.pitch_offset + self.foot_pitch_r,
             right[3] - self.yaw_offset / 2.0,
         ], dtype=np.float64)
         el = np.array([
-            swap_x + left[0] + self.x_offset,
+            swap_x + left[0] + self.x_offset - self.pelvis_forward_m,
             swap_y + left[1] + self.y_offset / 2.0 + self.foot_bias_l,
-            swap_z + left_z + self.z_offset - leg,
-            0.0 + self.roll_offset / 2.0,
-            0.0 + self.pitch_offset,
+            swap_z + left_z + self.z_offset - leg + self.foot_z_l,
+            0.0 + self.roll_offset / 2.0 + self.foot_roll_l,
+            0.0 + self.pitch_offset + self.foot_pitch_l,
             left[3] + self.yaw_offset / 2.0,
         ], dtype=np.float64)
         return er, el, pel_r, pel_l, swap_y
@@ -887,6 +909,12 @@ class Op3Walker:
             self.ctrl_running,
             self.foot_bias_l,
             self.foot_bias_r,
+            self.foot_z_l,
+            self.foot_z_r,
+            self.foot_pitch_l,
+            self.foot_pitch_r,
+            self.foot_roll_l,
+            self.foot_roll_r,
         )
         self.x_cmd = 0.0
         self.y_cmd = 0.0
@@ -896,6 +924,12 @@ class Op3Walker:
         self.z_swap_cmd = 0.0
         self.foot_bias_l = 0.0
         self.foot_bias_r = 0.0
+        self.foot_z_l = 0.0
+        self.foot_z_r = 0.0
+        self.foot_pitch_l = 0.0
+        self.foot_pitch_r = 0.0
+        self.foot_roll_l = 0.0
+        self.foot_roll_r = 0.0
         self.time = 0.0
         self.previous_x = 0.0
         self.ctrl_running = False
@@ -914,6 +948,12 @@ class Op3Walker:
             self.ctrl_running,
             self.foot_bias_l,
             self.foot_bias_r,
+            self.foot_z_l,
+            self.foot_z_r,
+            self.foot_pitch_l,
+            self.foot_pitch_r,
+            self.foot_roll_l,
+            self.foot_roll_r,
         ) = saved
         self.update_time()
         self.update_movement()

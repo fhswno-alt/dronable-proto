@@ -1475,11 +1475,16 @@ class SteerSession:
         self.data.qpos[2] = wg.COM_Z
         half = 0.5 * self._initial_yaw
         self.data.qpos[3:7] = [math.cos(half), 0.0, 0.0, math.sin(half)]
-        for jn, val in self.q_stand.items():
+        # Candidate A is the stand the gait holds. The spawn is the IK
+        # pose, and the min-jerk into A runs after this seat.
+        spawn = self.q_stand
+        if self.lipm is not None and self.lipm.q_spawn:
+            spawn = self.lipm.q_spawn
+        for jn, val in spawn.items():
             jid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_JOINT, jn)
             if jid >= 0:
                 self.data.qpos[self.model.jnt_qposadr[jid]] = val
-        wg.set_ctrl(self.model, self.data, self.q_stand, self.act_idx)
+        wg.set_ctrl(self.model, self.data, spawn, self.act_idx)
         mj.mj_forward(self.model, self.data)
         # The IK crouch is a different leg length than COM_Z's knee-0.40
         # stand. Seat the soles on the floor. This is the spawn height, not

@@ -291,6 +291,11 @@ def main(argv: list[str] | None = None) -> int:
     payload["dc_qvel"] = result.get("dc_qvel")
     payload["dc_limit"] = result.get("dc_limit")
     payload["dc_t"] = result.get("dc_t")
+    knee_rows = result.get("knee_qdd") if isinstance(result, dict) else None
+    if isinstance(knee_rows, list):
+        for knee_row in knee_rows:
+            if isinstance(knee_row, dict):
+                knee_row["tip_sha"] = sha
     payload["score"] = result
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(payload, indent=2, default=str) + "\n")
@@ -304,6 +309,10 @@ def main(argv: list[str] | None = None) -> int:
         f"dc_ok {payload['dc_ok']} dc {payload['dc_joint']} "
         f"{payload['dc_excess']} fault {payload['fault']!r} "
         f"root {result.get('id_plan_root_max') if isinstance(result, dict) else None} "
+        f"trunk {result.get('trunk_pitch_deg') if isinstance(result, dict) else None} "
+        f"cam {result.get('kit_cam_pitch_deg') if isinstance(result, dict) else None} "
+        f"seed_trunk {result.get('seed_trunk_pitch_deg') if isinstance(result, dict) else None} "
+        f"seed_cam {result.get('seed_kit_cam_pitch_deg') if isinstance(result, dict) else None} "
         f"at {result.get('id_plan_root_t') if isinstance(result, dict) else None} "
         f"row {result.get('id_plan_root_i') if isinstance(result, dict) else None} "
         f"{_report(payload)}",

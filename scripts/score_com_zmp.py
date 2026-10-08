@@ -271,6 +271,58 @@ def _dc_speed_limit(tau_nm: float) -> float:
     return QVEL_LIM * (1.0 - abs(float(tau_nm)) / DC_STALL_NM)
 
 
+def _window_bar(asks: list[AskRow], t0: float, t1: float) -> dict[str, object]:
+    """Signed peak and DC excess on one time window. Empty is not a pass."""
+    peak = 0.0
+    joint = ""
+    t_peak = 0.0
+    over = 0
+    n = 0
+    dc_excess = -1.0e9
+    dc_joint = ""
+    dc_t = 0.0
+    if t0 < 0.0 or t1 + 1e-12 < t0:
+        return {
+            "n": 0,
+            "signed_value": 0.0,
+            "signed_joint": "",
+            "signed_t": 0.0,
+            "signed_over": 0,
+            "signed_ok": False,
+            "dc_excess": float("nan"),
+            "dc_joint": "",
+            "dc_t": 0.0,
+            "dc_ok": False,
+        }
+    for row in asks:
+        if row.t < t0 - 1e-12 or row.t > t1 + 1e-12:
+            continue
+        n += 1
+        if abs(row.signed_nm) > abs(peak):
+            peak = float(row.signed_nm)
+            joint = str(row.joint)
+            t_peak = float(row.t)
+        if abs(row.signed_nm) > ASK_NM + 1e-9:
+            over += 1
+        excess = abs(row.omega) - _dc_speed_limit(abs(row.signed_nm))
+        if excess > dc_excess:
+            dc_excess = excess
+            dc_joint = str(row.joint)
+            dc_t = float(row.t)
+    return {
+        "n": n,
+        "signed_value": peak,
+        "signed_joint": joint,
+        "signed_t": t_peak,
+        "signed_over": over,
+        "signed_ok": bool(n > 0 and over == 0),
+        "dc_excess": dc_excess if n else float("nan"),
+        "dc_joint": dc_joint,
+        "dc_t": dc_t,
+        "dc_ok": bool(n > 0 and dc_excess <= 1e-6),
+    }
+
+
 def _clamp_limits(lipm: lipm_gait.LipmWalker) -> dict[str, tuple[float, float]]:
     """Actuator forcerange and joint actuatorfrcrange, both absolute."""
     out: dict[str, tuple[float, float]] = {}
@@ -2100,6 +2152,41 @@ def run_attempt(
         "diag": diag,
         "worst_diag": worst_diag,
         "stages": by_stage,
+        "trunk_pitch_deg": lipm._hw_trunk_pitch_deg(),
+        "kit_cam_pitch_deg": lipm._hw_kit_cam_pitch_deg(),
+        "seed_trunk_pitch_deg": float(getattr(lipm, "seed_trunk_pitch_deg", float("nan"))),
+        "seed_kit_cam_pitch_deg": float(getattr(lipm, "seed_kit_cam_pitch_deg", float("nan"))),
+        "seed_com": (
+            [float(v) for v in lipm._seed_com]
+            if getattr(lipm, "_seed_com", None) is not None else []
+        ),
+        "seed_cop": (
+            [float(v) for v in lipm._seed_cop]
+            if getattr(lipm, "_seed_cop", None) is not None else []
+        ),
+        "seed_zc": float(lipm._seed_zc) if lipm._seed_zc is not None else float("nan"),
+        "seed_qvel_abs": float(getattr(lipm, "seed_qvel_abs", float("nan"))),
+        "stand_ready_t": float(getattr(lipm, "stand_ready_t", -1.0)),
+        "stand_blend_s": float(getattr(lipm, "_blend_s", 0.0)),
+        "stand_settle_s": float(getattr(lipm, "_settle_s", 0.0)),
+        "first_step_t0": float(getattr(lipm, "first_step_t0", -1.0)),
+        "first_step_t1": float(getattr(lipm, "first_step_t1", -1.0)),
+        "transition": _window_bar(
+            asks,
+            min((row.t for row in asks if row.stage == "stand"), default=-1.0),
+            max((row.t for row in asks if row.stage == "stand"), default=-1.0),
+        ),
+        "first_step": _window_bar(
+            asks,
+            float(getattr(lipm, "first_step_t0", -1.0)),
+            (
+                float(lipm.first_step_t1)
+                if float(getattr(lipm, "first_step_t1", -1.0)) >= 0.0
+                else max((row.t for row in asks), default=-1.0)
+            ),
+        ),
+        "first_step_landed": bool(float(getattr(lipm, "first_step_t1", -1.0)) >= 0.0),
+        "knee_qdd": list(getattr(lipm, "knee_qdd_rows", [])),
     }
     return result
 
