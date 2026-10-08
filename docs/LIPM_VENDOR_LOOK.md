@@ -2793,30 +2793,14 @@ The largest ask is +5.820 Nm on the left knee at 1.328 s, swing lift, error +0.1
 
 ## Inverse-dynamics feedforward
 
-The position servo applies `kp·(ctrl−q) − kv·ω`. kp is the plant actuator gain and stays in the XML (knee and hip pitch 45, hip roll 40, ankle 35). The torque command is the position
+The position servo applies `kp·(ctrl−q) − kv·q̇`. kv is `−actuator_biasprm[i, 2]`, the same value the scorer uses. kp is the plant actuator gain and stays in the XML (knee and hip pitch 45, hip roll 40, ankle 35). The torque command is
 
-`ctrl = q + (τ + kv·ω) / kp`
+`ctrl = q + (τ_des + kv·q̇) / kp`
 
-so the applied ask equals τ. τ is `mj_inverse` of the current q and q̇. The leg q̈ tracks the IK velocity over 80 ms. That q̈ is scaled until the inverse fits in ±2.33 Nm and on the DC line `|qvel| ≤ 5.82·(1 − |τ|/3.43)`. Feedback is `8·(q_ref−q)`, reduced before the inverse is reduced. The 0.01 armature is not the reflected inertia — a planted hip pitch is about 0.2 kg·m² — so the reference q̈ is not capped at 2.33/0.01. The 20 ms position blend is not applied to this ctrl: that blend would spend the tick on the previous position target. The plant forcerange is not edited, and this is not a post-hoc force clamp. The construction can be written. `id_ff_broke` and `id_ff_impossible` are 0 on every row below. The measured signed peak sits on the 2.33 Nm rail, clamp fraction is 0, and the DC excess is ≤ 0.
+so the applied ask equals τ_des. Leaving out `kv·q̇` lets the damping eat the feedforward once the joint is moving. τ_des starts from `mj_inverse` at this step's q, q̇, and q̈. q̈ is that step's `data.qacc`, not a finite difference of the IK reference. Feedback is `8·(q_ref−q)`, reduced first, and the sum is held inside ±2.33 Nm and on the DC line `|qvel| ≤ 5.82·(1 − |τ|/3.43)`. The command is not pulled back into ctrlrange. MuJoCo clips ctrl to ±2.09 before the force is computed, so any tick whose commanded ctrl is outside that range is a fail. Max `|ctrl|` is logged on each leg joint. The 20 ms position blend is not applied to this ctrl. The plant forcerange is not edited, and this is not a post-hoc force clamp.
 
-The bar on these rows is that applied ask. The conservative sum `|kp·e| + |kv·ω|` still fails, and it is the Ask column, not the pass.
+The bar on these rows is the applied ask ≤ 2.33 Nm on every tick, clamp-active fraction 0, the DC line, and zero ctrlrange clips. The conservative sum `|kp·e| + |kv·ω|` is the Ask column and is not the pass. The historical mfg flag stays signed + clamp + DC, so a non-feedforward row whose IK target sits outside ±2.09 is not rewritten.
 
-When the inverse itself exceeds 2.33 Nm the dominant piece is named. q̈ is the inertia excluding armature, plus the velocity product. Armature is `0.01·q̈`. Impact is the contact torque at touchdown. CoP is the contact torque when that foot's centre of pressure is at least 15 mm from the ankle. Any other contact is counted with gravity. The peaks below are taken while the torso up component is at least 0.92, so a fallen pose does not supply the name.
+When `mj_inverse` at `data.qacc` itself exceeds 2.33 Nm the dominant piece is named. q̈ is the inertia excluding armature, plus the velocity product. Armature is `0.01·q̈`. Impact is the contact torque at touchdown. CoP is the contact torque when that foot's centre of pressure is at least 15 mm from the ankle. Any other contact is counted with gravity. The peak is taken while the torso up component is at least 0.92, so a fallen pose does not supply the name.
 
-| Row | signed | clamp | DC ex | clear | cmax | slip | off | up_z | hold ID | joint | phase | term |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |
-| T 0.60 / 0.032, flat 8 mm | 2.33 | 0 | 0.00 | — | — | — | — | 0.846 | +4.47 | r_hip_roll | stop | CoP |
-| T 1.00 / 0.016, flat 8 mm | 2.33 | 0 | −0.47 | −0.81 | 12.74 | 1.18 | 0.64 | 0.952 | +4.06 | l_hip_pitch | stance mid | CoP |
-| T 1.20 / 0.024, flat 8 mm | 2.33 | 0 | −0.06 | −1.76 | 13.09 | 4.48 | 0.52 | 0.955 | −4.94 | l_ank_roll | stop | CoP |
-| T 4 / 0.016, flat 8 mm | 2.33 | 0 | −1.25 | −4.25 | 19.00 | 13.76 | 0.60 | 0.932 | −4.65 | l_knee | stance mid | CoP |
-| T 20 / 0.0042, flat 18 mm | 2.33 | 0 | −0.75 | 12.45 | 14.73 | 0.67 | 0.96 | 0.891 | −5.10 | r_hip_pitch | DS transfer | CoP |
-
-T 0.60 s leaves the support. The fault is the centre of mass outside the polygon, margin −56 mm, and the clearance window is empty. The signed peak is −2.33 Nm on the right hip pitch at 1.328 s. The zero-acceleration inverse, while the torso is still at or above 0.92, reaches +4.47 Nm on the right hip roll in the stop. The contact term is the largest piece.
-
-T 1.00 s and T 1.20 s stay up (min up_z 0.952 and 0.955). The sole does rise — the highest corner inside the window is 12.7 mm and 13.1 mm — and the 20–80% minimum stays on the floor. The zero-acceleration inverse exceeds 2.33 Nm on both. At T 1.00 s the peak is +4.06 Nm on the left hip pitch in stance mid, CoP, at 3.112 s, 15 such ticks. At T 1.20 s it is −4.94 Nm on the left ankle roll in the stop, CoP, at 3.864 s.
-
-T 4 s at 0.016 m/s, the flat 8 mm hold, passes the signed bar, the clamp, and the DC line, and the window minimum is −4.25 mm. The zero-acceleration inverse peaks at −4.65 Nm on the left knee in stance mid, CoP, at 8.464 s.
-
-The 20 s / 18 mm gait (dsp 0.35, x_amp 21 mm, preview 0.043 m, arm 2.40 s, stand 0.40 s, walk 22 s) passes the applied-ask bar: signed peak +2.33 Nm on the left hip pitch at 1.888 s, clamp fraction 0, DC excess −0.75 rad/s. The 20–80% window is 12.45 mm, the window peak is 14.73 mm, slip is 0.67 mm, and the contact-off fraction is 0.96, on two steps. Trunk ratio is 0.76. Min up_z is 0.891, so the 0.90 upright check fails and the fault string is empty. The zero-acceleration inverse exceeds 2.33 Nm on 10 upright ticks. The largest is −5.10 Nm on the right hip pitch during double-support transfer, at 3.536 s, and the dominant term is CoP. The tracking acceleration's inverse is larger still, −5.89 Nm on that same joint and phase, on 800 upright ticks, because that q̈ does not fit and is scaled down before the write.
-
-The 8 mm command still does not clear 8 mm through 20–80% of the swing. The 18 mm command does, with the applied ask held at 2.33 Nm, and the inverse dynamics of the upright pose is over 2.33 Nm at the hip pitch because of where the contact sits. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0.
+The five rows below are the data.qacc rescore of the same set. Plant md5 `207f3d5e9c6a72e16f7aa0c8d224f75e`. Soft-pass off. y_swap 0.

@@ -50,9 +50,6 @@ ID_FF_KP = 8.0
 # It is the diagnosis column. It is not the reflected inertia: a planted
 # hip pitch is about 0.2 kg·m², so 2.33/0.01 is not a legal q̈.
 ID_FF_ARMATURE = 0.01
-# IK velocity is tracked over this horizon. The resulting q̈ is scaled
-# until mj_inverse fits in the sag bar and on the DC-motor line.
-ID_FF_QDD_HORIZON_S = 0.080
 # DC-motor model line, not a datasheet. |qvel| ≤ 5.82·(1 − |τ|/3.43).
 DC_QVEL_LIM = 5.82
 DC_STALL_NM = 3.43
@@ -297,23 +294,6 @@ def _leg_joint(name: str) -> bool:
     ))
 
 
-def _torque_scale(inertial: float, bias: float, room: float) -> float:
-    """Largest scale in [0, 1] with |scale·inertial + bias| ≤ room."""
-    if room <= 1e-12:
-        return 0.0
-    if abs(inertial) < 1e-12:
-        return 1.0 if abs(bias) <= room + 1e-9 else 0.0
-    roots = sorted((
-        (room - bias) / inertial,
-        (-room - bias) / inertial,
-    ))
-    lo = max(0.0, roots[0])
-    hi = min(1.0, roots[1])
-    if lo <= hi + 1e-12:
-        return hi
-    return 0.0
-
-
 def bezier_foot(s: float, p0: np.ndarray, p3: np.ndarray, clear_m: float) -> np.ndarray:
     """Cubic Bézier. Control height is clear/0.75 so the peak equals clear_m."""
     s = min(1.0, max(0.0, s))
@@ -478,11 +458,9 @@ class LipmWalker:
         # torque projection.
         self._shape_pos: dict[str, float] = {}
         self._shape_vel: dict[str, float] = {}
-        # Inverse-dynamics feedforward. Scratch data, reference velocity,
-        # and the largest unsaturated inverse torque.
+        # Inverse-dynamics feedforward. Scratch data and the largest
+        # inverse torque at this step's data.qacc.
         self._id_data: mj.MjData | None = None
-        self._ff_q: dict[str, float] = {}
-        self._ff_qd: dict[str, float] = {}
         self._leg_dof: dict[str, int] = {}
         self.id_ff_peak_abs = 0.0
         self.id_ff_peak_joint = ""
@@ -539,6 +517,9 @@ class LipmWalker:
             cmd = min(q + band, max(q - band, q_des))
         lo_lim = float(self.model.actuator_ctrlrange[idx, 0])
         hi_lim = float(self.model.actuator_ctrlrange[idx, 1])
+        # MuJoCo clips ctrl to ctrlrange before the force. The ask log
+        # records q_des before this clip. A leg command outside ±2.09
+        # is a fail even though the applied ctrl is the clipped value.
         self.data.ctrl[idx] = min(hi_lim, max(lo_lim, cmd))
 
     def write_force_limited(self, jn: str, q_des: float, limit_nm: float | None = None) -> None:
@@ -900,7 +881,11 @@ class LipmWalker:
         return max(scores, key=lambda name: scores[name])
 
     def _note_id_peak(self, inv: np.ndarray, names: dict[str, float], hold: bool) -> None:
-        """Remember the largest inverse torque. ``hold`` is the zero-q̈ case."""
+        """Remember the largest inverse torque.
+
+        The feedforward calls this with mj_inverse at data.qacc and
+        ``hold`` false. The hold slot is the unused zero-q̈ record.
+        """
         sag = float(KNEE_SAG_NM)
         worst_abs = 0.0
         worst_name = ""
@@ -953,17 +938,21 @@ class LipmWalker:
     def _id_feedforward(self, joints: dict[str, float]) -> None:
         """Replace each leg target with the ctrl that applies τ.
 
-        A position actuator applies kp·(ctrl−q) − kv·ω. The plant kp
-        stays in the XML, so the torque command is the position
+        A position actuator applies kp·(ctrl−q) − kv·q̇. kv is
+        −actuator_biasprm[i, 2], the same value the scorer uses. The
+        plant kp stays in the XML, so the torque command is
 
-            ctrl = q + (τ + kv·ω) / kp
+            ctrl = q + (τ_des + kv·q̇) / kp
 
-        τ is mj_inverse at the current q and q̇. Leg q̈ tracks the IK
-        velocity over ID_FF_QDD_HORIZON_S and is scaled until that
-        inverse fits in ±2.33 Nm and on the DC line. The 0.01 armature
-        is not used as the inertia. Feedback is ID_FF_KP·(q_ref−q),
-        reduced first. This is not write_force_limited and it does not
-        edit forcerange.
+        Without the kv·q̇ term the damping eats the feedforward at
+        speed. τ_des starts from mj_inverse at this step's q, q̇, and
+        q̈. q̈ is data.qacc, not a finite difference of the IK
+        reference. Feedback is ID_FF_KP·(q_ref−q), reduced first, and
+        the sum stays inside ±2.33 Nm and on the DC line. ctrl is not
+        pulled into ctrlrange. MuJoCo clips that range before the
+        force, and a command outside ±2.09 is a fail the scorer
+        counts. This is not write_force_limited and it does not edit
+        forcerange.
         """
         if not self.cfg.gm_id_ff:
             return
@@ -983,62 +972,14 @@ class LipmWalker:
         scratch.qacc[:] = self.data.qacc
         scratch.qfrc_applied[:] = 0.0
         scratch.xfrc_applied[:] = 0.0
-        dt = float(op3_walk.OP3_CTRL_S)
-        qd_cap = DC_QVEL_LIM * (1.0 - KNEE_SAG_NM / DC_STALL_NM)
-        q_ref: dict[str, float] = {}
-        qdd_des: dict[str, float] = {}
-        rooms: dict[str, float] = {}
-        for name, adr in self._leg_dof.items():
-            if name not in joints:
-                continue
-            ref = float(joints[name])
-            q_ref[name] = ref
-            prev_q = self._ff_q.get(name)
-            if prev_q is None:
-                qd_ik = 0.0
-            else:
-                qd_ik = (ref - prev_q) / dt
-            if qd_ik > qd_cap:
-                qd_ik = qd_cap
-            elif qd_ik < -qd_cap:
-                qd_ik = -qd_cap
-            omega = float(self.data.qvel[adr])
-            qdd = (qd_ik - omega) / ID_FF_QDD_HORIZON_S
-            qdd_des[name] = qdd
-            self._ff_q[name] = ref
-            self._ff_qd[name] = qd_ik
-            speed_room = DC_STALL_NM * (1.0 - abs(omega) / DC_QVEL_LIM)
-            if speed_room < 0.0:
-                speed_room = 0.0
-            rooms[name] = min(float(KNEE_SAG_NM), speed_room)
-
-        def _inverse(scale: float) -> np.ndarray:
-            scratch.qpos[:] = self.data.qpos
-            scratch.qvel[:] = self.data.qvel
-            scratch.qacc[:] = 0.0
-            scratch.qfrc_applied[:] = 0.0
-            scratch.xfrc_applied[:] = 0.0
-            for name, adr in self._leg_dof.items():
-                if name in qdd_des:
-                    scratch.qacc[adr] = scale * qdd_des[name]
-            mj.mj_inverse(self.model, scratch)
-            return np.array(scratch.qfrc_inverse, dtype=np.float64, copy=True)
-
-        inv0 = _inverse(0.0)
-        self._note_id_peak(inv0, q_ref, hold=True)
-        inv1 = _inverse(1.0)
-        self._note_id_peak(inv1, q_ref, hold=False)
-        scale = 1.0
-        for name, adr in self._leg_dof.items():
-            if name not in rooms:
-                continue
-            scale = min(scale, _torque_scale(
-                float(inv1[adr] - inv0[adr]), float(inv0[adr]), rooms[name],
-            ))
-        if scale < 0.999:
-            inv = _inverse(scale)
-        else:
-            inv = inv1
+        mj.mj_inverse(self.model, scratch)
+        inv = np.array(scratch.qfrc_inverse, dtype=np.float64, copy=True)
+        q_ref = {
+            name: float(joints[name])
+            for name in self._leg_dof
+            if name in joints
+        }
+        self._note_id_peak(inv, q_ref, hold=False)
         sag = float(KNEE_SAG_NM)
         for name, adr in self._leg_dof.items():
             if name not in q_ref:
@@ -1054,7 +995,10 @@ class LipmWalker:
                 continue
             q = self.q(name)
             omega = float(self.data.qvel[adr])
-            room = rooms[name]
+            speed_room = DC_STALL_NM * (1.0 - abs(omega) / DC_QVEL_LIM)
+            if speed_room < 0.0:
+                speed_room = 0.0
+            room = min(sag, speed_room)
             tau_ff = float(inv[adr])
             fb = ID_FF_KP * (q_ref[name] - q)
             if room <= 1e-9:
@@ -1068,24 +1012,6 @@ class LipmWalker:
                 elif tau < -room:
                     tau = -room
             ctrl = q + (tau + kv * omega) / kp
-            lo = q + (-room + kv * omega) / kp
-            hi = q + (room + kv * omega) / kp
-            # The sag window, so a DC-loose tick still cannot ask past 2.33.
-            sag_lo = q + (-sag + kv * omega) / kp
-            sag_hi = q + (sag + kv * omega) / kp
-            lo = max(lo, sag_lo, float(self.model.actuator_ctrlrange[idx, 0]))
-            hi = min(hi, sag_hi, float(self.model.actuator_ctrlrange[idx, 1]))
-            if lo <= hi:
-                if ctrl > hi:
-                    ctrl = hi
-                elif ctrl < lo:
-                    ctrl = lo
-            else:
-                self.id_ff_impossible += 1
-                ctrl = min(
-                    float(self.model.actuator_ctrlrange[idx, 1]),
-                    max(float(self.model.actuator_ctrlrange[idx, 0]), q),
-                )
             signed = kp * (ctrl - q) - kv * omega
             if abs(signed) > sag + 1e-6 or abs(signed) > room + 1e-4:
                 self.id_ff_broke += 1

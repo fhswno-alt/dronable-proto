@@ -9,7 +9,10 @@ Two pre-clamp signals are logged, both on the command before
 write_clipped or write_force_limited edits ctrl. The historical 2.33 Nm
 bar is |kp*(q_des−q)| + |kv*ω|. The signed force is
 kp*(q_des−q) − kv*ω. kv is −actuator_biasprm[i, 2] from dampratio=1,
-a different number on every joint.
+a different number on every joint. Max |ctrl| is logged per leg joint
+against ctrlrange ±2.09. MuJoCo clips ctrl before the force, so a
+command outside that range is a clip. The historical mfg bar does not
+include that clip.
 """
 from __future__ import annotations
 
@@ -72,6 +75,10 @@ DC_LABEL = "DC-motor model, not datasheet"
 # Leg actuator forcerange and joint actuatorfrcrange are both ±2.45 Nm.
 # A tick is clamp-active when the pre-clamp |signed| meets either rail.
 CLAMP_NM = 2.45
+# Position ctrlrange on every leg actuator. MuJoCo clips ctrl to this
+# before computing the force. A commanded value outside it is a fail
+# of the feedforward bar. The plant check raises if a leg differs.
+CTRL_RANGE = 2.09
 LEG_JOINTS: tuple[str, ...] = (
     "l_hip_yaw", "l_hip_roll", "l_hip_pitch", "l_knee", "l_ank_pitch", "l_ank_roll",
     "r_hip_yaw", "r_hip_roll", "r_hip_pitch", "r_knee", "r_ank_pitch", "r_ank_roll",
@@ -252,6 +259,21 @@ def _clamp_limits(lipm: lipm_gait.LipmWalker) -> dict[str, tuple[float, float]]:
         act = abs(float(lipm.model.actuator_forcerange[idx, 1]))
         jnt = abs(float(lipm.model.jnt_actfrcrange[jid, 1]))
         out[jn] = (act, jnt)
+    return out
+
+
+def _ctrl_limits(lipm: lipm_gait.LipmWalker) -> dict[str, tuple[float, float]]:
+    """Leg ctrlrange. Raises when a joint is not ±CTRL_RANGE."""
+    out: dict[str, tuple[float, float]] = {}
+    for jn in LEG_JOINTS:
+        idx = lipm.act_idx.get(jn + "_pos")
+        if idx is None:
+            raise RuntimeError(f"missing actuator {jn}")
+        lo = float(lipm.model.actuator_ctrlrange[idx, 0])
+        hi = float(lipm.model.actuator_ctrlrange[idx, 1])
+        if abs(lo + CTRL_RANGE) > 1e-9 or abs(hi - CTRL_RANGE) > 1e-9:
+            raise RuntimeError(f"{jn} ctrlrange {lo} {hi} != ±{CTRL_RANGE}")
+        out[jn] = (lo, hi)
     return out
 
 
@@ -1185,6 +1207,9 @@ def run_attempt(
     clamp_lim = _clamp_limits(lipm)
     clamp_n = {jn: 0 for jn in LEG_JOINTS}
     clamp_hit = {jn: 0 for jn in LEG_JOINTS}
+    ctrl_lim = _ctrl_limits(lipm)
+    ctrl_abs = {jn: 0.0 for jn in LEG_JOINTS}
+    ctrl_clip = {jn: 0 for jn in LEG_JOINTS}
     # A large negative sentinel so a row that stays inside the line
     # still records a joint. -1 would ignore every tick more than 1 rad/s
     # inside the line and then fail the bar for an empty joint.
@@ -1258,6 +1283,13 @@ def run_attempt(
                 signed_over += 1
             if row.sum_nm > ASK_NM + 1e-9:
                 sum_over += 1
+            # q_des is the command before write_clipped clips ctrlrange.
+            # MuJoCo would clip the same range before the force.
+            if abs(row.q_des) > ctrl_abs[row.joint]:
+                ctrl_abs[row.joint] = abs(row.q_des)
+            clo, chi = ctrl_lim[row.joint]
+            if row.q_des < clo - 1e-9 or row.q_des > chi + 1e-9:
+                ctrl_clip[row.joint] += 1
             # τ and ω are this write. ω is the qvel the torque used,
             # before mj_step replaces it.
             tau = abs(row.signed_nm)
@@ -1538,6 +1570,13 @@ def run_attempt(
     sum_ok = bool(asks) and sum_over == 0
     signed_pass_sum_fail = bool(signed_ok and not sum_ok)
     mfg_ok = bool(signed_ok and clamp_ok and dc_ok)
+    ctrl_clip_n = int(sum(ctrl_clip.values()))
+    ctrl_abs_joint = max(ctrl_abs, key=lambda jn: ctrl_abs[jn]) if asks else ""
+    ctrl_abs_max = float(ctrl_abs[ctrl_abs_joint]) if ctrl_abs_joint else 0.0
+    # Clip-free is part of the feedforward bar. It stays out of mfg_ok
+    # so a historical row is not rewritten when its IK target sits
+    # outside ctrlrange and write_clipped then clips it.
+    ctrl_ok = bool(asks) and ctrl_clip_n == 0
     vx_mean = vx_sum / float(vx_n) if vx_n else float("nan")
     vx_ratio = vx_mean / vx_cmd if vx_n and abs(vx_cmd) > 1e-9 else float("nan")
     cop_p5 = float(np.percentile(decl_cop_mm, 5)) if decl_cop_mm else float("nan")
@@ -1607,6 +1646,13 @@ def run_attempt(
         "sum_ok": sum_ok,
         "signed_pass_sum_fail": signed_pass_sum_fail,
         "mfg_ok": mfg_ok,
+        "ctrl_abs": ctrl_abs,
+        "ctrl_abs_max": ctrl_abs_max,
+        "ctrl_abs_joint": ctrl_abs_joint,
+        "ctrl_clip": ctrl_clip,
+        "ctrl_clip_n": ctrl_clip_n,
+        "ctrl_ok": ctrl_ok,
+        "ctrl_range": CTRL_RANGE,
         "id_ff": bool(getattr(cfg, "gm_id_ff", False)),
         "id_ff_peak": float(getattr(lipm, "id_ff_peak_abs", 0.0)),
         "id_ff_tau": float(getattr(lipm, "id_ff_peak_tau", 0.0)),
