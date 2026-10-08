@@ -1,0 +1,1965 @@
+{
+  "tip_sha": "8d6f2fd6876ce60b54bb5e2b82d267a7a7fb18af",
+  "entry_point": "scripts/run_live_row.py",
+  "config": "ff 1, knee q\u0308 cap 40, T 1.00, vx 0.016, clearance 0.008, dsp 0.40 raised to 0.55 by the feedforward path, seed none, latency 0, mass scale 1, mu none, arm 1.0, stand 0.25, walk 4.0, stop 2.5, preview shape 1, amp 0.016",
+  "airborne_test": "A tick is airborne only when three tests agree: zero mjData contacts between the group-0 contact box and the floor, all eight corners of that box above z=0, and summed mj_contactForce normal within 1e-6 N of 0.",
+  "rows": [
+    {
+      "armature": 0.01,
+      "entry_point_exit": 0,
+      "runner": {
+        "step_frac": 0.0,
+        "n_swings": 5.0,
+        "n_steps": 0.0,
+        "clear_mm": -0.6249551198649114,
+        "clear_max_mm": 0.6275077340985504,
+        "signed_ok": true,
+        "signed_value": 1.8718931646796286,
+        "signed_joint": "r_knee",
+        "signed_t": 3.5439999999998313,
+        "signed_over": 0,
+        "tip_ok": true,
+        "min_up_z": 0.9735079627220615,
+        "fault": "",
+        "step_ok": false,
+        "dc_ok": true,
+        "compiled_md5": "03ed33386178ab8d05db76a7307f1c1d",
+        "xml_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+        "perturbation": "none",
+        "cmd": [
+          "--t",
+          "1.00",
+          "--vx",
+          "0.016",
+          "--clearance",
+          "0.008",
+          "--dsp",
+          "0.40",
+          "--ff",
+          "1",
+          "--knee-qdd-cap",
+          "40",
+          "--armature",
+          "0.01",
+          "--seed",
+          "none",
+          "--latency",
+          "0",
+          "--mass-scale",
+          "1",
+          "--mu",
+          "none",
+          "--arm-s",
+          "1.0",
+          "--stand-s",
+          "0.25",
+          "--walk-s",
+          "4.0",
+          "--stop-s",
+          "2.5",
+          "--preview-shape",
+          "1.0",
+          "--amp",
+          "0.016",
+          "--z-quintic",
+          "0",
+          "--z-lead",
+          "0",
+          "--honor-vx",
+          "0",
+          "--out",
+          "/tmp/skate_row_a0.010.json"
+        ],
+        "tip_sha": "8d6f2fd6876ce60b54bb5e2b82d267a7a7fb18af",
+        "mujoco_version": "3.14.0",
+        "clear": false,
+        "clear_reason": "stepping bars step_frac 0.0; sum peak exceeds 2\u00d7 signed peak; \u00b11 tick latency rows and 5 bus-stop rows must pass the signed bar before CLEAR",
+        "signed_peak": 1.8718931646796286,
+        "sum_peak": 6.3585903452715,
+        "sum_over": 282,
+        "sum_over_2x_signed": true,
+        "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e"
+      },
+      "n_trace_ticks": 844,
+      "ctrl_dt_s": 0.008,
+      "stand_body_z_m": 0.20466262487927192,
+      "contact_box_group": {
+        "L": 0,
+        "R": 0
+      },
+      "swing_windows": [
+        {
+          "side": "L",
+          "stance": "R",
+          "t0_s": 1.400000000000001,
+          "t1_s": 1.6160000000000012,
+          "window_s": 0.2160000000000002,
+          "n_ticks": 28,
+          "stage": "walk",
+          "z_move_cmd_max_m": 0.008,
+          "swing_dx_m": 0.00043447646204874957,
+          "air_forward_m": 0.0011430174932222786,
+          "contact_forward_m": 0.00018392752446004523,
+          "step_frac": 0.861390244502144,
+          "box_half_y_m": 0.038,
+          "weight_N": 23.028959205899998,
+          "swing_grf_n": {
+            "min": 0.0,
+            "max": 7.545096166660867,
+            "mean": 1.2863003912727624
+          },
+          "stance_grf_n": {
+            "min": 16.806002048105608,
+            "max": 23.20498871311826,
+            "mean": 21.93646106475103
+          },
+          "stance_weight_frac": {
+            "min": 0.6957417006794822,
+            "max": 1.0,
+            "mean": 0.9462459986274222
+          },
+          "cop_y_m": -0.04562821648701162,
+          "zmp_y_m": -0.04487854660027675,
+          "zmp_cmd_y_m": -0.047954884479847984,
+          "stance_box_y_latched_m": -0.047954884479847984,
+          "stance_box_y_live_m": -0.04697422927194652,
+          "cop_minus_box_m": 0.002326667992836366,
+          "zmp_minus_box_m": 0.0030763378795712337,
+          "planned_bottom_z_m": {
+            "min": -0.0005332803443905999,
+            "max": 0.005984024368860492
+          },
+          "planned_corner_z_m": {
+            "min": -0.004445630123419274,
+            "max": 0.00037732816378695244
+          },
+          "capped_bottom_z_m": {
+            "min": -0.0004895268553186134,
+            "max": 0.005984024368860492
+          },
+          "capped_corner_z_m": {
+            "min": -0.006823485643387386,
+            "max": 0.00044524556610826306
+          },
+          "realised_bottom_z_m": {
+            "min": -0.0005019366058548434,
+            "max": 0.0014373664025053232
+          },
+          "realised_corner_z_m": {
+            "min": -0.0008705884312070183,
+            "max": 0.0006275077340985504
+          },
+          "pitch": {
+            "l_hip_pitch": {
+              "err_rms_rad": 0.05234407929535344,
+              "err_mean_rad": -0.05093335862652625,
+              "err_max_rad": -0.07030059513046549,
+              "abs_err_mean_rad": 0.05093335862652625,
+              "ctrl_minus_q_mean_rad": -0.007148984828441285,
+              "abs_ctrl_minus_q_mean_rad": 0.010217380165081304,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.21428571428571427,
+              "tau_ff_mean_nm": -0.17377388583479417,
+              "fb_mean_nm": -0.05093335862652625,
+              "tau_ff_plus_fb_mean_nm": -0.22470724446132043,
+              "kp": 45.0
+            },
+            "l_knee": {
+              "err_rms_rad": 0.0667891799340994,
+              "err_mean_rad": 0.05016983872117098,
+              "err_max_rad": 0.08125761267167741,
+              "abs_err_mean_rad": 0.06259059312421289,
+              "ctrl_minus_q_mean_rad": -0.001281260270980657,
+              "abs_ctrl_minus_q_mean_rad": 0.011903928082543607,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.17857142857142858,
+              "tau_ff_mean_nm": -0.11287719201334198,
+              "fb_mean_nm": 0.05016983872117098,
+              "tau_ff_plus_fb_mean_nm": -0.062707353292171,
+              "kp": 45.0
+            },
+            "l_ank_pitch": {
+              "err_rms_rad": 0.0760647321166851,
+              "err_mean_rad": 0.06337996377191017,
+              "err_max_rad": 0.10609165250563155,
+              "abs_err_mean_rad": 0.06514366688952675,
+              "ctrl_minus_q_mean_rad": 0.0036253251448422025,
+              "abs_ctrl_minus_q_mean_rad": 0.007855639348297893,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.39285714285714285,
+              "tau_ff_mean_nm": -0.03130287742072817,
+              "fb_mean_nm": 0.06337996377191017,
+              "tau_ff_plus_fb_mean_nm": 0.03207708635118201,
+              "kp": 35.0
+            }
+          },
+          "stance_knee": {
+            "joint": "r_knee",
+            "q_plan_start_rad": -0.9282003959370722,
+            "q_plan_end_rad": -0.9787299919352972,
+            "q_meas_start_rad": -0.9587298496957125,
+            "q_meas_end_rad": -0.9478359613235262,
+            "q_meas_minus_plan_mean_rad": -0.014180866247165339
+          },
+          "trunk_z_m": {
+            "start": 0.19899928382586288,
+            "end": 0.2041824958186616,
+            "min": 0.19899928382586288,
+            "stand_m": 0.20466262487927192,
+            "drop_from_stand_m": 0.005663341053409043
+          },
+          "knee_qdd_cap": {
+            "cap_rad_s2": 40.0,
+            "joint": "l_knee",
+            "qvel0_rad_s": 0.1599226984818997,
+            "uncapped_dq_rad": -0.09236391185248616,
+            "capped_dq_rad": -0.13203001301284412,
+            "measured_dq_rad": 0.030090651301750593,
+            "reachable_dq_rad": -0.8985766971279112,
+            "reference_clipped_frac": 0.42857142857142855,
+            "inverse_qdd_over_cap_frac": 0.0,
+            "blocks": false,
+            "reachable_short": false,
+            "shrinks_plan": false
+          },
+          "airborne": {
+            "definition": "zero floor contacts on the group-0 contact box, all eight corners above z=0, summed mj_contactForce normal within 1e-6 N of 0",
+            "n_contact_zero": 12,
+            "n_corners_above": 12,
+            "n_force_zero": 12,
+            "n_all_three": 12,
+            "n_disagree": 0,
+            "geom_group": 0
+          },
+          "binding": "feedforward ctrl stays on the measured knee; the joint reference pitches the sole (box bottom 5.98 mm, lowest corner 0.38 mm); |ctrl\u2212q| 11.9 mrad against |q_ref\u2212q| 62.6 mrad at kp 45; tau_ff -0.113 Nm, spring +0.050 Nm, net -0.063 Nm; knee \u0394q plan -0.092 rad, measured +0.030 rad, reachable under the 40 rad/s\u00b2 cap -0.899 rad; stance fraction 0.946, swing GRF mean 1.29 N, CoP\u2212box +2.3 mm inside a 38 mm half-width; lowest corner plan 0.38 mm / realised 0.63 mm, box bottom plan 5.98 mm / realised 1.44 mm, three-part airborne 12/28 (disagree 0), airborne forward 1.14 mm"
+        },
+        {
+          "side": "R",
+          "stance": "L",
+          "t0_s": 1.8960000000000015,
+          "t1_s": 2.111999999999989,
+          "window_s": 0.21599999999998754,
+          "n_ticks": 28,
+          "stage": "walk",
+          "z_move_cmd_max_m": 0.008,
+          "swing_dx_m": 0.0013055090814149892,
+          "air_forward_m": 0.0007084340283909848,
+          "contact_forward_m": 0.0010554329919986102,
+          "step_frac": 0.40163686956089756,
+          "box_half_y_m": 0.038,
+          "weight_N": 23.028959205899998,
+          "swing_grf_n": {
+            "min": 0.0,
+            "max": 5.964799640285676,
+            "mean": 1.4119790297420365
+          },
+          "stance_grf_n": {
+            "min": 19.313499809034703,
+            "max": 23.36170821255414,
+            "mean": 21.735417143484813
+          },
+          "stance_weight_frac": {
+            "min": 0.7654226682958254,
+            "max": 1.0,
+            "mean": 0.9418126090500417
+          },
+          "cop_y_m": 0.01619008337525209,
+          "zmp_y_m": 0.014809898984520287,
+          "zmp_cmd_y_m": 0.04147278768430424,
+          "stance_box_y_latched_m": 0.04147278768430424,
+          "stance_box_y_live_m": 0.04132534151896746,
+          "cop_minus_box_m": -0.02528270430905215,
+          "zmp_minus_box_m": -0.026662888699783956,
+          "planned_bottom_z_m": {
+            "min": -0.0008173462383674005,
+            "max": 0.0090754597002217
+          },
+          "planned_corner_z_m": {
+            "min": -0.002585075442944765,
+            "max": 0.006137146148953356
+          },
+          "capped_bottom_z_m": {
+            "min": -0.0010721373150646921,
+            "max": 0.0090754597002217
+          },
+          "capped_corner_z_m": {
+            "min": -0.00225343116311252,
+            "max": 0.006137146148953356
+          },
+          "realised_bottom_z_m": {
+            "min": -0.0002544949626311077,
+            "max": 0.0016111134504325567
+          },
+          "realised_corner_z_m": {
+            "min": -0.0009814416407929426,
+            "max": 2.4107512299920142e-05
+          },
+          "pitch": {
+            "r_hip_pitch": {
+              "err_rms_rad": 0.04722993740631743,
+              "err_mean_rad": 0.043326196477906684,
+              "err_max_rad": 0.06081122722266996,
+              "abs_err_mean_rad": 0.043326196477906684,
+              "ctrl_minus_q_mean_rad": 0.00836072714066757,
+              "abs_ctrl_minus_q_mean_rad": 0.011904250289446488,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.21428571428571427,
+              "tau_ff_mean_nm": 0.1494076897826858,
+              "fb_mean_nm": 0.043326196477906684,
+              "tau_ff_plus_fb_mean_nm": 0.19273388626059249,
+              "kp": 45.0
+            },
+            "r_knee": {
+              "err_rms_rad": 0.1565667040380699,
+              "err_mean_rad": -0.13719220522322556,
+              "err_max_rad": -0.1990657720202511,
+              "abs_err_mean_rad": 0.14283288250930756,
+              "ctrl_minus_q_mean_rad": -0.006255349475976252,
+              "abs_ctrl_minus_q_mean_rad": 0.012688639665471232,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.14285714285714285,
+              "tau_ff_mean_nm": 0.12514912106148343,
+              "fb_mean_nm": -0.13719220522322556,
+              "tau_ff_plus_fb_mean_nm": -0.012043084161742138,
+              "kp": 45.0
+            },
+            "r_ank_pitch": {
+              "err_rms_rad": 0.083666795368558,
+              "err_mean_rad": -0.061354512053702036,
+              "err_max_rad": -0.12590016162835727,
+              "abs_err_mean_rad": 0.07314157591439588,
+              "ctrl_minus_q_mean_rad": -0.006961280590594879,
+              "abs_ctrl_minus_q_mean_rad": 0.011366179671108501,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.35714285714285715,
+              "tau_ff_mean_nm": 0.010443724013357417,
+              "fb_mean_nm": -0.061354512053702036,
+              "tau_ff_plus_fb_mean_nm": -0.050910788040344615,
+              "kp": 35.0
+            }
+          },
+          "stance_knee": {
+            "joint": "l_knee",
+            "q_plan_start_rad": 0.9789515677876819,
+            "q_plan_end_rad": 0.9728336576713106,
+            "q_meas_start_rad": 1.0193234845068255,
+            "q_meas_end_rad": 0.9913352982688094,
+            "q_meas_minus_plan_mean_rad": 0.0628349167387106
+          },
+          "trunk_z_m": {
+            "start": 0.20870068042932183,
+            "end": 0.20895830303804777,
+            "min": 0.2081830338157974,
+            "stand_m": 0.20466262487927192,
+            "drop_from_stand_m": -0.003520408936525471
+          },
+          "knee_qdd_cap": {
+            "cap_rad_s2": 40.0,
+            "joint": "r_knee",
+            "qvel0_rad_s": -0.036390878780974224,
+            "uncapped_dq_rad": 0.16045990305012525,
+            "capped_dq_rad": 0.1884585300798235,
+            "measured_dq_rad": -0.05333538738808863,
+            "reachable_dq_rad": 0.9252595701832023,
+            "reference_clipped_frac": 0.42857142857142855,
+            "inverse_qdd_over_cap_frac": 0.0,
+            "blocks": false,
+            "reachable_short": false,
+            "shrinks_plan": false
+          },
+          "airborne": {
+            "definition": "zero floor contacts on the group-0 contact box, all eight corners above z=0, summed mj_contactForce normal within 1e-6 N of 0",
+            "n_contact_zero": 5,
+            "n_corners_above": 5,
+            "n_force_zero": 5,
+            "n_all_three": 5,
+            "n_disagree": 0,
+            "geom_group": 0
+          },
+          "binding": "feedforward ctrl stays on the measured knee; |ctrl\u2212q| 12.7 mrad against |q_ref\u2212q| 142.8 mrad at kp 45; tau_ff +0.125 Nm, spring -0.137 Nm, net -0.012 Nm; knee \u0394q plan +0.160 rad, measured -0.053 rad, reachable under the 40 rad/s\u00b2 cap +0.925 rad; stance fraction 0.942, swing GRF mean 1.41 N, CoP\u2212box -25.3 mm inside a 38 mm half-width; lowest corner plan 6.14 mm / realised 0.02 mm, box bottom plan 9.08 mm / realised 1.61 mm, three-part airborne 5/28 (disagree 0), airborne forward 0.71 mm"
+        },
+        {
+          "side": "L",
+          "stance": "R",
+          "t0_s": 2.3999999999999573,
+          "t1_s": 2.6159999999999335,
+          "window_s": 0.2159999999999762,
+          "n_ticks": 28,
+          "stage": "walk",
+          "z_move_cmd_max_m": 0.008,
+          "swing_dx_m": 0.00039753552351273064,
+          "air_forward_m": 0.0,
+          "contact_forward_m": 0.0005520139705318672,
+          "step_frac": 0.0,
+          "box_half_y_m": 0.038,
+          "weight_N": 23.028959205899998,
+          "swing_grf_n": {
+            "min": 0.16944188867455534,
+            "max": 6.7917339245465795,
+            "mean": 2.199770019141078
+          },
+          "stance_grf_n": {
+            "min": 18.331497591383496,
+            "max": 23.180233373131948,
+            "mean": 20.68707297871324
+          },
+          "stance_weight_frac": {
+            "min": 0.7296632035476768,
+            "max": 0.9927432871431957,
+            "mean": 0.9047836059294608
+          },
+          "cop_y_m": -0.010551573551120439,
+          "zmp_y_m": -0.010162382962824696,
+          "zmp_cmd_y_m": -0.04403703192565613,
+          "stance_box_y_latched_m": -0.04403703192565613,
+          "stance_box_y_live_m": -0.04394598225187381,
+          "cop_minus_box_m": 0.03348545837453569,
+          "zmp_minus_box_m": 0.03387464896283143,
+          "planned_bottom_z_m": {
+            "min": -0.0008822618406428284,
+            "max": 0.008194842318499913
+          },
+          "planned_corner_z_m": {
+            "min": -0.007013978952240351,
+            "max": 0.00012175439832892362
+          },
+          "capped_bottom_z_m": {
+            "min": -0.0014715819679907791,
+            "max": 0.008194842318499913
+          },
+          "capped_corner_z_m": {
+            "min": -0.0065976018767028195,
+            "max": 0.00012175439832892362
+          },
+          "realised_bottom_z_m": {
+            "min": -0.00035199498714359734,
+            "max": 0.0009326310222550847
+          },
+          "realised_corner_z_m": {
+            "min": -0.00087427533922463,
+            "max": -0.0002868802015663363
+          },
+          "pitch": {
+            "l_hip_pitch": {
+              "err_rms_rad": 0.05811910769538791,
+              "err_mean_rad": -0.053982386703892424,
+              "err_max_rad": -0.07541861832583696,
+              "abs_err_mean_rad": 0.053982386703892424,
+              "ctrl_minus_q_mean_rad": -0.010282380482204716,
+              "abs_ctrl_minus_q_mean_rad": 0.011045182212149831,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.14285714285714285,
+              "tau_ff_mean_nm": -0.12951923970709953,
+              "fb_mean_nm": -0.053982386703892424,
+              "tau_ff_plus_fb_mean_nm": -0.18350162641099196,
+              "kp": 45.0
+            },
+            "l_knee": {
+              "err_rms_rad": 0.1454153491255752,
+              "err_mean_rad": 0.13003878834713062,
+              "err_max_rad": 0.18319269347430034,
+              "abs_err_mean_rad": 0.13267975264740936,
+              "ctrl_minus_q_mean_rad": 0.004167123351287387,
+              "abs_ctrl_minus_q_mean_rad": 0.013686504153834628,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.21428571428571427,
+              "tau_ff_mean_nm": -0.10001179881970639,
+              "fb_mean_nm": 0.13003878834713062,
+              "tau_ff_plus_fb_mean_nm": 0.030026989527424223,
+              "kp": 45.0
+            },
+            "l_ank_pitch": {
+              "err_rms_rad": 0.04602642737208271,
+              "err_mean_rad": -0.008352707507154776,
+              "err_max_rad": -0.09261816064979855,
+              "abs_err_mean_rad": 0.03803723497835567,
+              "ctrl_minus_q_mean_rad": -0.0017459583907702514,
+              "abs_ctrl_minus_q_mean_rad": 0.004448147602791867,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.25925925925925924,
+              "tau_ff_mean_nm": -0.06558025624607232,
+              "fb_mean_nm": -0.008352707507154776,
+              "tau_ff_plus_fb_mean_nm": -0.0739329637532271,
+              "kp": 35.0
+            }
+          },
+          "stance_knee": {
+            "joint": "r_knee",
+            "q_plan_start_rad": -0.9912050809810935,
+            "q_plan_end_rad": -0.9843407222704259,
+            "q_meas_start_rad": -1.0503443792721905,
+            "q_meas_end_rad": -0.955626878989028,
+            "q_meas_minus_plan_mean_rad": -0.04000766561694797
+          },
+          "trunk_z_m": {
+            "start": 0.21060030530895707,
+            "end": 0.21166674793512166,
+            "min": 0.21055170753689764,
+            "stand_m": 0.20466262487927192,
+            "drop_from_stand_m": -0.005889082657625722
+          },
+          "knee_qdd_cap": {
+            "cap_rad_s2": 40.0,
+            "joint": "l_knee",
+            "qvel0_rad_s": -0.011814337543043342,
+            "uncapped_dq_rad": -0.13087846862942865,
+            "capped_dq_rad": -0.16625213686484275,
+            "measured_dq_rad": 0.04884401140175709,
+            "reachable_dq_rad": -0.9356718969090916,
+            "reference_clipped_frac": 0.39285714285714285,
+            "inverse_qdd_over_cap_frac": 0.0,
+            "blocks": false,
+            "reachable_short": false,
+            "shrinks_plan": false
+          },
+          "airborne": {
+            "definition": "zero floor contacts on the group-0 contact box, all eight corners above z=0, summed mj_contactForce normal within 1e-6 N of 0",
+            "n_contact_zero": 0,
+            "n_corners_above": 0,
+            "n_force_zero": 0,
+            "n_all_three": 0,
+            "n_disagree": 0,
+            "geom_group": 0
+          },
+          "binding": "feedforward ctrl stays on the measured knee; the joint reference pitches the sole (box bottom 8.19 mm, lowest corner 0.12 mm); |ctrl\u2212q| 13.7 mrad against |q_ref\u2212q| 132.7 mrad at kp 45; tau_ff -0.100 Nm, spring +0.130 Nm, net +0.030 Nm; knee \u0394q plan -0.131 rad, measured +0.049 rad, reachable under the 40 rad/s\u00b2 cap -0.936 rad; stance fraction 0.905, swing GRF mean 2.20 N, CoP\u2212box +33.5 mm inside a 38 mm half-width; lowest corner plan 0.12 mm / realised -0.29 mm, box bottom plan 8.19 mm / realised 0.93 mm, three-part airborne 0/28 (disagree 0), airborne forward 0.00 mm"
+        },
+        {
+          "side": "R",
+          "stance": "L",
+          "t0_s": 2.8959999999999027,
+          "t1_s": 3.111999999999879,
+          "window_s": 0.2159999999999762,
+          "n_ticks": 28,
+          "stage": "walk",
+          "z_move_cmd_max_m": 0.008,
+          "swing_dx_m": -0.0006516687493902107,
+          "air_forward_m": 0.0024497909189246797,
+          "contact_forward_m": 0.0,
+          "step_frac": 1.0,
+          "box_half_y_m": 0.038,
+          "weight_N": 23.028959205899998,
+          "swing_grf_n": {
+            "min": 0.0,
+            "max": 0.0,
+            "mean": 0.0
+          },
+          "stance_grf_n": {
+            "min": 21.79921893100249,
+            "max": 24.071748983991696,
+            "mean": 22.665196325461952
+          },
+          "stance_weight_frac": {
+            "min": 1.0,
+            "max": 1.0,
+            "mean": 1.0
+          },
+          "cop_y_m": 0.0377258091809388,
+          "zmp_y_m": 0.03453017098937935,
+          "zmp_cmd_y_m": 0.03846805348338906,
+          "stance_box_y_latched_m": 0.03846805348338906,
+          "stance_box_y_live_m": 0.038625295364109316,
+          "cop_minus_box_m": -0.0007422443024502623,
+          "zmp_minus_box_m": -0.003937882494009712,
+          "planned_bottom_z_m": {
+            "min": 0.00780558830653574,
+            "max": 0.0156596720665614
+          },
+          "planned_corner_z_m": {
+            "min": 0.0023638998546152337,
+            "max": 0.0085368454979372
+          },
+          "capped_bottom_z_m": {
+            "min": 0.0076282780013876075,
+            "max": 0.0156596720665614
+          },
+          "capped_corner_z_m": {
+            "min": 0.00021279829242103546,
+            "max": 0.00851115206215434
+          },
+          "realised_bottom_z_m": {
+            "min": 0.003400045637273098,
+            "max": 0.008689416992448186
+          },
+          "realised_corner_z_m": {
+            "min": 0.002070588000737346,
+            "max": 0.004983018752217886
+          },
+          "pitch": {
+            "r_hip_pitch": {
+              "err_rms_rad": 0.060315189993497005,
+              "err_mean_rad": 0.05791981195575454,
+              "err_max_rad": 0.07725036696223098,
+              "abs_err_mean_rad": 0.05791981195575454,
+              "ctrl_minus_q_mean_rad": 0.006637744281651021,
+              "abs_ctrl_minus_q_mean_rad": 0.010108155349563377,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.21428571428571427,
+              "tau_ff_mean_nm": 0.13720774420103726,
+              "fb_mean_nm": 0.05791981195575454,
+              "tau_ff_plus_fb_mean_nm": 0.1951275561567918,
+              "kp": 45.0
+            },
+            "r_knee": {
+              "err_rms_rad": 0.12659023860246368,
+              "err_mean_rad": -0.1047745378016119,
+              "err_max_rad": -0.1725687922800797,
+              "abs_err_mean_rad": 0.11445657346211469,
+              "ctrl_minus_q_mean_rad": -0.008376559020401337,
+              "abs_ctrl_minus_q_mean_rad": 0.020304168225844705,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.14285714285714285,
+              "tau_ff_mean_nm": 0.09929236525756276,
+              "fb_mean_nm": -0.1047745378016119,
+              "tau_ff_plus_fb_mean_nm": -0.00548217254404914,
+              "kp": 45.0
+            },
+            "r_ank_pitch": {
+              "err_rms_rad": 0.055905912188102175,
+              "err_mean_rad": -0.03195550366616201,
+              "err_max_rad": -0.0827058535548803,
+              "abs_err_mean_rad": 0.0505083887662126,
+              "ctrl_minus_q_mean_rad": 0.00013257671968204147,
+              "abs_ctrl_minus_q_mean_rad": 0.009076695109350014,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.17857142857142858,
+              "tau_ff_mean_nm": 0.05106984349830527,
+              "fb_mean_nm": -0.03195550366616201,
+              "tau_ff_plus_fb_mean_nm": 0.019114339832143258,
+              "kp": 35.0
+            }
+          },
+          "stance_knee": {
+            "joint": "l_knee",
+            "q_plan_start_rad": 0.9998114699708054,
+            "q_plan_end_rad": 0.993157951829273,
+            "q_meas_start_rad": 1.0466167514777371,
+            "q_meas_end_rad": 1.000023527980905,
+            "q_meas_minus_plan_mean_rad": 0.03990909629050015
+          },
+          "trunk_z_m": {
+            "start": 0.2081239484451927,
+            "end": 0.2084907017945164,
+            "min": 0.20767880955334062,
+            "stand_m": 0.20466262487927192,
+            "drop_from_stand_m": -0.003016184674068695
+          },
+          "knee_qdd_cap": {
+            "cap_rad_s2": 40.0,
+            "joint": "r_knee",
+            "qvel0_rad_s": -0.5126036630806742,
+            "uncapped_dq_rad": 0.14453362362832722,
+            "capped_dq_rad": 0.17396505817806285,
+            "measured_dq_rad": -0.07912212939165164,
+            "reachable_dq_rad": 0.8223976087743811,
+            "reference_clipped_frac": 0.42857142857142855,
+            "inverse_qdd_over_cap_frac": 0.0,
+            "blocks": false,
+            "reachable_short": false,
+            "shrinks_plan": false
+          },
+          "airborne": {
+            "definition": "zero floor contacts on the group-0 contact box, all eight corners above z=0, summed mj_contactForce normal within 1e-6 N of 0",
+            "n_contact_zero": 28,
+            "n_corners_above": 28,
+            "n_force_zero": 28,
+            "n_all_three": 28,
+            "n_disagree": 0,
+            "geom_group": 0
+          },
+          "binding": "feedforward ctrl stays on the measured knee; |ctrl\u2212q| 20.3 mrad against |q_ref\u2212q| 114.5 mrad at kp 45; tau_ff +0.099 Nm, spring -0.105 Nm, net -0.005 Nm; knee \u0394q plan +0.145 rad, measured -0.079 rad, reachable under the 40 rad/s\u00b2 cap +0.822 rad; stance fraction 1.000, swing GRF mean 0.00 N, CoP\u2212box -0.7 mm inside a 38 mm half-width; lowest corner plan 8.54 mm / realised 4.98 mm, box bottom plan 15.66 mm / realised 8.69 mm, three-part airborne 28/28 (disagree 0), airborne forward 2.45 mm; the foot leaves the floor and still misses the 8 mm corner"
+        },
+        {
+          "side": "L",
+          "stance": "R",
+          "t0_s": 3.399999999999847,
+          "t1_s": 3.6159999999998234,
+          "window_s": 0.2159999999999762,
+          "n_ticks": 28,
+          "stage": "walk",
+          "z_move_cmd_max_m": 0.008,
+          "swing_dx_m": -0.00291066299963956,
+          "air_forward_m": 0.0,
+          "contact_forward_m": 0.0003021967348744159,
+          "step_frac": 0.0,
+          "box_half_y_m": 0.038,
+          "weight_N": 23.028959205899998,
+          "swing_grf_n": {
+            "min": 0.0,
+            "max": 5.25728545113074,
+            "mean": 0.8066273980700388
+          },
+          "stance_grf_n": {
+            "min": 19.171241984859346,
+            "max": 24.303932379922205,
+            "mean": 22.110630146277195
+          },
+          "stance_weight_frac": {
+            "min": 0.784789096890659,
+            "max": 1.0,
+            "mean": 0.9658969188944295
+          },
+          "cop_y_m": -0.0406408741228041,
+          "zmp_y_m": -0.03708065465347043,
+          "zmp_cmd_y_m": -0.0467038920245626,
+          "stance_box_y_latched_m": -0.0467038920245626,
+          "stance_box_y_live_m": -0.04703810588962611,
+          "cop_minus_box_m": 0.006063017901758498,
+          "zmp_minus_box_m": 0.00962323737109217,
+          "planned_bottom_z_m": {
+            "min": 0.006051548811087097,
+            "max": 0.013937589737144634
+          },
+          "planned_corner_z_m": {
+            "min": -0.002148593891544707,
+            "max": 0.004252248908025266
+          },
+          "capped_bottom_z_m": {
+            "min": 0.006149648887023278,
+            "max": 0.013937589737144634
+          },
+          "capped_corner_z_m": {
+            "min": -0.00438161870600336,
+            "max": 0.004252248908025266
+          },
+          "realised_bottom_z_m": {
+            "min": 0.0034307447278882474,
+            "max": 0.006264350606217255
+          },
+          "realised_corner_z_m": {
+            "min": -0.0008617016291564486,
+            "max": 0.0003416840505642317
+          },
+          "pitch": {
+            "l_hip_pitch": {
+              "err_rms_rad": 0.056102578616692655,
+              "err_mean_rad": -0.05400416159977777,
+              "err_max_rad": -0.07533879260180454,
+              "abs_err_mean_rad": 0.05400416159977777,
+              "ctrl_minus_q_mean_rad": -0.004240488661029261,
+              "abs_ctrl_minus_q_mean_rad": 0.009071247543285973,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.25,
+              "tau_ff_mean_nm": -0.17249831253172074,
+              "fb_mean_nm": -0.05400416159977777,
+              "tau_ff_plus_fb_mean_nm": -0.22650247413149852,
+              "kp": 45.0
+            },
+            "l_knee": {
+              "err_rms_rad": 0.1099004441659441,
+              "err_mean_rad": 0.08661287660959838,
+              "err_max_rad": 0.14277604044532177,
+              "abs_err_mean_rad": 0.10048290642029513,
+              "ctrl_minus_q_mean_rad": 0.0004676514059116272,
+              "abs_ctrl_minus_q_mean_rad": 0.012325427402954194,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.2222222222222222,
+              "tau_ff_mean_nm": -0.12173860819195345,
+              "fb_mean_nm": 0.08661287660959838,
+              "tau_ff_plus_fb_mean_nm": -0.03512573158235506,
+              "kp": 45.0
+            },
+            "l_ank_pitch": {
+              "err_rms_rad": 0.0652803945048399,
+              "err_mean_rad": 0.04334235595236339,
+              "err_max_rad": 0.10227910756817316,
+              "abs_err_mean_rad": 0.057224587088663355,
+              "ctrl_minus_q_mean_rad": -0.0006624321529421129,
+              "abs_ctrl_minus_q_mean_rad": 0.010183884790641227,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.1111111111111111,
+              "tau_ff_mean_nm": -0.06383343935800918,
+              "fb_mean_nm": 0.04334235595236339,
+              "tau_ff_plus_fb_mean_nm": -0.02049108340564579,
+              "kp": 35.0
+            }
+          },
+          "stance_knee": {
+            "joint": "r_knee",
+            "q_plan_start_rad": -0.9694303986967812,
+            "q_plan_end_rad": -0.9682357495785301,
+            "q_meas_start_rad": -1.0495145095985796,
+            "q_meas_end_rad": -0.9971221120733494,
+            "q_meas_minus_plan_mean_rad": -0.08735733525518606
+          },
+          "trunk_z_m": {
+            "start": 0.20439359267586227,
+            "end": 0.2040906478075501,
+            "min": 0.2033707002932452,
+            "stand_m": 0.20466262487927192,
+            "drop_from_stand_m": 0.001291924586026727
+          },
+          "knee_qdd_cap": {
+            "cap_rad_s2": 40.0,
+            "joint": "l_knee",
+            "qvel0_rad_s": -0.044143959818118236,
+            "uncapped_dq_rad": -0.15886480975149597,
+            "capped_dq_rad": -0.19384182855382204,
+            "measured_dq_rad": 0.037244041154956165,
+            "reachable_dq_rad": -0.942655095320507,
+            "reference_clipped_frac": 0.39285714285714285,
+            "inverse_qdd_over_cap_frac": 0.0,
+            "blocks": false,
+            "reachable_short": false,
+            "shrinks_plan": false
+          },
+          "airborne": {
+            "definition": "zero floor contacts on the group-0 contact box, all eight corners above z=0, summed mj_contactForce normal within 1e-6 N of 0",
+            "n_contact_zero": 8,
+            "n_corners_above": 8,
+            "n_force_zero": 8,
+            "n_all_three": 8,
+            "n_disagree": 0,
+            "geom_group": 0
+          },
+          "binding": "feedforward ctrl stays on the measured knee; |ctrl\u2212q| 12.3 mrad against |q_ref\u2212q| 100.5 mrad at kp 45; tau_ff -0.122 Nm, spring +0.087 Nm, net -0.035 Nm; knee \u0394q plan -0.159 rad, measured +0.037 rad, reachable under the 40 rad/s\u00b2 cap -0.943 rad; stance fraction 0.966, swing GRF mean 0.81 N, CoP\u2212box +6.1 mm inside a 38 mm half-width; lowest corner plan 4.25 mm / realised 0.34 mm, box bottom plan 13.94 mm / realised 6.26 mm, three-part airborne 8/28 (disagree 0), airborne forward 0.00 mm"
+        },
+        {
+          "side": "R",
+          "stance": "L",
+          "t0_s": 3.8959999999997925,
+          "t1_s": 4.111999999999769,
+          "window_s": 0.21599999999997666,
+          "n_ticks": 28,
+          "stage": "walk",
+          "z_move_cmd_max_m": 0.008,
+          "swing_dx_m": -0.00039137281023336745,
+          "air_forward_m": 0.0005501448320133773,
+          "contact_forward_m": 0.0001611783319897947,
+          "step_frac": 0.7734105394758718,
+          "box_half_y_m": 0.038,
+          "weight_N": 23.028959205899998,
+          "swing_grf_n": {
+            "min": 0.0,
+            "max": 4.674885658835974,
+            "mean": 1.0412493914293306
+          },
+          "stance_grf_n": {
+            "min": 18.929085557095018,
+            "max": 22.81881944868563,
+            "mean": 21.90714336265499
+          },
+          "stance_weight_frac": {
+            "min": 0.801944951717245,
+            "max": 1.0,
+            "mean": 0.9554131436372829
+          },
+          "cop_y_m": 0.007686167651552949,
+          "zmp_y_m": 0.005661310424043427,
+          "zmp_cmd_y_m": 0.03646176725782672,
+          "stance_box_y_latched_m": 0.03646176725782672,
+          "stance_box_y_live_m": 0.03652152939595254,
+          "cop_minus_box_m": -0.02877559960627377,
+          "zmp_minus_box_m": -0.03080045683378329,
+          "planned_bottom_z_m": {
+            "min": 0.0019050446673400338,
+            "max": 0.009819467497546015
+          },
+          "planned_corner_z_m": {
+            "min": -0.002644088648815499,
+            "max": 0.0028380375910719118
+          },
+          "capped_bottom_z_m": {
+            "min": 0.0019013961171548653,
+            "max": 0.009819467497546015
+          },
+          "capped_corner_z_m": {
+            "min": -0.004446199330380077,
+            "max": 0.0029110889918046966
+          },
+          "realised_bottom_z_m": {
+            "min": 7.480849699629047e-06,
+            "max": 0.002620996026709564
+          },
+          "realised_corner_z_m": {
+            "min": -0.0008386217021769202,
+            "max": 0.00030436163866586104
+          },
+          "pitch": {
+            "r_hip_pitch": {
+              "err_rms_rad": 0.04842524214299935,
+              "err_mean_rad": 0.045474817209709174,
+              "err_max_rad": 0.06480432768694422,
+              "abs_err_mean_rad": 0.045474817209709174,
+              "ctrl_minus_q_mean_rad": 0.008747941662392702,
+              "abs_ctrl_minus_q_mean_rad": 0.011317424143214334,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.17857142857142858,
+              "tau_ff_mean_nm": 0.18377996849455444,
+              "fb_mean_nm": 0.045474817209709174,
+              "tau_ff_plus_fb_mean_nm": 0.22925478570426358,
+              "kp": 45.0
+            },
+            "r_knee": {
+              "err_rms_rad": 0.13958355263586197,
+              "err_mean_rad": -0.12515732413267958,
+              "err_max_rad": -0.1733817327570638,
+              "abs_err_mean_rad": 0.12840341941354522,
+              "ctrl_minus_q_mean_rad": -0.00432649897637077,
+              "abs_ctrl_minus_q_mean_rad": 0.01248640786379056,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.21428571428571427,
+              "tau_ff_mean_nm": 0.13325096311642456,
+              "fb_mean_nm": -0.12515732413267958,
+              "tau_ff_plus_fb_mean_nm": 0.008093638983744997,
+              "kp": 45.0
+            },
+            "r_ank_pitch": {
+              "err_rms_rad": 0.14580977493825692,
+              "err_mean_rad": -0.13325655097663755,
+              "err_max_rad": -0.1927548665509141,
+              "abs_err_mean_rad": 0.13325655097663755,
+              "ctrl_minus_q_mean_rad": -0.008611890553770986,
+              "abs_ctrl_minus_q_mean_rad": 0.009248799657354922,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.14285714285714285,
+              "tau_ff_mean_nm": 0.04143712751506928,
+              "fb_mean_nm": -0.13325655097663755,
+              "tau_ff_plus_fb_mean_nm": -0.09181942346156827,
+              "kp": 35.0
+            }
+          },
+          "stance_knee": {
+            "joint": "l_knee",
+            "q_plan_start_rad": 0.9955894656593942,
+            "q_plan_end_rad": 0.9871904267069571,
+            "q_meas_start_rad": 1.0680604826764029,
+            "q_meas_end_rad": 0.9887963778965636,
+            "q_meas_minus_plan_mean_rad": 0.05095341834778517
+          },
+          "trunk_z_m": {
+            "start": 0.2035689926296382,
+            "end": 0.20569495632501322,
+            "min": 0.2035689926296382,
+            "stand_m": 0.20466262487927192,
+            "drop_from_stand_m": 0.0010936322496337136
+          },
+          "knee_qdd_cap": {
+            "cap_rad_s2": 40.0,
+            "joint": "r_knee",
+            "qvel0_rad_s": -0.04984125238464773,
+            "uncapped_dq_rad": 0.12873672700471284,
+            "capped_dq_rad": 0.15612532608511687,
+            "measured_dq_rad": -0.047483960995795216,
+            "reachable_dq_rad": 0.9223542894847155,
+            "reference_clipped_frac": 0.42857142857142855,
+            "inverse_qdd_over_cap_frac": 0.0,
+            "blocks": false,
+            "reachable_short": false,
+            "shrinks_plan": false
+          },
+          "airborne": {
+            "definition": "zero floor contacts on the group-0 contact box, all eight corners above z=0, summed mj_contactForce normal within 1e-6 N of 0",
+            "n_contact_zero": 10,
+            "n_corners_above": 10,
+            "n_force_zero": 10,
+            "n_all_three": 10,
+            "n_disagree": 0,
+            "geom_group": 0
+          },
+          "binding": "feedforward ctrl stays on the measured knee; |ctrl\u2212q| 12.5 mrad against |q_ref\u2212q| 128.4 mrad at kp 45; tau_ff +0.133 Nm, spring -0.125 Nm, net +0.008 Nm; knee \u0394q plan +0.129 rad, measured -0.047 rad, reachable under the 40 rad/s\u00b2 cap +0.922 rad; stance fraction 0.955, swing GRF mean 1.04 N, CoP\u2212box -28.8 mm inside a 38 mm half-width; lowest corner plan 2.84 mm / realised 0.30 mm, box bottom plan 9.82 mm / realised 2.62 mm, three-part airborne 10/28 (disagree 0), airborne forward 0.55 mm"
+        }
+      ],
+      "clear_gate": {
+        "signed_peak_nm": 1.8718931646796286,
+        "sum_peak_nm": 6.3585903452715,
+        "sum_signed_ratio": 3.396876737011731,
+        "flag": "latency-test-first",
+        "may_clear": false,
+        "block_reasons": [
+          "step fraction / stepping bars fail; a non-tipping skate is not a walk",
+          "latency-test-first: control latency -1 tick has not passed the signed bar and the full bars",
+          "latency-test-first: control latency +1 tick has not passed the signed bar and the full bars",
+          "latency-test-first: the 5\u00d7 bus stop rows have not passed the signed bar and the full bars"
+        ],
+        "step_required": true,
+        "manifest_source": "runner"
+      }
+    },
+    {
+      "armature": 0.025,
+      "entry_point_exit": 0,
+      "runner": {
+        "step_frac": 0.0,
+        "n_swings": 6.0,
+        "n_steps": 0.0,
+        "clear_mm": -0.8843540341232983,
+        "clear_max_mm": 2.2438250495136343,
+        "signed_ok": false,
+        "signed_value": 2.4490402138834124,
+        "signed_joint": "r_knee",
+        "signed_t": 4.367999999999741,
+        "signed_over": 21,
+        "tip_ok": true,
+        "min_up_z": 0.990079097141298,
+        "fault": "",
+        "step_ok": false,
+        "dc_ok": true,
+        "compiled_md5": "f4fb2b70b5312a851e16316a38a88283",
+        "xml_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e",
+        "perturbation": "armature_0.025",
+        "cmd": [
+          "--t",
+          "1.00",
+          "--vx",
+          "0.016",
+          "--clearance",
+          "0.008",
+          "--dsp",
+          "0.40",
+          "--ff",
+          "1",
+          "--knee-qdd-cap",
+          "40",
+          "--armature",
+          "0.025",
+          "--seed",
+          "none",
+          "--latency",
+          "0",
+          "--mass-scale",
+          "1",
+          "--mu",
+          "none",
+          "--arm-s",
+          "1.0",
+          "--stand-s",
+          "0.25",
+          "--walk-s",
+          "4.0",
+          "--stop-s",
+          "2.5",
+          "--preview-shape",
+          "1.0",
+          "--amp",
+          "0.016",
+          "--z-quintic",
+          "0",
+          "--z-lead",
+          "0",
+          "--honor-vx",
+          "0",
+          "--out",
+          "/tmp/skate_row_a0.025.json"
+        ],
+        "tip_sha": "8d6f2fd6876ce60b54bb5e2b82d267a7a7fb18af",
+        "mujoco_version": "3.14.0",
+        "clear": false,
+        "clear_reason": "signed bar; stepping bars step_frac 0.0; sum peak exceeds 2\u00d7 signed peak; \u00b11 tick latency rows and 5 bus-stop rows must pass the signed bar before CLEAR",
+        "signed_peak": 2.4490402138834124,
+        "sum_peak": 8.46291556402335,
+        "sum_over": 875,
+        "sum_over_2x_signed": true,
+        "plant_md5": "207f3d5e9c6a72e16f7aa0c8d224f75e"
+      },
+      "n_trace_ticks": 844,
+      "ctrl_dt_s": 0.008,
+      "stand_body_z_m": 0.20496239913814618,
+      "contact_box_group": {
+        "L": 0,
+        "R": 0
+      },
+      "swing_windows": [
+        {
+          "side": "L",
+          "stance": "R",
+          "t0_s": 1.400000000000001,
+          "t1_s": 1.6160000000000012,
+          "window_s": 0.2160000000000002,
+          "n_ticks": 28,
+          "stage": "walk",
+          "z_move_cmd_max_m": 0.008,
+          "swing_dx_m": 0.0009600259273872536,
+          "air_forward_m": 0.00149132724224358,
+          "contact_forward_m": 0.00022672777747261702,
+          "step_frac": 0.8680322953160896,
+          "box_half_y_m": 0.038,
+          "weight_N": 23.028959205899998,
+          "swing_grf_n": {
+            "min": 0.0,
+            "max": 13.892050941375516,
+            "mean": 2.541067179299702
+          },
+          "stance_grf_n": {
+            "min": 11.87869413645318,
+            "max": 23.226345325348213,
+            "mean": 20.8743650332305
+          },
+          "stance_weight_frac": {
+            "min": 0.46141161658906604,
+            "max": 1.0,
+            "mean": 0.8964776084139949
+          },
+          "cop_y_m": -0.04341309965432862,
+          "zmp_y_m": -0.043224107912657725,
+          "zmp_cmd_y_m": -0.04791509954805068,
+          "stance_box_y_latched_m": -0.04791509954805068,
+          "stance_box_y_live_m": -0.04710690066604299,
+          "cop_minus_box_m": 0.004501999893722054,
+          "zmp_minus_box_m": 0.004690991635392952,
+          "planned_bottom_z_m": {
+            "min": 0.0006089445367617637,
+            "max": 0.006112581678102644
+          },
+          "planned_corner_z_m": {
+            "min": -0.004435055015759651,
+            "max": -9.110842024321122e-05
+          },
+          "capped_bottom_z_m": {
+            "min": 0.0006273630531341036,
+            "max": 0.006112581678102644
+          },
+          "capped_corner_z_m": {
+            "min": -0.006496027961365202,
+            "max": -1.3995151448113752e-06
+          },
+          "realised_bottom_z_m": {
+            "min": -0.000660892213840053,
+            "max": 0.0019873408011646942
+          },
+          "realised_corner_z_m": {
+            "min": -0.0010779864438904413,
+            "max": 0.0005404157228540603
+          },
+          "pitch": {
+            "l_hip_pitch": {
+              "err_rms_rad": 0.048542742728145925,
+              "err_mean_rad": -0.04751532895833144,
+              "err_max_rad": -0.06453763716020389,
+              "abs_err_mean_rad": 0.04751532895833144,
+              "ctrl_minus_q_mean_rad": -0.0023209834882060815,
+              "abs_ctrl_minus_q_mean_rad": 0.015277462639025538,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.2857142857142857,
+              "tau_ff_mean_nm": -0.15031455503994492,
+              "fb_mean_nm": -0.04751532895833144,
+              "tau_ff_plus_fb_mean_nm": -0.19782988399827636,
+              "kp": 45.0
+            },
+            "l_knee": {
+              "err_rms_rad": 0.06670508121585993,
+              "err_mean_rad": 0.057542884144573016,
+              "err_max_rad": 0.08526963865492199,
+              "abs_err_mean_rad": 0.061581270025919226,
+              "ctrl_minus_q_mean_rad": -0.014865904534774373,
+              "abs_ctrl_minus_q_mean_rad": 0.022846805749518372,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.35714285714285715,
+              "tau_ff_mean_nm": -0.33697017261420514,
+              "fb_mean_nm": 0.057542884144573016,
+              "tau_ff_plus_fb_mean_nm": -0.2794272884696321,
+              "kp": 45.0
+            },
+            "l_ank_pitch": {
+              "err_rms_rad": 0.08241375927777175,
+              "err_mean_rad": 0.07560761997268851,
+              "err_max_rad": 0.11370275886829792,
+              "abs_err_mean_rad": 0.07560761997268851,
+              "ctrl_minus_q_mean_rad": -0.0017355098877195171,
+              "abs_ctrl_minus_q_mean_rad": 0.013855982684881711,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.2857142857142857,
+              "tau_ff_mean_nm": -0.058973920980847735,
+              "fb_mean_nm": 0.07560761997268851,
+              "tau_ff_plus_fb_mean_nm": 0.016633698991840785,
+              "kp": 35.0
+            }
+          },
+          "stance_knee": {
+            "joint": "r_knee",
+            "q_plan_start_rad": -0.9285541641410819,
+            "q_plan_end_rad": -0.9786056124027318,
+            "q_meas_start_rad": -0.9452066357216118,
+            "q_meas_end_rad": -0.9482252562003175,
+            "q_meas_minus_plan_mean_rad": -0.0041180288143458045
+          },
+          "trunk_z_m": {
+            "start": 0.19864514153431725,
+            "end": 0.2041821923967428,
+            "min": 0.19864514153431725,
+            "stand_m": 0.20496239913814618,
+            "drop_from_stand_m": 0.006317257603828924
+          },
+          "knee_qdd_cap": {
+            "cap_rad_s2": 40.0,
+            "joint": "l_knee",
+            "qvel0_rad_s": 0.16053101104478001,
+            "uncapped_dq_rad": -0.0930343253393553,
+            "capped_dq_rad": -0.13333667477233002,
+            "measured_dq_rad": -0.04521360065299129,
+            "reachable_dq_rad": -0.8984453016143291,
+            "reference_clipped_frac": 0.42857142857142855,
+            "inverse_qdd_over_cap_frac": 0.0,
+            "blocks": false,
+            "reachable_short": false,
+            "shrinks_plan": false
+          },
+          "airborne": {
+            "definition": "zero floor contacts on the group-0 contact box, all eight corners above z=0, summed mj_contactForce normal within 1e-6 N of 0",
+            "n_contact_zero": 11,
+            "n_corners_above": 11,
+            "n_force_zero": 11,
+            "n_all_three": 11,
+            "n_disagree": 0,
+            "geom_group": 0
+          },
+          "binding": "feedforward ctrl stays on the measured knee; the joint reference pitches the sole (box bottom 6.11 mm, lowest corner -0.09 mm); |ctrl\u2212q| 22.8 mrad against |q_ref\u2212q| 61.6 mrad at kp 45; tau_ff -0.337 Nm, spring +0.058 Nm, net -0.279 Nm; knee \u0394q plan -0.093 rad, measured -0.045 rad, reachable under the 40 rad/s\u00b2 cap -0.898 rad; stance fraction 0.896, swing GRF mean 2.54 N, CoP\u2212box +4.5 mm inside a 38 mm half-width; lowest corner plan -0.09 mm / realised 0.54 mm, box bottom plan 6.11 mm / realised 1.99 mm, three-part airborne 11/28 (disagree 0), airborne forward 1.49 mm"
+        },
+        {
+          "side": "R",
+          "stance": "L",
+          "t0_s": 1.8960000000000015,
+          "t1_s": 2.111999999999989,
+          "window_s": 0.21599999999998754,
+          "n_ticks": 28,
+          "stage": "walk",
+          "z_move_cmd_max_m": 0.008,
+          "swing_dx_m": -0.0017481611880032083,
+          "air_forward_m": 0.0012484246134904786,
+          "contact_forward_m": 0.001598812324388535,
+          "step_frac": 0.4384688175689604,
+          "box_half_y_m": 0.038,
+          "weight_N": 23.028959205899998,
+          "swing_grf_n": {
+            "min": 0.0,
+            "max": 10.68101594704155,
+            "mean": 2.7802233373838314
+          },
+          "stance_grf_n": {
+            "min": 14.596946590900137,
+            "max": 23.873510578897736,
+            "mean": 20.270476676297566
+          },
+          "stance_weight_frac": {
+            "min": 0.5999978556060854,
+            "max": 1.0,
+            "mean": 0.886368703905997
+          },
+          "cop_y_m": 0.013940957905782604,
+          "zmp_y_m": 0.014164251801264972,
+          "zmp_cmd_y_m": 0.042424771250714456,
+          "stance_box_y_latched_m": 0.042424771250714456,
+          "stance_box_y_live_m": 0.04285918502194719,
+          "cop_minus_box_m": -0.02848381334493185,
+          "zmp_minus_box_m": -0.028260519449449482,
+          "planned_bottom_z_m": {
+            "min": 0.001713656538466864,
+            "max": 0.009486427188894102
+          },
+          "planned_corner_z_m": {
+            "min": 0.000291366009891424,
+            "max": 0.008527292462917554
+          },
+          "capped_bottom_z_m": {
+            "min": 0.001534153272564627,
+            "max": 0.009486427188894102
+          },
+          "capped_corner_z_m": {
+            "min": -0.0020917058138060617,
+            "max": 0.008527292462917554
+          },
+          "realised_bottom_z_m": {
+            "min": -0.00033556341763575116,
+            "max": 0.0022295685207761942
+          },
+          "realised_corner_z_m": {
+            "min": -0.001040962858616096,
+            "max": 0.0004766140982096351
+          },
+          "pitch": {
+            "r_hip_pitch": {
+              "err_rms_rad": 0.049854204518646784,
+              "err_mean_rad": 0.04876553192650138,
+              "err_max_rad": 0.06287794677230174,
+              "abs_err_mean_rad": 0.04876553192650138,
+              "ctrl_minus_q_mean_rad": -0.00018459821932825408,
+              "abs_ctrl_minus_q_mean_rad": 0.016082548905751382,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.32142857142857145,
+              "tau_ff_mean_nm": 0.0940232778121055,
+              "fb_mean_nm": 0.04876553192650138,
+              "tau_ff_plus_fb_mean_nm": 0.1427888097386069,
+              "kp": 45.0
+            },
+            "r_knee": {
+              "err_rms_rad": 0.10841320826535707,
+              "err_mean_rad": -0.09291802727068237,
+              "err_max_rad": -0.13424555747512779,
+              "abs_err_mean_rad": 0.09945817070868714,
+              "ctrl_minus_q_mean_rad": 0.012737060192233156,
+              "abs_ctrl_minus_q_mean_rad": 0.021292926055748562,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.2857142857142857,
+              "tau_ff_mean_nm": 0.39691915916444165,
+              "fb_mean_nm": -0.09291802727068237,
+              "tau_ff_plus_fb_mean_nm": 0.30400113189375927,
+              "kp": 45.0
+            },
+            "r_ank_pitch": {
+              "err_rms_rad": 0.07252345760163045,
+              "err_mean_rad": -0.05103906206755288,
+              "err_max_rad": -0.11726725539942695,
+              "abs_err_mean_rad": 0.06305722560728062,
+              "ctrl_minus_q_mean_rad": -0.004156255544929694,
+              "abs_ctrl_minus_q_mean_rad": 0.014953464527274593,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.3333333333333333,
+              "tau_ff_mean_nm": 0.07607627601470679,
+              "fb_mean_nm": -0.05103906206755288,
+              "tau_ff_plus_fb_mean_nm": 0.025037213947153907,
+              "kp": 35.0
+            }
+          },
+          "stance_knee": {
+            "joint": "l_knee",
+            "q_plan_start_rad": 0.9756203915901625,
+            "q_plan_end_rad": 0.9727097814895755,
+            "q_meas_start_rad": 1.01054654904513,
+            "q_meas_end_rad": 0.9844787924037631,
+            "q_meas_minus_plan_mean_rad": 0.04103638306657139
+          },
+          "trunk_z_m": {
+            "start": 0.20709156904455508,
+            "end": 0.208248295090642,
+            "min": 0.20709156904455508,
+            "stand_m": 0.20496239913814618,
+            "drop_from_stand_m": -0.0021291699064089065
+          },
+          "knee_qdd_cap": {
+            "cap_rad_s2": 40.0,
+            "joint": "r_knee",
+            "qvel0_rad_s": -0.23561286657387392,
+            "uncapped_dq_rad": 0.16374916389382466,
+            "capped_dq_rad": 0.19887915023165104,
+            "measured_dq_rad": 0.03531339447142401,
+            "reachable_dq_rad": 0.8822276208199384,
+            "reference_clipped_frac": 0.42857142857142855,
+            "inverse_qdd_over_cap_frac": 0.0,
+            "blocks": false,
+            "reachable_short": false,
+            "shrinks_plan": false
+          },
+          "airborne": {
+            "definition": "zero floor contacts on the group-0 contact box, all eight corners above z=0, summed mj_contactForce normal within 1e-6 N of 0",
+            "n_contact_zero": 11,
+            "n_corners_above": 11,
+            "n_force_zero": 11,
+            "n_all_three": 11,
+            "n_disagree": 0,
+            "geom_group": 0
+          },
+          "binding": "feedforward ctrl stays on the measured knee; |ctrl\u2212q| 21.3 mrad against |q_ref\u2212q| 99.5 mrad at kp 45; tau_ff +0.397 Nm, spring -0.093 Nm, net +0.304 Nm; knee \u0394q plan +0.164 rad, measured +0.035 rad, reachable under the 40 rad/s\u00b2 cap +0.882 rad; stance fraction 0.886, swing GRF mean 2.78 N, CoP\u2212box -28.5 mm inside a 38 mm half-width; lowest corner plan 8.53 mm / realised 0.48 mm, box bottom plan 9.49 mm / realised 2.23 mm, three-part airborne 11/28 (disagree 0), airborne forward 1.25 mm"
+        },
+        {
+          "side": "L",
+          "stance": "R",
+          "t0_s": 2.3999999999999573,
+          "t1_s": 2.6159999999999335,
+          "window_s": 0.2159999999999762,
+          "n_ticks": 28,
+          "stage": "walk",
+          "z_move_cmd_max_m": 0.008,
+          "swing_dx_m": 0.00048038169468361813,
+          "air_forward_m": 7.113391574418981e-05,
+          "contact_forward_m": 0.001429065798577392,
+          "step_frac": 0.047416297353687936,
+          "box_half_y_m": 0.038,
+          "weight_N": 23.028959205899998,
+          "swing_grf_n": {
+            "min": 0.0,
+            "max": 6.519002449999162,
+            "mean": 2.2337558878885337
+          },
+          "stance_grf_n": {
+            "min": 16.480162198667863,
+            "max": 24.145613773529156,
+            "mean": 20.51051001988734
+          },
+          "stance_weight_frac": {
+            "min": 0.7165548162473375,
+            "max": 1.0,
+            "mean": 0.9032787777301982
+          },
+          "cop_y_m": -0.0057084672303837755,
+          "zmp_y_m": -0.00613311424415542,
+          "zmp_cmd_y_m": -0.04173838887270925,
+          "stance_box_y_latched_m": -0.04173838887270925,
+          "stance_box_y_live_m": -0.0417517905568486,
+          "cop_minus_box_m": 0.03602992164232548,
+          "zmp_minus_box_m": 0.03560527462855383,
+          "planned_bottom_z_m": {
+            "min": 0.0029230259330163336,
+            "max": 0.009465985313769666
+          },
+          "planned_corner_z_m": {
+            "min": 8.283446949769284e-05,
+            "max": 0.005713300520692228
+          },
+          "capped_bottom_z_m": {
+            "min": 0.0026313868749633477,
+            "max": 0.009465985313769666
+          },
+          "capped_corner_z_m": {
+            "min": -0.0003998150347098439,
+            "max": 0.005713300520692228
+          },
+          "realised_bottom_z_m": {
+            "min": 0.0004899859309005009,
+            "max": 0.002382842724899926
+          },
+          "realised_corner_z_m": {
+            "min": -0.0008506667077382932,
+            "max": 0.00039974462710580007
+          },
+          "pitch": {
+            "l_hip_pitch": {
+              "err_rms_rad": 0.044669891972332454,
+              "err_mean_rad": -0.042909926776271715,
+              "err_max_rad": -0.06408816643013238,
+              "abs_err_mean_rad": 0.042909926776271715,
+              "ctrl_minus_q_mean_rad": 0.0003940263496659308,
+              "abs_ctrl_minus_q_mean_rad": 0.012245231920605218,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.35714285714285715,
+              "tau_ff_mean_nm": -0.10149615769328549,
+              "fb_mean_nm": -0.042909926776271715,
+              "tau_ff_plus_fb_mean_nm": -0.14440608446955722,
+              "kp": 45.0
+            },
+            "l_knee": {
+              "err_rms_rad": 0.1084788282511363,
+              "err_mean_rad": 0.09781218204021418,
+              "err_max_rad": 0.13714027857624322,
+              "abs_err_mean_rad": 0.09892763968550608,
+              "ctrl_minus_q_mean_rad": -0.016447808862549984,
+              "abs_ctrl_minus_q_mean_rad": 0.02504752483785034,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.32142857142857145,
+              "tau_ff_mean_nm": -0.3544629225301005,
+              "fb_mean_nm": 0.09781218204021418,
+              "tau_ff_plus_fb_mean_nm": -0.25665074048988623,
+              "kp": 45.0
+            },
+            "l_ank_pitch": {
+              "err_rms_rad": 0.0492271702153883,
+              "err_mean_rad": 0.03140149683975445,
+              "err_max_rad": 0.07886407329035827,
+              "abs_err_mean_rad": 0.043864108649159066,
+              "ctrl_minus_q_mean_rad": -0.006515201035045744,
+              "abs_ctrl_minus_q_mean_rad": 0.01803242021698123,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.4444444444444444,
+              "tau_ff_mean_nm": -0.13740974752468887,
+              "fb_mean_nm": 0.03140149683975445,
+              "tau_ff_plus_fb_mean_nm": -0.10600825068493443,
+              "kp": 35.0
+            }
+          },
+          "stance_knee": {
+            "joint": "r_knee",
+            "q_plan_start_rad": -0.9931095573095738,
+            "q_plan_end_rad": -0.9884656175073274,
+            "q_meas_start_rad": -1.0470242602837854,
+            "q_meas_end_rad": -0.9835957624414432,
+            "q_meas_minus_plan_mean_rad": -0.04931936216586959
+          },
+          "trunk_z_m": {
+            "start": 0.20840897946641856,
+            "end": 0.20995029198070214,
+            "min": 0.20840897946641856,
+            "stand_m": 0.20496239913814618,
+            "drop_from_stand_m": -0.003446580328272386
+          },
+          "knee_qdd_cap": {
+            "cap_rad_s2": 40.0,
+            "joint": "l_knee",
+            "qvel0_rad_s": 0.026169555393328516,
+            "uncapped_dq_rad": -0.14127239434834293,
+            "capped_dq_rad": -0.1754586997728732,
+            "measured_dq_rad": -0.054894292978497905,
+            "reachable_dq_rad": -0.9274673760348361,
+            "reference_clipped_frac": 0.39285714285714285,
+            "inverse_qdd_over_cap_frac": 0.0,
+            "blocks": false,
+            "reachable_short": false,
+            "shrinks_plan": false
+          },
+          "airborne": {
+            "definition": "zero floor contacts on the group-0 contact box, all eight corners above z=0, summed mj_contactForce normal within 1e-6 N of 0",
+            "n_contact_zero": 5,
+            "n_corners_above": 5,
+            "n_force_zero": 5,
+            "n_all_three": 5,
+            "n_disagree": 0,
+            "geom_group": 0
+          },
+          "binding": "feedforward ctrl stays on the measured knee; |ctrl\u2212q| 25.0 mrad against |q_ref\u2212q| 98.9 mrad at kp 45; tau_ff -0.354 Nm, spring +0.098 Nm, net -0.257 Nm; knee \u0394q plan -0.141 rad, measured -0.055 rad, reachable under the 40 rad/s\u00b2 cap -0.927 rad; stance fraction 0.903, swing GRF mean 2.23 N, CoP\u2212box +36.0 mm inside a 38 mm half-width; lowest corner plan 5.71 mm / realised 0.40 mm, box bottom plan 9.47 mm / realised 2.38 mm, three-part airborne 5/28 (disagree 0), airborne forward 0.07 mm"
+        },
+        {
+          "side": "R",
+          "stance": "L",
+          "t0_s": 2.8959999999999027,
+          "t1_s": 3.111999999999879,
+          "window_s": 0.2159999999999762,
+          "n_ticks": 28,
+          "stage": "walk",
+          "z_move_cmd_max_m": 0.008,
+          "swing_dx_m": 0.003972404048520034,
+          "air_forward_m": 0.003881627634669614,
+          "contact_forward_m": 0.0009865346356708327,
+          "step_frac": 0.7973496812788369,
+          "box_half_y_m": 0.038,
+          "weight_N": 23.028959205899998,
+          "swing_grf_n": {
+            "min": 0.0,
+            "max": 8.025589636827041,
+            "mean": 0.6538435248185106
+          },
+          "stance_grf_n": {
+            "min": 18.175977954269214,
+            "max": 24.453082106536545,
+            "mean": 22.49431110819274
+          },
+          "stance_weight_frac": {
+            "min": 0.6936981114231395,
+            "max": 1.0,
+            "mean": 0.9730639506369497
+          },
+          "cop_y_m": 0.030268172908292035,
+          "zmp_y_m": 0.02851527828824362,
+          "zmp_cmd_y_m": 0.040304275718198175,
+          "stance_box_y_latched_m": 0.040304275718198175,
+          "stance_box_y_live_m": 0.040521690859199155,
+          "cop_minus_box_m": -0.01003610280990614,
+          "zmp_minus_box_m": -0.011788997429954554,
+          "planned_bottom_z_m": {
+            "min": 0.005749267204932119,
+            "max": 0.012028024057603944
+          },
+          "planned_corner_z_m": {
+            "min": 5.5147256232481595e-05,
+            "max": 0.006543824180587108
+          },
+          "capped_bottom_z_m": {
+            "min": 0.0056523958466667065,
+            "max": 0.012035726441211193
+          },
+          "capped_corner_z_m": {
+            "min": -0.0020546977292900132,
+            "max": 0.006579799566525803
+          },
+          "realised_bottom_z_m": {
+            "min": 0.0010763287555004743,
+            "max": 0.003947906200970816
+          },
+          "realised_corner_z_m": {
+            "min": -0.0005790403548132702,
+            "max": 0.002243825049513634
+          },
+          "pitch": {
+            "r_hip_pitch": {
+              "err_rms_rad": 0.05189024710235707,
+              "err_mean_rad": 0.050545101485169705,
+              "err_max_rad": 0.06918608644030178,
+              "abs_err_mean_rad": 0.050545101485169705,
+              "ctrl_minus_q_mean_rad": -0.003120243332354964,
+              "abs_ctrl_minus_q_mean_rad": 0.013789051403520361,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.4642857142857143,
+              "tau_ff_mean_nm": 0.10036879669862601,
+              "fb_mean_nm": 0.050545101485169705,
+              "tau_ff_plus_fb_mean_nm": 0.15091389818379572,
+              "kp": 45.0
+            },
+            "r_knee": {
+              "err_rms_rad": 0.12011295104765654,
+              "err_mean_rad": -0.11162238352780544,
+              "err_max_rad": -0.1444538873676282,
+              "abs_err_mean_rad": 0.11162238352780544,
+              "ctrl_minus_q_mean_rad": 0.01589835068153155,
+              "abs_ctrl_minus_q_mean_rad": 0.027452378290989538,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.39285714285714285,
+              "tau_ff_mean_nm": 0.3857528520744849,
+              "fb_mean_nm": -0.11162238352780544,
+              "tau_ff_plus_fb_mean_nm": 0.27413046854667944,
+              "kp": 45.0
+            },
+            "r_ank_pitch": {
+              "err_rms_rad": 0.08269089722000002,
+              "err_mean_rad": -0.07438354991329339,
+              "err_max_rad": -0.11265234556234988,
+              "abs_err_mean_rad": 0.07438354991329339,
+              "ctrl_minus_q_mean_rad": 0.00787411384563505,
+              "abs_ctrl_minus_q_mean_rad": 0.01546946447543716,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.6071428571428571,
+              "tau_ff_mean_nm": 0.1209259712422394,
+              "fb_mean_nm": -0.07438354991329339,
+              "tau_ff_plus_fb_mean_nm": 0.046542421328946024,
+              "kp": 35.0
+            }
+          },
+          "stance_knee": {
+            "joint": "l_knee",
+            "q_plan_start_rad": 0.9917225346439553,
+            "q_plan_end_rad": 0.9854462638889354,
+            "q_meas_start_rad": 1.0345072205932893,
+            "q_meas_end_rad": 1.018744029334916,
+            "q_meas_minus_plan_mean_rad": 0.050861398822063024
+          },
+          "trunk_z_m": {
+            "start": 0.20644776923979172,
+            "end": 0.20700640679583038,
+            "min": 0.20599823105100568,
+            "stand_m": 0.20496239913814618,
+            "drop_from_stand_m": -0.0010358319128594973
+          },
+          "knee_qdd_cap": {
+            "cap_rad_s2": 40.0,
+            "joint": "r_knee",
+            "qvel0_rad_s": -0.1403738564096892,
+            "uncapped_dq_rad": 0.14350653111448164,
+            "capped_dq_rad": 0.17348666453063843,
+            "measured_dq_rad": 0.05387138312874007,
+            "reachable_dq_rad": 0.9027992470153049,
+            "reference_clipped_frac": 0.42857142857142855,
+            "inverse_qdd_over_cap_frac": 0.0,
+            "blocks": false,
+            "reachable_short": false,
+            "shrinks_plan": false
+          },
+          "airborne": {
+            "definition": "zero floor contacts on the group-0 contact box, all eight corners above z=0, summed mj_contactForce normal within 1e-6 N of 0",
+            "n_contact_zero": 19,
+            "n_corners_above": 19,
+            "n_force_zero": 19,
+            "n_all_three": 19,
+            "n_disagree": 0,
+            "geom_group": 0
+          },
+          "binding": "feedforward ctrl stays on the measured knee; |ctrl\u2212q| 27.5 mrad against |q_ref\u2212q| 111.6 mrad at kp 45; tau_ff +0.386 Nm, spring -0.112 Nm, net +0.274 Nm; knee \u0394q plan +0.144 rad, measured +0.054 rad, reachable under the 40 rad/s\u00b2 cap +0.903 rad; stance fraction 0.973, swing GRF mean 0.65 N, CoP\u2212box -10.0 mm inside a 38 mm half-width; lowest corner plan 6.54 mm / realised 2.24 mm, box bottom plan 12.03 mm / realised 3.95 mm, three-part airborne 19/28 (disagree 0), airborne forward 3.88 mm"
+        },
+        {
+          "side": "L",
+          "stance": "R",
+          "t0_s": 3.399999999999847,
+          "t1_s": 3.6159999999998234,
+          "window_s": 0.2159999999999762,
+          "n_ticks": 28,
+          "stage": "walk",
+          "z_move_cmd_max_m": 0.008,
+          "swing_dx_m": -0.0010158287023661755,
+          "air_forward_m": 0.0,
+          "contact_forward_m": 0.0016864712360139603,
+          "step_frac": 0.0,
+          "box_half_y_m": 0.038,
+          "weight_N": 23.028959205899998,
+          "swing_grf_n": {
+            "min": 0.0,
+            "max": 8.172956023665778,
+            "mean": 1.7891400205358465
+          },
+          "stance_grf_n": {
+            "min": 15.338444167339896,
+            "max": 24.567916989949072,
+            "mean": 21.1247407463703
+          },
+          "stance_weight_frac": {
+            "min": 0.6523832712101785,
+            "max": 1.0,
+            "mean": 0.9226201281555252
+          },
+          "cop_y_m": -0.02665473123914208,
+          "zmp_y_m": -0.026146959300404667,
+          "zmp_cmd_y_m": -0.04170633712945353,
+          "stance_box_y_latched_m": -0.04170633712945353,
+          "stance_box_y_live_m": -0.04192370182230461,
+          "cop_minus_box_m": 0.015051605890311449,
+          "zmp_minus_box_m": 0.01555937782904886,
+          "planned_bottom_z_m": {
+            "min": 0.005456592074496289,
+            "max": 0.011037860326088863
+          },
+          "planned_corner_z_m": {
+            "min": -0.0010042851225503524,
+            "max": 0.004709270428187641
+          },
+          "capped_bottom_z_m": {
+            "min": 0.00541423028976379,
+            "max": 0.011037860326088863
+          },
+          "capped_corner_z_m": {
+            "min": -0.003155037521570035,
+            "max": 0.004709270428187641
+          },
+          "realised_bottom_z_m": {
+            "min": 0.00019972640852651546,
+            "max": 0.0019890840512311048
+          },
+          "realised_corner_z_m": {
+            "min": -0.0008504911443310767,
+            "max": 0.00026063762425936575
+          },
+          "pitch": {
+            "l_hip_pitch": {
+              "err_rms_rad": 0.06223809658027516,
+              "err_mean_rad": -0.060849096938817716,
+              "err_max_rad": -0.0823439336176639,
+              "abs_err_mean_rad": 0.060849096938817716,
+              "ctrl_minus_q_mean_rad": 0.005174488248272003,
+              "abs_ctrl_minus_q_mean_rad": 0.011192820436254719,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.39285714285714285,
+              "tau_ff_mean_nm": -0.11298397215451687,
+              "fb_mean_nm": -0.060849096938817716,
+              "tau_ff_plus_fb_mean_nm": -0.1738330690933346,
+              "kp": 45.0
+            },
+            "l_knee": {
+              "err_rms_rad": 0.10441352801992405,
+              "err_mean_rad": 0.09509903361575346,
+              "err_max_rad": 0.13165703771862614,
+              "abs_err_mean_rad": 0.09542834792544572,
+              "ctrl_minus_q_mean_rad": -0.02125141038502901,
+              "abs_ctrl_minus_q_mean_rad": 0.025610257898701163,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.7142857142857143,
+              "tau_ff_mean_nm": -0.3391697525168985,
+              "fb_mean_nm": 0.09509903361575346,
+              "tau_ff_plus_fb_mean_nm": -0.244070718901145,
+              "kp": 45.0
+            },
+            "l_ank_pitch": {
+              "err_rms_rad": 0.08041814882245733,
+              "err_mean_rad": 0.07152873535402518,
+              "err_max_rad": 0.11583542212215484,
+              "abs_err_mean_rad": 0.07152873535402518,
+              "ctrl_minus_q_mean_rad": -0.006755042933710215,
+              "abs_ctrl_minus_q_mean_rad": 0.017502929298397193,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.5714285714285714,
+              "tau_ff_mean_nm": -0.11648025129116733,
+              "fb_mean_nm": 0.07152873535402518,
+              "tau_ff_plus_fb_mean_nm": -0.044951515937142146,
+              "kp": 35.0
+            }
+          },
+          "stance_knee": {
+            "joint": "r_knee",
+            "q_plan_start_rad": -0.9809231396534532,
+            "q_plan_end_rad": -0.9820110822243164,
+            "q_meas_start_rad": -1.0260445677088015,
+            "q_meas_end_rad": -1.0057963354351684,
+            "q_meas_minus_plan_mean_rad": -0.06583663533078837
+          },
+          "trunk_z_m": {
+            "start": 0.20538807295870656,
+            "end": 0.20583299237765812,
+            "min": 0.2041874926323698,
+            "stand_m": 0.20496239913814618,
+            "drop_from_stand_m": 0.0007749065057763849
+          },
+          "knee_qdd_cap": {
+            "cap_rad_s2": 40.0,
+            "joint": "l_knee",
+            "qvel0_rad_s": -0.140823775343751,
+            "uncapped_dq_rad": -0.1472268884846044,
+            "capped_dq_rad": -0.17964351068855644,
+            "measured_dq_rad": -0.07578634500534032,
+            "reachable_dq_rad": -0.9635379354740413,
+            "reference_clipped_frac": 0.42857142857142855,
+            "inverse_qdd_over_cap_frac": 0.0,
+            "blocks": false,
+            "reachable_short": false,
+            "shrinks_plan": false
+          },
+          "airborne": {
+            "definition": "zero floor contacts on the group-0 contact box, all eight corners above z=0, summed mj_contactForce normal within 1e-6 N of 0",
+            "n_contact_zero": 5,
+            "n_corners_above": 5,
+            "n_force_zero": 5,
+            "n_all_three": 5,
+            "n_disagree": 0,
+            "geom_group": 0
+          },
+          "binding": "feedforward ctrl stays on the measured knee; |ctrl\u2212q| 25.6 mrad against |q_ref\u2212q| 95.4 mrad at kp 45; tau_ff -0.339 Nm, spring +0.095 Nm, net -0.244 Nm; knee \u0394q plan -0.147 rad, measured -0.076 rad, reachable under the 40 rad/s\u00b2 cap -0.964 rad; stance fraction 0.923, swing GRF mean 1.79 N, CoP\u2212box +15.1 mm inside a 38 mm half-width; lowest corner plan 4.71 mm / realised 0.26 mm, box bottom plan 11.04 mm / realised 1.99 mm, three-part airborne 5/28 (disagree 0), airborne forward 0.00 mm"
+        },
+        {
+          "side": "R",
+          "stance": "L",
+          "t0_s": 3.8959999999997925,
+          "t1_s": 4.111999999999769,
+          "window_s": 0.21599999999997666,
+          "n_ticks": 28,
+          "stage": "walk",
+          "z_move_cmd_max_m": 0.008,
+          "swing_dx_m": 0.002205237201846094,
+          "air_forward_m": 0.0022795316340018454,
+          "contact_forward_m": 0.0009547509894491241,
+          "step_frac": 0.7048028572003989,
+          "box_half_y_m": 0.038,
+          "weight_N": 23.028959205899998,
+          "swing_grf_n": {
+            "min": 0.0,
+            "max": 13.483450775401518,
+            "mean": 1.2819693066859552
+          },
+          "stance_grf_n": {
+            "min": 14.48104345906297,
+            "max": 23.625527072840207,
+            "mean": 22.152264849962627
+          },
+          "stance_weight_frac": {
+            "min": 0.5178367732185191,
+            "max": 1.0,
+            "mean": 0.9507706121464139
+          },
+          "cop_y_m": 0.016068164150753742,
+          "zmp_y_m": 0.014817743407559718,
+          "zmp_cmd_y_m": 0.03853274211158854,
+          "stance_box_y_latched_m": 0.03853274211158854,
+          "stance_box_y_live_m": 0.03912509569129607,
+          "cop_minus_box_m": -0.022464577960834797,
+          "zmp_minus_box_m": -0.023714998704028822,
+          "planned_bottom_z_m": {
+            "min": 0.004795212944517369,
+            "max": 0.010454513234833757
+          },
+          "planned_corner_z_m": {
+            "min": -0.0031273421484639564,
+            "max": 0.0023760291208424905
+          },
+          "capped_bottom_z_m": {
+            "min": 0.004893911244704743,
+            "max": 0.0104583947530718
+          },
+          "capped_corner_z_m": {
+            "min": -0.005057086669751326,
+            "max": 0.002446271032555229
+          },
+          "realised_bottom_z_m": {
+            "min": 0.0013221209892167515,
+            "max": 0.004066688342427568
+          },
+          "realised_corner_z_m": {
+            "min": -0.0010273298762975558,
+            "max": 0.0016367448062780104
+          },
+          "pitch": {
+            "r_hip_pitch": {
+              "err_rms_rad": 0.03345956544702696,
+              "err_mean_rad": 0.03148998290338404,
+              "err_max_rad": 0.049928758088608416,
+              "abs_err_mean_rad": 0.03148998290338404,
+              "ctrl_minus_q_mean_rad": -0.00416496629171403,
+              "abs_ctrl_minus_q_mean_rad": 0.013557232488929717,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.42857142857142855,
+              "tau_ff_mean_nm": 0.13244750335592986,
+              "fb_mean_nm": 0.03148998290338404,
+              "tau_ff_plus_fb_mean_nm": 0.1639374862593139,
+              "kp": 45.0
+            },
+            "r_knee": {
+              "err_rms_rad": 0.10660075304462324,
+              "err_mean_rad": -0.09797802125463398,
+              "err_max_rad": -0.1287985795545139,
+              "abs_err_mean_rad": 0.09848555471040776,
+              "ctrl_minus_q_mean_rad": 0.018644230552231838,
+              "abs_ctrl_minus_q_mean_rad": 0.026619137887318494,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.35714285714285715,
+              "tau_ff_mean_nm": 0.4069548138584599,
+              "fb_mean_nm": -0.09797802125463398,
+              "tau_ff_plus_fb_mean_nm": 0.3089767926038259,
+              "kp": 45.0
+            },
+            "r_ank_pitch": {
+              "err_rms_rad": 0.13598033260449877,
+              "err_mean_rad": -0.12968778750247134,
+              "err_max_rad": -0.1709052842238119,
+              "abs_err_mean_rad": 0.12968778750247134,
+              "ctrl_minus_q_mean_rad": 0.004819401656395353,
+              "abs_ctrl_minus_q_mean_rad": 0.0113432106731904,
+              "clip_n": 0,
+              "ff_oppose_frac": 0.2857142857142857,
+              "tau_ff_mean_nm": 0.14755527235030805,
+              "fb_mean_nm": -0.12968778750247134,
+              "tau_ff_plus_fb_mean_nm": 0.017867484847836727,
+              "kp": 35.0
+            }
+          },
+          "stance_knee": {
+            "joint": "l_knee",
+            "q_plan_start_rad": 0.9894520605441743,
+            "q_plan_end_rad": 0.9839773667608418,
+            "q_meas_start_rad": 1.0443896642115593,
+            "q_meas_end_rad": 1.0098968662240615,
+            "q_meas_minus_plan_mean_rad": 0.05090612669998266
+          },
+          "trunk_z_m": {
+            "start": 0.20310369957281335,
+            "end": 0.2043841849869432,
+            "min": 0.2030452657165591,
+            "stand_m": 0.20496239913814618,
+            "drop_from_stand_m": 0.001917133421587086
+          },
+          "knee_qdd_cap": {
+            "cap_rad_s2": 40.0,
+            "joint": "r_knee",
+            "qvel0_rad_s": -0.15676410696561482,
+            "uncapped_dq_rad": 0.14561089801892346,
+            "capped_dq_rad": 0.1760659221381874,
+            "measured_dq_rad": 0.06242019608060789,
+            "reachable_dq_rad": 0.8992589528952292,
+            "reference_clipped_frac": 0.42857142857142855,
+            "inverse_qdd_over_cap_frac": 0.0,
+            "blocks": false,
+            "reachable_short": false,
+            "shrinks_plan": false
+          },
+          "airborne": {
+            "definition": "zero floor contacts on the group-0 contact box, all eight corners above z=0, summed mj_contactForce normal within 1e-6 N of 0",
+            "n_contact_zero": 17,
+            "n_corners_above": 17,
+            "n_force_zero": 17,
+            "n_all_three": 17,
+            "n_disagree": 0,
+            "geom_group": 0
+          },
+          "binding": "feedforward ctrl stays on the measured knee; |ctrl\u2212q| 26.6 mrad against |q_ref\u2212q| 98.5 mrad at kp 45; tau_ff +0.407 Nm, spring -0.098 Nm, net +0.309 Nm; knee \u0394q plan +0.146 rad, measured +0.062 rad, reachable under the 40 rad/s\u00b2 cap +0.899 rad; stance fraction 0.951, swing GRF mean 1.28 N, CoP\u2212box -22.5 mm inside a 38 mm half-width; lowest corner plan 2.38 mm / realised 1.64 mm, box bottom plan 10.45 mm / realised 4.07 mm, three-part airborne 17/28 (disagree 0), airborne forward 2.28 mm"
+        }
+      ],
+      "clear_gate": {
+        "signed_peak_nm": 2.4490402138834124,
+        "sum_peak_nm": 8.46291556402335,
+        "sum_signed_ratio": 3.455604981922208,
+        "flag": "latency-test-first",
+        "may_clear": false,
+        "block_reasons": [
+          "step fraction / stepping bars fail; a non-tipping skate is not a walk",
+          "latency-test-first: control latency -1 tick has not passed the signed bar and the full bars",
+          "latency-test-first: control latency +1 tick has not passed the signed bar and the full bars",
+          "latency-test-first: the 5\u00d7 bus stop rows have not passed the signed bar and the full bars"
+        ],
+        "step_required": true,
+        "manifest_source": "runner"
+      }
+    }
+  ],
+  "harness_vs_runner": {
+    "note": "Already measured. Not resimulated in this diagnosis.",
+    "harness_tip": "a5a9183461105016211bebbf110051c2bb8f9df2",
+    "harness_sample": "plant ctrl entering mj_step",
+    "harness_r_hip_roll_nm": 0.823,
+    "harness_tips": false,
+    "runner_tip": "4f1d02705d5b4f79285d20e91e92afb52ed4d40b",
+    "runner_sample": "kp*(clip(q_des, \u00b12.09)-q)-kv*omega on the IK target before the hip-roll band",
+    "runner_r_hip_roll_nm": 6.0163777812014505,
+    "runner_tips": true,
+    "first_divergence": "r_hip_roll q crosses 1e-6 rad at t=0.270 s",
+    "cause": "At t=0.256 s preview_com_y matches at -8.476e-7 m. The runner adds a DCM step of +9.256e-7 m. The harness 20 mm deadband leaves that term at 0.",
+    "verdict": "The 0.823 Nm figure is withdrawn as a score of the shared-runner baseline. Prefer FAIL."
+  },
+  "cause": "The swing sole does not track the lift. Weight is already on the stance foot (stance fraction 0.89\u20131.00, swing GRF mean 0\u20132.8 N). The knee q\u0308 cap does not bind: the planned excursion is 0.09\u20130.16 rad and 40 rad/s\u00b2 can reach about 0.9 rad in the 0.216 s window; inverse |q\u0308| stays inside the cap. Ctrl is never outside \u00b12.09. Trunk drop from the stand stays under 6.3 mm. ctrl = q + (tau_ff + kv\u00b7\u03c9 + 1.0\u00b7(q_ref\u2212q)) / kp with kp 45, so the command sits 12\u201327 mrad off the measured knee while the lift reference is 60\u2013140 mrad away. At armature 0.01, tau_ff cancels the 1 Nm/rad spring (net about 0) and the measured knee \u0394q is opposite the plan. At 0.025 the armature term leaves a net near 0.3 Nm and the knee moves only part of the planned \u0394q. On three windows the reference itself pitches the sole, so the lowest corner stays near 0 mm while the box bottom rises about 6\u20138 mm. The three contact, corner, and force tests never disagree. One window is airborne on every tick and still peaks at 4.98 mm with 2.45 mm of airborne forward travel. Step fraction is 0. Both rows are latency-test-first. Prefer FAIL. No CLEAR."
+}
