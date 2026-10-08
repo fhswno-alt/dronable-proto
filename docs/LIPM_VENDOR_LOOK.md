@@ -2799,9 +2799,9 @@ Joint damping acts on the end-of-step velocity. `mjd_smooth_vel` puts dof dampin
 
 `M(q_t)·q̈ + qfrc_bias − qfrc_constraint_forward − qfrc_applied = kp(ctrl−q) − kv·qvel_{t+1} − 0.08·qvel_{t+1}`
 
-with the actuator held at its `qvel_t` clip when `forcerange` is active. On every row below the leg residual of that identity is at most 1.9×10⁻¹⁴ Nm. The fraction of physics steps with any leg joint over 0.05 Nm is 0. Every tick is inside 1×10⁻³ Nm. The root balance of the same identity, `max |dyn[0:6] − con[0:6] − app[0:6]|`, is at most 3.5×10⁻¹⁴ Nm.
+with the actuator held at its `qvel_t` clip when `forcerange` is active. On the rows in the next table that identity's leg residual is at most 1.9×10⁻¹⁴ Nm, and the root balance `max |dyn[0:6] − con[0:6] − app[0:6]|` is at most 3.5×10⁻¹⁴ Nm. Those rows were measured before `mjENBL_INVDISCRETE`. The identity remains the cross-check. The bucket residual is the discrete one below.
 
-`mj_inverse` is a different vector. In 3.14 it sets `qfrc_inverse = M·q̈ + bias − qfrc_passive − qfrc_constraint` after re-solving the constraint (`engine_inverse.c`). Passive is the stored-velocity damping, not the end-step damping, and the constraint is not the one the integrator used. `mj_compareFwdInv` therefore reports a large `solver_fwdinv`: component 0 is the constraint mismatch and component 1 is the force mismatch. `|qfrc_inverse − F_user|` is that mismatch. It is not the integrator residual, and it is not a pass band.
+Without the discrete flag, `mj_inverse` sets `qfrc_inverse = M·q̈ + bias − qfrc_passive − qfrc_constraint` after re-solving the constraint (`engine_inverse.c`). Passive is the stored-velocity damping, and the constraint is not the one the integrator used. `mj_compareFwdInv` then reports a large `solver_fwdinv`. The table is that measurement.
 
 | Row | ident resid | over 0.05 | root balance | `|qfrc_inverse[0:6]|` | `|qfrc_inverse − F_user|` | fwdinv0 | fwdinv1 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
