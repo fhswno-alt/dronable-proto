@@ -157,8 +157,10 @@ def historical_torque_identity(model: mj.MjModel | None = None) -> list[dict[str
 
     All three commits log in ``_install_ask_log``. ``ask_nm`` is
     ``sum_nm``, the conservative ``|kp·e|+|kv·ω|``. ``kv`` is
-    ``-actuator_biasprm[i, 2]`` with dampratio=1, so hip roll is 1.7027
-    and the knee is 1.4573. The signed force on those ticks is about
+    ``-actuator_biasprm[i, 2]`` with dampratio=1. On the file armature
+    the hip roll is 1.7027 and the knee is 1.4573. A load-time leg
+    armature recomputes those through MjSpec, and the live kv has to
+    match that compile. The signed force on those ticks is about
     +0.25 Nm and was not the published number.
 
     ac81435 and 58ce1d8 store the full line in ``ask_worst``
@@ -188,13 +190,23 @@ def historical_torque_identity(model: mj.MjModel | None = None) -> list[dict[str
             "signed": signed,
         })
     if model is not None:
+        side = sw.leg_kv_side_by_side()
+        file_kv = side["0.010"]
         for jn, expect in (("r_hip_roll", 1.7027), ("r_knee", 1.4573)):
-            aid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_ACTUATOR, jn + "_pos")
-            kv = -float(model.actuator_biasprm[aid, 2])
-            if abs(kv - expect) > 5e-4:
-                raise RuntimeError(f"{jn} kv {kv:.4f} != {expect:.4f}")
-            if abs(kv - 1.7027) < 1e-4 and jn == "r_knee":
-                raise RuntimeError("knee kv collapsed onto the hip-roll constant")
+            if abs(file_kv[jn] - expect) > 5e-4:
+                raise RuntimeError(f"file {jn} kv {file_kv[jn]:.4f} != {expect:.4f}")
+        arm = lipm_gait._compiled_leg_armature(model)
+        key = f"{arm:.3f}"
+        if key not in side:
+            raise RuntimeError(f"leg armature {arm:.3f} is not 0.01 or 0.025")
+        live = sw.leg_kv_map(model)
+        for jn, expect in side[key].items():
+            if abs(live[jn] - expect) > 5e-4:
+                raise RuntimeError(
+                    f"{jn} kv {live[jn]:.4f} != compiled {expect:.4f} at armature {key}"
+                )
+        if abs(live["r_knee"] - live["r_hip_roll"]) < 1e-4:
+            raise RuntimeError("knee kv collapsed onto the hip-roll constant")
     return rows
 
 
